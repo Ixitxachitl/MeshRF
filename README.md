@@ -65,9 +65,10 @@ Prerequisites:
 - .NET 8 SDK
 - [vcpkg](https://github.com/microsoft/vcpkg) (manifest mode — see `vcpkg.json`)
 - An SDR with the WinUSB driver installed via [Zadig](https://zadig.akeo.ie/):
-  a HackRF One, or an RTL-SDR dongle (`rtlsdr.dll`/`librtlsdr.dll` is loaded at
-  runtime — e.g. from [PothosSDR](https://github.com/pothosware/PothosSDR) or
-  SDRangel — and discovered on the module/known SDK paths).
+  a HackRF One, or an RTL-SDR dongle. The `hackrf.dll` and `rtlsdr.dll` runtime
+  libraries are **vendored** under `third_party/` and copied next to the app at
+  build time, so no separate SDR install is required. (To override with your
+  own librtlsdr build, set the `RTLSDR_DIR` environment variable.)
 
 ```powershell
 # Configure + build the native core (RelWithDebInfo recommended; Debug C++ is
@@ -81,6 +82,22 @@ dotnet build app/MeshtasticRF.App/MeshtasticRF.App.csproj -c Debug
 
 VS Code tasks are provided for **Build Native**, **Deploy Native DLL**,
 **Build App**, **Build All**, and **Run App**.
+
+### Packaging a release
+
+`scripts/build-release.ps1` produces a self-contained, single-file Windows
+build (no .NET install needed on the target) and zips it under `dist/`:
+
+```powershell
+# Version defaults to <VersionPrefix> in Directory.Build.props.
+pwsh scripts/build-release.ps1
+
+# Override the version and create a matching git tag (v0.2.0).
+pwsh scripts/build-release.ps1 -Version 0.2.0 -Tag
+```
+
+The build identity (version + git commit) is shown in **About** (the ⓘ button
+on the toolbar) and is derived from `Directory.Build.props`.
 
 ## Testing
 
@@ -103,6 +120,8 @@ dotnet test tests/managed/MeshtasticRF.Tests.csproj
 | `tests/native/` | GoogleTest unit tests |
 | `tests/managed/` | xUnit unit tests |
 | `third_party/hackrf/` | Vendored HackRF runtime DLLs |
+| `third_party/rtlsdr/` | Vendored RTL-SDR (librtlsdr) runtime DLL |
+| `scripts/build-release.ps1` | Self-contained release packager |
 
 ## License
 

@@ -509,28 +509,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ReloadChannels();
     }
 
-    private void RouteEvent(string line)
-    {
-        // Diagnostic events (preamble/header/sync/payload) aren't tied to a
-        // single channel until decode resolves the key, so mirror them onto
-        // every channel's log. This keeps each tab's Log identical instead of
-        // appearing to "move" with the selected tab.
-        foreach (var ch in Channels)
-            ch.AddLog(line);
-    }
-
     /// <summary>
-    /// Append a timestamped line to the global running log AND to the active
-    /// channel's tab log. New code should prefer this over touching
-    /// <see cref="LogLines"/> directly.
+    /// Append a timestamped line to the global running log. The log is shared
+    /// across all tabs (channels and direct messages), not channel-specific.
     /// </summary>
     private void Log(string text)
     {
         var line = $"[{DateTime.Now:HH:mm:ss}] {text}";
         LogLines.Add(line);
         if (LogLines.Count > 500) LogLines.RemoveAt(0);
-        RouteEvent(line);
     }
+
+    /// <summary>Copy the entire global log to the clipboard.</summary>
+    [RelayCommand]
+    private void CopyLog()
+    {
+        if (LogLines.Count == 0) return;
+        try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, LogLines)); }
+        catch { /* clipboard contention; ignore */ }
+    }
+
+    /// <summary>Clear the global log.</summary>
+    [RelayCommand]
+    private void ClearLog() => LogLines.Clear();
 
     partial void OnSelectedPresetChanged(LoraPreset value) { RebuildSlots(snapToDefault: true); RetuneIfRunning(); SaveSettings(); }
     partial void OnSelectedRegionChanged(Region value)     { RebuildSlots(snapToDefault: true); RetuneIfRunning(); SaveSettings(); }

@@ -210,6 +210,12 @@
                     VerticalAlignment="Center" />
             <TextBlock Width="48" VerticalAlignment="Center"
                        Text="{Binding WaterfallCeilDb, StringFormat={}{0:F0} dB}" />
+            <Separator />
+            <Button Width="32" Height="28"
+                    Click="OnAboutClick"
+                    ToolTip="About MeshtasticRF">
+                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE946;" />
+            </Button>
         </ToolBar>
 
         <StatusBar DockPanel.Dock="Bottom">
@@ -507,7 +513,15 @@
                         <TextBlock Text="Channels" FontWeight="SemiBold" Margin="2,0,0,0" />
                     </DockPanel>
 
-                    <TabControl ItemsSource="{Binding Tabs}"
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="3*" MinHeight="120" />
+                            <RowDefinition Height="5" />
+                            <RowDefinition Height="1*" MinHeight="80" />
+                        </Grid.RowDefinitions>
+
+                    <TabControl Grid.Row="0"
+                                ItemsSource="{Binding Tabs}"
                                 SelectedItem="{Binding SelectedTab, Mode=TwoWay}">
                         <TabControl.ItemTemplate>
                             <DataTemplate>
@@ -531,8 +545,6 @@
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" MinHeight="60" />
-                                        <RowDefinition Height="5" />
                                         <RowDefinition Height="*" MinHeight="60" />
                                     </Grid.RowDefinitions>
 
@@ -646,27 +658,6 @@
                                             </ListBox.ItemTemplate>
                                         </ListBox>
                                     </DockPanel>
-
-                                    <GridSplitter Grid.Row="2"
-                                                  Height="5"
-                                                  HorizontalAlignment="Stretch"
-                                                  Background="{DynamicResource BrushSplitter}"
-                                                  ShowsPreview="False"
-                                                  ResizeBehavior="PreviousAndNext" />
-
-                                    <DockPanel Grid.Row="3" Margin="4">
-                                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2" LastChildFill="True">
-                                            <Button DockPanel.Dock="Right" Content="Clear" Padding="6,1"
-                                                    Margin="4,0,0,0"
-                                                    Command="{Binding ClearLogCommand}" />
-                                            <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
-                                                    Command="{Binding CopyLogCommand}" />
-                                            <TextBlock Text="Log" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                        </DockPanel>
-                                        <ListBox ItemsSource="{Binding Log}"
-                                                 FontFamily="Consolas"
-                                                 beh:AutoScroll.IsEnabled="True" />
-                                    </DockPanel>
                                 </Grid>
                             </DataTemplate>
 
@@ -683,6 +674,11 @@
                                                     Command="{Binding DataContext.ClearConversationMessagesCommand,
                                                               RelativeSource={RelativeSource AncestorType=TabControl}}"
                                                     CommandParameter="{Binding}" />
+                                            <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
+                                                    Margin="0,0,4,0"
+                                                    VerticalAlignment="Center"
+                                                    ToolTip="Copy this conversation to the clipboard"
+                                                    Command="{Binding CopyMessagesCommand}" />
                                             <StackPanel>
                                                 <TextBlock FontWeight="SemiBold"
                                                            Text="{Binding PeerName}" />
@@ -696,11 +692,37 @@
                                                Foreground="{DynamicResource BrushSubtle}"
                                                FontSize="11" Margin="2,4,0,0"
                                                Text="Receive-only: direct messages addressed to your node." />
-                                    <!-- Telemetry panel for the peer node. -->
-                                    <Border DockPanel.Dock="Right" Width="220" Margin="6,0,0,0"
-                                            Padding="8" VerticalAlignment="Stretch"
-                                            Background="{DynamicResource BrushPanelBackground}"
-                                            BorderBrush="{DynamicResource BrushPanelBorder}"
+                                    <!-- Messages (left) + resizable telemetry panel (right). -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" MinWidth="120" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="220" MinWidth="120" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <ListBox Grid.Column="0"
+                                                 ItemsSource="{Binding Messages}"
+                                                 FontFamily="Consolas"
+                                                 beh:AutoScroll.IsEnabled="True">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Display}" TextWrapping="Wrap" />
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+
+                                        <GridSplitter Grid.Column="1" Width="5"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Stretch"
+                                                      Background="{DynamicResource BrushSplitter}"
+                                                      ShowsPreview="False"
+                                                      ResizeBehavior="PreviousAndNext" />
+
+                                        <!-- Telemetry panel for the peer node. -->
+                                        <Border Grid.Column="2" Margin="6,0,0,0"
+                                                Padding="8" VerticalAlignment="Stretch"
+                                                Background="{DynamicResource BrushPanelBackground}"
+                                                BorderBrush="{DynamicResource BrushPanelBorder}"
                                             BorderThickness="1">
                                         <DockPanel LastChildFill="True">
                                             <TextBlock DockPanel.Dock="Top" Text="Telemetry"
@@ -720,40 +742,57 @@
                                                     </Style>
                                                 </TextBlock.Style>
                                             </TextBlock>
-                                            <ItemsControl ItemsSource="{Binding Telemetry}">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Grid Margin="0,1">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="Auto" MinWidth="92" />
-                                                                <ColumnDefinition Width="*" />
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Grid.Column="0"
-                                                                       Foreground="{DynamicResource BrushSubtle}"
-                                                                       Text="{Binding Label}" />
-                                                            <TextBlock Grid.Column="1"
-                                                                       FontFamily="Consolas"
-                                                                       TextWrapping="Wrap"
-                                                                       Text="{Binding Value}" />
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Disabled">
+                                                <ItemsControl ItemsSource="{Binding Telemetry}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid Margin="0,1">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" MinWidth="92" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="0"
+                                                                           Foreground="{DynamicResource BrushSubtle}"
+                                                                           Text="{Binding Label}" />
+                                                                <TextBlock Grid.Column="1"
+                                                                           FontFamily="Consolas"
+                                                                           TextWrapping="Wrap"
+                                                                           Text="{Binding Value}" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
                                         </DockPanel>
                                     </Border>
-                                    <ListBox ItemsSource="{Binding Messages}"
-                                             FontFamily="Consolas"
-                                             beh:AutoScroll.IsEnabled="True">
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding Display}" TextWrapping="Wrap" />
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
+                                    </Grid>
                                 </DockPanel>
                             </DataTemplate>
                         </TabControl.Resources>
                     </TabControl>
+
+                    <GridSplitter Grid.Row="1"
+                                  Height="5"
+                                  HorizontalAlignment="Stretch"
+                                  Background="{DynamicResource BrushSplitter}"
+                                  ShowsPreview="False"
+                                  ResizeBehavior="PreviousAndNext" />
+
+                    <DockPanel Grid.Row="2" Margin="0,2,0,0">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2" LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="Clear" Padding="6,1"
+                                    Margin="4,0,0,0"
+                                    Command="{Binding ClearLogCommand}" />
+                            <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
+                                    Command="{Binding CopyLogCommand}" />
+                            <TextBlock Text="Log" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ListBox ItemsSource="{Binding LogLines}"
+                                 FontFamily="Consolas"
+                                 beh:AutoScroll.IsEnabled="True" />
+                    </DockPanel>
+                    </Grid>
                 </DockPanel>
             </Grid>
                 </Grid>

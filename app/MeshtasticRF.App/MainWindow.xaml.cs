@@ -34,6 +34,12 @@ public partial class MainWindow : Window
         Unloaded += (_, _) => _timer.Stop();
     }
 
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        var about = new AboutWindow { Owner = this };
+        about.ShowDialog();
+    }
+
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
         _timer.Start();

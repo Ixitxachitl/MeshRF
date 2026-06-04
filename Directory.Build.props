@@ -1,0 +1,42 @@
+<Project>
+
+  <!-- Shared identity / versioning for every managed project in the repo.
+       Bump <VersionPrefix> (and the AssemblyVersion/FileVersion below) to cut
+       a new release; scripts/build-release.ps1 reads VersionPrefix from here. -->
+  <PropertyGroup>
+    <Product>MeshtasticRF</Product>
+    <Company>MeshtasticRF contributors</Company>
+    <Authors>MeshtasticRF contributors</Authors>
+    <Copyright>Copyright © MeshtasticRF contributors</Copyright>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/</RepositoryUrl>
+
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <!-- AssemblyVersion is kept at major.minor.0.0 for binding stability;
+         FileVersion and InformationalVersion carry the full build identity. -->
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+  </PropertyGroup>
+
+  <!-- Append the short git commit hash to the informational version so the
+       About box can show exactly which build is running (e.g. "0.1.0+dfc2918").
+       Best-effort: if git is unavailable the build still succeeds with the
+       bare version. Setting SourceRevisionId lets the .NET SDK append it. -->
+  <Target Name="SetGitCommitHash"
+          BeforeTargets="AddSourceRevisionToInformationalVersion"
+          Condition="'$(GitCommitHashResolved)' != 'true'">
+    <Exec Command="git rev-parse --short HEAD"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          ContinueOnError="true"
+          WorkingDirectory="$(MSBuildThisFileDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitHash" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+    <PropertyGroup>
+      <GitCommitHashResolved>true</GitCommitHashResolved>
+      <SourceRevisionId Condition="'$(_GitExitCode)' == '0' and '$(_GitCommitHash)' != ''">$(_GitCommitHash)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+
+</Project>

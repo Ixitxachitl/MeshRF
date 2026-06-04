@@ -6,7 +6,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include <array>
 #include <filesystem>
 #include <string>
 
@@ -88,38 +87,26 @@ bool load(Api& out) {
         }
     };
 
-    // 1. Same directory as the bridge DLL (vendored case).
+    // 1. Same directory as the bridge DLL (the bundled, vendored copy). This is
+    //    the only location used by default — we deliberately do NOT probe for
+    //    third-party installs (SDRangel, PothosSDR, etc.) so the app always runs
+    //    against the rtlsdr.dll we ship and never silently binds to whatever
+    //    happens to be installed on the machine.
     try_dir(module_directory());
 
-    // 2. RTLSDR_DIR / RTLSDR_ROOT environment variables (and their bin/).
-    try_dir(env_path(L"RTLSDR_DIR"));
-    try_dir(env_path(L"RTLSDR_ROOT"));
+    // 2. Explicit opt-in override via RTLSDR_DIR / RTLSDR_ROOT (and their bin/).
+    //    This is an intentional user choice, not auto-detection.
+    if (!m) try_dir(env_path(L"RTLSDR_DIR"));
+    if (!m) try_dir(env_path(L"RTLSDR_ROOT"));
     if (!m) {
         auto root = env_path(L"RTLSDR_DIR");
         if (!root.empty()) try_dir(root / L"bin");
     }
 
-    // 3/4. Common installer locations.
-    static const std::array<const wchar_t*, 4> kWellKnown{
-        L"C:/Program Files/PothosSDR/bin",
-        L"C:/Program Files/SDRangel",
-        L"C:/Program Files/rtl-sdr/bin",
-        L"C:/Program Files/rtl-sdr",
-    };
-    for (auto* p : kWellKnown) {
-        if (m) break;
-        try_dir(p);
-    }
-
-    // 5. Plain LoadLibrary — relies on PATH / app dir / etc.
-    if (!m) {
-        m = ::LoadLibraryW(L"rtlsdr.dll");
-        if (!m) m = ::LoadLibraryW(L"librtlsdr.dll");
-        if (m) loaded_from = L"rtlsdr.dll (default search path)";
-    }
     if (!m) {
         g_status = last_load_error.empty()
-                       ? "rtlsdr.dll not found in any search location"
+                       ? "bundled rtlsdr.dll not found next to the app "
+                         "(set RTLSDR_DIR to override)"
                        : last_load_error;
         return false;
     }

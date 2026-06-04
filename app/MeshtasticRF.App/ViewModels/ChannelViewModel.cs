@@ -33,9 +33,6 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         _editPositionPrecision = cfg.PositionPrecision;
     }
 
-    /// <summary>System / preamble / packet events for this channel.</summary>
-    public ObservableCollection<string> Log { get; } = new();
-
     /// <summary>Decoded text messages, newest last.</summary>
     public ObservableCollection<ChannelMessage> Messages { get; } = new();
 
@@ -115,23 +112,6 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
 
     [RelayCommand]
     private void GenerateRandomKey128() => EditPsk = ChannelConfig.NewRandomPsk(16);
-
-    public void AddLog(string line)
-    {
-        Log.Add(line);
-        if (Log.Count > 500) Log.RemoveAt(0);
-    }
-
-    [RelayCommand]
-    private void CopyLog()
-    {
-        if (Log.Count == 0) return;
-        try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, Log)); }
-        catch { /* clipboard contention; ignore */ }
-    }
-
-    [RelayCommand]
-    private void ClearLog() => Log.Clear();
 
     [RelayCommand]
     private void CopyMessages()

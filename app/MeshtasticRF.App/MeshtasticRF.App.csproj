@@ -11,7 +11,7 @@
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>MeshtasticRF.App</RootNamespace>
     <AssemblyName>MeshtasticRF</AssemblyName>
-    <ApplicationIcon />
+    <ApplicationIcon>icon.ico</ApplicationIcon>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- Avoid the WPF "_wpftmp.csproj" temporary-target-assembly dance, which
          races with the VS Code C# project system and produces spurious
@@ -46,6 +46,7 @@
       <_NativeRuntimeDll Include="$(_NativeBinDir)\hackrf.dll" />
       <_NativeRuntimeDll Include="$(_NativeBinDir)\libusb-1.0.dll" />
       <_NativeRuntimeDll Include="$(_NativeBinDir)\pthreadVC2.dll" />
+      <_NativeRuntimeDll Include="$(_NativeBinDir)\rtlsdr.dll" />
     </ItemGroup>
     <Copy SourceFiles="$(_NativeBridgeDll)"
           DestinationFolder="$(OutDir)"

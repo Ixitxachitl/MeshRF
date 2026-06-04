@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System;
+using System.Linq;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using MeshtasticRF.Nodes;
 
 namespace MeshtasticRF.App.ViewModels;
@@ -102,5 +105,13 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     {
         Messages.Add(message);
         if (Messages.Count > 1000) Messages.RemoveAt(0);
+    }
+
+    [RelayCommand]
+    private void CopyMessages()
+    {
+        if (Messages.Count == 0) return;
+        try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, Messages.Select(m => m.Display))); }
+        catch { }
     }
 }

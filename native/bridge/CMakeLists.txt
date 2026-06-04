@@ -38,3 +38,17 @@ if(MRF_HACKRF_DLL AND NOT EXISTS "${_mrf_hackrf_runtime_dir}/hackrf.dll")
                 "$<TARGET_FILE_DIR:mrf_bridge>/hackrf.dll"
         VERBATIM)
 endif()
+
+# Copy the vendored rtlsdr runtime next to the bridge DLL. librtlsdr links
+# libusb-1.0.dll, which we already vendor above for hackrf, so the two backends
+# share that dependency. We ship our own rtlsdr.dll and never probe for
+# third-party SDR installs at runtime.
+set(_mrf_rtlsdr_runtime_dir "${CMAKE_SOURCE_DIR}/third_party/rtlsdr")
+set(_rtlsdr_src "${_mrf_rtlsdr_runtime_dir}/rtlsdr.dll")
+if(EXISTS "${_rtlsdr_src}")
+    add_custom_command(TARGET mrf_bridge POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_rtlsdr_src}"
+                "$<TARGET_FILE_DIR:mrf_bridge>/rtlsdr.dll"
+        VERBATIM)
+endif()
