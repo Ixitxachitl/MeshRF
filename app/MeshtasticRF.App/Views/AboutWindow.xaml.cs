@@ -46,7 +46,7 @@ public partial class AboutWindow : Window
         CommitText = string.IsNullOrWhiteSpace(commit) ? string.Empty : $"Build {commit}";
         RuntimeText = $".NET {Environment.Version}  ·  {RuntimeInformation.OSArchitecture}";
         _fullVersionInfo =
-            $"MeshtasticRF {version}\n" +
+            $"MeshRF {version}\n" +
             (string.IsNullOrWhiteSpace(commit) ? string.Empty : $"Build {commit}\n") +
             $".NET {Environment.Version} ({RuntimeInformation.OSArchitecture})";
 

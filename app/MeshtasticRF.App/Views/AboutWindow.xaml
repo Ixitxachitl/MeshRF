@@ -1,7 +1,7 @@
 <Window x:Class="MeshtasticRF.App.Views.AboutWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="About MeshtasticRF"
+        Title="About MeshRF"
         SizeToContent="WidthAndHeight"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -10,7 +10,7 @@
         Foreground="{DynamicResource BrushAppForeground}">
     <Grid Margin="22" Width="440">
         <StackPanel>
-            <TextBlock Text="MeshtasticRF" FontSize="24" FontWeight="Bold" />
+            <TextBlock Text="MeshRF" FontSize="24" FontWeight="Bold" />
             <TextBlock Text="{Binding VersionText}" Margin="0,4,0,0" FontSize="13" />
             <TextBlock Text="{Binding CommitText}"
                        Foreground="{DynamicResource BrushSubtle}" FontSize="12" />

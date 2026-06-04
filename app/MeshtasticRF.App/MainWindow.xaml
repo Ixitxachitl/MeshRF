@@ -5,7 +5,7 @@
         xmlns:views="clr-namespace:MeshtasticRF.App.Views"
         xmlns:conv="clr-namespace:MeshtasticRF.App.Converters"
         xmlns:beh="clr-namespace:MeshtasticRF.App.Behaviors"
-        Title="MeshtasticRF"
+        Title="MeshRF"
         Height="1000" Width="1280"
         MinHeight="480" MinWidth="720">
     <Window.DataContext>
@@ -241,7 +241,7 @@
             <Separator />
             <Button Width="32" Height="28"
                     Click="OnAboutClick"
-                    ToolTip="About MeshtasticRF">
+                    ToolTip="About MeshRF">
                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE946;" />
             </Button>
         </ToolBar>

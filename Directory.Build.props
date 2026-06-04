@@ -4,10 +4,10 @@
        Bump <VersionPrefix> (and the AssemblyVersion/FileVersion below) to cut
        a new release; scripts/build-release.ps1 reads VersionPrefix from here. -->
   <PropertyGroup>
-    <Product>MeshtasticRF</Product>
-    <Company>MeshtasticRF contributors</Company>
-    <Authors>MeshtasticRF contributors</Authors>
-    <Copyright>Copyright © MeshtasticRF contributors</Copyright>
+    <Product>MeshRF</Product>
+    <Company>MeshRF contributors</Company>
+    <Authors>MeshRF contributors</Authors>
+    <Copyright>Copyright © MeshRF contributors</Copyright>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/</RepositoryUrl>
 
