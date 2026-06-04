@@ -39,6 +39,7 @@ constexpr std::uint32_t kDeviceRateHz = 2'400'000u;
 
 struct Core::Impl {
     std::unique_ptr<hal::IRadioDevice> radio;
+    hal::DeviceKind requested_kind{hal::DeviceKind::Auto};
     std::string device_name{"(none)"};
     std::uint8_t lna_db{24};
     std::uint8_t vga_db{20};
@@ -98,7 +99,7 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     });
 
     if (!impl_->radio) {
-        impl_->radio = hal::open_default_device();
+        impl_->radio = hal::open_device(impl_->requested_kind);
         if (impl_->radio) impl_->device_name = impl_->radio->info().board_name;
     }
     hal::RxConfig rx{};
@@ -442,6 +443,23 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         }
     }
     return n_time;
+}
+
+bool Core::set_device(hal::DeviceKind kind) {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    if (impl_->running) return false;
+    impl_->requested_kind = kind;
+    impl_->radio = hal::open_device(kind);
+    impl_->device_name = impl_->radio ? impl_->radio->info().board_name : "(none)";
+    return true;
+}
+
+hal::DeviceKind Core::device_kind() const noexcept {
+    return impl_->radio ? impl_->radio->kind() : hal::DeviceKind::Null;
+}
+
+bool Core::is_device_available(hal::DeviceKind kind) const noexcept {
+    return hal::device_available(kind);
 }
 
 const char* Core::device_name() const noexcept {

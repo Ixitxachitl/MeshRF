@@ -27,6 +27,19 @@ MRF_API int  MRF_CALL mrf_core_start_rx(mrf_core_t* core,
 MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core);
 MRF_API int  MRF_CALL mrf_core_is_running(const mrf_core_t* core);
 
+// Radio backend selection. `kind` mirrors mrf::hal::DeviceKind:
+//   0 = Auto, 1 = HackRF, 2 = RTL-SDR, 3 = Synthetic/Null.
+// Reopens the device immediately when RX is stopped so the device name/status
+// reflect the choice. Returns 0 on success, -1 if RX is running, -2 on null.
+MRF_API int32_t MRF_CALL mrf_core_set_device(mrf_core_t* core, int32_t kind);
+
+// The backend that actually opened (may differ from the requested kind).
+MRF_API int32_t MRF_CALL mrf_core_get_device_kind(const mrf_core_t* core);
+
+// 1 if the given backend's runtime library can be loaded (selectable), else 0.
+MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
+                                                   int32_t kind);
+
 // IQ capture: dump the decimated modem-input stream (interleaved float32
 // I/Q, ".cf32") to `path`. Safe to toggle while RX runs. Capped to ~60 s.
 MRF_API int  MRF_CALL mrf_core_start_capture(mrf_core_t* core, const char* path);

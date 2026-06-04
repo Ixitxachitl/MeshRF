@@ -91,6 +91,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ? $"Device: {_core.DeviceName}"
         : $"Device: {_core.DeviceName} (no hardware \u2014 synthetic)";
 
+    /// <summary>An entry in the device-backend selector.</summary>
+    public sealed record DeviceOption(RadioDeviceKind Kind, string Label);
+
+    /// <summary>Selectable radio backends (HackRF / RTL-SDR / Auto / Synthetic).
+    /// Populated at construction with an availability annotation.</summary>
+    public IReadOnlyList<DeviceOption> DeviceOptions { get; private set; } =
+        Array.Empty<DeviceOption>();
+
+    [ObservableProperty]
+    private DeviceOption? _selectedDevice;
+
+    private bool _suppressDeviceUpdate;
+
+    /// <summary>The device selector is only editable while RX is stopped.</summary>
+    public bool CanSelectDevice => !IsRunning;
+
     [ObservableProperty]
     private float _rssiDbfs = float.NegativeInfinity;
 
@@ -276,6 +292,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Push gains into the native core so they take effect when RX starts.
         _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
+
+        // Select the persisted radio backend before probing names/status below.
+        var deviceKind = Enum.TryParse<RadioDeviceKind>(_settings.DeviceKind, out var dk)
+            ? dk : RadioDeviceKind.Auto;
+        _core.SetDevice(deviceKind);
+        DeviceOptions = BuildDeviceOptions();
+        _suppressDeviceUpdate = true;
+        SelectedDevice = DeviceOptions.FirstOrDefault(o => o.Kind == deviceKind)
+                             ?? DeviceOptions[0];
+        _suppressDeviceUpdate = false;
 
         // Bring up channel and node tabs before logging anything, so boot
         // messages land on the Primary tab.
@@ -518,6 +544,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnLnaGainDbChanged(byte value) { _core.SetGains(value, VgaGainDb, AmpEnable); SaveSettings(); }
     partial void OnVgaGainDbChanged(byte value) { _core.SetGains(LnaGainDb, value, AmpEnable); SaveSettings(); }
     partial void OnAmpEnableChanged(bool value) { _core.SetGains(LnaGainDb, VgaGainDb, value); SaveSettings(); }
+    partial void OnIsRunningChanged(bool value) => OnPropertyChanged(nameof(CanSelectDevice));
+    partial void OnSelectedDeviceChanged(DeviceOption? value)
+    {
+        if (_suppressDeviceUpdate || value is null) return;
+        ApplyDevice(value.Kind);
+    }
     partial void OnAgcEnableChanged(bool value) { SaveSettings(); }
     partial void OnAgcTargetDbfsChanged(double value) { SaveSettings(); }
     partial void OnThemeChanged(string value) { ThemeManager.Apply(value); SaveSettings(); }
@@ -536,6 +568,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.LnaGainDb = LnaGainDb;
         _settings.VgaGainDb = VgaGainDb;
         _settings.AmpEnable = AmpEnable;
+        _settings.DeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
         _settings.AgcEnable = AgcEnable;
         _settings.AgcTargetDbfs = AgcTargetDbfs;
         _settings.Theme = Theme;
@@ -729,6 +762,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!string.IsNullOrWhiteSpace(rec.ShortName)) return rec.ShortName!;
         }
         return $"!{nodeNum:x8}";
+    }
+
+    /// <summary>Build the device-backend selector list with an availability
+    /// annotation for the hardware backends.</summary>
+    private IReadOnlyList<DeviceOption> BuildDeviceOptions()
+    {
+        string Label(RadioDeviceKind kind, string name) =>
+            _core.IsDeviceAvailable(kind) ? name : $"{name} (not found)";
+        return new[]
+        {
+            new DeviceOption(RadioDeviceKind.Auto, "Auto-detect"),
+            new DeviceOption(RadioDeviceKind.HackRf, Label(RadioDeviceKind.HackRf, "HackRF")),
+            new DeviceOption(RadioDeviceKind.RtlSdr, Label(RadioDeviceKind.RtlSdr, "RTL-SDR")),
+            new DeviceOption(RadioDeviceKind.Null, "Synthetic (no hardware)"),
+        };
+    }
+
+    /// <summary>Switch the active radio backend (only valid while stopped) and
+    /// refresh the device badge / status.</summary>
+    private void ApplyDevice(RadioDeviceKind kind)
+    {
+        if (IsRunning) return;
+        _core.SetDevice(kind);
+        OnPropertyChanged(nameof(DeviceName));
+        OnPropertyChanged(nameof(DeviceStatus));
+        OnPropertyChanged(nameof(HasRealRadio));
+        OnPropertyChanged(nameof(DeviceBadge));
+        Status = $"Idle ({_core.DeviceName})";
+        Log(DeviceBadge);
+        if (!string.IsNullOrEmpty(_core.DeviceStatus))
+            Log(_core.DeviceStatus);
+        SaveSettings();
     }
 
     /// <summary>Restart the receiver with the current parameters if it's running.</summary>

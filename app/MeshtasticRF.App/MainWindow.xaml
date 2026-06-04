@@ -18,6 +18,14 @@
 
     <DockPanel LastChildFill="True">
         <ToolBar DockPanel.Dock="Top">
+            <TextBlock Text="Device" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <ComboBox Width="150"
+                      ItemsSource="{Binding DeviceOptions}"
+                      DisplayMemberPath="Label"
+                      SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                      IsEnabled="{Binding CanSelectDevice}"
+                      ToolTip="Active SDR backend (selectable when stopped)" />
+            <Separator />
             <TextBlock Text="Region" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox Width="90"
                       ItemsSource="{Binding Regions}"

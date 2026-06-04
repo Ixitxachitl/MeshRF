@@ -28,6 +28,19 @@ public readonly record struct SignalStatsSnapshot(
     ulong TotalSamples);
 
 /// <summary>
+/// Selectable radio backend. Mirrors <c>mrf::hal::DeviceKind</c> in
+/// <c>native/core/include/mrf/hal/RadioDevice.h</c>. Values are part of the
+/// C ABI — keep them in sync.
+/// </summary>
+public enum RadioDeviceKind
+{
+    Auto = 0,
+    HackRf = 1,
+    RtlSdr = 2,
+    Null = 3,
+}
+
+/// <summary>
 /// Managed wrapper around the native <c>mrf::Core</c> facade.
 /// </summary>
 public sealed class MeshtasticCore : IDisposable
@@ -40,27 +53,57 @@ public sealed class MeshtasticCore : IDisposable
         _handle = NativeMethods.CoreCreate();
         if (_handle == 0)
             throw new InvalidOperationException("Failed to create native core");
-        DeviceName = ReadDeviceName();
-        DeviceStatus = ReadDeviceStatus();
     }
 
     /// <summary>
-    /// Human-readable name of the radio backend in use (e.g. "HackRF One" or
-    /// "null-synth" if no hardware was detected).
+    /// Human-readable name of the radio backend in use (e.g. "HackRF One",
+    /// "RTL-SDR" or "null-synth" if no hardware was detected). Re-read from the
+    /// native core each access so it reflects the latest <see cref="SetDevice"/>.
     /// </summary>
-    public string DeviceName { get; }
+    public string DeviceName => ReadDeviceName();
 
     /// <summary>
     /// Diagnostic string from the most recent device-open attempt — explains
     /// *why* a synthetic backend was selected when no real radio came up.
     /// </summary>
-    public string DeviceStatus { get; }
+    public string DeviceStatus => ReadDeviceStatus();
 
     /// <summary>True if a real (non-synthetic) radio backend is in use.</summary>
-    public bool HasRealRadio =>
-        !string.IsNullOrEmpty(DeviceName) &&
-        !DeviceName.StartsWith("null", StringComparison.OrdinalIgnoreCase) &&
-        !DeviceName.Equals("(none)", StringComparison.OrdinalIgnoreCase);
+    public bool HasRealRadio
+    {
+        get
+        {
+            var name = DeviceName;
+            return !string.IsNullOrEmpty(name) &&
+                   !name.StartsWith("null", StringComparison.OrdinalIgnoreCase) &&
+                   !name.Equals("(none)", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Select the radio backend used for the next <see cref="StartRx"/>. Reopens
+    /// the device immediately (so <see cref="DeviceName"/>/<see cref="DeviceStatus"/>
+    /// reflect the choice) when RX is stopped. Returns false if RX is running.
+    /// </summary>
+    public bool SetDevice(RadioDeviceKind kind)
+    {
+        if (_disposed || _handle == 0) return false;
+        return NativeMethods.CoreSetDevice(_handle, (int)kind) == 0;
+    }
+
+    /// <summary>The backend that actually opened (may differ from the request).</summary>
+    public RadioDeviceKind DeviceKind =>
+        _disposed || _handle == 0
+            ? RadioDeviceKind.Null
+            : (RadioDeviceKind)NativeMethods.CoreGetDeviceKind(_handle);
+
+    /// <summary>
+    /// True if the given backend's runtime library can be loaded (so the user
+    /// could select it). Does not require hardware to be connected.
+    /// </summary>
+    public bool IsDeviceAvailable(RadioDeviceKind kind) =>
+        !_disposed && _handle != 0 &&
+        NativeMethods.CoreDeviceAvailable(_handle, (int)kind) != 0;
 
     private string ReadDeviceName()
     {

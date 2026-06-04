@@ -26,6 +26,15 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_stop")]
     public static partial void CoreStop(nint core);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_device")]
+    public static partial int CoreSetDevice(nint core, int kind);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_device_kind")]
+    public static partial int CoreGetDeviceKind(nint core);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_device_available")]
+    public static partial int CoreDeviceAvailable(nint core, int kind);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_set_gains")]
     public static partial void CoreSetGains(nint core, byte lnaDb, byte vgaDb, int ampEnable);
 

@@ -19,6 +19,10 @@ public sealed class AppSettings
     public byte VgaGainDb { get; set; } = 20;
     public bool AmpEnable { get; set; } = false;
 
+    /// <summary>Selected radio backend: "Auto", "HackRf", "RtlSdr" or "Null".
+    /// Matches <see cref="MeshtasticRF.RadioDeviceKind"/>.</summary>
+    public string DeviceKind { get; set; } = "Auto";
+
     /// <summary>Auto-Gain-Control: when on, the app pushes LNA/VGA to keep
     /// the peak power around <see cref="AgcTargetDbfs"/>.</summary>
     public bool AgcEnable { get; set; } = false;

@@ -35,6 +35,20 @@ public:
     void start_rx(modem::Preset preset, std::uint64_t center_freq_hz);
     void stop();
 
+    // Select the radio backend used for the next start_rx. Reopens the device
+    // immediately (so device_name()/device_status() reflect the choice) when
+    // RX is not running. Returns false if RX is currently running (the caller
+    // must stop first).
+    bool set_device(hal::DeviceKind kind);
+
+    // The backend that actually opened (may differ from the requested kind
+    // when Auto probes, or when the requested device was unavailable).
+    [[nodiscard]] hal::DeviceKind device_kind() const noexcept;
+
+    // True if a backend's runtime library can be loaded (so the user could
+    // select it). Auto and Null are always available; does not need hardware.
+    [[nodiscard]] bool is_device_available(hal::DeviceKind kind) const noexcept;
+
     // Begin capturing the decimated modem-input IQ stream (interleaved
     // float32 I/Q, ".cf32") to `path`. Safe to call while RX is running.
     // Returns true if the file was opened. Overwrites any existing capture.

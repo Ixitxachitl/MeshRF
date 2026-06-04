@@ -21,6 +21,12 @@
 #include <vector>
 
 namespace mrf::hal {
+
+// Defined in RtlSdrDevice.cpp. Declared here so open_device() can dispatch to
+// the RTL-SDR backend without a header dependency on the RTL loader.
+std::unique_ptr<IRadioDevice> open_rtlsdr_device(std::string& status);
+bool rtlsdr_backend_available();
+
 namespace {
 std::string g_open_status = "not attempted";
 } // namespace
@@ -117,6 +123,7 @@ public:
     }
 
     DeviceInfo info() const override { return DeviceInfo{"", "HackRF One", 0}; }
+    DeviceKind kind() const override { return DeviceKind::HackRf; }
 
     void start_rx(const RxConfig& cfg, RxCallback cb) override {
         rx_cb_ = std::move(cb);
@@ -338,7 +345,11 @@ private:
 
 } // namespace
 
-std::unique_ptr<IRadioDevice> open_default_device() {
+namespace {
+
+// Try to open the HackRF backend. Returns nullptr (and sets g_open_status) if
+// libhackrf is missing or no device opened.
+std::unique_ptr<IRadioDevice> try_open_hackrf() {
     hackrf_dyn::Api api{};
     if (hackrf_dyn::load(api)) {
         try {
@@ -354,7 +365,58 @@ std::unique_ptr<IRadioDevice> open_default_device() {
         g_open_status = std::string("libhackrf load failed: ") +
                         hackrf_dyn::last_status();
     }
-    return std::make_unique<NullDevice>();
+    return nullptr;
+}
+
+std::unique_ptr<IRadioDevice> try_open_rtlsdr() {
+    std::string status;
+    auto dev = open_rtlsdr_device(status);
+    g_open_status = status;
+    return dev; // may be nullptr
+}
+
+} // namespace
+
+std::unique_ptr<IRadioDevice> open_device(DeviceKind kind) {
+    switch (kind) {
+        case DeviceKind::HackRf:
+            if (auto d = try_open_hackrf()) return d;
+            return std::make_unique<NullDevice>();
+        case DeviceKind::RtlSdr:
+            if (auto d = try_open_rtlsdr()) return d;
+            return std::make_unique<NullDevice>();
+        case DeviceKind::Null:
+            g_open_status = "Synthetic NullDevice selected (no hardware)";
+            return std::make_unique<NullDevice>();
+        case DeviceKind::Auto:
+        default: {
+            if (auto d = try_open_hackrf()) return d;
+            const std::string hackrf_why = g_open_status;
+            if (auto d = try_open_rtlsdr()) return d;
+            g_open_status = "No SDR found \u2014 " + hackrf_why +
+                            "; " + g_open_status + "; using synthetic NullDevice";
+            return std::make_unique<NullDevice>();
+        }
+    }
+}
+
+std::unique_ptr<IRadioDevice> open_default_device() {
+    return open_device(DeviceKind::Auto);
+}
+
+bool device_available(DeviceKind kind) {
+    switch (kind) {
+        case DeviceKind::HackRf: {
+            hackrf_dyn::Api api{};
+            return hackrf_dyn::load(api);
+        }
+        case DeviceKind::RtlSdr:
+            return rtlsdr_backend_available();
+        case DeviceKind::Null:
+        case DeviceKind::Auto:
+        default:
+            return true;
+    }
 }
 
 } // namespace mrf::hal

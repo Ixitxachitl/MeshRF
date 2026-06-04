@@ -339,4 +339,24 @@
             </Setter.Value>
         </Setter>
     </Style>
+
+    <!-- ToolTips default to the system info colors (light), which render as
+         white-on-white in dark mode. Re-template to use the dark palette. -->
+    <Style TargetType="{x:Type ToolTip}">
+        <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToolTip}">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1"
+                            Padding="6,3">
+                        <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

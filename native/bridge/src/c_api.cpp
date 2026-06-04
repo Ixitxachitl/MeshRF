@@ -35,6 +35,23 @@ MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core) {
     if (core) core->core.stop();
 }
 
+MRF_API int32_t MRF_CALL mrf_core_set_device(mrf_core_t* core, int32_t kind) {
+    if (!core) return -2;
+    return core->core.set_device(static_cast<mrf::hal::DeviceKind>(kind)) ? 0 : -1;
+}
+
+MRF_API int32_t MRF_CALL mrf_core_get_device_kind(const mrf_core_t* core) {
+    if (!core) return static_cast<int32_t>(mrf::hal::DeviceKind::Null);
+    return static_cast<int32_t>(core->core.device_kind());
+}
+
+MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
+                                                   int32_t kind) {
+    if (!core) return 0;
+    return core->core.is_device_available(
+               static_cast<mrf::hal::DeviceKind>(kind)) ? 1 : 0;
+}
+
 MRF_API void MRF_CALL mrf_core_set_gains(mrf_core_t* core,
                                          uint8_t lna_db,
                                          uint8_t vga_db,
@@ -139,6 +156,6 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_event(mrf_core_t* core,
         core->core.pull_event(std::span<char>(buf, capacity)));
 }
 
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 4u; }
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 5u; }
 
 } // extern "C"

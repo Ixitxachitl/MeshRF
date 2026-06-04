@@ -1,8 +1,9 @@
 # MeshtasticRF
 
-Windows-native [Meshtastic](https://meshtastic.org/) **receiver** that uses a
-[HackRF One](https://greatscottgadgets.com/hackrf/) as the radio instead of a
-LoRa modem chip. It demodulates LoRa chirps in software (a port of
+Windows-native [Meshtastic](https://meshtastic.org/) **receiver** that uses an
+SDR ([HackRF One](https://greatscottgadgets.com/hackrf/) or an RTL-SDR dongle)
+as the radio instead of a LoRa modem chip. It demodulates LoRa chirps in
+software (a port of
 [`gr-lora_sdr`](https://github.com/tapparelj/gr-lora_sdr)), reassembles
 Meshtastic frames, decrypts channels, and parses the mesh protobufs — all on
 the host CPU.
@@ -13,7 +14,11 @@ the host CPU.
 
 ## Features
 
-- **Software LoRa demodulation** from raw HackRF IQ (CSS / chirp-chat),
+- **Selectable SDR backend**: HackRF One or RTL-SDR, with auto-detection. The
+  active device is chosen in the toolbar and can be switched while the receiver
+  is stopped. Backends are loaded at runtime (no build-time dependency) and a
+  synthetic source is used when no hardware is present.
+- **Software LoRa demodulation** from raw SDR IQ (CSS / chirp-chat),
   configurable spreading factor, bandwidth, and coding rate via the standard
   Meshtastic LoRa presets.
 - **Live spectrum + waterfall** with auto-levels, Turbo/Inferno colormaps, and a
@@ -39,7 +44,7 @@ the host CPU.
                | P/Invoke (C ABI)
 +--------------v--------------+
 |  MeshtasticRF.Native (DLL)  |   C++20
-|  - HAL (HackRF)             |
+|  - HAL (HackRF, RTL-SDR)    |
 |  - DSP / LoRa demod         |   (port of gr-lora_sdr)
 |  - Spectrum / waterfall     |
 +-----------------------------+
@@ -59,7 +64,10 @@ Prerequisites:
 - CMake ≥ 3.25
 - .NET 8 SDK
 - [vcpkg](https://github.com/microsoft/vcpkg) (manifest mode — see `vcpkg.json`)
-- HackRF One with the WinUSB driver installed via [Zadig](https://zadig.akeo.ie/)
+- An SDR with the WinUSB driver installed via [Zadig](https://zadig.akeo.ie/):
+  a HackRF One, or an RTL-SDR dongle (`rtlsdr.dll`/`librtlsdr.dll` is loaded at
+  runtime — e.g. from [PothosSDR](https://github.com/pothosware/PothosSDR) or
+  SDRangel — and discovered on the module/known SDK paths).
 
 ```powershell
 # Configure + build the native core (RelWithDebInfo recommended; Debug C++ is

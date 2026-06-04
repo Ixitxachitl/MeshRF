@@ -13,6 +13,15 @@ namespace mrf::hal {
 
 using SampleType = std::complex<float>;
 
+// Selectable radio backend. Values are part of the C ABI (mirrored by the
+// managed RadioDeviceKind enum and mrf_core_set_device); keep them stable.
+enum class DeviceKind : int {
+    Auto   = 0, // probe HackRF, then RTL-SDR, then fall back to synthetic
+    HackRf = 1,
+    RtlSdr = 2,
+    Null   = 3, // synthetic NullDevice (no hardware)
+};
+
 struct DeviceInfo {
     std::string serial;
     std::string board_name;
@@ -49,6 +58,11 @@ public:
 
     virtual DeviceInfo info() const = 0;
 
+    // Concrete backend kind (HackRf / RtlSdr / Null). Used by higher layers to
+    // report which device actually opened (which may differ from the requested
+    // kind when Auto probes, or when the requested backend is unavailable).
+    virtual DeviceKind kind() const { return DeviceKind::Null; }
+
     virtual void start_rx(const RxConfig& cfg, RxCallback cb) = 0;
     virtual void stop_rx() = 0;
 
@@ -73,6 +87,16 @@ public:
 // connected; otherwise returns a NullDevice that produces zero samples (so
 // higher layers can still be exercised in tests / dev without hardware).
 std::unique_ptr<IRadioDevice> open_default_device();
+
+// Open a specific backend. DeviceKind::Auto behaves like open_default_device().
+// HackRf / RtlSdr fall back to a NullDevice when the requested backend's DLL or
+// hardware is unavailable. The reason is recorded in open_default_device_status().
+std::unique_ptr<IRadioDevice> open_device(DeviceKind kind);
+
+// True if the backend's runtime library can be loaded (i.e. the user could
+// select it). DeviceKind::Auto and DeviceKind::Null are always available.
+// Does not require hardware to be connected.
+bool device_available(DeviceKind kind);
 
 // Human-readable diagnostic from the most recent open_default_device() call,
 // e.g. "HackRF open OK" or "libhackrf load failed: hackrf.dll not found".

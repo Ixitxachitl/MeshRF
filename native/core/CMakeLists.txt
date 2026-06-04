@@ -2,6 +2,8 @@ add_library(mrf_core STATIC
     src/Core.cpp
     src/hal/HackRfDevice.cpp
     src/hal/HackRfDynLoad.cpp
+    src/hal/RtlSdrDevice.cpp
+    src/hal/RtlSdrDynLoad.cpp
     src/dsp/Fir.cpp
     src/dsp/Fft.cpp
     src/dsp/SignalStats.cpp
