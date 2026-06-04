@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>MeshtasticRF.App</RootNamespace>
+    <AssemblyName>MeshtasticRF</AssemblyName>
+    <ApplicationIcon />
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Avoid the WPF "_wpftmp.csproj" temporary-target-assembly dance, which
+         races with the VS Code C# project system and produces spurious
+         "Cannot open project file ..._wpftmp.csproj" errors. -->
+    <IncludePackageReferencesDuringMarkupCompilation>true</IncludePackageReferencesDuringMarkupCompilation>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MeshtasticRF.Core\MeshtasticRF.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Copy the native bridge DLL produced by CMake into the WPF output dir so
+       P/Invoke can find it at runtime. The native DSP hot path is far too slow
+       in a Debug (unoptimized, bounds-checked) build to sustain 2.4 MS/s, so
+       we default to the optimized RelWithDebInfo native build even when the
+       managed app is built Debug. Override with -p:NativeConfig=Debug if you
+       need to debug the C++ side. The CMake build must have produced
+       build/windows-x64/bin/$(NativeConfig)/MeshtasticRF.Native.dll first. -->
+  <PropertyGroup>
+    <NativeConfig Condition="'$(NativeConfig)' == ''">RelWithDebInfo</NativeConfig>
+  </PropertyGroup>
+  <Target Name="CopyNativeBridge" AfterTargets="Build">
+    <PropertyGroup>
+      <_NativeBinDir>$(MSBuildThisFileDirectory)..\..\build\windows-x64\bin\$(NativeConfig)</_NativeBinDir>
+      <_NativeBridgeDll>$(_NativeBinDir)\MeshtasticRF.Native.dll</_NativeBridgeDll>
+    </PropertyGroup>
+    <ItemGroup>
+      <_NativeRuntimeDll Include="$(_NativeBinDir)\hackrf.dll" />
+      <_NativeRuntimeDll Include="$(_NativeBinDir)\libusb-1.0.dll" />
+      <_NativeRuntimeDll Include="$(_NativeBinDir)\pthreadVC2.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="$(_NativeBridgeDll)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(_NativeBridgeDll)')" />
+    <Copy SourceFiles="@(_NativeRuntimeDll)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(_NativeRuntimeDll.FullPath)')" />
+    <Warning Text="Native bridge DLL not found at $(_NativeBridgeDll). Build the native CMake project first (cmake --build build/windows-x64 --config $(NativeConfig))."
+             Condition="!Exists('$(_NativeBridgeDll)')" />
+  </Target>
+
+</Project>

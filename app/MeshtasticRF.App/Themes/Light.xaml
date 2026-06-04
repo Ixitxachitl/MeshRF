@@ -1,0 +1,13 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Light theme: mostly relies on default WPF chrome. We define the
+         brushes used by name in MainWindow.xaml so the same XAML works for
+         both themes. -->
+    <SolidColorBrush x:Key="BrushAppBackground"     Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="BrushAppForeground"     Color="#FF202020" />
+    <SolidColorBrush x:Key="BrushSubtle"            Color="#FF606060" />
+    <SolidColorBrush x:Key="BrushPanelBackground"   Color="#FFFAFAFA" />
+    <SolidColorBrush x:Key="BrushPanelBorder"       Color="#FFDDDDDD" />
+    <SolidColorBrush x:Key="BrushSplitter"          Color="#FFDDDDDD" />
+    <SolidColorBrush x:Key="BrushSpectrumBackground" Color="#FF101418" />
+</ResourceDictionary>

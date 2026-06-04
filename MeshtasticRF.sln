@@ -1,0 +1,69 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "app", "app", "{F95F473B-E98A-ACD6-1986-755F447BE36F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeshtasticRF.Core", "app\MeshtasticRF.Core\MeshtasticRF.Core.csproj", "{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeshtasticRF.App", "app\MeshtasticRF.App\MeshtasticRF.App.csproj", "{75D67F95-893A-4370-869D-38A1678D5284}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeshtasticRF.Tests", "tests\managed\MeshtasticRF.Tests.csproj", "{44501941-C6D1-4511-928C-F9253828FABD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Debug|Any CPU.Build.0 = Debug|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Debug|x64.ActiveCfg = Debug|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Debug|x64.Build.0 = Debug|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Debug|x86.ActiveCfg = Debug|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Debug|x86.Build.0 = Debug|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Release|Any CPU.ActiveCfg = Release|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Release|Any CPU.Build.0 = Release|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Release|x64.ActiveCfg = Release|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Release|x64.Build.0 = Release|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Release|x86.ActiveCfg = Release|x64
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC}.Release|x86.Build.0 = Release|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Debug|Any CPU.Build.0 = Debug|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Debug|x64.ActiveCfg = Debug|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Debug|x64.Build.0 = Debug|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Debug|x86.ActiveCfg = Debug|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Debug|x86.Build.0 = Debug|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Release|Any CPU.ActiveCfg = Release|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Release|Any CPU.Build.0 = Release|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Release|x64.ActiveCfg = Release|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Release|x64.Build.0 = Release|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Release|x86.ActiveCfg = Release|x64
+		{75D67F95-893A-4370-869D-38A1678D5284}.Release|x86.Build.0 = Release|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Debug|Any CPU.Build.0 = Debug|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Debug|x64.ActiveCfg = Debug|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Debug|x64.Build.0 = Debug|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Debug|x86.ActiveCfg = Debug|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Debug|x86.Build.0 = Debug|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Release|Any CPU.ActiveCfg = Release|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Release|Any CPU.Build.0 = Release|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Release|x64.ActiveCfg = Release|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Release|x64.Build.0 = Release|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Release|x86.ActiveCfg = Release|x64
+		{44501941-C6D1-4511-928C-F9253828FABD}.Release|x86.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{0A3A7E58-180B-4344-AD2D-72CCF1EE1DBC} = {F95F473B-E98A-ACD6-1986-755F447BE36F}
+		{75D67F95-893A-4370-869D-38A1678D5284} = {F95F473B-E98A-ACD6-1986-755F447BE36F}
+		{44501941-C6D1-4511-928C-F9253828FABD} = {F95F473B-E98A-ACD6-1986-755F447BE36F}
+	EndGlobalSection
+EndGlobal

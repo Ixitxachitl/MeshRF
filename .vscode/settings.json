@@ -1,0 +1,52 @@
+{
+    "VsCodeTaskButtons.showCounter": false,
+    "VsCodeTaskButtons.tasks": [
+        {
+            "label": "$(rocket) Build & Run",
+            "task": "Build & Run",
+            "tooltip": "Build native + app, deploy DLL, then launch the WPF app"
+        },
+        {
+            "label": "$(tools) Build All",
+            "task": "Build All",
+            "tooltip": "Build native, deploy DLL, build WPF app"
+        },
+        {
+            "label": "$(play) Run",
+            "task": "Run App",
+            "tooltip": "Launch the WPF app (no rebuild)"
+        },
+        {
+            "label": "$(gear) Native",
+            "tooltip": "Native (C++) tasks",
+            "tasks": [
+                {
+                    "label": "Configure (CMake preset windows-x64)",
+                    "task": "Configure Native (CMake)"
+                },
+                {
+                    "label": "Build Native",
+                    "task": "Build Native"
+                },
+                {
+                    "label": "Test Native (ctest)",
+                    "task": "Test Native"
+                },
+                {
+                    "label": "Deploy Native DLL",
+                    "task": "Deploy Native DLL"
+                }
+            ]
+        },
+        {
+            "label": "$(beaker) Test",
+            "task": "Test Native",
+            "tooltip": "Build native and run ctest"
+        },
+        {
+            "label": "$(trash) Clean",
+            "task": "Clean",
+            "tooltip": "Clean native + dotnet build outputs"
+        }
+    ]
+}

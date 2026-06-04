@@ -1,0 +1,155 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure Native (CMake)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--preset",
+                "windows-x64"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "always",
+                "clear": true
+            }
+        },
+        {
+            "label": "Build Native",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build/windows-x64",
+                "--config",
+                "RelWithDebInfo",
+                "-j"
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "always",
+                "clear": true
+            }
+        },
+        {
+            "label": "Test Native",
+            "type": "shell",
+            "command": "ctest",
+            "args": [
+                "--test-dir",
+                "build/windows-x64",
+                "--output-on-failure",
+                "-C",
+                "RelWithDebInfo"
+            ],
+            "group": "test",
+            "dependsOn": "Build Native",
+            "problemMatcher": [],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "always",
+                "clear": true
+            }
+        },
+        {
+            "label": "Build App",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "build",
+                "app/MeshtasticRF.App/MeshtasticRF.App.csproj",
+                "-c",
+                "Debug",
+                "--nologo"
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "always",
+                "clear": true
+            }
+        },
+        {
+            "label": "Deploy Native DLL",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "Copy-Item build/windows-x64/bin/RelWithDebInfo/MeshtasticRF.Native.dll app/MeshtasticRF.App/bin/Debug/net8.0-windows/ -Force; Write-Host 'Deployed.'"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "silent"
+            }
+        },
+        {
+            "label": "Build All",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build Native",
+                "Deploy Native DLL",
+                "Build App"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run App",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "run",
+                "--project",
+                "app/MeshtasticRF.App/MeshtasticRF.App.csproj",
+                "-c",
+                "Debug",
+                "--no-build"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "always",
+                "clear": true
+            }
+        },
+        {
+            "label": "Build & Run",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build All",
+                "Run App"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "if (Test-Path build/windows-x64) { cmake --build build/windows-x64 --target clean }; dotnet clean app/MeshtasticRF.App/MeshtasticRF.App.csproj"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "always",
+                "clear": true
+            }
+        }
+    ]
+}

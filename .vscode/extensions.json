@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "spencerwmiles.vscode-task-buttons",
+        "ms-dotnettools.csharp",
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools"
+    ]
+}

@@ -1,0 +1,90 @@
+# Build outputs
+build/
+out/
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM/
+ARM64/
+
+# vcpkg
+vcpkg_installed/
+.vcpkg/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.cmake.in
+!CMakeLists.txt
+!*Config.cmake
+CMakeUserPresets.json
+compile_commands.json
+
+# .NET
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.nuget.props
+*.nuget.targets
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+
+# Native
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.obj
+*.o
+*.a
+
+# But keep the vendored hackrf runtime — see third_party/hackrf/README.md
+!third_party/hackrf/hackrf.dll
+!third_party/hackrf/libusb-1.0.dll
+!third_party/hackrf/pthreadVC2.dll
+
+# Test artifacts / IQ captures (large)
+tests/vectors/*.iq
+tests/vectors/*.cf32
+tests/vectors/*.sigmf-data
+
+# Scratch / debug artifacts (IQ captures, analysis dumps) at the repo root
+*.cf32
+*.sdriq
+*.sigmf-data
+*.wav
+capture*.iq
+analyze_out.txt
+err.txt
+spec_out.txt
+ref_out*.txt
+ref_result.txt
+spectrogram*.png
+
+# Python cache and script scratch output
+__pycache__/
+*.pyc
+scripts/replay_gt.txt
+scripts/replay_out.txt
+
+# OS
+Thumbs.db
+.DS_Store

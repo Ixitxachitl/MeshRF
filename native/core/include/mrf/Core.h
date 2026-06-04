@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include "mrf/Export.h"
+#include "mrf/hal/RadioDevice.h"
+#include "mrf/modem/Preset.h"
+#include "mrf/router/FloodingRouter.h"
+
+#include <cstddef>
+#include <memory>
+#include <span>
+
+namespace mrf {
+
+// Lightweight POD mirroring dsp::SignalStats::Snapshot, exposed publicly so
+// the C ABI / managed bindings can carry a stable shape.
+struct CoreSignalStats {
+    float rssi_dbfs;
+    float peak_dbfs;
+    float dc_re;
+    float dc_im;
+    std::uint64_t total_samples;
+};
+
+// Top-level facade tying HAL + modem + MAC + router together. The C ABI
+// (native/bridge) wraps a single instance of this class.
+class Core {
+public:
+    Core();
+    ~Core();
+
+    Core(const Core&) = delete;
+    Core& operator=(const Core&) = delete;
+
+    void start_rx(modem::Preset preset, std::uint64_t center_freq_hz);
+    void stop();
+
+    // Begin capturing the decimated modem-input IQ stream (interleaved
+    // float32 I/Q, ".cf32") to `path`. Safe to call while RX is running.
+    // Returns true if the file was opened. Overwrites any existing capture.
+    bool start_capture(const char* path);
+    // Stop and flush any in-progress capture. No-op if not capturing.
+    void stop_capture();
+    [[nodiscard]] bool is_capturing() const noexcept;
+
+    // Live gain control. Values are clamped to HackRF ranges:
+    //   lna_db: 0..40 step 8, vga_db: 0..62 step 2, amp: 0/1.
+    // Safe to call before or after start_rx; takes effect immediately when
+    // RX is running, and is remembered for the next start.
+    void set_gains(std::uint8_t lna_db, std::uint8_t vga_db, bool amp);
+
+    [[nodiscard]] bool is_running() const noexcept;
+
+    // Returns the FFT/spectrum frame size used by the running pipeline. 0 if
+    // not running.
+    [[nodiscard]] std::size_t spectrum_size() const noexcept;
+
+    // Device sample rate (Hz) of the running pipeline. This equals the full
+    // span of the spectrum/waterfall (DC at the tuned center frequency). 0 if
+    // not running.
+    [[nodiscard]] std::uint32_t sample_rate_hz() const noexcept;
+
+    // Copy the latest dBFS spectrum into `out`. Returns true if a frame is
+    // available and out.size() >= spectrum_size().
+    bool latest_spectrum(std::span<float> out) const;
+
+    // Compute a high-time-resolution spectrogram of the most recent ~150 ms of
+    // modem-rate IQ, cropped to the LoRa channel. Fills `out` row-major as
+    // n_time rows of n_freq dBFS values (low->high freq left->right, matching
+    // the live waterfall). Returns the number of rows written (n_time) or 0 if
+    // not enough IQ history is available. out.size() must be >= n_time*n_freq.
+    std::uint32_t pull_packet_spectrogram(std::span<float> out,
+                                          std::uint32_t n_time,
+                                          std::uint32_t n_freq) const;
+
+    [[nodiscard]] CoreSignalStats signal_stats() const noexcept;
+
+    // Pop the next pending demodulator event (UTF-8) into `out`. Returns the
+    // number of bytes copied (excluding any NUL), or 0 if no event is queued
+    // or `out` is too small. Events are queued by the modem (e.g. "preamble
+    // detected: ...") and consumed by the UI for display in the log.
+    std::size_t pull_event(std::span<char> out) noexcept;
+
+    // Human-readable name of the radio backend currently in use
+    // (e.g. "HackRF One", or "null-synth" if no hardware was found).
+    [[nodiscard]] const char* device_name() const noexcept;
+
+    // Diagnostic string from the most recent device-open attempt, e.g.
+    // "HackRF open OK" or "libhackrf load failed: hackrf.dll not found".
+    [[nodiscard]] const char* device_status() const noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+} // namespace mrf
