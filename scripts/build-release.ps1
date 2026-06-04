@@ -48,7 +48,7 @@ if (-not $Version) {
 Write-Host "Building MeshtasticRF v$Version ($NativeConfig)" -ForegroundColor Cyan
 
 # --- Don't fight a running instance for the DLL --------------------------
-Get-Process -Name MeshtasticRF -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name MeshRF -ErrorAction SilentlyContinue | Stop-Process -Force
 
 # --- 1. Native build -----------------------------------------------------
 Write-Host '==> Configuring + building native core' -ForegroundColor Yellow
@@ -97,7 +97,7 @@ Copy-Item (Join-Path $repoRoot 'LICENSE') -Destination $stage -Force
 Copy-Item (Join-Path $repoRoot 'README.md') -Destination $stage -Force
 
 # --- 4. Zip --------------------------------------------------------------
-$zipName = "MeshtasticRF-v$Version-win-x64.zip"
+$zipName = "MeshRF-v$Version-win-x64.zip"
 $zipPath = Join-Path $repoRoot "dist/$zipName"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Write-Host "==> Packaging $zipName" -ForegroundColor Yellow

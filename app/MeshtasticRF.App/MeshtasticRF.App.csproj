@@ -10,7 +10,7 @@
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>MeshtasticRF.App</RootNamespace>
-    <AssemblyName>MeshtasticRF</AssemblyName>
+    <AssemblyName>MeshRF</AssemblyName>
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- Avoid the WPF "_wpftmp.csproj" temporary-target-assembly dance, which
