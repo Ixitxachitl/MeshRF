@@ -14,6 +14,7 @@
     <Window.Resources>
         <conv:PskTextConverter x:Key="PskText" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <conv:InverseBoolConverter x:Key="InverseBool" />
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
@@ -133,7 +134,8 @@
                        Text="{Binding Status}" />
         </ToolBar>
 
-        <ToolBar DockPanel.Dock="Top">
+        <ToolBar DockPanel.Dock="Top"
+                 Visibility="{Binding IsHackRf, Converter={StaticResource BoolToVis}}">
             <TextBlock Text="LNA" VerticalAlignment="Center" Margin="0,0,4,0"
                        ToolTip="HackRF LNA gain (RF-stage), 0..40 dB step 8" />
             <Slider Width="160"
@@ -175,6 +177,32 @@
                     IsEnabled="{Binding AgcEnable}" />
             <TextBlock Width="48" VerticalAlignment="Center"
                        Text="{Binding AgcTargetDbfs, StringFormat={}{0:F0} dBFS}" />
+        </ToolBar>
+
+        <ToolBar DockPanel.Dock="Top"
+                 Visibility="{Binding IsRtlSdr, Converter={StaticResource BoolToVis}}">
+            <TextBlock Text="Gain" VerticalAlignment="Center" Margin="0,0,4,0"
+                       ToolTip="RTL-SDR manual tuner gain, 0..49 dB" />
+            <Slider Width="220"
+                    Minimum="0" Maximum="49"
+                    TickFrequency="1" IsSnapToTickEnabled="True"
+                    SmallChange="1" LargeChange="5"
+                    Value="{Binding RtlGainDb, Mode=TwoWay}"
+                    VerticalAlignment="Center"
+                    IsEnabled="{Binding AmpEnable, Converter={StaticResource InverseBool}}" />
+            <TextBlock Width="40" VerticalAlignment="Center"
+                       Text="{Binding RtlGainDb, StringFormat={}{0} dB}" />
+
+            <Separator />
+            <CheckBox Content="AGC"
+                      IsChecked="{Binding AmpEnable, Mode=TwoWay}"
+                      VerticalAlignment="Center"
+                      ToolTip="Tuner automatic gain control (overrides the manual gain slider)" />
+            <Separator />
+            <CheckBox Content="Bias-T"
+                      IsChecked="{Binding BiasTee, Mode=TwoWay}"
+                      VerticalAlignment="Center"
+                      ToolTip="Enable 5 V bias-T on the antenna port to power an external LNA/active antenna" />
         </ToolBar>
 
         <ToolBar DockPanel.Dock="Top">
@@ -248,95 +276,95 @@
             </StatusBarItem>
         </StatusBar>
 
-        <TabControl>
-            <TabItem Header="Receiver">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="1*" MinHeight="60" />
-                        <RowDefinition Height="5" />
-                        <RowDefinition Height="2*" MinHeight="60" />
-                        <RowDefinition Height="5" />
-                        <RowDefinition Height="5*" MinHeight="160" />
-                    </Grid.RowDefinitions>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="200" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="*" MinWidth="260" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" MinHeight="120" />
+                <RowDefinition Height="5" />
+                <RowDefinition Height="*" MinHeight="120" />
+            </Grid.RowDefinitions>
 
-            <views:SpectrumView x:Name="Spectrum"
-                                Grid.Row="0"
-                                Margin="4"
-                                FloorDb="{Binding WaterfallFloorDb}"
-                                CeilDb="{Binding WaterfallCeilDb}" />
+            <!-- Top-left quarter: map. -->
+            <views:MapView Grid.Row="0" Grid.Column="0" x:Name="Map" Margin="4" />
 
-            <GridSplitter Grid.Row="1"
-                          Height="5"
-                          HorizontalAlignment="Stretch"
-                          Background="{DynamicResource BrushSplitter}"
-                          ShowsPreview="False"
-                          ResizeBehavior="PreviousAndNext" />
-
-            <Grid Grid.Row="2" Margin="4">
+            <!-- Top-right quarter: spectrum (top) over waterfall (bottom). -->
+            <Grid Grid.Row="0" Grid.Column="2" Margin="4">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="22" />
+                    <RowDefinition Height="1*" MinHeight="50" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="2*" MinHeight="60" />
                 </Grid.RowDefinitions>
 
-                <views:WaterfallView x:Name="Waterfall"
-                                     Grid.Row="0"
-                                     FloorDb="{Binding WaterfallFloorDb, Mode=TwoWay}"
-                                     CeilDb="{Binding WaterfallCeilDb, Mode=TwoWay}"
-                                     AutoLevels="{Binding WaterfallAutoLevels, Mode=TwoWay}" />
+                <views:SpectrumView x:Name="Spectrum"
+                                    Grid.Row="0"
+                                    FloorDb="{Binding WaterfallFloorDb}"
+                                    CeilDb="{Binding WaterfallCeilDb}" />
 
-                <!-- Frozen spectrogram of the most recently detected packet.
-                     Hidden until the first packet is captured. -->
-                <Border x:Name="LastPacketPanel"
-                        Grid.Row="0"
-                        HorizontalAlignment="Right"
-                        VerticalAlignment="Top"
-                        Width="540" Height="170"
-                        Margin="0,6,6,0"
-                        Background="#DD101418"
-                        BorderBrush="{DynamicResource BrushPanelBorder}"
-                        BorderThickness="1"
-                        Visibility="Collapsed">
-                    <DockPanel>
-                        <DockPanel DockPanel.Dock="Top" Margin="4,2,2,2">
-                            <Button DockPanel.Dock="Right"
-                                    Width="18" Height="18" Padding="0"
-                                    Click="OnCloseLastPacket"
-                                    ToolTip="Hide"
-                                    Content="&#xE711;"
-                                    FontFamily="Segoe MDL2 Assets" FontSize="9" />
-                            <TextBlock x:Name="LastPacketTitle"
-                                       Text="Last packet"
-                                       FontWeight="SemiBold" FontSize="11"
-                                       VerticalAlignment="Center" />
+                <GridSplitter Grid.Row="1"
+                              Height="5"
+                              HorizontalAlignment="Stretch"
+                              Background="{DynamicResource BrushSplitter}"
+                              ShowsPreview="False"
+                              ResizeBehavior="PreviousAndNext" />
+
+                <Grid Grid.Row="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="22" />
+                    </Grid.RowDefinitions>
+
+                    <views:WaterfallView x:Name="Waterfall"
+                                         Grid.Row="0"
+                                         FloorDb="{Binding WaterfallFloorDb, Mode=TwoWay}"
+                                         CeilDb="{Binding WaterfallCeilDb, Mode=TwoWay}"
+                                         AutoLevels="{Binding WaterfallAutoLevels, Mode=TwoWay}" />
+
+                    <!-- Frozen spectrogram of the most recently detected packet.
+                         Hidden until the first packet is captured. -->
+                    <Border x:Name="LastPacketPanel"
+                            Grid.Row="0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Width="540" Height="170"
+                            Margin="0,6,6,0"
+                            Background="#DD101418"
+                            BorderBrush="{DynamicResource BrushPanelBorder}"
+                            BorderThickness="1"
+                            Visibility="Collapsed">
+                        <DockPanel>
+                            <DockPanel DockPanel.Dock="Top" Margin="4,2,2,2">
+                                <Button DockPanel.Dock="Right"
+                                        Width="18" Height="18" Padding="0"
+                                        Click="OnCloseLastPacket"
+                                        ToolTip="Hide"
+                                        Content="&#xE711;"
+                                        FontFamily="Segoe MDL2 Assets" FontSize="9" />
+                                <TextBlock x:Name="LastPacketTitle"
+                                           Text="Last packet"
+                                           Foreground="#F0F0F0"
+                                           FontWeight="SemiBold" FontSize="11"
+                                           VerticalAlignment="Center" />
+                            </DockPanel>
+                            <views:WaterfallView x:Name="LastPacket"
+                                                 AutoLevels="True"
+                                                 TimeHorizontal="True"
+                                                 Margin="2" />
                         </DockPanel>
-                        <views:WaterfallView x:Name="LastPacket"
-                                             AutoLevels="True"
-                                             TimeHorizontal="True"
-                                             Margin="2" />
-                    </DockPanel>
-                </Border>
+                    </Border>
 
-                <views:FrequencyAxis Grid.Row="1"
-                                     CenterFreqHz="{Binding SpectrumCenterHz}"
-                                     SpanHz="{Binding SpectrumSpanHz}"
-                                     Foreground="{DynamicResource BrushAppForeground}" />
+                    <views:FrequencyAxis Grid.Row="1"
+                                         CenterFreqHz="{Binding SpectrumCenterHz}"
+                                         SpanHz="{Binding SpectrumSpanHz}"
+                                         Foreground="{DynamicResource BrushAppForeground}" />
+                </Grid>
             </Grid>
 
-            <GridSplitter Grid.Row="3"
-                          Height="5"
-                          HorizontalAlignment="Stretch"
-                          Background="{DynamicResource BrushSplitter}"
-                          ShowsPreview="False"
-                          ResizeBehavior="PreviousAndNext" />
-
-            <Grid Grid.Row="4">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" MinWidth="180" />
-                    <ColumnDefinition Width="5" />
-                    <ColumnDefinition Width="3*" MinWidth="260" />
-                </Grid.ColumnDefinitions>
-
-                <DockPanel Grid.Column="0" Margin="4">
+            <!-- Bottom-left quarter: node list + identity. -->
+                <DockPanel Grid.Row="2" Grid.Column="0" Margin="4">
                     <Expander DockPanel.Dock="Top" Header="My node (identity)"
                               IsExpanded="False" Margin="0,0,0,4">
                         <Border Padding="8"
@@ -449,15 +477,30 @@
                                Text="Nodes"
                                FontWeight="SemiBold"
                                Margin="2,0,0,2" />
-                    <DataGrid ItemsSource="{Binding Nodes}"
+                    <DataGrid x:Name="NodesGrid"
+                              ItemsSource="{Binding Nodes}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
                               CanUserSortColumns="True"
                               CanUserAddRows="False"
-                              SelectionMode="Single"
+                              SelectionMode="Extended"
                               GridLinesVisibility="Horizontal"
                               HeadersVisibility="Column"
-                              MouseDoubleClick="NodesGrid_MouseDoubleClick">
+                              MouseDoubleClick="NodesGrid_MouseDoubleClick"
+                              KeyDown="NodesGrid_KeyDown">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Delete"
+                                          Click="OnDeleteNodes"
+                                          InputGestureText="Del">
+                                    <MenuItem.Icon>
+                                        <TextBlock Text="&#xE74D;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Short" Width="Auto"
                                                 SortMemberPath="ShortName"
@@ -486,15 +529,8 @@
                     </DataGrid>
                 </DockPanel>
 
-                <GridSplitter Grid.Column="1"
-                              Width="5"
-                              VerticalAlignment="Stretch"
-                              HorizontalAlignment="Stretch"
-                              Background="{DynamicResource BrushSplitter}"
-                              ShowsPreview="False"
-                              ResizeBehavior="PreviousAndNext" />
-
-                <DockPanel Grid.Column="2" Margin="4">
+                <!-- Bottom-right quarter: channels / chats + log. -->
+                <DockPanel Grid.Row="2" Grid.Column="2" Margin="4">
                     <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,2">
                         <Button DockPanel.Dock="Right"
                                 Width="22" Height="22"
@@ -795,13 +831,16 @@
                     </DockPanel>
                     </Grid>
                 </DockPanel>
-            </Grid>
-                </Grid>
-            </TabItem>
 
-            <TabItem Header="Map">
-                <views:MapView />
-            </TabItem>
-        </TabControl>
+            <!-- Cross splitters dividing the four quarters. -->
+            <GridSplitter Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                          Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                          Background="{DynamicResource BrushSplitter}"
+                          ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
+            <GridSplitter Grid.Column="1" Grid.Row="0" Grid.RowSpan="3"
+                          Width="5" VerticalAlignment="Stretch" HorizontalAlignment="Center"
+                          Background="{DynamicResource BrushSplitter}"
+                          ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
+        </Grid>
     </DockPanel>
 </Window>

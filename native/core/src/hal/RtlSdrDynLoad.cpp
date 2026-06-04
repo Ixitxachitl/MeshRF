@@ -125,6 +125,7 @@ bool load(Api& out) {
     ok &= resolve(m, "rtlsdr_cancel_async",       a.rtlsdr_cancel_async);
     resolve_optional(m, "rtlsdr_set_agc_mode",       a.rtlsdr_set_agc_mode);
     resolve_optional(m, "rtlsdr_set_freq_correction", a.rtlsdr_set_freq_correction);
+    resolve_optional(m, "rtlsdr_set_bias_tee",       a.rtlsdr_set_bias_tee);
     resolve_optional(m, "rtlsdr_get_tuner_gains",    a.rtlsdr_get_tuner_gains);
     resolve_optional(m, "rtlsdr_get_device_name",    a.rtlsdr_get_device_name);
     if (!ok) {

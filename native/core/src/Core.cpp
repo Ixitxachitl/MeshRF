@@ -44,6 +44,7 @@ struct Core::Impl {
     std::uint8_t lna_db{24};
     std::uint8_t vga_db{20};
     bool         amp_enable{false};
+    bool         bias_tee{false};
     std::unique_ptr<modem::ILoraModem> modem;
     std::unique_ptr<dsp::Resampler> resampler;
     dsp::DcBlocker dc_blocker;
@@ -118,10 +119,13 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     impl_->spectrum = std::make_unique<dsp::Spectrum>(kSpectrumFftSize);
     impl_->mix_phase     = 0.0;
     impl_->last_drops_reported = 0;
-    // Allocate ~0.5 s of modem-rate IQ history for the last-packet spectrogram.
+    // Allocate ~1 s of modem-rate IQ history for the last-packet spectrogram.
+    // A long SF11 packet runs ~0.4-0.5 s; combined with event-drain latency a
+    // 0.5 s ring could let the preamble scroll out before we snapshot, so keep
+    // a full second of headroom.
     {
         std::lock_guard<std::mutex> lk(impl_->iq_mu);
-        impl_->iq_ring.assign(static_cast<std::size_t>(target) / 2u,
+        impl_->iq_ring.assign(static_cast<std::size_t>(target),
                               std::complex<float>{0.0f, 0.0f});
         impl_->iq_pos = 0;
         impl_->iq_filled = 0;
@@ -242,6 +246,10 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
         }
     });
 
+    // Re-apply cached device-specific options now that the radio is open and
+    // the stream is running (RTL-SDR only acquires its handle in start_rx).
+    impl_->radio->set_rx_option("bias_tee", impl_->bias_tee ? 1 : 0);
+
     impl_->running = true;
 }
 
@@ -298,6 +306,12 @@ void Core::set_gains(std::uint8_t lna_db, std::uint8_t vga_db, bool amp) {
     impl_->vga_db = vga_db;
     impl_->amp_enable = amp;
     if (impl_->radio) impl_->radio->set_rx_gains(lna_db, vga_db, amp);
+}
+
+void Core::set_device_option(std::string_view key, int value) {
+    // Cache so the option survives a stop/start cycle, then push live.
+    if (key == "bias_tee") impl_->bias_tee = (value != 0);
+    if (impl_->radio) impl_->radio->set_rx_option(key, value);
 }
 
 std::size_t Core::spectrum_size() const noexcept {
@@ -388,8 +402,8 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         std::size_t peak_blk = 0;
         float peak_e = -1.0f;
         // Track the channel-power distribution so we can reject the case where
-        // there is no real packet (every block is just noise): require the best
-        // block to stand clearly above the median.
+        // there is no real packet (every block is just noise) and so we can
+        // find the *onset* of the burst rather than its single hottest block.
         std::vector<float> blk_e(nblk, 0.0f);
         for (std::size_t b = 0; b < nblk; ++b) {
             const std::size_t base = b * kBlk;
@@ -409,24 +423,46 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
             if (e > peak_e) { peak_e = e; peak_blk = b; }
         }
 
-        // Reject noise-only captures: if the strongest block isn't clearly
-        // above the channel noise floor (median), there is no packet to show.
-        // Returning 0 leaves the previous snapshot untouched instead of
-        // freezing static.
-        if (nblk >= 4u) {
+        // Channel noise floor (median of block energies).
+        float median = peak_e;
+        if (nblk >= 2u) {
             std::vector<float> sorted = blk_e;
             std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2,
                              sorted.end());
-            const float median = sorted[sorted.size() / 2];
-            // Need a clear burst: peak channel power well above the median.
-            if (peak_e < median * 4.0f) return 0u;
+            median = sorted[sorted.size() / 2];
         }
 
-        const std::size_t peak_sample = peak_blk * kBlk;
-        // Place the peak ~15% into the window so the preamble that precedes it
-        // is visible and the payload that follows fits in the remainder.
-        const std::size_t lead = window * 15ull / 100ull;
-        off0 = (peak_sample > lead) ? peak_sample - lead : 0u;
+        // Reject noise-only captures: the strongest block must stand clearly
+        // above the noise floor. Returning 0 leaves the previous snapshot
+        // untouched instead of freezing static. (Threshold lowered from 4x so
+        // weaker first frames aren't dropped.)
+        if (nblk >= 4u && peak_e < median * 2.5f) return 0u;
+
+        // A block counts as "in a burst" when its channel power is roughly
+        // halfway (geometric) between the noise floor and the peak. This is
+        // robust to SNR: strong and weak packets both trip it.
+        const float burst_thr = std::max(median * 2.0f,
+                                          std::sqrt(std::max(median, 1e-20f) * peak_e));
+
+        // Prefer the *most recent* burst, not the globally strongest one. The
+        // snapshot is triggered by the packet that just decoded, which sits at
+        // the newest end of the ring; another node's stronger packet earlier in
+        // the ring must not steal the view. Scan from the newest block back to
+        // find the latest block above threshold, then walk back to the burst's
+        // onset so the preamble (and any small timing offset) is captured.
+        std::size_t burst_end = peak_blk;
+        for (std::size_t b = nblk; b-- > 0;) {
+            if (blk_e[b] >= burst_thr) { burst_end = b; break; }
+        }
+        std::size_t burst_start = burst_end;
+        while (burst_start > 0 && blk_e[burst_start - 1] >= burst_thr)
+            --burst_start;
+
+        const std::size_t onset_sample = burst_start * kBlk;
+        // Keep a small lead before the onset so the very start of the preamble
+        // and any sub-block timing slack stay on-screen.
+        const std::size_t lead = window * 8ull / 100ull;
+        off0 = (onset_sample > lead) ? onset_sample - lead : 0u;
         if (off0 + window > filled) off0 = filled - window;
     }
 

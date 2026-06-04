@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace mrf::hal {
@@ -77,6 +78,12 @@ public:
     virtual void set_rx_gains(std::uint8_t /*lna_db*/,
                               std::uint8_t /*vga_db*/,
                               bool         /*amp*/) {}
+
+    // Device-specific boolean/integer option (e.g. RTL-SDR "bias_tee" or
+    // "adc_agc"). Backends ignore keys they don't recognise. The value is
+    // typically 0/1. Applied immediately when RX is running, and re-applied on
+    // the next start_rx by backends that cache it.
+    virtual void set_rx_option(std::string_view /*key*/, int /*value*/) {}
 
     // Total RX samples dropped since start_rx because the processing consumer
     // could not keep up (ring-buffer overflow). 0 on backends that never drop.

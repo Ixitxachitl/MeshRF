@@ -52,6 +52,12 @@ MRF_API void MRF_CALL mrf_core_set_gains(mrf_core_t* core,
                                          uint8_t vga_db,
                                          int32_t amp_enable);
 
+// Device-specific option (RTL-SDR: "adc_agc", "bias_tee"; value 0/1). Unknown
+// keys are ignored. Cached across stop/start.
+MRF_API void MRF_CALL mrf_core_set_device_option(mrf_core_t* core,
+                                                 const char* key,
+                                                 int32_t value);
+
 // Diagnostics ------------------------------------------------------------
 typedef struct mrf_signal_stats_t {
     float rssi_dbfs;

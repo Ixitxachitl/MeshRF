@@ -60,6 +60,13 @@ MRF_API void MRF_CALL mrf_core_set_gains(mrf_core_t* core,
     core->core.set_gains(lna_db, vga_db, amp_enable != 0);
 }
 
+MRF_API void MRF_CALL mrf_core_set_device_option(mrf_core_t* core,
+                                                 const char* key,
+                                                 int32_t value) {
+    if (!core || !key) return;
+    core->core.set_device_option(key, value);
+}
+
 MRF_API int MRF_CALL mrf_core_is_running(const mrf_core_t* core) {
     return (core && core->core.is_running()) ? 1 : 0;
 }

@@ -79,6 +79,7 @@ public:
                   dev_, static_cast<std::uint32_t>(cfg.center_freq_hz)),
               "rtlsdr_set_center_freq");
         apply_gains(cfg.lna_gain_db, cfg.vga_gain_db, cfg.amp_enable);
+        apply_bias_tee(bias_tee_);
         api_.rtlsdr_reset_buffer(dev_);
 
         ring_.assign(kRingCapacity, SampleType{0.0f, 0.0f});
@@ -127,28 +128,41 @@ public:
         apply_gains(lna, vga, amp);
     }
 
+    // RTL-SDR specific toggle: "bias_tee" (5 V bias-T on the antenna port).
+    // Unknown keys are ignored.
+    void set_rx_option(std::string_view key, int value) override {
+        if (key == "bias_tee") {
+            bias_tee_ = (value != 0);
+            apply_bias_tee(bias_tee_);
+        }
+    }
+
 private:
     static void check(int rc, const char* what) {
         if (rc != rtlsdr_dyn::RTLSDR_SUCCESS)
             throw std::runtime_error(std::string(what) + " rc=" + std::to_string(rc));
     }
 
-    // Map the shared HackRF-style gain controls onto the RTL-SDR's single
-    // tuner gain: `amp` enables hardware AGC (automatic tuner gain); otherwise
-    // the tuner gain is set manually to the nearest supported value to the
-    // requested LNA gain, plus a fraction of VGA so the VGA slider still nudges
-    // sensitivity.
+    // Map the shared gain controls onto the RTL-SDR's single tuner gain.
+    // `amp` selects the tuner's automatic-gain mode (the "AGC" toggle in the
+    // UI); otherwise the tuner gain is set manually to the nearest supported
+    // value to the requested gain (lna + a fraction of vga).
     void apply_gains(std::uint8_t lna, std::uint8_t vga, bool amp) {
+        if (!dev_) return;
         if (amp) {
-            api_.rtlsdr_set_tuner_gain_mode(dev_, 0); // 0 = automatic
-            if (api_.rtlsdr_set_agc_mode) api_.rtlsdr_set_agc_mode(dev_, 1);
+            api_.rtlsdr_set_tuner_gain_mode(dev_, 0); // 0 = automatic tuner gain
             return;
         }
-        if (api_.rtlsdr_set_agc_mode) api_.rtlsdr_set_agc_mode(dev_, 0);
         api_.rtlsdr_set_tuner_gain_mode(dev_, 1); // 1 = manual
         const int requested_db = static_cast<int>(lna) + static_cast<int>(vga) / 4;
         const int tenths = nearest_supported_gain(api_, dev_, requested_db);
         api_.rtlsdr_set_tuner_gain(dev_, tenths);
+    }
+
+    // 5 V bias-T on the antenna port (for powering LNAs/active antennas).
+    void apply_bias_tee(bool on) {
+        if (dev_ && api_.rtlsdr_set_bias_tee)
+            api_.rtlsdr_set_bias_tee(dev_, on ? 1 : 0);
     }
 
     static void rx_thunk(unsigned char* buf, std::uint32_t len, void* ctx) {
@@ -211,6 +225,7 @@ private:
     std::vector<SampleType> scratch_;
     std::atomic<bool> rx_running_{false};
     std::thread async_thread_;
+    bool bias_tee_{false};
 
     // Producer (USB callback) -> consumer (rx_worker_) decoupling ring.
     static constexpr std::size_t kRingCapacity = 4u * 1024u * 1024u;

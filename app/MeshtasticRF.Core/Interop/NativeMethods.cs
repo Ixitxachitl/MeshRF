@@ -38,6 +38,9 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_set_gains")]
     public static partial void CoreSetGains(nint core, byte lnaDb, byte vgaDb, int ampEnable);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_device_option", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial void CoreSetDeviceOption(nint core, string key, int value);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_is_running")]
     public static partial int CoreIsRunning(nint core);
 

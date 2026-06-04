@@ -178,6 +178,17 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
+    /// Set a device-specific option that doesn't fit the HackRF gain model.
+    /// Recognised keys (RTL-SDR): "adc_agc" and "bias_tee" (value 0/1). Unknown
+    /// keys are ignored by the backend. Cached across stop/start.
+    /// </summary>
+    public void SetDeviceOption(string key, int value)
+    {
+        if (_disposed || _handle == 0) return;
+        NativeMethods.CoreSetDeviceOption(_handle, key, value);
+    }
+
+    /// <summary>
     /// Latest signal statistics (RSSI, peak, residual DC). Cheap; safe to
     /// poll at UI rates.
     /// </summary>

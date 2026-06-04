@@ -26,11 +26,37 @@ public partial class MapView : UserControl
     private const int MinZoom = 2;
     private const int MaxZoom = 19;
 
+    // Tile providers. The dark basemap (CARTO dark_all) is used while the app
+    // is in a dark theme so the map blends in instead of glowing white; the
+    // standard OSM raster is used in light mode. Both are free, key-less, and
+    // attributed to OpenStreetMap.
+    private readonly record struct TileProvider(
+        string Id, string UrlTemplate, string Subdomains, string Attribution,
+        double Brightness = 1.0);
+
+    private static readonly TileProvider LightTiles = new(
+        "osm",
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "abc",
+        "© OpenStreetMap contributors  ·  right-click to set home");
+
+    private static readonly TileProvider DarkTiles = new(
+        "cartodark",
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "abcd",
+        "© OpenStreetMap · © CARTO  ·  right-click to set home",
+        // CARTO dark_all renders roads/labels very dark; lift them so they read
+        // against the dark theme.
+        Brightness: 1.7);
+
+    private static TileProvider CurrentTiles =>
+        ThemeManager.IsDark ? DarkTiles : LightTiles;
+
     private static readonly HttpClient s_http = CreateHttpClient();
     private static readonly string s_cacheDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "MeshtasticRF", "tiles");
-    private static readonly ConcurrentDictionary<string, BitmapImage> s_memCache = new();
+    private static readonly ConcurrentDictionary<string, BitmapSource> s_memCache = new();
 
     private MainViewModel? _vm;
 
@@ -51,6 +77,17 @@ public partial class MapView : UserControl
         Unloaded += OnUnloaded;
         SizeChanged += (_, _) => Render();
         DataContextChanged += OnDataContextChanged;
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        AttributionText.Text = CurrentTiles.Attribution;
+    }
+
+    private void OnThemeChanged()
+    {
+        // Tile provider follows the theme; drop the on-screen tiles and redraw
+        // with the new basemap. Disk/mem caches are keyed by provider id, so
+        // they don't collide.
+        AttributionText.Text = CurrentTiles.Attribution;
+        Render();
     }
 
     private static HttpClient CreateHttpClient()
@@ -183,20 +220,21 @@ public partial class MapView : UserControl
         Canvas.SetTop(img, top);
         MapCanvas.Children.Add(img);
 
-        var key = $"{zoom}/{x}/{y}";
+        var provider = CurrentTiles;
+        var key = $"{provider.Id}/{zoom}/{x}/{y}";
         if (s_memCache.TryGetValue(key, out var cached))
         {
             img.Source = cached;
             return;
         }
-        _ = LoadTileAsync(key, x, y, zoom, img);
+        _ = LoadTileAsync(key, provider, x, y, zoom, img);
     }
 
-    private async Task LoadTileAsync(string key, int x, int y, int zoom, Image target)
+    private async Task LoadTileAsync(string key, TileProvider provider, int x, int y, int zoom, Image target)
     {
         try
         {
-            var bmp = await GetTileBitmapAsync(key, x, y, zoom);
+            var bmp = await GetTileBitmapAsync(provider, x, y, zoom);
             if (bmp is null) return;
             s_memCache[key] = bmp;
             // The image may have been recycled by a re-render; only set if it's
@@ -206,9 +244,9 @@ public partial class MapView : UserControl
         catch { /* tile fetch failed; leave blank */ }
     }
 
-    private static async Task<BitmapImage?> GetTileBitmapAsync(string key, int x, int y, int zoom)
+    private static async Task<BitmapSource?> GetTileBitmapAsync(TileProvider provider, int x, int y, int zoom)
     {
-        var file = Path.Combine(s_cacheDir, $"{zoom}_{x}_{y}.png");
+        var file = Path.Combine(s_cacheDir, $"{provider.Id}_{zoom}_{x}_{y}.png");
         byte[] bytes;
         if (File.Exists(file))
         {
@@ -216,9 +254,14 @@ public partial class MapView : UserControl
         }
         else
         {
-            // Rotate across the OSM tile servers.
-            var server = "abc"[(x + y) % 3];
-            var url = $"https://{server}.tile.openstreetmap.org/{zoom}/{x}/{y}.png";
+            // Rotate across the provider's tile subdomains.
+            var subs = provider.Subdomains;
+            var server = subs[(x + y) % subs.Length];
+            var url = provider.UrlTemplate
+                .Replace("{s}", server.ToString())
+                .Replace("{z}", zoom.ToString())
+                .Replace("{x}", x.ToString())
+                .Replace("{y}", y.ToString());
             bytes = await s_http.GetByteArrayAsync(url);
             try { await File.WriteAllBytesAsync(file, bytes); } catch { /* cache best-effort */ }
         }
@@ -229,7 +272,39 @@ public partial class MapView : UserControl
         bmp.StreamSource = new MemoryStream(bytes);
         bmp.EndInit();
         bmp.Freeze();
-        return bmp;
+
+        if (provider.Brightness == 1.0) return bmp;
+        return Brighten(bmp, provider.Brightness);
+    }
+
+    /// <summary>Returns a copy of <paramref name="src"/> with each RGB channel
+    /// scaled by <paramref name="factor"/> (clamped to 255). Used to lift the
+    /// very dark roads/labels of the dark basemap so they remain readable.</summary>
+    private static BitmapSource Brighten(BitmapSource src, double factor)
+    {
+        var bgra = new FormatConvertedBitmap(src, PixelFormats.Bgra32, null, 0);
+        int w = bgra.PixelWidth, h = bgra.PixelHeight;
+        int stride = w * 4;
+        var pixels = new byte[h * stride];
+        bgra.CopyPixels(pixels, stride, 0);
+
+        // Precompute the channel lookup table.
+        var lut = new byte[256];
+        for (int i = 0; i < 256; i++)
+            lut[i] = (byte)Math.Min(255.0, i * factor);
+
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i]     = lut[pixels[i]];     // B
+            pixels[i + 1] = lut[pixels[i + 1]]; // G
+            pixels[i + 2] = lut[pixels[i + 2]]; // R
+            // alpha (i + 3) left unchanged
+        }
+
+        var wb = new WriteableBitmap(w, h, bgra.DpiX, bgra.DpiY, PixelFormats.Bgra32, null);
+        wb.WritePixels(new Int32Rect(0, 0, w, h), pixels, stride, 0);
+        wb.Freeze();
+        return wb;
     }
 
     private void DrawMarkers(double originX, double originY)
@@ -262,8 +337,10 @@ public partial class MapView : UserControl
                     Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)),
                     Stroke = Brushes.White,
                     StrokeThickness = 1.5,
-                    ToolTip = mk.Title,
+                    ToolTip = BuildNodeToolTip(mk.Title),
                 };
+                ToolTipService.SetInitialShowDelay(dot, 250);
+                ToolTipService.SetShowDuration(dot, 60000);
                 Canvas.SetLeft(dot, px - 6);
                 Canvas.SetTop(dot, py - 6);
                 MapCanvas.Children.Add(dot);
@@ -283,6 +360,18 @@ public partial class MapView : UserControl
             MapCanvas.Children.Add(label);
         }
     }
+
+    /// <summary>Wraps the multi-line marker description in a ToolTip that stays
+    /// visible while the pointer hovers the node.</summary>
+    private static ToolTip BuildNodeToolTip(string text) => new()
+    {
+        Content = new TextBlock
+        {
+            Text = text,
+            FontSize = 11,
+            FontFamily = new FontFamily("Segoe UI"),
+        },
+    };
 
     // -- Interaction --------------------------------------------------------
 

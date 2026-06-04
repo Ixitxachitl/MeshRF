@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Linq;
 using System.Windows;
 using System.Windows.Threading;
 using MeshtasticRF.App.ViewModels;
@@ -15,11 +16,6 @@ public partial class MainWindow : Window
     // of the last detected packet. Holds the most recent HistoryFrames frames.
     private const int HistoryFrames = 64;
     private readonly Queue<float[]> _specHistory = new();
-    // Frames still to capture after a packet was detected before snapshotting,
-    // so the snapshot includes the header/payload that follow the preamble.
-    // -1 means "no capture pending".
-    private int _captureCountdown = -1;
-    private bool _packetPending;
 
     public MainWindow()
     {
@@ -60,16 +56,13 @@ public partial class MainWindow : Window
 
     // Marks that a CRC-valid packet was just decoded. A bad frame or a false
     // positive (preamble that never decodes) never reaches here, so the
-    // last-packet panel only ever shows genuine packets. We keep capturing a
-    // few more frames so the snapshot covers the header/payload tail before
-    // freezing the spectrogram.
+    // last-packet panel only ever shows genuine packets. The whole packet is
+    // already buffered in the native IQ ring by the time it decodes, so we
+    // snapshot immediately — any extra delay just ages the packet toward the
+    // far end of the ring and risks the preamble scrolling out.
     private void OnPacketDecoded()
     {
-        _packetPending = true;
-        // Wait just long enough for the full (short) packet to trail into the
-        // IQ ring, then snapshot. The ring only holds ~0.5 s, so we must grab
-        // it well before that or the packet scrolls out and we capture silence.
-        _captureCountdown = 4; // ~0.2 s at 20 Hz
+        FreezeLastPacket();
     }
 
     private void OnCloseLastPacket(object sender, RoutedEventArgs e)
@@ -84,6 +77,41 @@ public partial class MainWindow : Window
         {
             vm.OpenConversationForNodeCommand.Execute(node);
         }
+    }
+
+    // Pressing Delete in the node list removes the selected node(s).
+    private void NodesGrid_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Delete)
+        {
+            DeleteSelectedNodes();
+            e.Handled = true;
+        }
+    }
+
+    // Context-menu "Delete" removes the selected node(s).
+    private void OnDeleteNodes(object sender, RoutedEventArgs e) => DeleteSelectedNodes();
+
+    private void DeleteSelectedNodes()
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = NodesGrid.SelectedItems
+            .OfType<MeshtasticRF.Nodes.NodeRecord>()
+            .ToList();
+        if (selected.Count == 0) return;
+
+        var label = selected.Count == 1
+            ? $"node \"{(string.IsNullOrWhiteSpace(selected[0].LongName) ? selected[0].DisplayId : selected[0].LongName)}\""
+            : $"{selected.Count} nodes";
+        var result = MessageBox.Show(
+            this,
+            $"Delete {label}? This removes them from the node database.",
+            "Delete nodes",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning);
+        if (result != MessageBoxResult.OK) return;
+
+        vm.RemoveNodes(selected);
     }
 
     private void OnTick(object? sender, EventArgs e)
@@ -118,18 +146,6 @@ public partial class MainWindow : Window
             var frame = _spectrumBuffer.AsSpan(0, written).ToArray();
             _specHistory.Enqueue(frame);
             while (_specHistory.Count > HistoryFrames) _specHistory.Dequeue();
-
-            // If a packet was detected, capture a few trailing frames then
-            // snapshot the accumulated history into the last-packet panel.
-            if (_packetPending && _captureCountdown > 0)
-            {
-                if (--_captureCountdown == 0)
-                {
-                    FreezeLastPacket();
-                    _packetPending = false;
-                    _captureCountdown = -1;
-                }
-            }
         }
     }
 

@@ -2,6 +2,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -53,6 +54,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private double _agcTargetDbfs = -15.0;
 
+    /// <summary>RTL-SDR manual tuner gain in dB (0..49). Independent of the
+    /// HackRF LNA/VGA controls so each device remembers its own setting.</summary>
+    [ObservableProperty]
+    private byte _rtlGainDb = 30;
+
+    /// <summary>RTL-SDR 5 V bias-T on the antenna port. Off by default.</summary>
+    [ObservableProperty]
+    private bool _biasTee;
+
     [ObservableProperty]
     private string _theme = "System";
 
@@ -103,6 +113,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private DeviceOption? _selectedDevice;
 
     private bool _suppressDeviceUpdate;
+
+    /// <summary>True when the selected backend is an RTL-SDR (drives which
+    /// hardware controls the toolbar shows).</summary>
+    public bool IsRtlSdr => SelectedDevice?.Kind == RadioDeviceKind.RtlSdr;
+
+    /// <summary>True for everything that isn't an RTL-SDR (HackRF / Auto /
+    /// Synthetic) — those use the LNA/VGA/AMP gain model.</summary>
+    public bool IsHackRf => !IsRtlSdr;
 
     /// <summary>The device selector is only editable while RX is stopped.</summary>
     public bool CanSelectDevice => !IsRunning;
@@ -204,9 +222,95 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
             var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
             var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
-            list.Add(new MapMarker(lat, lon, label, $"{name}\n{n.DisplayId}", IsHome: false));
+            list.Add(new MapMarker(lat, lon, label, BuildNodeTooltip(n), IsHome: false));
         }
         return list;
+    }
+
+    /// <summary>Removes the given nodes from the in-memory list, the persistent
+    /// store, and refreshes the map.</summary>
+    public void RemoveNodes(IEnumerable<MeshtasticRF.Nodes.NodeRecord> nodes)
+    {
+        var targets = nodes?.ToList();
+        if (targets is null || targets.Count == 0) return;
+
+        bool removedPositioned = false;
+        foreach (var n in targets)
+        {
+            _nodeStore.Forget(n.NodeNum);
+            Nodes.Remove(n);
+            if (n.Latitude is not null && n.Longitude is not null) removedPositioned = true;
+        }
+
+        if (removedPositioned)
+            MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Builds the multi-line tooltip shown when hovering a node on the
+    /// map: identity, telemetry, and how long ago it was last heard.</summary>
+    private static string BuildNodeTooltip(MeshtasticRF.Nodes.NodeRecord n)
+    {
+        var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
+        var sb = new System.Text.StringBuilder();
+        sb.Append(name);
+        if (!string.IsNullOrWhiteSpace(n.ShortName))
+            sb.Append("  [").Append(n.ShortName).Append(']');
+        sb.Append('\n').Append(n.DisplayId);
+
+        if (!string.IsNullOrWhiteSpace(n.Role))
+            sb.Append("\nRole: ").Append(n.Role);
+        if (!string.IsNullOrWhiteSpace(n.HwModel))
+            sb.Append("\nHW: ").Append(n.HwModel);
+
+        // Position.
+        if (n.Latitude is double la && n.Longitude is double lo)
+        {
+            sb.Append('\n').Append(la.ToString("F5", CultureInfo.InvariantCulture))
+              .Append(", ").Append(lo.ToString("F5", CultureInfo.InvariantCulture));
+            if (n.AltitudeM is int alt) sb.Append("  ").Append(alt).Append(" m");
+        }
+
+        // Signal.
+        var sig = new List<string>();
+        if (n.RssiDbm is float rssi) sig.Add($"{rssi:F0} dBm");
+        if (n.SnrDb is float snr) sig.Add($"SNR {snr:F1}");
+        if (n.HopsAway is byte hops) sig.Add(hops == 0 ? "direct" : $"{hops} hop{(hops == 1 ? "" : "s")}");
+        if (sig.Count > 0) sb.Append('\n').Append(string.Join("  ·  ", sig));
+
+        // Power telemetry.
+        var pwr = new List<string>();
+        if (n.BatteryPct is byte bat) pwr.Add($"{bat}%");
+        if (n.VoltageV is float v) pwr.Add($"{v:F2} V");
+        if (pwr.Count > 0) sb.Append("\nBattery: ").Append(string.Join("  ", pwr));
+
+        // Channel utilization.
+        var util = new List<string>();
+        if (n.ChannelUtilPct is float ch) util.Add($"ChUtil {ch:F1}%");
+        if (n.AirUtilTxPct is float air) util.Add($"AirTx {air:F1}%");
+        if (util.Count > 0) sb.Append('\n').Append(string.Join("  ", util));
+
+        // Environment telemetry.
+        var env = new List<string>();
+        if (n.TemperatureC is float t) env.Add($"{t:F1} °C");
+        if (n.RelativeHumidityPct is float h) env.Add($"{h:F0}% RH");
+        if (n.BarometricPressureHpa is float p) env.Add($"{p:F0} hPa");
+        if (env.Count > 0) sb.Append('\n').Append(string.Join("  ", env));
+
+        // Last heard (relative).
+        sb.Append("\nHeard ").Append(FormatAge(n.LastHeardEpoch));
+        return sb.ToString();
+    }
+
+    /// <summary>Formats a unix epoch as a human "x ago" string.</summary>
+    private static string FormatAge(long epoch)
+    {
+        if (epoch <= 0) return "never";
+        var delta = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(epoch);
+        if (delta < TimeSpan.Zero) delta = TimeSpan.Zero;
+        if (delta.TotalSeconds < 60) return $"{(int)delta.TotalSeconds}s ago";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m ago";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours}h {delta.Minutes}m ago";
+        return $"{(int)delta.TotalDays}d {delta.Hours}h ago";
     }
 
     /// <summary>Common Meshtastic hardware models (subset of the firmware
@@ -255,6 +359,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AmpEnable = _settings.AmpEnable;
         AgcEnable = _settings.AgcEnable;
         AgcTargetDbfs = _settings.AgcTargetDbfs;
+        RtlGainDb = _settings.RtlGainDb;
+        BiasTee = _settings.BiasTee;
         Theme = _settings.Theme;
         WaterfallColormap = _settings.WaterfallColormap;
         WaterfallAutoLevels = _settings.WaterfallAutoLevels;
@@ -302,6 +408,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedDevice = DeviceOptions.FirstOrDefault(o => o.Kind == deviceKind)
                              ?? DeviceOptions[0];
         _suppressDeviceUpdate = false;
+
+        // Now that the backend is known, push the gains appropriate for it and
+        // apply the RTL-SDR bias-T option.
+        PushGains();
+        _core.SetDeviceOption("bias_tee", BiasTee ? 1 : 0);
+        OnPropertyChanged(nameof(IsRtlSdr));
+        OnPropertyChanged(nameof(IsHackRf));
 
         // Bring up channel and node tabs before logging anything, so boot
         // messages land on the Primary tab.
@@ -544,15 +657,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnCenterFreqMHzChanged(double value) { RetuneIfRunning(); SaveSettings(); OnPropertyChanged(nameof(SpectrumCenterHz)); }
     partial void OnLnaGainDbChanged(byte value) { _core.SetGains(value, VgaGainDb, AmpEnable); SaveSettings(); }
     partial void OnVgaGainDbChanged(byte value) { _core.SetGains(LnaGainDb, value, AmpEnable); SaveSettings(); }
-    partial void OnAmpEnableChanged(bool value) { _core.SetGains(LnaGainDb, VgaGainDb, value); SaveSettings(); }
+    partial void OnAmpEnableChanged(bool value) { PushGains(); SaveSettings(); }
     partial void OnIsRunningChanged(bool value) => OnPropertyChanged(nameof(CanSelectDevice));
     partial void OnSelectedDeviceChanged(DeviceOption? value)
     {
+        OnPropertyChanged(nameof(IsRtlSdr));
+        OnPropertyChanged(nameof(IsHackRf));
         if (_suppressDeviceUpdate || value is null) return;
         ApplyDevice(value.Kind);
     }
     partial void OnAgcEnableChanged(bool value) { SaveSettings(); }
     partial void OnAgcTargetDbfsChanged(double value) { SaveSettings(); }
+    partial void OnRtlGainDbChanged(byte value) { PushGains(); SaveSettings(); }
+    partial void OnBiasTeeChanged(bool value) { _core.SetDeviceOption("bias_tee", value ? 1 : 0); SaveSettings(); }
+
+    /// <summary>Push the gain settings appropriate for the selected backend.
+    /// RTL-SDR uses its single manual tuner gain (or auto when AGC is on);
+    /// HackRF and friends use the LNA/VGA/AMP model.</summary>
+    private void PushGains()
+    {
+        if (IsRtlSdr)
+            _core.SetGains(RtlGainDb, 0, AmpEnable);
+        else
+            _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
+    }
     partial void OnThemeChanged(string value) { ThemeManager.Apply(value); SaveSettings(); }
     partial void OnWaterfallColormapChanged(string value) { SaveSettings(); }
     partial void OnWaterfallAutoLevelsChanged(bool value) { SaveSettings(); }
@@ -572,6 +700,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.DeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
         _settings.AgcEnable = AgcEnable;
         _settings.AgcTargetDbfs = AgcTargetDbfs;
+        _settings.RtlGainDb = RtlGainDb;
+        _settings.BiasTee = BiasTee;
         _settings.Theme = Theme;
         _settings.WaterfallColormap = WaterfallColormap;
         _settings.WaterfallAutoLevels = WaterfallAutoLevels;

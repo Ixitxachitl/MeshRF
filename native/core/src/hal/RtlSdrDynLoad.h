@@ -43,6 +43,7 @@ struct Api {
     // Optional (guard for null before calling).
     int (*rtlsdr_set_agc_mode)(rtlsdr_dev*, int);
     int (*rtlsdr_set_freq_correction)(rtlsdr_dev*, int);
+    int (*rtlsdr_set_bias_tee)(rtlsdr_dev*, int);
     int (*rtlsdr_get_tuner_gains)(rtlsdr_dev*, int*);
     const char* (*rtlsdr_get_device_name)(std::uint32_t);
 };

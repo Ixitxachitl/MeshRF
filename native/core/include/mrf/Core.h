@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <string_view>
 
 namespace mrf {
 
@@ -62,6 +63,11 @@ public:
     // Safe to call before or after start_rx; takes effect immediately when
     // RX is running, and is remembered for the next start.
     void set_gains(std::uint8_t lna_db, std::uint8_t vga_db, bool amp);
+
+    // Device-specific option setter for backends with controls that don't map
+    // onto the HackRF gain model. Recognised keys (RTL-SDR): "adc_agc" and
+    // "bias_tee" (value 0/1). Unknown keys are ignored. Cached across stop/start.
+    void set_device_option(std::string_view key, int value);
 
     [[nodiscard]] bool is_running() const noexcept;
 
