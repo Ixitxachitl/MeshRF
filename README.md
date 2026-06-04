@@ -1,4 +1,4 @@
-# MeshtasticRF
+# MeshRF
 
 Windows-native [Meshtastic](https://meshtastic.org/) **receiver** that uses an
 SDR ([HackRF One](https://greatscottgadgets.com/hackrf/) or an RTL-SDR dongle)
