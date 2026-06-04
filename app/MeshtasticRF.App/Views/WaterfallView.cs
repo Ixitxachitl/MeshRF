@@ -32,11 +32,20 @@ public sealed class WaterfallView : Image
     public static readonly DependencyProperty AutoLevelsProperty =
         DependencyProperty.Register(nameof(AutoLevels), typeof(bool), typeof(WaterfallView),
             new PropertyMetadata(true));
+    public static readonly DependencyProperty TimeHorizontalProperty =
+        DependencyProperty.Register(nameof(TimeHorizontal), typeof(bool), typeof(WaterfallView),
+            new PropertyMetadata(false, (d, _) => ((WaterfallView)d).Render()));
 
     public double FloorDb { get => (double)GetValue(FloorDbProperty); set => SetValue(FloorDbProperty, value); }
     public double CeilDb  { get => (double)GetValue(CeilDbProperty);  set => SetValue(CeilDbProperty, value); }
     public WaterfallColormap Colormap { get => (WaterfallColormap)GetValue(ColormapProperty); set => SetValue(ColormapProperty, value); }
     public bool AutoLevels { get => (bool)GetValue(AutoLevelsProperty); set => SetValue(AutoLevelsProperty, value); }
+
+    /// <summary>When true, time runs along the horizontal axis (left = oldest,
+    /// right = newest) and frequency along the vertical axis (bottom = low).
+    /// Used for the frozen last-packet snapshot so chirp sweeps stretch out
+    /// horizontally instead of as cramped vertical diagonals.</summary>
+    public bool TimeHorizontal { get => (bool)GetValue(TimeHorizontalProperty); set => SetValue(TimeHorizontalProperty, value); }
 
     /// <summary>Raised whenever AutoLevels recomputes the floor/ceil window.
     /// The owner can mirror these onto the bound sliders.</summary>
@@ -260,6 +269,13 @@ public sealed class WaterfallView : Image
                     return;
                 }
 
+                if (TimeHorizontal)
+                {
+                    RenderTimeHorizontal(back, stride, w, h, n, floorF, invRange);
+                    _bmp.AddDirtyRect(new Int32Rect(0, 0, _w, _h));
+                    return;
+                }
+
                 Span<int> mxStack = stackalloc int[Math.Min(w, 4096)];
                 int[]? heap = w > mxStack.Length ? new int[w] : null;
                 Span<int> mx = heap ?? mxStack;
@@ -300,6 +316,58 @@ public sealed class WaterfallView : Image
         finally
         {
             _bmp.Unlock();
+        }
+    }
+
+    // Transposed render: x axis = time (left = oldest, right = newest),
+    // y axis = frequency (bottom = low bin, top = high bin). LoRa chirp
+    // sweeps therefore stretch across the panel width instead of appearing
+    // as cramped vertical diagonals.
+    private unsafe void RenderTimeHorizontal(
+        byte* back, int stride, int w, int h, int n, float floorF, float invRange)
+    {
+        if (_filled <= 0)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                uint* blank = (uint*)(back + y * stride);
+                for (int x = 0; x < w; x++) blank[x] = 0xFF000000u;
+            }
+            return;
+        }
+
+        // Oldest valid row in chronological order.
+        int oldestRow = (_head - _filled + _capacity) % _capacity;
+
+        // Precompute frequency bin for each output row (top = high freq).
+        Span<int> myStack = stackalloc int[Math.Min(h, 4096)];
+        int[]? heap = h > myStack.Length ? new int[h] : null;
+        Span<int> my = heap ?? myStack;
+        for (int y = 0; y < h; y++)
+        {
+            int sy = (int)((long)(h - 1 - y) * n / h);
+            if (sy < 0) sy = 0; else if (sy >= n) sy = n - 1;
+            my[y] = sy;
+        }
+
+        fixed (uint* lut = _lut)
+        fixed (float* ring = _ring)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int k = _filled > 0 ? (int)((long)x * _filled / w) : 0;
+                if (k < 0) k = 0; else if (k >= _filled) k = _filled - 1;
+                int srcRow = (oldestRow + k) % _capacity;
+                float* src = ring + (long)srcRow * n;
+                for (int y = 0; y < h; y++)
+                {
+                    float v = src[my[y]];
+                    if (float.IsNaN(v) || float.IsInfinity(v)) v = floorF;
+                    int idx = (int)((v - floorF) * invRange);
+                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                    ((uint*)(back + y * stride))[x] = lut[idx];
+                }
+            }
         }
     }
 

@@ -290,7 +290,7 @@
                         Grid.Row="0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Top"
-                        Width="260" Height="168"
+                        Width="540" Height="170"
                         Margin="0,6,6,0"
                         Background="#DD101418"
                         BorderBrush="{DynamicResource BrushPanelBorder}"
@@ -311,6 +311,7 @@
                         </DockPanel>
                         <views:WaterfallView x:Name="LastPacket"
                                              AutoLevels="True"
+                                             TimeHorizontal="True"
                                              Margin="2" />
                     </DockPanel>
                 </Border>

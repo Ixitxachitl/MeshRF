@@ -55,13 +55,15 @@ public partial class MainWindow : Window
         };
 
         if (DataContext is MainViewModel mvm)
-            mvm.PacketDetected += OnPacketDetected;
+            mvm.PacketDecoded += OnPacketDecoded;
     }
 
-    // Marks that a packet was just detected. We keep capturing a few more
-    // frames (so the snapshot covers the header/payload that trail the
-    // preamble) before freezing the spectrogram.
-    private void OnPacketDetected()
+    // Marks that a CRC-valid packet was just decoded. A bad frame or a false
+    // positive (preamble that never decodes) never reaches here, so the
+    // last-packet panel only ever shows genuine packets. We keep capturing a
+    // few more frames so the snapshot covers the header/payload tail before
+    // freezing the spectrogram.
+    private void OnPacketDecoded()
     {
         _packetPending = true;
         // Wait just long enough for the full (short) packet to trail into the

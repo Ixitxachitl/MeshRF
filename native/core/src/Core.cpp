@@ -364,21 +364,64 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     // packet sits near the start. This is robust to event-drain latency that
     // would otherwise make a fixed "newest N ms" window miss the packet (and
     // snapshot post-packet noise instead).
+    //
+    // Crucially, measure energy *inside the LoRa channel only* (a narrow band
+    // around DC). The radio is offset-tuned so the channel sits at DC and only
+    // occupies bw/modem_rate of the captured spectrum. A plain wideband power
+    // sum is dominated by out-of-band static/interference, which would make the
+    // locator lock onto noise and snapshot static instead of the frame. A
+    // per-block FFT restricted to the channel bins fixes that.
     std::size_t off0 = filled - window; // default: newest window
     if (filled > window) {
         constexpr std::size_t kBlk = 2048u;
         const std::size_t nblk = filled / kBlk;
+
+        // Channel half-width in FFT bins: (bw/2) / rate of the kBlk spectrum.
+        const std::size_t chanHalf = std::clamp<std::size_t>(
+            static_cast<std::size_t>(
+                0.5 * static_cast<double>(bw) / static_cast<double>(rate) * kBlk),
+            1u, kBlk / 2u - 1u);
+
+        dsp::Fft locFft(kBlk);
+        std::vector<std::complex<float>> locBuf(kBlk);
+
         std::size_t peak_blk = 0;
         float peak_e = -1.0f;
+        // Track the channel-power distribution so we can reject the case where
+        // there is no real packet (every block is just noise): require the best
+        // block to stand clearly above the median.
+        std::vector<float> blk_e(nblk, 0.0f);
         for (std::size_t b = 0; b < nblk; ++b) {
-            float e = 0.0f;
             const std::size_t base = b * kBlk;
-            for (std::size_t i = 0; i < kBlk; ++i) {
-                const auto& v = snap[base + i];
-                e += v.real() * v.real() + v.imag() * v.imag();
+            for (std::size_t i = 0; i < kBlk; ++i) locBuf[i] = snap[base + i];
+            locFft.forward(std::span<std::complex<float>>(locBuf.data(), kBlk));
+            // Sum power in bins [-chanHalf, +chanHalf] around DC (bin 0).
+            float e = 0.0f;
+            for (std::size_t k = 0; k <= chanHalf; ++k) {
+                const auto lo = locBuf[k];
+                e += lo.real() * lo.real() + lo.imag() * lo.imag();
+                if (k != 0) {
+                    const auto hi = locBuf[kBlk - k];
+                    e += hi.real() * hi.real() + hi.imag() * hi.imag();
+                }
             }
+            blk_e[b] = e;
             if (e > peak_e) { peak_e = e; peak_blk = b; }
         }
+
+        // Reject noise-only captures: if the strongest block isn't clearly
+        // above the channel noise floor (median), there is no packet to show.
+        // Returning 0 leaves the previous snapshot untouched instead of
+        // freezing static.
+        if (nblk >= 4u) {
+            std::vector<float> sorted = blk_e;
+            std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2,
+                             sorted.end());
+            const float median = sorted[sorted.size() / 2];
+            // Need a clear burst: peak channel power well above the median.
+            if (peak_e < median * 4.0f) return 0u;
+        }
+
         const std::size_t peak_sample = peak_blk * kBlk;
         // Place the peak ~15% into the window so the preamble that precedes it
         // is visible and the payload that follows fits in the remainder.

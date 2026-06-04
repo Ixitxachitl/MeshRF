@@ -1270,12 +1270,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // The View uses the preamble to freeze a spectrogram of the packet.
             if (ev.StartsWith("preamble", StringComparison.Ordinal))
                 PacketDetected?.Invoke();
+            // A CRC-valid payload means this was a real packet (not a false
+            // positive or a corrupt frame); only then is the snapshot worth
+            // keeping. The View uses this to commit the frozen spectrogram.
+            else if (IsCrcOkPayload(ev))
+                PacketDecoded?.Invoke();
         }
+    }
+
+    // True when the event line is a decoded payload whose CRC verified.
+    private static bool IsCrcOkPayload(string ev)
+    {
+        if (ev.IndexOf("payload", StringComparison.Ordinal) < 0) return false;
+        var m = PayloadLineRegex.Match(ev);
+        return m.Success && m.Groups["status"].Success &&
+               m.Groups["status"].Value == "OK";
     }
 
     /// <summary>Raised on the UI thread when the demodulator detects a packet
     /// (preamble). The View captures a spectrogram snapshot around it.</summary>
     public event Action? PacketDetected;
+
+    /// <summary>Raised on the UI thread when a detected packet decodes with a
+    /// valid CRC (i.e. a genuine frame, not a false positive or corrupt one).
+    /// The View commits the frozen last-packet spectrogram only on this.</summary>
+    public event Action? PacketDecoded;
 
     // AGC: nudge LNA/VGA toward a target peak power. Runs at the UI tick
     // (20 Hz) but only acts ~once per second, with small +/- 2 dB steps so
