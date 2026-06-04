@@ -344,6 +344,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MeshtasticCore Core => _core;
 
     private bool _suppressSlotSync;
+    // Set while RebuildSlots updates CenterFreqMHz, so the resulting frequency
+    // change doesn't trigger its own retune — the preset/region handler that
+    // called RebuildSlots performs a single retune itself.
+    private bool _suppressRetune;
 
     public MainViewModel()
     {
@@ -482,8 +486,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                var chanVm = Channels.FirstOrDefault(c =>
-                    string.Equals(c.Config.Name, msg.Channel, StringComparison.Ordinal));
+                var chanVm = ResolveChannelTab(msg.Channel);
                 if (chanVm is not null)
                 {
                     chanVm.Messages.Add(cm);
@@ -494,6 +497,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Restoring DM tabs moves selection; leave the primary channel focused.
         SelectedTab = Channels.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Map a stored message's channel name to a channel tab. Falls back to the
+    /// Primary tab when the stored name is a modem-preset name (the default
+    /// channel is named after the preset, so its history was saved under
+    /// whatever preset was active at the time — a later preset change must not
+    /// orphan those messages).
+    /// </summary>
+    private ChannelViewModel? ResolveChannelTab(string? channelName)
+    {
+        var exact = Channels.FirstOrDefault(c =>
+            string.Equals(c.Config.Name, channelName, StringComparison.Ordinal));
+        if (exact is not null) return exact;
+
+        if (!string.IsNullOrEmpty(channelName) &&
+            Enum.GetNames<LoraPreset>().Contains(channelName))
+        {
+            return Channels.FirstOrDefault(c =>
+                c.Config.Role == ChannelRole.Primary && c.Config.UsesDefaultKey);
+        }
+        return null;
     }
 
     /// <summary>Clear a channel's chat room (in-memory and persisted).</summary>
@@ -549,8 +574,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         Channels.Clear();
         foreach (var c in existing) Channels.Add(new ChannelViewModel(c, OnChannelSaved));
+        SyncPrimaryChannelName();
         RebuildTabs();
         SelectedTab = Channels.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Keep the default Primary channel's tab name in sync with the active
+    /// modem preset. Only auto-named default channels are renamed (name empty
+    /// or equal to a preset name, and still using the firmware default key); a
+    /// user's custom primary name is left untouched.
+    /// </summary>
+    private void SyncPrimaryChannelName()
+    {
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null) return;
+        var cfg = primary.Config;
+        if (!cfg.UsesDefaultKey) return;
+        var presetName = SelectedPreset.ToString();
+        var autoNamed = string.IsNullOrEmpty(cfg.Name) ||
+                        Enum.GetNames<LoraPreset>().Contains(cfg.Name);
+        if (!autoNamed || cfg.Name == presetName) return;
+        primary.RenameTo(presetName);
+        _channelStore.Upsert(cfg);
     }
 
     /// <summary>Rebuild <see cref="Tabs"/> = channels + preserved DM conversations.</summary>
@@ -646,7 +692,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearLog() => LogLines.Clear();
 
-    partial void OnSelectedPresetChanged(LoraPreset value) { RebuildSlots(snapToDefault: true); RetuneIfRunning(); SaveSettings(); }
+    partial void OnSelectedPresetChanged(LoraPreset value) { RebuildSlots(snapToDefault: true); RetuneIfRunning(); SyncPrimaryChannelName(); SaveSettings(); }
     partial void OnSelectedRegionChanged(Region value)     { RebuildSlots(snapToDefault: true); RetuneIfRunning(); SaveSettings(); }
     partial void OnSelectedSlotChanged(int value)
     {
@@ -654,7 +700,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, value);
         SaveSettings();
     }
-    partial void OnCenterFreqMHzChanged(double value) { RetuneIfRunning(); SaveSettings(); OnPropertyChanged(nameof(SpectrumCenterHz)); }
+    partial void OnCenterFreqMHzChanged(double value) { if (!_suppressRetune) RetuneIfRunning(); SaveSettings(); OnPropertyChanged(nameof(SpectrumCenterHz)); }
     partial void OnLnaGainDbChanged(byte value) { _core.SetGains(value, VgaGainDb, AmpEnable); SaveSettings(); }
     partial void OnVgaGainDbChanged(byte value) { _core.SetGains(LnaGainDb, value, AmpEnable); SaveSettings(); }
     partial void OnAmpEnableChanged(bool value) { PushGains(); SaveSettings(); }
@@ -976,7 +1022,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _suppressSlotSync = false;
         }
-        CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, desired);
+        _suppressRetune = true;
+        try { CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, desired); }
+        finally { _suppressRetune = false; }
     }
 
     [RelayCommand]
@@ -1275,8 +1323,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     else
                     {
                         // Broadcast text → populate the owning channel tab like a chat room.
-                        var chanVm = Channels.FirstOrDefault(c =>
-                            string.Equals(c.Config.Name, result.ChannelName, StringComparison.Ordinal));
+                        var chanVm = ResolveChannelTab(result.ChannelName);
                         chanVm?.Messages.Add(new ChannelMessage
                         {
                             FromId = senderName,

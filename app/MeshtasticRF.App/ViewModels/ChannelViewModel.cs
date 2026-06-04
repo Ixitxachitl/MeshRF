@@ -93,10 +93,23 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         OnPropertyChanged(nameof(IsPrimary));
     }
 
+    /// <summary>
+    /// Rename the channel in place (used to keep the default Primary channel's
+    /// name in sync with the active modem preset) and refresh the tab header.
+    /// </summary>
+    public void RenameTo(string name)
+    {
+        Config.Name = name ?? string.Empty;
+        EditName = Config.Name;
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(TabHeader));
+        OnPropertyChanged(nameof(Hash));
+        OnPropertyChanged(nameof(PskHex));
+    }
+
     [RelayCommand]
     private void Revert()
-    {
-        EditName              = Config.Name;
+    {        EditName              = Config.Name;
         EditRole              = Config.Role;
         EditPsk               = (byte[])Config.Psk.Clone();
         EditUplink            = Config.UplinkEnabled;
