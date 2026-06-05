@@ -172,4 +172,10 @@ public static class HardwareModels
     /// is unknown or empty).</summary>
     public static int Id(string? name) =>
         !string.IsNullOrWhiteSpace(name) && s_byName.TryGetValue(name, out var id) ? id : 0;
+
+    /// <summary>Normalize a stored hardware value for display. Legacy records
+    /// may hold a raw numeric id (saved before names were resolved); those are
+    /// mapped to a name. Values that are already names pass through unchanged.</summary>
+    public static string Display(string? stored) =>
+        int.TryParse(stored, out var id) ? Name(id) : (stored ?? string.Empty);
 }

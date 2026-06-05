@@ -4,6 +4,7 @@ using System.Linq;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MeshRF.Mesh;
 using MeshRF.Nodes;
 
 namespace MeshRF.App.ViewModels;
@@ -73,7 +74,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 
             Add("Long name", n.LongName);
             Add("Short name", n.ShortName);
-            Add("Hardware", n.HwModel);
+            Add("Hardware", HardwareModels.Display(n.HwModel));
             Add("Role", n.Role);
             if (n.BatteryPct is byte bat) Add("Battery", $"{bat}%");
             if (n.VoltageV is float volt) Add("Voltage", $"{volt:0.00} V");

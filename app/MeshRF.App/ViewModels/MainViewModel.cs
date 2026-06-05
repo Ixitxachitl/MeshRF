@@ -297,7 +297,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!string.IsNullOrWhiteSpace(n.Role))
             sb.Append("\nRole: ").Append(n.Role);
         if (!string.IsNullOrWhiteSpace(n.HwModel))
-            sb.Append("\nHW: ").Append(n.HwModel);
+            sb.Append("\nHW: ").Append(HardwareModels.Display(n.HwModel));
 
         // Position.
         if (n.Latitude is double la && n.Longitude is double lo)
@@ -1933,7 +1933,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // when the user pressed send, so just note the confirmation and drop it.
         if (_myNodeNum != 0 && header.From == _myNodeNum)
         {
-            Log($"  tx confirmed (heard own packet id {header.PacketId:x8})");
+            // Decode our own frame to surface the ok_to_mqtt bitfield, so the
+            // user can confirm the flag is actually present on the wire.
+            var ownChannels = Channels.Select(c => c.Config).ToList();
+            var own = MeshDecoder.Decode(frame, ownChannels);
+            string mqttNote = own is not null
+                ? $", ok_to_mqtt={(own.OkToMqtt ? "yes" : "no")}"
+                : string.Empty;
+            Log($"  tx confirmed (heard own packet id {header.PacketId:x8}{mqttNote})");
             return;
         }
 

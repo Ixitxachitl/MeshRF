@@ -69,6 +69,10 @@ public partial class MapView : UserControl
     private Point _lastMouse;
     private bool _userMovedView;
 
+    // Temporary elements added when a cluster of stacked nodes is "spidered"
+    // out on hover; removed on collapse or on the next full Render.
+    private readonly List<UIElement> _spiderElements = new();
+
     public MapView()
     {
         InitializeComponent();
@@ -310,6 +314,12 @@ public partial class MapView : UserControl
     private void DrawMarkers(double originX, double originY)
     {
         if (_vm is null) return;
+        _spiderElements.Clear();
+
+        // Node markers are collected and clustered; the home marker is drawn
+        // immediately since it never stacks with nodes.
+        var nodes = new List<(MainViewModel.MapMarker mk, double px, double py)>();
+
         foreach (var mk in _vm.GetMapMarkers())
         {
             double px = LonToX(mk.Lon, _zoom) - originX;
@@ -327,38 +337,203 @@ public partial class MapView : UserControl
                 Canvas.SetLeft(home, px - 8);
                 Canvas.SetTop(home, py - 12);
                 MapCanvas.Children.Add(home);
+                AddNodeLabel(mk.Label, px, py);
             }
             else
             {
-                var dot = new Ellipse
-                {
-                    Width = 12,
-                    Height = 12,
-                    Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)),
-                    Stroke = Brushes.White,
-                    StrokeThickness = 1.5,
-                    ToolTip = BuildNodeToolTip(mk.Title),
-                };
-                ToolTipService.SetInitialShowDelay(dot, 250);
-                ToolTipService.SetShowDuration(dot, 60000);
-                Canvas.SetLeft(dot, px - 6);
-                Canvas.SetTop(dot, py - 6);
-                MapCanvas.Children.Add(dot);
+                nodes.Add((mk, px, py));
             }
+        }
+
+        // Group node markers that land on (nearly) the same screen pixel so
+        // stacked nodes don't hide each other's dot and tooltip.
+        const double clusterRadiusPx = 14;
+        var clusters = new List<List<(MainViewModel.MapMarker mk, double px, double py)>>();
+        foreach (var nm in nodes)
+        {
+            List<(MainViewModel.MapMarker mk, double px, double py)>? hit = null;
+            foreach (var c in clusters)
+            {
+                double dx = nm.px - c[0].px;
+                double dy = nm.py - c[0].py;
+                if (dx * dx + dy * dy <= clusterRadiusPx * clusterRadiusPx) { hit = c; break; }
+            }
+            if (hit is null) { hit = new(); clusters.Add(hit); }
+            hit.Add(nm);
+        }
+
+        foreach (var c in clusters)
+        {
+            if (c.Count == 1)
+            {
+                AddNodeDot(c[0].mk, c[0].px, c[0].py);
+                AddNodeLabel(c[0].mk.Label, c[0].px, c[0].py);
+            }
+            else
+            {
+                AddCluster(c);
+            }
+        }
+    }
+
+    /// <summary>Draws a single node marker (blue dot with a hover tooltip).</summary>
+    private void AddNodeDot(MainViewModel.MapMarker mk, double px, double py)
+    {
+        var dot = new Ellipse
+        {
+            Width = 12,
+            Height = 12,
+            Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)),
+            Stroke = Brushes.White,
+            StrokeThickness = 1.5,
+            ToolTip = BuildNodeToolTip(mk.Title),
+        };
+        ToolTipService.SetInitialShowDelay(dot, 250);
+        ToolTipService.SetShowDuration(dot, 60000);
+        Canvas.SetLeft(dot, px - 6);
+        Canvas.SetTop(dot, py - 6);
+        MapCanvas.Children.Add(dot);
+    }
+
+    /// <summary>Draws a small caption to the right of a marker.</summary>
+    private void AddNodeLabel(string text, double px, double py)
+    {
+        var label = new TextBlock
+        {
+            Text = text,
+            FontSize = 11,
+            Foreground = Brushes.White,
+            Background = new SolidColorBrush(Color.FromArgb(0xAA, 0, 0, 0)),
+            Padding = new Thickness(2, 0, 2, 0),
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(label, px + 8);
+        Canvas.SetTop(label, py - 8);
+        MapCanvas.Children.Add(label);
+    }
+
+    /// <summary>Draws a count badge for a group of overlapping nodes. Hovering
+    /// the badge fans the members out radially ("spiderfies") so each can be
+    /// inspected individually.</summary>
+    private void AddCluster(List<(MainViewModel.MapMarker mk, double px, double py)> members)
+    {
+        double cx = members.Average(m => m.px);
+        double cy = members.Average(m => m.py);
+
+        var badge = new Grid { Width = 24, Height = 24, Cursor = Cursors.Hand };
+        badge.Children.Add(new Ellipse
+        {
+            Width = 24,
+            Height = 24,
+            Fill = new SolidColorBrush(Color.FromRgb(0xff, 0x8c, 0x2d)),
+            Stroke = Brushes.White,
+            StrokeThickness = 1.5,
+        });
+        badge.Children.Add(new TextBlock
+        {
+            Text = members.Count.ToString(),
+            Foreground = Brushes.White,
+            FontSize = 12,
+            FontWeight = FontWeights.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        badge.ToolTip = $"{members.Count} nodes here \u2014 hover to expand";
+        Canvas.SetLeft(badge, cx - 12);
+        Canvas.SetTop(badge, cy - 12);
+        Panel.SetZIndex(badge, 10);
+
+        badge.MouseEnter += (_, _) => SpiderExpand(members, cx, cy);
+        MapCanvas.Children.Add(badge);
+    }
+
+    /// <summary>Fans a stacked group of nodes out around their shared point and
+    /// keeps them open via a transparent hover hull.</summary>
+    private void SpiderExpand(
+        List<(MainViewModel.MapMarker mk, double px, double py)> members, double cx, double cy)
+    {
+        SpiderCollapse();
+
+        double legLen = Math.Max(34, 14 + members.Count * 4);
+
+        // All spider parts live in one transparent container Canvas. Handling
+        // MouseLeave on the container (rather than on a sibling hull) means
+        // moving the pointer between the badge, legs and dots never counts as
+        // "leaving" — the spider only collapses when the pointer exits the
+        // whole fanned-out region, which stops it vanishing before you can
+        // hover a node.
+        double hullR = legLen + 16;
+        var spider = new Canvas
+        {
+            Width = hullR * 2,
+            Height = hullR * 2,
+            Background = Brushes.Transparent,
+        };
+        Canvas.SetLeft(spider, cx - hullR);
+        Canvas.SetTop(spider, cy - hullR);
+        Panel.SetZIndex(spider, 9);
+        spider.MouseLeave += (_, _) => SpiderCollapse();
+        MapCanvas.Children.Add(spider);
+        _spiderElements.Add(spider);
+
+        // Local center within the container.
+        double lcx = hullR;
+        double lcy = hullR;
+
+        for (int i = 0; i < members.Count; i++)
+        {
+            double angle = 2 * Math.PI * i / members.Count - Math.PI / 2;
+            double mx = lcx + legLen * Math.Cos(angle);
+            double my = lcy + legLen * Math.Sin(angle);
+
+            var leg = new Line
+            {
+                X1 = lcx,
+                Y1 = lcy,
+                X2 = mx,
+                Y2 = my,
+                Stroke = new SolidColorBrush(Color.FromArgb(0xAA, 0xff, 0xff, 0xff)),
+                StrokeThickness = 1.5,
+                IsHitTestVisible = false,
+            };
+            spider.Children.Add(leg);
+
+            var dot = new Ellipse
+            {
+                Width = 12,
+                Height = 12,
+                Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)),
+                Stroke = Brushes.White,
+                StrokeThickness = 1.5,
+                ToolTip = BuildNodeToolTip(members[i].mk.Title),
+            };
+            ToolTipService.SetInitialShowDelay(dot, 100);
+            ToolTipService.SetShowDuration(dot, 60000);
+            Canvas.SetLeft(dot, mx - 6);
+            Canvas.SetTop(dot, my - 6);
+            spider.Children.Add(dot);
 
             var label = new TextBlock
             {
-                Text = mk.Label,
+                Text = members[i].mk.Label,
                 FontSize = 11,
                 Foreground = Brushes.White,
-                Background = new SolidColorBrush(Color.FromArgb(0xAA, 0, 0, 0)),
+                Background = new SolidColorBrush(Color.FromArgb(0xCC, 0, 0, 0)),
                 Padding = new Thickness(2, 0, 2, 0),
                 IsHitTestVisible = false,
             };
-            Canvas.SetLeft(label, px + 8);
-            Canvas.SetTop(label, py - 8);
-            MapCanvas.Children.Add(label);
+            Canvas.SetLeft(label, mx + 8);
+            Canvas.SetTop(label, my - 8);
+            spider.Children.Add(label);
         }
+    }
+
+    /// <summary>Removes the temporary spider elements added on hover.</summary>
+    private void SpiderCollapse()
+    {
+        foreach (var el in _spiderElements)
+            MapCanvas.Children.Remove(el);
+        _spiderElements.Clear();
     }
 
     /// <summary>Wraps the multi-line marker description in a ToolTip that stays

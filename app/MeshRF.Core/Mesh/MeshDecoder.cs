@@ -31,6 +31,10 @@ public sealed class MeshDecodeResult
     /// to. For a ROUTING ack/nak it identifies the original packet.</summary>
     public uint RequestId { get; init; }
 
+    /// <summary>Data.bitfield (field 9) bit 0 (ok_to_mqtt): the sender permits
+    /// gateways to uplink this packet to public MQTT.</summary>
+    public bool OkToMqtt { get; init; }
+
     /// <summary>For a ROUTING_APP packet, the Routing.error_reason value: 0 = ACK
     /// (NONE), non-zero = NAK reason. -1 when this isn't a routing packet.</summary>
     public int RoutingError { get; init; } = -1;
@@ -124,10 +128,10 @@ public static class MeshDecoder
             catch { continue; }
 
             if (TryParseData(plain, out var port, out var appPayload,
-                             out var wantResp, out var reqId) &&
+                             out var wantResp, out var reqId, out var okMqtt) &&
                 IsPlausible(port, appPayload))
             {
-                return Build(header, ch.Name, port, appPayload, wantResp, reqId);
+                return Build(header, ch.Name, port, appPayload, wantResp, reqId, okMqtt);
             }
         }
         return null;
@@ -155,7 +159,7 @@ public static class MeshDecoder
             try { plain = MeshCrypto.Ctr(cipher, key, header.From, header.PacketId); }
             catch { continue; }
 
-            if (TryParseData(plain, out var port, out var appPayload, out _, out _) &&
+            if (TryParseData(plain, out var port, out var appPayload, out _, out _, out _) &&
                 IsPlausible(port, appPayload))
             {
                 return index;
@@ -195,23 +199,26 @@ public static class MeshDecoder
         if (plain is null) return null; // auth tag mismatch
 
         if (TryParseData(plain, out var port, out var appPayload,
-                         out var wantResp, out var reqId) &&
+                         out var wantResp, out var reqId, out var okMqtt) &&
             IsPlausible(port, appPayload))
         {
-            return Build(header, "PKC", port, appPayload, wantResp, reqId);
+            return Build(header, "PKC", port, appPayload, wantResp, reqId, okMqtt);
         }
         return null;
     }
 
     // -- Data protobuf: 1 = portnum (varint), 2 = payload (bytes),
-    //    3 = want_response (varint bool), 6 = request_id (fixed32) --
+    //    3 = want_response (varint bool), 6 = request_id (fixed32),
+    //    9 = bitfield (varint, bit 0 = ok_to_mqtt) --
     private static bool TryParseData(byte[] data, out PortNum port, out byte[] payload,
-                                     out bool wantResponse, out uint requestId)
+                                     out bool wantResponse, out uint requestId,
+                                     out bool okToMqtt)
     {
         port = PortNum.Unknown;
         payload = Array.Empty<byte>();
         wantResponse = false;
         requestId = 0;
+        okToMqtt = false;
         var rdr = new ProtoReader(data);
         bool sawPort = false;
         while (rdr.TryReadTag(out int field, out var wt))
@@ -230,6 +237,9 @@ public static class MeshDecoder
                     break;
                 case 6 when wt == ProtoReader.WireType.I32:
                     requestId = rdr.ReadFixed32();
+                    break;
+                case 9 when wt == ProtoReader.WireType.Varint:
+                    okToMqtt = (rdr.ReadVarint() & 0x01) != 0;
                     break;
                 default:
                     rdr.SkipField(wt);
@@ -251,7 +261,8 @@ public static class MeshDecoder
 
     private static MeshDecodeResult Build(MeshHeader header, string channel,
                                           PortNum port, byte[] payload,
-                                          bool wantResponse = false, uint requestId = 0)
+                                          bool wantResponse = false, uint requestId = 0,
+                                          bool okToMqtt = false)
     {
         string? text = null;
         MeshUser? user = null;
@@ -289,6 +300,7 @@ public static class MeshDecoder
             Telemetry = telem,
             WantResponse = wantResponse,
             RequestId = requestId,
+            OkToMqtt = okToMqtt,
             RoutingError = routingError,
             AppPayload = payload,
         };
