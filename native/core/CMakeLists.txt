@@ -13,6 +13,8 @@ add_library(mrf_core STATIC
     src/modem/ChirpChatRx.cpp
     src/modem/MeshtasticRx.cpp
     src/modem/LoraDecoder.cpp
+    src/modem/LoraEncoder.cpp
+    src/modem/ChirpChatTx.cpp
     src/mac/PacketHeader.cpp
     src/mac/Csma.cpp
     src/crypto/ChannelCrypto.cpp

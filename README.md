@@ -8,9 +8,11 @@ software (a port of
 Meshtastic frames, decrypts channels, and parses the mesh protobufs — all on
 the host CPU.
 
-> **Status:** receive-only. The full RX chain (SDR → DSP → LoRa demod →
-> Meshtastic frame decode → channel decrypt → protobuf parse → UI) is working.
-> **Transmit is not implemented** — this is a listen-only client.
+> **Status:** transmit + receive. The full RX chain (SDR → DSP → LoRa demod →
+> Meshtastic frame decode → channel decrypt → protobuf parse → UI) is working,
+> and the app can now **transmit**: channel broadcasts, encrypted (PKC) direct
+> messages with automatic key exchange, and Meshtastic-style ACK/NACK delivery
+> tracking.
 
 ## Features
 
@@ -27,7 +29,14 @@ the host CPU.
   (default-key family discovery included), and protobuf parsing.
 - **Channels** with PSK management and per-channel message history (SQLite).
 - **Direct messages**: double-click a node to open a conversation tab.
-- **Node database** with positions, signal stats, and telemetry.
+  Outgoing DMs are sealed with **PKC** (X25519 + AES-256-CCM); if the peer's
+  public key isn't known yet it is requested automatically over the air.
+  Conversations and which tabs were open are restored across restarts.
+- **Delivery tracking**: sent messages show **sent / delivered / no ack** using
+  Meshtastic-style Routing ACK/NACK, and the app acknowledges direct messages
+  addressed to it.
+- **Node database** with positions, signal stats, and telemetry. Nodes whose
+  X25519 public key is known show a key icon (PKC direct messages enabled).
 - **Telemetry**: device metrics (battery, voltage, channel/air utilization,
   uptime) and **environment metrics** (temperature, humidity, barometric
   pressure, gas resistance, IAQ), shown per node in its conversation tab.
@@ -134,5 +143,5 @@ The license is dictated by ports of / references to:
 
 ## Disclaimer
 
-This is a receive-only client and does not transmit. It is an independent
-project and is not affiliated with or endorsed by the Meshtastic project.
+This is an independent project and is not affiliated with or endorsed by the
+Meshtastic project.

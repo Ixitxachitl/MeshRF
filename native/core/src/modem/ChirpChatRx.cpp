@@ -830,26 +830,25 @@ void ChirpChatRx::decode_payload_() {
         ev.raw_bytes[i] = raw_bytes[i];
     }
 
-    if (ev.length > 0) {
+    // Dewhiten the data bytes *and* the trailing 2-byte CRC: the TX (and
+    // SDRangel) whiten the entire stream, CRC included.
+    std::size_t dewhiten_len = ev.length;
+    if (ev.has_crc && raw_bytes.size() >= ev.length + 2)
+        dewhiten_len = ev.length + 2;
+    if (dewhiten_len > 0) {
         dewhiten_payload_bytes(
-            std::span<std::uint8_t>(raw_bytes.data(), ev.length));
+            std::span<std::uint8_t>(raw_bytes.data(), dewhiten_len));
     }
     for (std::size_t i = 0; i < ev.length && i < sizeof(ev.bytes); ++i) {
         ev.bytes[i] = raw_bytes[i];
     }
 
-    // 7. Compute and verify gr-lora_sdr CRC. Per SDRangel's Meshtastic
-    //    decoder:
-    //      crc = crc16gr(bytes[0..length-2))
-    //          ^ bytes[length-1] ^ (bytes[length-2] << 8)
-    //    compared to bytes[length] | (bytes[length+1] << 8) (raw CRC,
-    //    not dewhitened).
+    // 7. Compute and verify the SDRangel `sx1272DataChecksum` over the
+    //    `length` data bytes; the value is appended little-endian as the two
+    //    trailing CRC bytes (whitened with the rest of the stream).
     if (ev.has_crc && ev.length >= 2 && raw_bytes.size() >= ev.length + 2) {
-        std::uint16_t crc = crc16gr(
-            std::span<const std::uint8_t>(raw_bytes.data(), ev.length - 2));
-        crc = static_cast<std::uint16_t>(crc ^ raw_bytes[ev.length - 1]);
-        crc = static_cast<std::uint16_t>(
-            crc ^ (static_cast<std::uint16_t>(raw_bytes[ev.length - 2]) << 8));
+        const std::uint16_t crc = sx1272_data_checksum(
+            std::span<const std::uint8_t>(raw_bytes.data(), ev.length));
         ev.crc_received = static_cast<std::uint16_t>(
             raw_bytes[ev.length] |
             (static_cast<std::uint16_t>(raw_bytes[ev.length + 1]) << 8));

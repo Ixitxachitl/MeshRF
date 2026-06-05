@@ -73,6 +73,7 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("barometric_pressure_hpa", "REAL");
         AddColumnIfMissing("gas_resistance_mohm", "REAL");
         AddColumnIfMissing("iaq", "INTEGER");
+        AddColumnIfMissing("public_key", "TEXT");
     }
 
     private void AddColumnIfMissing(string name, string sqlType)
@@ -102,7 +103,7 @@ public sealed class NodeStore : IDisposable
                                channel_util_pct, air_util_tx_pct,
                                uptime_seconds, temperature_c,
                                relative_humidity_pct, barometric_pressure_hpa,
-                               gas_resistance_mohm, iaq)
+                               gas_resistance_mohm, iaq, public_key)
             VALUES ($node_num, $user_id, $long_name, $short_name,
                     $hw_model, $role, $last_heard,
                     $snr, $rssi, $hops,
@@ -111,7 +112,7 @@ public sealed class NodeStore : IDisposable
                     $chan, $airx,
                     $uptime, $temp,
                     $hum, $pres,
-                    $gas, $iaq)
+                    $gas, $iaq, $pubkey)
             ON CONFLICT(node_num) DO UPDATE SET
                 user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
                 long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
@@ -134,7 +135,8 @@ public sealed class NodeStore : IDisposable
                 relative_humidity_pct   = COALESCE(excluded.relative_humidity_pct, relative_humidity_pct),
                 barometric_pressure_hpa = COALESCE(excluded.barometric_pressure_hpa, barometric_pressure_hpa),
                 gas_resistance_mohm     = COALESCE(excluded.gas_resistance_mohm, gas_resistance_mohm),
-                iaq              = COALESCE(excluded.iaq, iaq);
+                iaq              = COALESCE(excluded.iaq, iaq),
+                public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key);
             """;
         cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
         cmd.Parameters.AddWithValue("$user_id", rec.UserId ?? string.Empty);
@@ -159,6 +161,7 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$pres", (object?)rec.BarometricPressureHpa ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$gas",  (object?)rec.GasResistanceMohm ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$iaq",  (object?)rec.Iaq ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pubkey", rec.PublicKey ?? string.Empty);
         cmd.ExecuteNonQuery();
     }
 
@@ -257,7 +260,14 @@ public sealed class NodeStore : IDisposable
             BarometricPressureHpa = Nullable<float>("barometric_pressure_hpa"),
             GasResistanceMohm     = Nullable<float>("gas_resistance_mohm"),
             Iaq                   = Nullable<int>("iaq"),
+            PublicKey             = ReadStringOrEmpty(r, "public_key"),
         };
+    }
+
+    private static string ReadStringOrEmpty(SqliteDataReader r, string col)
+    {
+        int i = r.GetOrdinal(col);
+        return r.IsDBNull(i) ? string.Empty : r.GetString(i);
     }
 
     private void ThrowIfDisposed()

@@ -167,8 +167,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>The selected tab when it is a channel (null for DM tabs).</summary>
     public ChannelViewModel? SelectedChannel => SelectedTab as ChannelViewModel;
 
-    partial void OnSelectedTabChanged(object? value) =>
+    partial void OnSelectedTabChanged(object? value)
+    {
         OnPropertyChanged(nameof(SelectedChannel));
+        SendMessageCommand.NotifyCanExecuteChanged();
+        SendNodeInfoCommand.NotifyCanExecuteChanged();
+    }
 
     // -- Local node identity -------------------------------------------------
 
@@ -192,6 +196,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _rebroadcastMode = "ALL";
     [ObservableProperty] private string _myPublicKey = string.Empty;
     [ObservableProperty] private string _myPrivateKey = string.Empty;
+
+    /// <summary>Default hop limit for transmitted packets (1..7). Mirrors the
+    /// firmware LoRa config; broadcasts and DMs are sent with this many hops.</summary>
+    [ObservableProperty] private int _hopLimit = 3;
+
     [ObservableProperty] private string _homeLatitudeText = string.Empty;
     [ObservableProperty] private string _homeLongitudeText = string.Empty;
 
@@ -237,6 +246,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         bool removedPositioned = false;
         foreach (var n in targets)
         {
+            // Never delete our own node: it represents us and is re-created on
+            // startup / identity change, so removing it is pointless and would
+            // make our name vanish from chats until the next restart.
+            if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             _nodeStore.Forget(n.NodeNum);
             Nodes.Remove(n);
             if (n.Latitude is not null && n.Longitude is not null) removedPositioned = true;
@@ -380,8 +393,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         MyHwModel = string.IsNullOrEmpty(_settings.UserHwModel) ? "UNSET" : _settings.UserHwModel;
         RebroadcastMode = string.IsNullOrEmpty(_settings.RebroadcastMode) ? "ALL" : _settings.RebroadcastMode;
+        HopLimit = Math.Clamp(_settings.HopLimit, 1, 7);
         MyPublicKey = _settings.UserPublicKey;
         MyPrivateKey = _settings.UserPrivateKey;
+
+        // Ensure we always have a valid X25519 keypair so PKC direct messages
+        // work out of the box. Generate one on first run (or if the stored key
+        // is missing/corrupt); the change handlers persist it via SaveSettings.
+        if (TryParseKeyBase64(MyPrivateKey).Length != 32)
+        {
+            var priv = Curve25519.GeneratePrivateKey();
+            MyPrivateKey = Convert.ToBase64String(priv);            // derives + saves public key
+            MyPublicKey = Convert.ToBase64String(Curve25519.GetPublicKey(priv));
+        }
+
         HomeLatitude = _settings.HomeLatitude;
         HomeLongitude = _settings.HomeLongitude;
         // Populate the text boxes without retriggering UpdateHomeLocation: doing
@@ -423,6 +448,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Bring up channel and node tabs before logging anything, so boot
         // messages land on the Primary tab.
         ReloadChannels();
+        UpsertSelf();
         ReloadNodes();
         ReloadMessages();
         LoadChatHistory();
@@ -446,6 +472,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Record our own node in the node store so our name (rather than a bare
+    /// node id) appears in chats, even though we ignore our own NodeInfo on the
+    /// air. Called on identity changes; safe to call repeatedly.
+    /// </summary>
+    private void UpsertSelf()
+    {
+        if (_myNodeNum == 0) return;
+        _nodeStore.Upsert(new NodeRecord
+        {
+            NodeNum = _myNodeNum,
+            UserId = $"!{_myNodeNum:x8}",
+            LongName = MyLongName ?? string.Empty,
+            ShortName = MyShortName ?? string.Empty,
+            HwModel = MyHwModel ?? string.Empty,
+            Role = MyRole ?? string.Empty,
+            PublicKey = Convert.ToHexString(TryParseKeyBase64(MyPublicKey)),
+        });
+    }
+
+    /// <summary>Persist our own node record and refresh the in-memory node list
+    /// so name changes are reflected immediately in chats.</summary>
+    private void RefreshSelfNode()
+    {
+        if (!_settingsLoaded) return;
+        UpsertSelf();
+        ReloadNodes();
+    }
+
     /// <summary>Refresh the in-memory <see cref="Messages"/> collection from disk.</summary>
     public void ReloadMessages()
     {
@@ -465,38 +520,65 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var convo in Tabs.OfType<ConversationViewModel>().ToList())
             Tabs.Remove(convo);
 
+        // Rebuild channel (broadcast) chat rooms from history.
         foreach (var msg in _messageStore.TextHistory())
         {
             if (string.IsNullOrEmpty(msg.Text)) continue;
 
-            var senderName = NodeDisplayName(msg.FromNode);
-            var cm = new ChannelMessage
-            {
-                Timestamp = DateTimeOffset.FromUnixTimeSeconds(msg.RxEpoch).LocalDateTime,
-                FromId = senderName,
-                Text = msg.Text,
-                RssiDbm = msg.RssiDbfs,
-                SnrDb = msg.SnrDb,
-            };
+            bool isDm = msg.ToNode != 0xFFFFFFFFu &&
+                        (msg.FromNode == _myNodeNum || msg.ToNode == _myNodeNum);
+            if (isDm) continue; // DMs are restored per-conversation below.
 
-            bool isDm = _myNodeNum != 0 && msg.ToNode == _myNodeNum && msg.ToNode != 0xFFFFFFFF;
-            if (isDm)
+            var chanVm = ResolveChannelTab(msg.Channel);
+            if (chanVm is not null)
             {
-                OpenConversation(msg.FromNode, senderName).Add(cm);
+                chanVm.Messages.Add(BuildHistoryMessage(msg));
+                if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
             }
-            else
-            {
-                var chanVm = ResolveChannelTab(msg.Channel);
-                if (chanVm is not null)
-                {
-                    chanVm.Messages.Add(cm);
-                    if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
-                }
-            }
+        }
+
+        // Reopen a DM tab for every peer we have a conversation with (sent or
+        // received), so closed/relaunched conversations reappear with history.
+        if (_myNodeNum != 0)
+        {
+            foreach (var peer in _messageStore.ConversationPeers(_myNodeNum))
+                OpenConversation(peer, NodeDisplayName(peer), focus: false);
         }
 
         // Restoring DM tabs moves selection; leave the primary channel focused.
         SelectedTab = Channels.FirstOrDefault();
+    }
+
+    /// <summary>Load the full persisted history for a peer into a conversation
+    /// tab (idempotent: clears first so reopening doesn't duplicate rows).</summary>
+    private void LoadConversationHistory(ConversationViewModel convo)
+    {
+        convo.Messages.Clear();
+        if (_myNodeNum == 0) return;
+        foreach (var msg in _messageStore.Conversation(convo.NodeNum, _myNodeNum))
+        {
+            if (string.IsNullOrEmpty(msg.Text)) continue;
+            convo.Add(BuildHistoryMessage(msg));
+        }
+    }
+
+    /// <summary>Turn a stored record into a <see cref="ChannelMessage"/>, marking
+    /// our own sends as delivered (we can't know the original ACK after a
+    /// restart, but the message did leave the radio).</summary>
+    private ChannelMessage BuildHistoryMessage(MessageRecord msg)
+    {
+        bool outgoing = _myNodeNum != 0 && msg.FromNode == _myNodeNum;
+        return new ChannelMessage
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(msg.RxEpoch).LocalDateTime,
+            FromId = NodeDisplayName(msg.FromNode),
+            Text = msg.Text,
+            RssiDbm = msg.RssiDbfs,
+            SnrDb = msg.SnrDb,
+            PacketId = msg.PacketId,
+            IsOutgoing = outgoing,
+            Delivery = outgoing ? MessageDelivery.Sent : MessageDelivery.None,
+        };
     }
 
     /// <summary>
@@ -759,6 +841,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserRole = MyRole ?? "Client";
         _settings.UserHwModel = MyHwModel ?? "UNSET";
         _settings.RebroadcastMode = RebroadcastMode ?? "ALL";
+        _settings.HopLimit = Math.Clamp(HopLimit, 1, 7);
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.HomeLatitude = HomeLatitude;
@@ -771,14 +854,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnMyNodeIdTextChanged(string value)
     {
         _myNodeNum = ParseNodeId(value);
+        SendNodeInfoCommand.NotifyCanExecuteChanged();
         SaveSettings();
+        RefreshSelfNode();
     }
 
-    partial void OnMyLongNameChanged(string value) => SaveSettings();
-    partial void OnMyShortNameChanged(string value) => SaveSettings();
+    partial void OnMyLongNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyShortNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyRoleChanged(string value) => SaveSettings();
-    partial void OnMyHwModelChanged(string value) => SaveSettings();
+    partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnRebroadcastModeChanged(string value) => SaveSettings();
+
+    partial void OnHopLimitChanged(int value)
+    {
+        // Keep within the firmware-valid 1..7 range; re-clamping triggers this
+        // handler again only when the value actually changes.
+        var clamped = Math.Clamp(value, 1, 7);
+        if (clamped != value) { HopLimit = clamped; return; }
+        SaveSettings();
+    }
     partial void OnMyPublicKeyChanged(string value) => SaveSettings();
 
     partial void OnMyPrivateKeyChanged(string value)
@@ -878,7 +972,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // -- Direct-message conversations ---------------------------------------
 
     /// <summary>Open (or focus) a DM conversation tab for the given node.</summary>
-    public ConversationViewModel OpenConversation(uint nodeNum, string? name = null)
+    /// <param name="nodeNum">Peer node number.</param>
+    /// <param name="name">Optional display name to set/refresh on the tab.</param>
+    /// <param name="focus">When true, select the tab. Incoming DMs open the tab
+    /// in the background (focus = false) so an unsolicited message doesn't yank
+    /// the user away from what they're viewing.</param>
+    public ConversationViewModel OpenConversation(uint nodeNum, string? name = null,
+                                                  bool focus = true)
     {
         var existing = Tabs.OfType<ConversationViewModel>()
                            .FirstOrDefault(c => c.NodeNum == nodeNum);
@@ -886,14 +986,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (!string.IsNullOrWhiteSpace(name)) existing.PeerName = name!;
             existing.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
-            SelectedTab = existing;
+            if (focus) SelectedTab = existing;
             return existing;
         }
 
         var convo = new ConversationViewModel(nodeNum, name ?? NodeDisplayName(nodeNum));
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
+        // Restore this peer's prior message history so reopening a closed tab
+        // (or relaunching the app) shows the existing conversation.
+        LoadConversationHistory(convo);
         Tabs.Add(convo);
-        SelectedTab = convo;
+        if (focus) SelectedTab = convo;
         return convo;
     }
 
@@ -912,6 +1015,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void OpenConversationForNode(NodeRecord? node)
     {
         if (node is null) return;
+        // Don't open a DM tab for ourselves: you can't message your own node.
+        if (_myNodeNum != 0 && node.NodeNum == _myNodeNum) return;
         OpenConversation(node.NodeNum, NodeDisplayName(node.NodeNum));
     }
 
@@ -966,6 +1071,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DeviceStatus));
         OnPropertyChanged(nameof(HasRealRadio));
         OnPropertyChanged(nameof(DeviceBadge));
+        OnPropertyChanged(nameof(CanTransmit));
+        SendMessageCommand.NotifyCanExecuteChanged();
+        SendNodeInfoCommand.NotifyCanExecuteChanged();
         Status = $"Idle ({_core.DeviceName})";
         Log(DeviceBadge);
         if (!string.IsNullOrEmpty(_core.DeviceStatus))
@@ -1054,6 +1162,488 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsCapturing = false;
         Status = "Stopped";
         Log(Status);
+    }
+
+    // -- Transmit (HackRF only) ---------------------------------------------
+
+    /// <summary>True when the active radio backend can transmit (HackRF).</summary>
+    public bool CanTransmit => _core.CanTransmit;
+
+    /// <summary>Text typed into the per-channel compose box.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SendMessageCommand))]
+    private string _composeText = string.Empty;
+
+    /// <summary>HackRF TX VGA gain in dB (0..47). Default to max for range.</summary>
+    [ObservableProperty]
+    private byte _txGainDb = 47;
+
+    // Per-packet id seed; Meshtastic uses a 32-bit packet id (also the CTR
+    // nonce). Start random and increment, keeping it non-zero.
+    private uint _txPacketId = (uint)Random.Shared.Next(1, int.MaxValue);
+
+    // Outgoing messages awaiting an ACK, keyed by their packet id. When a
+    // ROUTING ack/nak arrives referencing the id we mark the message
+    // delivered/failed; entries that age out are flagged as un-acked.
+    private readonly Dictionary<uint, PendingAck> _pendingAcks = new();
+
+    /// <summary>How long to wait for an ACK before flagging a DM as un-acked.</summary>
+    private static readonly TimeSpan AckTimeout = TimeSpan.FromSeconds(30);
+
+    private sealed record PendingAck(ChannelMessage Message, DateTime SentUtc);
+
+    private uint NextPacketId()
+    {
+        _txPacketId++;
+        if (_txPacketId == 0) _txPacketId = 1;
+        return _txPacketId;
+    }
+
+    private bool CanSendMessage() =>
+        CanTransmit &&
+        SelectedChannel is not null &&
+        !string.IsNullOrWhiteSpace(ComposeText);
+
+    /// <summary>
+    /// Encode the composed text as a Meshtastic TEXT_MESSAGE_APP frame on the
+    /// selected channel and transmit it on the current preset/frequency. The
+    /// sent line is echoed into the channel's message list.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendMessage))]
+    private void SendMessage()
+    {
+        var ch = SelectedChannel;
+        if (ch is null) return;
+        var text = (ComposeText ?? string.Empty).Trim();
+        if (text.Length == 0) return;
+
+        if (_myNodeNum == 0)
+        {
+            Status = "Set your node ID (Identity) before sending.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeTextMessage(
+                ch.Config, _myNodeNum, packetId, text, hopLimit: (byte)HopLimit);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            if (ok)
+            {
+                ch.Messages.Add(new ChannelMessage
+                {
+                    FromId = NodeDisplayName(_myNodeNum),
+                    Text = text,
+                });
+                if (ch.Messages.Count > 1000) ch.Messages.RemoveAt(0);
+                PersistOutgoingText(0xFFFFFFFFu, packetId, text, ch.Config.Name);
+                ComposeText = string.Empty;
+                Status = $"Sent {frame.Length} B on {ch.DisplayName}";
+            }
+            else
+            {
+                Status = "Transmit failed (device cannot transmit).";
+            }
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Send error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    /// <summary>
+    /// Encode the conversation's composed text as a Meshtastic TEXT_MESSAGE_APP
+    /// frame addressed to a single peer (a direct message) and transmit it.
+    ///
+    /// When we hold our X25519 private key and the peer's public key (learned
+    /// from their NODEINFO), the DM is sealed with PKC (X25519 + AES-CCM,
+    /// channel hash 0x00) exactly like modern Meshtastic firmware — so real
+    /// nodes will surface it. Otherwise it falls back to a legacy channel-PSK
+    /// DM on the primary channel (which modern firmware will reject, but which
+    /// works between two instances of this app sharing the channel key). The
+    /// actual transmit only succeeds on a TX-capable radio (HackRF).
+    /// </summary>
+    [RelayCommand]
+    private void SendDirectMessage(ConversationViewModel? convo)
+    {
+        if (convo is null) return;
+        var text = (convo.ComposeText ?? string.Empty).Trim();
+        if (text.Length == 0) return;
+
+        if (_myNodeNum == 0)
+        {
+            Status = "Set your node ID (Identity) before sending.";
+            Log(Status);
+            return;
+        }
+
+        // Prefer PKC: seal with our private key + the peer's public key when
+        // both are available (matches modern firmware; decodes on real nodes).
+        var myPriv = TryParseKeyBase64(MyPrivateKey);
+        var peerPub = TryParseHex(_nodeStore.Get(convo.NodeNum)?.PublicKey);
+        bool usePkc = myPriv.Length == 32 && peerPub.Length == 32;
+
+        // Make the chosen path (and any missing prerequisite) visible: modern
+        // firmware rejects legacy channel-PSK DMs, so a silent fallback looks
+        // like the message simply vanished. Tell the user exactly what's wrong.
+        if (!usePkc)
+        {
+            if (myPriv.Length != 32)
+                Log("  DM: no local X25519 private key — cannot seal with PKC.");
+            else if (peerPub.Length != 32)
+            {
+                Log($"  DM: no public key known for {convo.TabHeader} yet — "
+                  + "requesting their NodeInfo so the next DM can use PKC. "
+                  + "Modern nodes reject legacy DMs; retry once their key arrives.");
+                // Proactively pull the peer's key by sending our NodeInfo with
+                // want_response directed at them (firmware replies with theirs).
+                RequestNodeInfo(convo.NodeNum);
+            }
+        }
+
+        // Legacy fallback rides the primary channel's key (index 0), matching
+        // how inbound legacy DMs are decrypted and routed to a conversation.
+        var ch = Channels.FirstOrDefault();
+        if (!usePkc && ch is null)
+        {
+            Status = "No channel configured to carry the direct message.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            byte[] frame = usePkc
+                ? MeshEncoder.EncodePkcTextMessage(
+                      _myNodeNum, convo.NodeNum, packetId, text,
+                      myPriv, peerPub, hopLimit: (byte)HopLimit, wantAck: true)
+                : MeshEncoder.EncodeTextMessage(
+                      ch!.Config, _myNodeNum, packetId, text,
+                      to: convo.NodeNum, hopLimit: (byte)HopLimit, wantAck: true);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            if (ok)
+            {
+                var sent = new ChannelMessage
+                {
+                    FromId = NodeDisplayName(_myNodeNum),
+                    Text = text,
+                    PacketId = packetId,
+                    IsOutgoing = true,
+                    Delivery = MessageDelivery.Sent,
+                };
+                convo.Add(sent);
+                TrackPendingAck(sent);
+                PersistOutgoingText(convo.NodeNum, packetId, text,
+                                    usePkc ? "PKC" : (ch?.Config.Name ?? string.Empty));
+                convo.ComposeText = string.Empty;
+                Status = usePkc
+                    ? $"DM (PKC) sent {frame.Length} B to {convo.TabHeader}"
+                    : $"DM (legacy PSK) sent {frame.Length} B to {convo.TabHeader}";
+            }
+            else
+            {
+                Status = "Transmit failed (device cannot transmit).";
+            }
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"DM send error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    private bool CanSendNodeInfo() => CanTransmit && _myNodeNum != 0;
+
+    /// <summary>
+    /// Broadcast our identity (NODEINFO_APP <c>User</c> protobuf) on the
+    /// primary channel so peers learn our node id / name / role. Always sent on
+    /// the primary channel (firmware behaviour), regardless of the active tab.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendNodeInfo))]
+    private void SendNodeInfo()
+    {
+        if (_myNodeNum == 0)
+        {
+            Status = "Set your node ID (Identity) before sending node info.";
+            Log(Status);
+            return;
+        }
+
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null)
+        {
+            Status = "No primary channel to send node info on.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            uint role = RoleEnumValue(MyRole);
+            byte[] pubKey = TryParseKeyBase64(MyPublicKey);
+            var frame = MeshEncoder.EncodeNodeInfo(
+                primary.Config, _myNodeNum, packetId,
+                MyLongName ?? string.Empty, MyShortName ?? string.Empty,
+                hwModel: 0, role: role, publicKey: pubKey, hopLimit: (byte)HopLimit);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            Status = ok
+                ? $"Sent node info ({frame.Length} B) on {primary.DisplayName}"
+                : "Transmit failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Node info error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    /// <summary>
+    /// Send our NodeInfo directed at <paramref name="to"/> with
+    /// <c>want_response</c> set, prompting that node to reply with its own
+    /// NodeInfo — the standard Meshtastic way to learn a peer's public key
+    /// before a PKC direct message. No-op when we can't transmit.
+    /// </summary>
+    private void RequestNodeInfo(uint to)
+    {
+        if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null) return;
+
+        try
+        {
+            uint packetId = NextPacketId();
+            uint role = RoleEnumValue(MyRole);
+            byte[] pubKey = TryParseKeyBase64(MyPublicKey);
+            var frame = MeshEncoder.EncodeNodeInfo(
+                primary.Config, _myNodeNum, packetId,
+                MyLongName ?? string.Empty, MyShortName ?? string.Empty,
+                hwModel: 0, role: role, publicKey: pubKey,
+                to: to, hopLimit: (byte)HopLimit, wantResponse: true);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+                Log($"  requested NodeInfo from !{to:x8}");
+        }
+        catch (Exception ex)
+        {
+            Log($"  NodeInfo request failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Reply to a directed NodeInfo request with our NodeInfo (no want_response,
+    /// to avoid a request/response loop) so the requester learns our public key.
+    /// </summary>
+    private void RequestNodeInfoReply(uint to)
+    {
+        if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null) return;
+
+        try
+        {
+            uint packetId = NextPacketId();
+            uint role = RoleEnumValue(MyRole);
+            byte[] pubKey = TryParseKeyBase64(MyPublicKey);
+            var frame = MeshEncoder.EncodeNodeInfo(
+                primary.Config, _myNodeNum, packetId,
+                MyLongName ?? string.Empty, MyShortName ?? string.Empty,
+                hwModel: 0, role: role, publicKey: pubKey,
+                to: to, hopLimit: (byte)HopLimit, wantResponse: false);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+        }
+        catch (Exception ex)
+        {
+            Log($"  NodeInfo reply failed: {ex.Message}");
+        }
+    }
+
+    // -- ACK / NAK tracking --------------------------------------------------
+
+    /// <summary>Register an outgoing message so an inbound ROUTING ack/nak can
+    /// flip its delivery status.</summary>
+    private void TrackPendingAck(ChannelMessage message)
+    {
+        if (message.PacketId == 0) return;
+        _pendingAcks[message.PacketId] = new PendingAck(message, DateTime.UtcNow);
+    }
+
+    /// <summary>Persist an outgoing text message we transmitted so it survives a
+    /// restart (received messages are stored in <see cref="DecodePayloadIfPossible"/>;
+    /// our own sends are never heard back as decodable, so store them here).</summary>
+    private void PersistOutgoingText(uint to, uint packetId, string text, string channel)
+    {
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = packetId,
+                FromNode = _myNodeNum,
+                ToNode = to,
+                Channel = channel ?? string.Empty,
+                PortNum = (int)PortNum.TextMessage,
+                Text = text,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            });
+        }
+        catch (Exception ex) { Log($"message store failed: {ex.Message}"); }
+    }
+
+    /// <summary>Flag outgoing DMs that never got an ACK within the timeout.</summary>
+    private void SweepPendingAcks()
+    {
+        if (_pendingAcks.Count == 0) return;
+        var now = DateTime.UtcNow;
+        List<uint>? expired = null;
+        foreach (var kv in _pendingAcks)
+        {
+            if (now - kv.Value.SentUtc < AckTimeout) continue;
+            (expired ??= new()).Add(kv.Key);
+        }
+        if (expired is null) return;
+        foreach (var id in expired)
+        {
+            if (_pendingAcks.Remove(id, out var pending) &&
+                pending.Message.Delivery == MessageDelivery.Sent)
+                pending.Message.Delivery = MessageDelivery.Failed;
+        }
+    }
+
+    /// <summary>Handle an inbound ROUTING_APP packet addressed to us: match its
+    /// request_id to a message we sent and mark it delivered (ACK) or failed
+    /// (NAK), mirroring firmware <c>Router::handleReceived</c> ack handling.</summary>
+    private void HandleRouting(MeshHeader header, MeshDecodeResult result)
+    {
+        if (_myNodeNum == 0 || header.To != _myNodeNum) return;
+        if (result.RequestId == 0) return;
+        if (!_pendingAcks.Remove(result.RequestId, out var pending)) return;
+
+        bool ack = result.RoutingError == 0;
+        pending.Message.Delivery = ack ? MessageDelivery.Delivered : MessageDelivery.Failed;
+        Log(ack
+            ? $"  ACK from {NodeDisplayName(header.From)} for id {result.RequestId:x8}"
+            : $"  NAK ({result.RoutingError}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
+    }
+
+    /// <summary>Send a ROUTING_APP acknowledgement back to the sender of a
+    /// received unicast packet that requested one (want_ack). PKC frames are
+    /// acked with PKC, channel frames on the same channel.</summary>
+    private void SendAck(MeshHeader origHeader, MeshDecodeResult result)
+    {
+        if (!CanTransmit || _myNodeNum == 0) return;
+        if (origHeader.IsBroadcast || origHeader.To != _myNodeNum) return;
+
+        try
+        {
+            uint packetId = NextPacketId();
+            byte[]? frame = null;
+            bool pkc = result.ChannelName == "PKC";
+
+            if (pkc)
+            {
+                var myPriv = TryParseKeyBase64(MyPrivateKey);
+                var peerPub = TryParseHex(_nodeStore.Get(origHeader.From)?.PublicKey);
+                if (myPriv.Length == 32 && peerPub.Length == 32)
+                    frame = MeshEncoder.EncodePkcRouting(
+                        _myNodeNum, origHeader.From, packetId, origHeader.PacketId,
+                        myPriv, peerPub, errorReason: 0, hopLimit: (byte)HopLimit);
+            }
+            else
+            {
+                var ch = Channels.FirstOrDefault(c => c.Config.Name == result.ChannelName)
+                         ?? Channels.FirstOrDefault();
+                if (ch is not null)
+                    frame = MeshEncoder.EncodeRouting(
+                        ch.Config, _myNodeNum, origHeader.From, packetId,
+                        origHeader.PacketId, errorReason: 0, hopLimit: (byte)HopLimit);
+            }
+
+            if (frame is null) return;
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+                Log($"  sent ACK to {NodeDisplayName(origHeader.From)} for id {origHeader.PacketId:x8}");
+        }
+        catch (Exception ex)
+        {
+            Log($"  ACK send failed: {ex.Message}");
+        }
+    }
+
+    // meshtastic Config.DeviceConfig.Role enum values (order differs from the
+    // UI option list, so map by name rather than index).
+    private static uint RoleEnumValue(string? role) => role switch
+    {
+        "Client"       => 0,
+        "ClientMute"   => 1,
+        "Router"       => 2,
+        "RouterClient" => 3,
+        "Repeater"     => 4,
+        "Tracker"      => 5,
+        "Sensor"       => 6,
+        "TAK"          => 7,
+        "ClientHidden" => 8,
+        "LostAndFound" => 9,
+        "TakTracker"   => 10,
+        _              => 0,
+    };
+
+    // Parse a hex string (optional whitespace / colons) into bytes; returns an
+    // empty array when the input is blank or malformed.
+    private static byte[] TryParseHex(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return Array.Empty<byte>();
+        var clean = new string(s.Where(Uri.IsHexDigit).ToArray());
+        if (clean.Length == 0 || (clean.Length & 1) != 0) return Array.Empty<byte>();
+        var bytes = new byte[clean.Length / 2];
+        for (int i = 0; i < bytes.Length; i++)
+            bytes[i] = Convert.ToByte(clean.Substring(i * 2, 2), 16);
+        return bytes;
+    }
+
+    // Parse a base64-encoded X25519 key (how our keypair is stored/displayed)
+    // into 32 bytes; returns empty when blank, malformed, or the wrong length.
+    private static byte[] TryParseKeyBase64(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return Array.Empty<byte>();
+        try
+        {
+            var bytes = Convert.FromBase64String(s.Trim());
+            return bytes.Length == 32 ? bytes : Array.Empty<byte>();
+        }
+        catch { return Array.Empty<byte>(); }
+    }
+
+    /// <summary>
+    /// Attempt to decrypt a direct message sealed with PKC (X25519 + AES-CCM)
+    /// using our private key and the sender's stored public key. Returns null
+    /// when we lack a key, the sender is unknown, or the tag doesn't verify.
+    /// </summary>
+    private MeshDecodeResult? TryDecodePkc(byte[] frame, MeshHeader header)
+    {
+        var myPriv = TryParseKeyBase64(MyPrivateKey);
+        if (myPriv.Length != 32) return null;
+
+        var sender = _nodeStore.Get(header.From);
+        var senderPub = TryParseHex(sender?.PublicKey);
+        if (senderPub.Length != 32) return null;
+
+        try { return MeshDecoder.DecodePkc(frame, myPriv, senderPub); }
+        catch { return null; }
     }
 
     /// <summary>Single bound command for the toolbar toggle button.</summary>
@@ -1225,9 +1815,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (frame.Length < MeshHeader.Size) return;
         if (!MeshHeader.TryParse(frame, out var header)) return;
 
+        // Own packet heard back (Meshtastic `isFromUs`): when a neighbour
+        // rebroadcasts a frame we sent, we receive our own transmission. The
+        // firmware never re-processes these — it treats hearing your own packet
+        // only as an implicit ACK that it was relayed, and never adds it to the
+        // node DB or message list again. We already echoed the message locally
+        // when the user pressed send, so just note the confirmation and drop it.
+        if (_myNodeNum != 0 && header.From == _myNodeNum)
+        {
+            Log($"  tx confirmed (heard own packet id {header.PacketId:x8})");
+            return;
+        }
+
         var rxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var channels = Channels.Select(c => c.Config).ToList();
         var result = MeshDecoder.Decode(frame, channels);
+
+        // PKC fallback: modern firmware seals direct messages to us with
+        // X25519 + AES-CCM (channel-hash byte 0x00) instead of a channel PSK,
+        // so MeshDecoder.Decode (PSK-only) can't read them. Mirroring firmware
+        // perhapsDecode, attempt a PKC decrypt when the frame is a unicast DM
+        // addressed to us, the channel hash is 0, and we hold both keys.
+        if (result is null && _myNodeNum != 0 &&
+            header.To == _myNodeNum && !header.IsBroadcast &&
+            header.ChannelHash == 0x00)
+        {
+            result = TryDecodePkc(frame, header);
+        }
 
         // SNR estimate captured from this frame's preamble (peak above noise).
         float? snrDb = float.IsNaN(_lastPreamblePeakDb) ? null : _lastPreamblePeakDb;
@@ -1310,15 +1924,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     // Direct message addressed to us → route to a conversation tab.
                     if (_myNodeNum != 0 && !header.IsBroadcast && header.To == _myNodeNum)
                     {
-                        var convo = OpenConversation(header.From, senderName);
-                        convo.Add(new ChannelMessage
-                        {
-                            FromId = senderName,
-                            Text = record.Text,
-                            RssiDbm = record.RssiDbfs,
-                            SnrDb = record.SnrDb,
-                        });
+                        // Open the peer's DM tab if it isn't already, but don't
+                        // steal focus from whatever the user is currently viewing.
+                        // OpenConversation loads persisted history (including the
+                        // record we just stored above), so a freshly-opened tab is
+                        // already complete; only append when the tab pre-existed.
+                        bool existed = Tabs.OfType<ConversationViewModel>()
+                                           .Any(c => c.NodeNum == header.From);
+                        var convo = OpenConversation(header.From, senderName, focus: false);
+                        if (existed)
+                            convo.Add(new ChannelMessage
+                            {
+                                FromId = senderName,
+                                Text = record.Text,
+                                RssiDbm = record.RssiDbfs,
+                                SnrDb = record.SnrDb,
+                                PacketId = header.PacketId,
+                            });
                         Log($"  DM from {senderName}: {record.Text}");
+                        // Acknowledge if the sender asked for one (firmware does
+                        // this for any unicast packet addressed to it).
+                        if (header.WantAck) SendAck(header, result);
                     }
                     else
                     {
@@ -1336,6 +1962,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
                     }
                     break;
+                case PortNum.Routing:
+                    // ACK / NAK for one of our sent messages.
+                    HandleRouting(header, result);
+                    break;
                 case PortNum.NodeInfo when result.User is not null:
                     nodeChanged = true;
                     _nodeStore.Upsert(new NodeRecord
@@ -1345,9 +1975,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         LongName = result.User.LongName,
                         ShortName = result.User.ShortName,
                         HwModel = result.User.HwModel.ToString(),
+                        PublicKey = result.User.PublicKey.Length == 32
+                            ? Convert.ToHexString(result.User.PublicKey)
+                            : string.Empty,
                         LastHeardEpoch = rxEpoch,
                     });
-                    Log($"  nodeinfo {header.FromId}: {result.User.LongName} ({result.User.ShortName})");
+                    Log($"  nodeinfo {header.FromId}: {result.User.LongName} ({result.User.ShortName})"
+                        + (result.User.PublicKey.Length == 32 ? " [PKC key]" : string.Empty));
+                    // If they directed a NodeInfo request at us (want_response),
+                    // reply with ours so they learn our public key. Firmware does
+                    // the same — this is how PKC key exchange bootstraps.
+                    if (result.WantResponse && _myNodeNum != 0 &&
+                        header.To == _myNodeNum && !header.IsBroadcast)
+                    {
+                        Log($"  NodeInfo requested by {senderName} — replying");
+                        RequestNodeInfoReply(header.From);
+                    }
                     break;
                 case PortNum.Position when result.Position is not null:
                     nodeChanged = true;
@@ -1424,6 +2067,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         TotalSamples = s.TotalSamples;
 
         if (AgcEnable) StepAgc();
+
+        // Flag any outgoing DMs that never got an ACK within the timeout.
+        SweepPendingAcks();
 
         // Drain any queued demodulator events into the log. Cap per tick so a
         // burst can't lock up the UI thread.

@@ -115,6 +115,24 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_event(mrf_core_t* core,
                                               char* buf,
                                               uint32_t capacity);
 
+// Transmit ----------------------------------------------------------------
+// 1 if the active radio backend can transmit (HackRF only), else 0.
+MRF_API int32_t MRF_CALL mrf_core_can_transmit(const mrf_core_t* core);
+
+// Modulates `payload` (the fully framed/encrypted on-air bytes produced by the
+// managed layer) into a LoRa burst for `preset` and transmits it centered on
+// `center_freq_hz`. HackRF only; if RX is running it is paused for the burst
+// and resumed afterwards. `txvga_gain_db` is the HackRF TX VGA gain (0..47).
+// Blocks until the burst has been streamed. Returns 1 on success, 0 if the
+// device cannot transmit, the payload is empty, or modulation failed.
+MRF_API int32_t MRF_CALL mrf_core_transmit(mrf_core_t* core,
+                                           int32_t preset,
+                                           uint64_t center_freq_hz,
+                                           const uint8_t* payload,
+                                           uint32_t payload_len,
+                                           uint8_t txvga_gain_db,
+                                           int32_t amp_enable);
+
 // Returns the bridge ABI version. Bumped on breaking change.
 MRF_API uint32_t MRF_CALL mrf_abi_version(void);
 

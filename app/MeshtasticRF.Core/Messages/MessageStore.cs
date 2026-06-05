@@ -123,6 +123,64 @@ public sealed class MessageStore : IDisposable
         return list;
     }
 
+    /// <summary>
+    /// The set of peer node numbers we have a direct-message history with (sent
+    /// or received), relative to our own node. Used to restore DM tabs on
+    /// startup so closed/relaunched conversations reappear.
+    /// </summary>
+    public IReadOnlyList<uint> ConversationPeers(uint myNode)
+    {
+        ThrowIfDisposed();
+        var peers = new List<uint>();
+        if (myNode == 0) return peers;
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT peer FROM (
+                SELECT CASE WHEN from_node = $me THEN to_node ELSE from_node END AS peer,
+                       MAX(rx_epoch) AS last
+                FROM messages
+                WHERE portnum = 1
+                  AND to_node != 4294967295
+                  AND (from_node = $me OR to_node = $me)
+                GROUP BY peer
+            )
+            WHERE peer != $me
+            ORDER BY last ASC;
+            """;
+        cmd.Parameters.AddWithValue("$me", myNode);
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read()) peers.Add((uint)rd.GetInt64(0));
+        return peers;
+    }
+
+    /// <summary>
+    /// The full direct-message history with one peer (sent and received),
+    /// oldest first, for rebuilding a conversation tab when it is (re)opened.
+    /// </summary>
+    public IReadOnlyList<MessageRecord> Conversation(uint peerNode, uint myNode, int limit = 5000)
+    {
+        ThrowIfDisposed();
+        var list = new List<MessageRecord>();
+        if (myNode == 0) return list;
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT * FROM (
+                SELECT * FROM messages
+                WHERE portnum = 1
+                  AND ((from_node = $peer AND to_node = $me)
+                    OR (from_node = $me   AND to_node = $peer))
+                ORDER BY rx_epoch DESC, id DESC
+                LIMIT $n
+            ) ORDER BY rx_epoch ASC, id ASC;
+            """;
+        cmd.Parameters.AddWithValue("$peer", peerNode);
+        cmd.Parameters.AddWithValue("$me", myNode);
+        cmd.Parameters.AddWithValue("$n", limit);
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read()) list.Add(Read(rd));
+        return list;
+    }
+
     /// <summary>Delete the broadcast text messages stored for one channel.</summary>
     public void ClearChannel(string channel)
     {

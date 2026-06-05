@@ -10,6 +10,8 @@
 #include <atomic>
 #include <cmath>
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +19,7 @@
 #include <mutex>
 #include <numbers>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace mrf {
@@ -58,6 +61,11 @@ struct Core::Impl {
     double mix_phase{0.0};
     double mix_phase_inc{0.0};
 
+    // Last RX configuration, remembered so a transmit() burst can pause and
+    // then resume the receiver on the same preset/frequency.
+    modem::Preset last_rx_preset{modem::Preset::LongFast};
+    std::uint64_t last_rx_center{915'000'000};
+
     // Optional raw IQ capture of the modem-input (decimated) stream, gated by
     // the MRF_IQ_CAPTURE env var (=output path) or the start_capture() API.
     // Interleaved float32 I/Q (.cf32), capped so we don't fill the disk.
@@ -90,6 +98,10 @@ Core::~Core() { stop(); }
 void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (impl_->running) return;
+
+    // Remember the active RX config so transmit() can resume it after a burst.
+    impl_->last_rx_preset = preset;
+    impl_->last_rx_center = center_freq_hz;
 
     const auto params = modem::params_for(preset);
     impl_->modem = modem::make_modem(params);
@@ -260,6 +272,170 @@ void Core::stop() {
     // The RX callback has now stopped; safe to close any capture.
     stop_capture();
     impl_->running = false;
+}
+
+bool Core::can_transmit() const noexcept {
+    return impl_->radio && impl_->radio->kind() == hal::DeviceKind::HackRf;
+}
+
+bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
+                    std::span<const std::uint8_t> payload,
+                    std::uint8_t txvga_gain_db, bool amp_enable) {
+    if (!impl_->radio || impl_->radio->kind() != hal::DeviceKind::HackRf)
+        return false;
+    if (payload.empty()) return false;
+
+    // 1. Modulate the on-air bytes into a LoRa IQ frame at the modem rate.
+    const auto params = modem::params_for(preset);
+    auto modem = modem::make_modem(params);
+    auto iq = modem->encode(payload);
+    if (iq.empty()) return false;
+
+    const std::uint32_t modem_rate = modem->working_sample_rate_hz();
+    const std::uint32_t dev_rate = std::max(kDeviceRateHz, modem_rate);
+
+    // Pad the modem-rate frame with leading + trailing zeros.
+    //   * Lead-in (~20 ms): hackrf_start_tx primes the USB pipe and the PA/VGA
+    //     bias takes time to settle, so the first samples clocked out of the
+    //     DAC carry a startup transient. Without a lead-in that transient lands
+    //     squarely on the LoRa preamble, corrupting the very symbols a strict
+    //     receiver (e.g. SDRangel, RadioLib) needs to detect/lock the frame —
+    //     the "energy on the waterfall but never decodes" failure. Prepending
+    //     silence burns the transient off into dead air so the preamble is
+    //     clean. (Zeros also flush the resampler's filter warm-up state.)
+    //   * Tail (~5 ms): lets the resampler filter flush so the burst ends
+    //     cleanly (no abrupt cut mid-symbol).
+    const std::size_t modem_lead = modem_rate / 50u;  // ~20 ms of zeros
+    const std::size_t modem_tail = modem_rate / 200u; // ~5 ms of zeros
+    iq.insert(iq.begin(), modem_lead, hal::SampleType{0.0f, 0.0f});
+    iq.insert(iq.end(), modem_tail, hal::SampleType{0.0f, 0.0f});
+
+    // 2. Upsample modem-rate -> device (radio) rate.
+    dsp::Resampler up(modem_rate, dev_rate);
+    auto rs = up.process(std::span<const hal::SampleType>(iq.data(), iq.size()));
+    std::vector<hal::SampleType> tx(rs.begin(), rs.end());
+    if (tx.empty()) return false;
+
+    // 3. Offset-tuning mix. The radio is tuned center_freq + kLoOffsetHz, so to
+    //    emit the signal at center_freq we place it at -kLoOffsetHz in baseband
+    //    by multiplying with exp(-j*2*pi*kLoOffsetHz*n/dev_rate). This is the
+    //    exact inverse of the RX mix-back in start_rx.
+    {
+        const double inc = -2.0 * std::numbers::pi * kLoOffsetHz /
+                           static_cast<double>(dev_rate);
+        double phase = 0.0;
+        for (auto& s : tx) {
+            const float c = static_cast<float>(std::cos(phase));
+            const float sn = static_cast<float>(std::sin(phase));
+            const float xr = s.real();
+            const float xi = s.imag();
+            s = hal::SampleType{xr * c - xi * sn, xr * sn + xi * c};
+            phase += inc;
+            if (phase < -2.0 * std::numbers::pi) phase += 2.0 * std::numbers::pi;
+        }
+    }
+
+    // 4. Normalize to ~0.95 full-scale so the int8 DAC is driven hard (more
+    //    radiated power) while keeping a little headroom against the resampler
+    //    + offset-mix overshoot so the chirp envelope doesn't clip to a square.
+    float max_mag = 0.0f;
+    for (const auto& s : tx)
+        max_mag = std::max(max_mag, std::abs(s));
+    if (max_mag > 0.0f) {
+        const float scale = 0.95f / max_mag;
+        for (auto& s : tx) s *= scale;
+    }
+
+    // 4b. Optional diagnostic: dump the final device-rate TX IQ (post resample,
+    //     offset-mix and normalization — i.e. exactly what is handed to the
+    //     DAC) to a .cf32 file when MRF_TX_CAPTURE is set. The stream is at
+    //     dev_rate with the LoRa channel sitting at -kLoOffsetHz, so it can be
+    //     replayed/analyzed offline (e.g. through scripts/analyze_capture.py or
+    //     our own RX) to verify the transmit chain end-to-end.
+    if (const char* tx_path = std::getenv("MRF_TX_CAPTURE"); tx_path && *tx_path) {
+        if (std::FILE* f = std::fopen(tx_path, "wb")) {
+            // std::complex<float> is stored as interleaved {re, im} floats.
+            std::fwrite(tx.data(), sizeof(hal::SampleType), tx.size(), f);
+            std::fclose(f);
+        }
+    }
+
+    // 5. Pause RX for the half-duplex burst, remembering its config.
+    const bool was_running = is_running();
+    const modem::Preset rx_preset = impl_->last_rx_preset;
+    const std::uint64_t rx_center = impl_->last_rx_center;
+    if (was_running) stop();
+
+    // 6. Stream the buffer once via the HackRF TX callback, blocking until the
+    //    burst has physically clocked out of the DAC.
+    //
+    //    hackrf_start_tx primes ~8 USB transfers (~2 MB) up front, which is far
+    //    larger than a short LoRa frame. If we stop the moment the last real
+    //    sample is *handed to* libhackrf, the DAC has not yet emitted anything
+    //    and nothing reaches the antenna (the app still logs "Sent"). To make
+    //    the RF actually radiate we keep the TX stream alive, feeding zeros
+    //    after the payload, until enough wall-clock time has elapsed for the
+    //    whole burst (plus margin) to be clocked out at dev_rate.
+    {
+        hal::TxConfig cfg{};
+        cfg.center_freq_hz = center_freq_hz + static_cast<std::uint64_t>(kLoOffsetHz);
+        cfg.sample_rate_hz = dev_rate;
+        cfg.txvga_gain_db  = txvga_gain_db;
+        cfg.amp_enable     = amp_enable;
+
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        std::size_t pos = 0;
+
+        // How long the real payload takes to play out at the device rate, plus
+        // a generous margin to cover the USB/DAC pipeline latency and the
+        // amp/VGA settling. We keep keying (sending zeros) until this elapses.
+        const double burst_secs = static_cast<double>(tx.size()) / dev_rate;
+        const auto hold = std::chrono::microseconds(
+            static_cast<long long>((burst_secs + 0.050) * 1e6));
+        const auto t_start = std::chrono::steady_clock::now();
+
+        impl_->radio->start_tx(cfg, [&](hal::SampleType* out, std::size_t cap)
+                                        -> std::size_t {
+            // First, drain the real payload.
+            if (pos < tx.size()) {
+                const std::size_t take = std::min(cap, tx.size() - pos);
+                std::memcpy(out, tx.data() + pos, take * sizeof(hal::SampleType));
+                pos += take;
+                // Zero-fill any remainder of this buffer.
+                for (std::size_t i = take; i < cap; ++i)
+                    out[i] = hal::SampleType{0.0f, 0.0f};
+                return cap;
+            }
+
+            // Payload sent; keep keying with zeros until the hold elapses so the
+            // DAC finishes emitting the burst before we cut the carrier.
+            if (std::chrono::steady_clock::now() - t_start < hold) {
+                for (std::size_t i = 0; i < cap; ++i)
+                    out[i] = hal::SampleType{0.0f, 0.0f};
+                return cap;
+            }
+
+            {
+                std::lock_guard<std::mutex> l(m);
+                done = true;
+            }
+            cv.notify_all();
+            return 0; // ends the TX stream
+        });
+
+        {
+            std::unique_lock<std::mutex> l(m);
+            // Bound the wait so a stalled USB callback can't hang the UI thread.
+            cv.wait_for(l, std::chrono::seconds(2), [&] { return done; });
+        }
+        impl_->radio->stop_tx();
+    }
+
+    // 7. Resume RX if it was running before the burst.
+    if (was_running) start_rx(rx_preset, rx_center);
+    return true;
 }
 
 bool Core::start_capture(const char* path) {
@@ -528,6 +704,12 @@ bool Core::set_device(hal::DeviceKind kind) {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (impl_->running) return false;
     impl_->requested_kind = kind;
+    // Release the current device BEFORE opening the new one. Otherwise the old
+    // HackRF still holds its USB handle while open_device() calls hackrf_open()
+    // for the new selection, so the second open hits the already-claimed device
+    // and fails with rc=-5 (HACKRF_ERROR_NOT_FOUND). Closing first guarantees a
+    // clean re-open even when re-selecting the same HackRF.
+    impl_->radio.reset();
     impl_->radio = hal::open_device(kind);
     impl_->device_name = impl_->radio ? impl_->radio->info().board_name : "(none)";
     return true;

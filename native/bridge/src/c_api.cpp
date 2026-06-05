@@ -163,6 +163,29 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_event(mrf_core_t* core,
         core->core.pull_event(std::span<char>(buf, capacity)));
 }
 
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 5u; }
+MRF_API int32_t MRF_CALL mrf_core_can_transmit(const mrf_core_t* core) {
+    return (core && core->core.can_transmit()) ? 1 : 0;
+}
+
+MRF_API int32_t MRF_CALL mrf_core_transmit(mrf_core_t* core,
+                                           int32_t preset,
+                                           uint64_t center_freq_hz,
+                                           const uint8_t* payload,
+                                           uint32_t payload_len,
+                                           uint8_t txvga_gain_db,
+                                           int32_t amp_enable) {
+    if (!core || !payload || payload_len == 0) return 0;
+    try {
+        const bool ok = core->core.transmit(
+            static_cast<mrf::modem::Preset>(preset), center_freq_hz,
+            std::span<const std::uint8_t>(payload, payload_len),
+            txvga_gain_db, amp_enable != 0);
+        return ok ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 6u; }
 
 } // extern "C"

@@ -46,6 +46,10 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     /// <summary>Direct messages exchanged with this peer, newest last.</summary>
     public ObservableCollection<ChannelMessage> Messages { get; } = new();
 
+    /// <summary>Text typed into this conversation's compose box.</summary>
+    [ObservableProperty]
+    private string _composeText = string.Empty;
+
     public string TabHeader =>
         string.IsNullOrEmpty(PeerName) ? PeerId : PeerName;
 

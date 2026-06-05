@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 
 namespace MeshtasticRF.Mesh;
@@ -80,5 +81,110 @@ public static class MeshCrypto
         {
             if (++counter[i] != 0) break; // no carry
         }
+    }
+
+    // -- PKC (public-key crypto) direct messages -----------------------------
+    //
+    // Modern Meshtastic firmware (2.5+) encrypts direct messages with PKC
+    // instead of the channel PSK: an X25519 ECDH shared secret is hashed with
+    // SHA-256 to form an AES-256 key, then the payload is sealed with AES-CCM
+    // (13-byte nonce, 8-byte auth tag). Mirrors firmware
+    // CryptoEngine::encryptCurve25519 / decryptCurve25519.
+
+    /// <summary>Bytes added to the plaintext by a PKC seal: 8-byte auth tag +
+    /// 4-byte extra nonce (firmware <c>MESHTASTIC_PKC_OVERHEAD</c>).</summary>
+    public const int PkcOverhead = 12;
+
+    private const int PkcNonceLen = 13;
+    private const int PkcTagLen = 8;
+
+    /// <summary>
+    /// PKC-encrypt <paramref name="plain"/> for a peer. Returns
+    /// <c>ciphertext || 8-byte tag || 4-byte extraNonce(LE)</c>
+    /// (<paramref name="plain"/>.Length + 12 bytes). The AES-256 key is
+    /// <c>SHA256(X25519(myPrivateKey, peerPublicKey))</c>.
+    /// </summary>
+    public static byte[] PkcEncrypt(ReadOnlySpan<byte> plain, byte[] myPrivateKey,
+                                    byte[] peerPublicKey, uint fromNode, uint packetId)
+    {
+        byte[] key = DeriveSharedKey(myPrivateKey, peerPublicKey);
+
+        // 32-bit random extra nonce, exactly as the firmware (random()).
+        uint extraNonce = unchecked((uint)RandomNumberGenerator.GetInt32(int.MinValue, int.MaxValue));
+
+        Span<byte> nonce = stackalloc byte[PkcNonceLen];
+        BuildNonce(nonce, fromNode, packetId, extraNonce);
+
+        var output = new byte[plain.Length + PkcOverhead];
+        Span<byte> tag = stackalloc byte[PkcTagLen];
+        using (var ccm = new AesCcm(key))
+            ccm.Encrypt(nonce, plain, output.AsSpan(0, plain.Length), tag);
+
+        tag.CopyTo(output.AsSpan(plain.Length, PkcTagLen));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            output.AsSpan(plain.Length + PkcTagLen, 4), extraNonce);
+        CryptographicOperations.ZeroMemory(key);
+        return output;
+    }
+
+    /// <summary>
+    /// PKC-decrypt a sealed buffer (<c>ciphertext || 8-byte tag || 4-byte
+    /// extraNonce(LE)</c>). Returns the plaintext, or null if the authentication
+    /// tag does not verify (wrong key pair / corrupt frame).
+    /// </summary>
+    public static byte[]? PkcDecrypt(ReadOnlySpan<byte> data, byte[] myPrivateKey,
+                                     byte[] peerPublicKey, uint fromNode, uint packetId)
+    {
+        if (data.Length <= PkcOverhead) return null;
+        int ctLen = data.Length - PkcOverhead;
+
+        byte[] key = DeriveSharedKey(myPrivateKey, peerPublicKey);
+
+        uint extraNonce = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(data.Length - 4, 4));
+        var tag = data.Slice(ctLen, PkcTagLen);
+        var cipher = data.Slice(0, ctLen);
+
+        Span<byte> nonce = stackalloc byte[PkcNonceLen];
+        BuildNonce(nonce, fromNode, packetId, extraNonce);
+
+        var plain = new byte[ctLen];
+        try
+        {
+            using var ccm = new AesCcm(key);
+            ccm.Decrypt(nonce, cipher, tag, plain);
+        }
+        catch (AuthenticationTagMismatchException)
+        {
+            return null;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+        return plain;
+    }
+
+    // shared AES key = SHA256(X25519(ourPriv, theirPub)) — firmware setDHPublicKey + hash().
+    private static byte[] DeriveSharedKey(byte[] myPrivateKey, byte[] peerPublicKey)
+    {
+        var secret = Curve25519.SharedSecret(myPrivateKey, peerPublicKey);
+        var key = SHA256.HashData(secret);
+        CryptographicOperations.ZeroMemory(secret);
+        return key;
+    }
+
+    // 13-byte AES-CCM nonce, byte-for-byte as firmware CryptoEngine::initNonce:
+    //   [0..3]  packetId  (32-bit, little-endian)
+    //   [4..7]  extraNonce(32-bit, little-endian) — overwrites the high half of
+    //           the 64-bit packetId, which is always zero for a 32-bit id
+    //   [8..11] fromNode  (32-bit, little-endian)
+    //   [12]    0
+    private static void BuildNonce(Span<byte> nonce, uint fromNode, uint packetId, uint extraNonce)
+    {
+        nonce.Clear();
+        BinaryPrimitives.WriteUInt32LittleEndian(nonce.Slice(0, 4), packetId);
+        BinaryPrimitives.WriteUInt32LittleEndian(nonce.Slice(4, 4), extraNonce);
+        BinaryPrimitives.WriteUInt32LittleEndian(nonce.Slice(8, 4), fromNode);
+        // nonce[12] stays 0
     }
 }

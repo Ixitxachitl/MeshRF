@@ -386,6 +386,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID"
@@ -469,6 +470,21 @@
                                              ToolTip="Longitude in degrees (-180..180)"
                                              Text="{Binding HomeLongitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </Grid>
+
+                                <TextBlock Grid.Row="9" Grid.Column="0" Text="Hop limit"
+                                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                                <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,4,0,4">
+                                    <TextBlock DockPanel.Dock="Right" Width="20"
+                                               Margin="6,0,0,0" VerticalAlignment="Center"
+                                               TextAlignment="Center"
+                                               Text="{Binding HopLimit}" />
+                                    <Slider Minimum="1" Maximum="7"
+                                            TickFrequency="1" TickPlacement="BottomRight"
+                                            IsSnapToTickEnabled="True"
+                                            VerticalAlignment="Center"
+                                            Value="{Binding HopLimit, Mode=TwoWay}"
+                                            ToolTip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
+                                </DockPanel>
                             </Grid>
                         </Border>
                     </Expander>
@@ -502,11 +518,24 @@
                             </ContextMenu>
                         </DataGrid.ContextMenu>
                         <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="" Width="Auto"
+                                                    SortMemberPath="HasPublicKey"
+                                                    CanUserResize="False">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="&#xE192;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12"
+                                                   HorizontalAlignment="Center"
+                                                   ToolTip="Has encryption key (PKC direct messages enabled)"
+                                                   Visibility="{Binding HasPublicKey, Converter={StaticResource BoolToVis}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Short" Width="Auto"
                                                 SortMemberPath="ShortName"
                                                 Binding="{Binding ShortName}"
-                                                FontFamily="Consolas" />
-                            <DataGridTextColumn Header="Node name" Width="*"
+                                                FontFamily="Consolas" />                            <DataGridTextColumn Header="Node name" Width="*"
                                                 SortMemberPath="LongName"
                                                 Binding="{Binding LongName}" />
                             <DataGridTextColumn Header="Node ID" Width="Auto"
@@ -685,6 +714,33 @@
                                                     Command="{Binding CopyMessagesCommand}" />
                                             <TextBlock Text="Messages" FontWeight="SemiBold" VerticalAlignment="Center" />
                                         </DockPanel>
+                                        <!-- Compose bar: visible only when the active device can transmit (HackRF). -->
+                                        <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0" LastChildFill="True"
+                                                   Visibility="{Binding DataContext.CanTransmit,
+                                                                RelativeSource={RelativeSource AncestorType=TabControl},
+                                                                Converter={StaticResource BoolToVis}}">
+                                            <Button DockPanel.Dock="Right" Content="Send" Padding="14,4"
+                                                    Margin="4,0,0,0"
+                                                    ToolTip="Encode and transmit a text message on this channel"
+                                                    Command="{Binding DataContext.SendMessageCommand,
+                                                              RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                            <Button DockPanel.Dock="Right" Content="Node info" Padding="14,4"
+                                                    Margin="4,0,0,0"
+                                                    ToolTip="Broadcast your node info (id / name / role) on the primary channel"
+                                                    Command="{Binding DataContext.SendNodeInfoCommand,
+                                                              RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                            <TextBox VerticalContentAlignment="Center"
+                                                     ToolTip="Type a message and press Enter or Send (HackRF only)"
+                                                     Text="{Binding DataContext.ComposeText,
+                                                            RelativeSource={RelativeSource AncestorType=TabControl},
+                                                            Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Enter"
+                                                                Command="{Binding DataContext.SendMessageCommand,
+                                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+                                        </DockPanel>
                                         <ListBox ItemsSource="{Binding Messages}"
                                                  FontFamily="Consolas"
                                                  beh:AutoScroll.IsEnabled="True">
@@ -725,10 +781,28 @@
                                             </StackPanel>
                                         </DockPanel>
                                     </Border>
-                                    <TextBlock DockPanel.Dock="Bottom"
-                                               Foreground="{DynamicResource BrushSubtle}"
-                                               FontSize="11" Margin="2,4,0,0"
-                                               Text="Receive-only: direct messages addressed to your node." />
+                                    <!-- Compose bar: send a direct message to this peer. Shown on
+                                         any device; transmit only succeeds on a TX-capable radio.
+                                         DMs require sharing the channel key with the peer. -->
+                                    <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0" LastChildFill="True">
+                                        <Button DockPanel.Dock="Right" Content="Send" Padding="14,4"
+                                                Margin="4,0,0,0"
+                                                ToolTip="Encode and transmit a direct message to this node"
+                                                Command="{Binding DataContext.SendDirectMessageCommand,
+                                                          RelativeSource={RelativeSource AncestorType=TabControl}}"
+                                                CommandParameter="{Binding}" />
+                                        <TextBox VerticalContentAlignment="Center"
+                                                 ToolTip="Type a direct message and press Enter or Send"
+                                                 Text="{Binding ComposeText,
+                                                        Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                            <TextBox.InputBindings>
+                                                <KeyBinding Key="Enter"
+                                                            Command="{Binding DataContext.SendDirectMessageCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=TabControl}}"
+                                                            CommandParameter="{Binding}" />
+                                            </TextBox.InputBindings>
+                                        </TextBox>
+                                    </DockPanel>
                                     <!-- Messages (left) + resizable telemetry panel (right). -->
                                     <Grid>
                                         <Grid.ColumnDefinitions>

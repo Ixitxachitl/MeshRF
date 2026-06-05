@@ -36,6 +36,21 @@ public:
     void start_rx(modem::Preset preset, std::uint64_t center_freq_hz);
     void stop();
 
+    // Transmit a single Meshtastic frame. `payload` is the on-air byte stream
+    // (16-byte L1 header + encrypted Data payload) produced by the managed
+    // MeshEncoder; this modulates it into a full LoRa frame (preamble + sync +
+    // SFD + FEC + chirps), upsamples to the radio rate, offset-mixes, and keys
+    // the transmitter. TX is HackRF-only (half-duplex): if RX is currently
+    // running it is paused for the burst and resumed afterward. Blocks until
+    // the burst has been streamed. Returns false if the active device cannot
+    // transmit (not a HackRF) or the payload is empty/invalid.
+    bool transmit(modem::Preset preset, std::uint64_t center_freq_hz,
+                  std::span<const std::uint8_t> payload,
+                  std::uint8_t txvga_gain_db = 30, bool amp_enable = false);
+
+    // True if the active radio backend can transmit (HackRF only).
+    [[nodiscard]] bool can_transmit() const noexcept;
+
     // Select the radio backend used for the next start_rx. Reopens the device
     // immediately (so device_name()/device_status() reflect the choice) when
     // RX is not running. Returns false if RX is currently running (the caller

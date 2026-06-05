@@ -41,6 +41,15 @@ public sealed class NodeRecord
     public float?  GasResistanceMohm     { get; set; }
     public int?    Iaq                   { get; set; }
 
+    /// <summary>Peer's 32-byte X25519 public key (from NODEINFO field 8),
+    /// hex-encoded; empty if not yet learned. Enables PKC direct messages.</summary>
+    public string PublicKey { get; set; } = string.Empty;
+
+    /// <summary>True once we hold a valid 32-byte X25519 public key for this
+    /// node, meaning encrypted (PKC) direct messages are possible.</summary>
+    public bool HasPublicKey =>
+        !string.IsNullOrEmpty(PublicKey) && PublicKey.Length == 64;
+
     public DateTime LastHeard =>
         LastHeardEpoch == 0 ? DateTime.MinValue
             : DateTimeOffset.FromUnixTimeSeconds(LastHeardEpoch).LocalDateTime;

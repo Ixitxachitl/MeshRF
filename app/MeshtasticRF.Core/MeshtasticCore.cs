@@ -148,6 +148,36 @@ public sealed class MeshtasticCore : IDisposable
         NativeMethods.CoreStop(_handle);
     }
 
+    /// <summary>
+    /// True if the active radio backend can transmit (HackRF only).
+    /// </summary>
+    public bool CanTransmit =>
+        !_disposed && _handle != 0 && NativeMethods.CoreCanTransmit(_handle) != 0;
+
+    /// <summary>
+    /// Transmit a LoRa burst carrying <paramref name="payload"/> (the fully
+    /// framed/encrypted on-air bytes from <c>MeshEncoder</c>) for the given
+    /// <paramref name="preset"/>, centered on <paramref name="centerFreqHz"/>.
+    /// HackRF only; if RX is running it is paused for the burst and resumed
+    /// afterwards. Blocks until the burst has been streamed. Returns true on
+    /// success, false if the device cannot transmit or modulation failed.
+    /// </summary>
+    public bool Transmit(LoraPreset preset, ulong centerFreqHz,
+                         ReadOnlySpan<byte> payload,
+                         byte txvgaGainDb = 30, bool ampEnable = false)
+    {
+        ThrowIfDisposed();
+        if (payload.IsEmpty) return false;
+        unsafe
+        {
+            fixed (byte* p = payload)
+            {
+                return NativeMethods.CoreTransmit(_handle, (int)preset, centerFreqHz,
+                    p, (uint)payload.Length, txvgaGainDb, ampEnable ? 1 : 0) != 0;
+            }
+        }
+    }
+
     /// <summary>True while an IQ capture is in progress.</summary>
     public bool IsCapturing =>
         !_disposed && _handle != 0 && NativeMethods.CoreIsCapturing(_handle) != 0;

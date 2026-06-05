@@ -23,6 +23,18 @@ public sealed class MeshDecodeResult
     /// <summary>Parsed Telemetry (TELEMETRY_APP); null otherwise.</summary>
     public MeshTelemetry? Telemetry { get; init; }
 
+    /// <summary>Data.want_response (field 3): the sender wants a reply (e.g. a
+    /// directed NodeInfo request asking us to send ours back).</summary>
+    public bool WantResponse { get; init; }
+
+    /// <summary>Data.request_id (field 6): the packet id this message responds
+    /// to. For a ROUTING ack/nak it identifies the original packet.</summary>
+    public uint RequestId { get; init; }
+
+    /// <summary>For a ROUTING_APP packet, the Routing.error_reason value: 0 = ACK
+    /// (NONE), non-zero = NAK reason. -1 when this isn't a routing packet.</summary>
+    public int RoutingError { get; init; } = -1;
+
     /// <summary>Raw decrypted application payload (the Data.payload bytes).</summary>
     public byte[] AppPayload { get; init; } = Array.Empty<byte>();
 }
@@ -34,6 +46,9 @@ public sealed class MeshUser
     public string LongName { get; init; } = string.Empty;
     public string ShortName { get; init; } = string.Empty;
     public int HwModel { get; init; }
+
+    /// <summary>32-byte X25519 public key (field 8), empty if not advertised.</summary>
+    public byte[] PublicKey { get; init; } = Array.Empty<byte>();
 }
 
 /// <summary>Subset of the Meshtastic <c>Position</c> protobuf.</summary>
@@ -108,10 +123,11 @@ public static class MeshDecoder
             try { plain = MeshCrypto.Ctr(cipher, key, header.From, header.PacketId); }
             catch { continue; }
 
-            if (TryParseData(plain, out var port, out var appPayload) &&
+            if (TryParseData(plain, out var port, out var appPayload,
+                             out var wantResp, out var reqId) &&
                 IsPlausible(port, appPayload))
             {
-                return Build(header, ch.Name, port, appPayload);
+                return Build(header, ch.Name, port, appPayload, wantResp, reqId);
             }
         }
         return null;
@@ -139,7 +155,7 @@ public static class MeshDecoder
             try { plain = MeshCrypto.Ctr(cipher, key, header.From, header.PacketId); }
             catch { continue; }
 
-            if (TryParseData(plain, out var port, out var appPayload) &&
+            if (TryParseData(plain, out var port, out var appPayload, out _, out _) &&
                 IsPlausible(port, appPayload))
             {
                 return index;
@@ -148,11 +164,54 @@ public static class MeshDecoder
         return null;
     }
 
-    // -- Data protobuf: field 1 = portnum (varint), field 2 = payload (bytes) --
-    private static bool TryParseData(byte[] data, out PortNum port, out byte[] payload)
+    /// <summary>
+    /// Attempt a PKC (public-key) decrypt of a direct message addressed to us.
+    /// Modern Meshtastic firmware seals DMs with X25519 + AES-CCM instead of the
+    /// channel PSK; such frames carry a channel-hash byte of 0x00. Returns null
+    /// if the frame isn't a verifiable PKC packet for this key pair.
+    /// </summary>
+    /// <param name="frame">Raw on-air frame (16-byte header + sealed payload).</param>
+    /// <param name="myPrivateKey">Our 32-byte X25519 private key.</param>
+    /// <param name="senderPublicKey">The sender's 32-byte X25519 public key.</param>
+    public static MeshDecodeResult? DecodePkc(ReadOnlySpan<byte> frame,
+                                              byte[] myPrivateKey,
+                                              byte[] senderPublicKey)
+    {
+        if (myPrivateKey is null || myPrivateKey.Length != 32) return null;
+        if (senderPublicKey is null || senderPublicKey.Length != 32) return null;
+        if (!MeshHeader.TryParse(frame, out var header)) return null;
+        if (frame.Length <= MeshHeader.Size + MeshCrypto.PkcOverhead) return null;
+
+        var sealedPayload = frame.Slice(MeshHeader.Size).ToArray();
+
+        byte[]? plain;
+        try
+        {
+            plain = MeshCrypto.PkcDecrypt(sealedPayload, myPrivateKey, senderPublicKey,
+                                          header.From, header.PacketId);
+        }
+        catch { return null; }
+
+        if (plain is null) return null; // auth tag mismatch
+
+        if (TryParseData(plain, out var port, out var appPayload,
+                         out var wantResp, out var reqId) &&
+            IsPlausible(port, appPayload))
+        {
+            return Build(header, "PKC", port, appPayload, wantResp, reqId);
+        }
+        return null;
+    }
+
+    // -- Data protobuf: 1 = portnum (varint), 2 = payload (bytes),
+    //    3 = want_response (varint bool), 6 = request_id (fixed32) --
+    private static bool TryParseData(byte[] data, out PortNum port, out byte[] payload,
+                                     out bool wantResponse, out uint requestId)
     {
         port = PortNum.Unknown;
         payload = Array.Empty<byte>();
+        wantResponse = false;
+        requestId = 0;
         var rdr = new ProtoReader(data);
         bool sawPort = false;
         while (rdr.TryReadTag(out int field, out var wt))
@@ -165,6 +224,12 @@ public static class MeshDecoder
                     break;
                 case 2 when wt == ProtoReader.WireType.Len:
                     payload = rdr.ReadLengthDelimited().ToArray();
+                    break;
+                case 3 when wt == ProtoReader.WireType.Varint:
+                    wantResponse = rdr.ReadVarint() != 0;
+                    break;
+                case 6 when wt == ProtoReader.WireType.I32:
+                    requestId = rdr.ReadFixed32();
                     break;
                 default:
                     rdr.SkipField(wt);
@@ -185,12 +250,14 @@ public static class MeshDecoder
     }
 
     private static MeshDecodeResult Build(MeshHeader header, string channel,
-                                          PortNum port, byte[] payload)
+                                          PortNum port, byte[] payload,
+                                          bool wantResponse = false, uint requestId = 0)
     {
         string? text = null;
         MeshUser? user = null;
         MeshPosition? pos = null;
         MeshTelemetry? telem = null;
+        int routingError = -1;
 
         switch (port)
         {
@@ -206,6 +273,9 @@ public static class MeshDecoder
             case PortNum.Telemetry:
                 telem = ParseTelemetry(payload);
                 break;
+            case PortNum.Routing:
+                routingError = ParseRoutingError(payload);
+                break;
         }
 
         return new MeshDecodeResult
@@ -217,15 +287,37 @@ public static class MeshDecoder
             User = user,
             Position = pos,
             Telemetry = telem,
+            WantResponse = wantResponse,
+            RequestId = requestId,
+            RoutingError = routingError,
             AppPayload = payload,
         };
     }
 
+    // Routing: oneof variant { ... error_reason = 3 (varint) }. 0 = NONE (ACK),
+    // non-zero = NAK reason. Returns 0 when no error_reason is present (an ACK
+    // can serialise as an empty Routing message).
+    private static int ParseRoutingError(byte[] data)
+    {
+        var rdr = new ProtoReader(data);
+        int err = 0;
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            if (field == 3 && wt == ProtoReader.WireType.Varint)
+                err = (int)rdr.ReadVarint();
+            else
+                rdr.SkipField(wt);
+        }
+        return err;
+    }
+
     // User: 1=id(string) 2=long_name(string) 3=short_name(string) 5=hw_model(varint)
+    //       8=public_key(bytes)
     private static MeshUser ParseUser(byte[] data)
     {
         string id = "", ln = "", sn = "";
         int hw = 0;
+        byte[] pub = Array.Empty<byte>();
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
         {
@@ -235,10 +327,11 @@ public static class MeshDecoder
                 case 2 when wt == ProtoReader.WireType.Len: ln = rdr.ReadString(); break;
                 case 3 when wt == ProtoReader.WireType.Len: sn = rdr.ReadString(); break;
                 case 5 when wt == ProtoReader.WireType.Varint: hw = (int)rdr.ReadVarint(); break;
+                case 8 when wt == ProtoReader.WireType.Len: pub = rdr.ReadLengthDelimited().ToArray(); break;
                 default: rdr.SkipField(wt); break;
             }
         }
-        return new MeshUser { Id = id, LongName = ln, ShortName = sn, HwModel = hw };
+        return new MeshUser { Id = id, LongName = ln, ShortName = sn, HwModel = hw, PublicKey = pub };
     }
 
     // Position: 1=latitude_i(sfixed32) 2=longitude_i(sfixed32) 3=altitude(varint)

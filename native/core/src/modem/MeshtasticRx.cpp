@@ -710,19 +710,24 @@ void MeshtasticRx::decode_payload_() {
             out.raw_bytes[i] = raw_bytes[i];
         }
 
-        if (out.length > 0) {
-            dewhiten_payload_bytes(std::span<std::uint8_t>(raw_bytes.data(), out.length));
+        // Dewhiten the data bytes *and* the trailing 2-byte CRC: the TX (and
+        // SDRangel) whiten the entire stream, CRC included.
+        std::size_t dewhiten_len = out.length;
+        if (out.has_crc && raw_bytes.size() >= out.length + 2)
+            dewhiten_len = out.length + 2;
+        if (dewhiten_len > 0) {
+            dewhiten_payload_bytes(
+                std::span<std::uint8_t>(raw_bytes.data(), dewhiten_len));
         }
         for (std::size_t i = 0; i < out.length && i < sizeof(out.bytes); ++i) {
             out.bytes[i] = raw_bytes[i];
         }
 
         if (out.has_crc && out.length >= 2 && raw_bytes.size() >= out.length + 2) {
-            std::uint16_t crc = crc16gr(
-                std::span<const std::uint8_t>(raw_bytes.data(), out.length - 2));
-            crc = static_cast<std::uint16_t>(crc ^ raw_bytes[out.length - 1]);
-            crc = static_cast<std::uint16_t>(
-                crc ^ (static_cast<std::uint16_t>(raw_bytes[out.length - 2]) << 8));
+            // SDRangel `sx1272DataChecksum` over the `length` data bytes; the
+            // computed value is appended little-endian as the trailing 2 bytes.
+            const std::uint16_t crc = sx1272_data_checksum(
+                std::span<const std::uint8_t>(raw_bytes.data(), out.length));
             out.crc_received = static_cast<std::uint16_t>(
                 raw_bytes[out.length] |
                 (static_cast<std::uint16_t>(raw_bytes[out.length + 1]) << 8));

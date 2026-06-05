@@ -43,6 +43,35 @@ public static class Curve25519
         return ScalarMult(clamped, BasePoint);
     }
 
+    /// <summary>
+    /// Compute the raw X25519 shared secret between our <paramref name="privateKey"/>
+    /// and a peer's <paramref name="peerPublicKey"/> (both 32 bytes) — the
+    /// <c>Curve25519::dh2</c> step the Meshtastic firmware performs. The caller
+    /// must still hash the result (firmware uses SHA-256) before using it as an
+    /// AES key. Throws if the result is the all-zero weak point.
+    /// </summary>
+    public static byte[] SharedSecret(byte[] privateKey, byte[] peerPublicKey)
+    {
+        if (privateKey is null || privateKey.Length != 32)
+            throw new ArgumentException("X25519 private key must be 32 bytes.", nameof(privateKey));
+        if (peerPublicKey is null || peerPublicKey.Length != 32)
+            throw new ArgumentException("X25519 public key must be 32 bytes.", nameof(peerPublicKey));
+
+        var clamped = (byte[])privateKey.Clone();
+        Clamp(clamped);
+        var secret = ScalarMult(clamped, peerPublicKey);
+
+        // Weak-key check: an all-zero shared secret means a low-order public key
+        // was supplied. The firmware (Curve25519::dh2) rejects this too.
+        bool allZero = true;
+        foreach (var b in secret)
+            if (b != 0) { allZero = false; break; }
+        if (allZero)
+            throw new CryptographicException("X25519 produced a weak (all-zero) shared secret.");
+
+        return secret;
+    }
+
     private static void Clamp(byte[] k)
     {
         k[0] &= 248;

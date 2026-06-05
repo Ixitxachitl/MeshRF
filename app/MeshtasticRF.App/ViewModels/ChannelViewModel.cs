@@ -135,7 +135,7 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     }
 }
 
-public sealed class ChannelMessage
+public partial class ChannelMessage : ObservableObject
 {
     public DateTime Timestamp { get; init; } = DateTime.Now;
     public string FromId  { get; init; } = string.Empty;
@@ -143,6 +143,36 @@ public sealed class ChannelMessage
     public float? RssiDbm { get; init; }
     public float? SnrDb   { get; init; }
 
+    /// <summary>Packet id of this message (for matching ACKs). 0 = unknown.</summary>
+    public uint PacketId { get; init; }
+
+    /// <summary>True for messages we transmitted (so delivery status applies).</summary>
+    public bool IsOutgoing { get; init; }
+
+    /// <summary>Delivery state for outgoing messages, updated when an ACK/NAK
+    /// arrives. Always <see cref="MessageDelivery.None"/> for received messages.</summary>
+    [ObservableProperty]
+    private MessageDelivery _delivery = MessageDelivery.None;
+
+    partial void OnDeliveryChanged(MessageDelivery value) => OnPropertyChanged(nameof(Display));
+
+    private string DeliverySuffix => Delivery switch
+    {
+        MessageDelivery.Sent      => "  \u00B7 sent",
+        MessageDelivery.Delivered => "  \u00B7 delivered",
+        MessageDelivery.Failed    => "  \u00B7 no ack",
+        _ => string.Empty,
+    };
+
     public string Display =>
-        $"[{Timestamp:HH:mm:ss}] {FromId,-12}  {Text}";
+        $"[{Timestamp:HH:mm:ss}] {FromId,-12}  {Text}{DeliverySuffix}";
+}
+
+/// <summary>Delivery state of an outgoing message based on Meshtastic ACKs.</summary>
+public enum MessageDelivery
+{
+    None,
+    Sent,
+    Delivered,
+    Failed,
 }

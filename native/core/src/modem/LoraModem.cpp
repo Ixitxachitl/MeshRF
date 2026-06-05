@@ -6,6 +6,8 @@
 
 #include "mrf/modem/LoraModem.h"
 #include "mrf/modem/MeshtasticRx.h"
+#include "mrf/modem/LoraEncoder.h"
+#include "mrf/modem/ChirpChatTx.h"
 
 #include <cstdio>
 #include <cstring>
@@ -166,9 +168,30 @@ public:
         rx_.process(samples);
     }
 
-    std::vector<Sample> encode(std::span<const std::uint8_t>) const override {
-        // TODO: chirp modulator + Hamming + interleaver + whitening.
-        return {};
+    std::vector<Sample> encode(std::span<const std::uint8_t> payload) const override {
+        // Modulate the on-air bytes (16-byte L1 header + encrypted payload)
+        // into a complete IQ frame at the modem's working sample rate. The
+        // PHY chain (CRC, whitening, Hamming, interleave, Gray) is the exact
+        // inverse of the receiver in MeshtasticRx; the chirp synthesis in
+        // ChirpChatTx matches what the RX demodulates.
+        if (payload.empty()) return {};
+
+        // Low-data-rate optimize: enabled when one symbol is >= 16 ms, the
+        // same rule MeshtasticRx applies on decode.
+        const double t_sym_ms =
+            1000.0 * static_cast<double>(1u << params_.spreading_factor) /
+            static_cast<double>(params_.bandwidth_hz);
+        const bool ldro = params_.low_data_rate_optimize || (t_sym_ms >= 16.0);
+        const std::uint8_t cr = static_cast<std::uint8_t>(params_.coding_rate - 4); // 4/5..4/8 -> 1..4
+
+        const auto symbols = lora::encode_frame_symbols(
+            payload, params_.spreading_factor, cr, params_.crc_enabled, ldro);
+
+        ChirpChatTx tx(params_.spreading_factor, params_.bandwidth_hz,
+                       static_cast<int>(kOversampling), params_.sync_word,
+                       params_.preamble_symbols);
+        return tx.modulate(
+            std::span<const std::uint16_t>(symbols.data(), symbols.size()));
     }
 
     void set_frame_callback(FrameCallback cb) override { frame_cb_ = std::move(cb); }

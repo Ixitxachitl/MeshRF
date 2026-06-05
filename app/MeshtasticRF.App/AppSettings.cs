@@ -61,6 +61,10 @@ public sealed class AppSettings
     /// <c>Config.DeviceConfig.RebroadcastMode</c>).</summary>
     public string RebroadcastMode { get; set; } = "ALL";
 
+    /// <summary>Default hop limit for transmitted packets (firmware
+    /// <c>Config.LoRaConfig.hop_limit</c>, 1..7). Meshtastic default is 3.</summary>
+    public int HopLimit { get; set; } = 3;
+
     /// <summary>Base64 X25519 public key for PKI direct messages (TX).</summary>
     public string UserPublicKey  { get; set; } = string.Empty;
 

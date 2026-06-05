@@ -56,9 +56,16 @@ def resample_to_modem(iq, src_rate):
         return filt[::down].astype(np.complex64)
 
 
-def load(path, src_rate=SRC_RATE_DEFAULT):
+def load(path, src_rate=SRC_RATE_DEFAULT, freq_offset_hz=0.0):
     raw = np.fromfile(path, dtype=np.float32)
     iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
+    if freq_offset_hz:
+        # Mix the channel back to DC before resampling. The native TX capture
+        # (MRF_TX_CAPTURE) sits at -kLoOffsetHz (=-500 kHz); pass +500000 to
+        # recenter it. The shift happens at the source rate.
+        n = np.arange(len(iq), dtype=np.float64)
+        osc = np.exp(1j * 2.0 * np.pi * (freq_offset_hz / src_rate) * n)
+        iq = (iq * osc).astype(np.complex64)
     if src_rate != FS:
         print(f"Resampling {len(iq)} samples {src_rate/1e6:.3f} MHz -> "
               f"{FS/1e6:.1f} MHz ...")
@@ -129,10 +136,11 @@ def find_preamble_runs(bins, peaks, min_run=6, tol=1):
 
 def main():
     if len(sys.argv) < 2:
-        print("usage: analyze_capture.py <capture.cf32> [src_rate_hz]")
+        print("usage: analyze_capture.py <capture.cf32> [src_rate_hz] [freq_offset_hz]")
         return
     src_rate = int(sys.argv[2]) if len(sys.argv) > 2 else SRC_RATE_DEFAULT
-    iq = load(sys.argv[1], src_rate)
+    freq_offset = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
+    iq = load(sys.argv[1], src_rate, freq_offset)
     print(f"Loaded {len(iq)} samples = {len(iq)/FS:.2f}s @ {FS/1e6:.1f} MHz")
     power = 20 * np.log10(np.abs(iq) + 1e-12)
     print(f"Power: mean {np.mean(power):.1f} dBFS, max {np.max(power):.1f} dBFS")
