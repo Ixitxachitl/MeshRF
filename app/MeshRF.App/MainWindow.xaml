@@ -763,18 +763,18 @@
                                         <ListBox ItemsSource="{Binding Messages}"
                                                  FontFamily="Consolas"
                                                  HorizontalContentAlignment="Stretch"
+                                                 Grid.IsSharedSizeScope="True"
                                                  beh:AutoScroll.IsEnabled="True">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto" />
-                                                            <ColumnDefinition Width="110" />
+                                                            <ColumnDefinition Width="Auto" SharedSizeGroup="NodeName" />
                                                             <ColumnDefinition Width="*" />
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
                                                         <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
-                                                                   TextTrimming="CharacterEllipsis"
                                                                    ToolTip="{Binding FromId}" />
                                                         <TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
                                                                    TextWrapping="Wrap" />
@@ -847,18 +847,18 @@
                                                  ItemsSource="{Binding Messages}"
                                                  FontFamily="Consolas"
                                                  HorizontalContentAlignment="Stretch"
+                                                 Grid.IsSharedSizeScope="True"
                                                  beh:AutoScroll.IsEnabled="True">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto" />
-                                                            <ColumnDefinition Width="110" />
+                                                            <ColumnDefinition Width="Auto" SharedSizeGroup="NodeName" />
                                                             <ColumnDefinition Width="*" />
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
                                                         <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
-                                                                   TextTrimming="CharacterEllipsis"
                                                                    ToolTip="{Binding FromId}" />
                                                         <TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
                                                                    TextWrapping="Wrap" />

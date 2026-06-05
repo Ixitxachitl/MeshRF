@@ -1,23 +1,23 @@
 # MeshRF
 
-Windows-native [Meshtastic](https://meshtastic.org/) **receiver** that uses an
-SDR ([HackRF One](https://greatscottgadgets.com/hackrf/) or an RTL-SDR dongle)
-as the radio instead of a LoRa modem chip. It demodulates LoRa chirps in
-software (a port of
+Windows-native [Meshtastic](https://meshtastic.org/) **transceiver** that uses
+an SDR ([HackRF One](https://greatscottgadgets.com/hackrf/) or an RTL-SDR
+dongle) as the radio instead of a LoRa modem chip. It demodulates and modulates
+LoRa chirps in software (a port of
 [`gr-lora_sdr`](https://github.com/tapparelj/gr-lora_sdr)), reassembles
 Meshtastic frames, decrypts channels, and parses the mesh protobufs — all on
 the host CPU.
 
 > **Status:** transmit + receive. The full RX chain (SDR → DSP → LoRa demod →
 > Meshtastic frame decode → channel decrypt → protobuf parse → UI) is working,
-> and the app can now **transmit**: channel broadcasts, encrypted (PKC) direct
+> and the app can also **transmit**: channel broadcasts, encrypted (PKC) direct
 > messages with automatic key exchange, and Meshtastic-style ACK/NACK delivery
 > tracking.
 
 ## Features
 
 - **Selectable SDR backend**: HackRF One or RTL-SDR, with auto-detection. The
-  active device is chosen in the toolbar and can be switched while the receiver
+  active device is chosen in the toolbar and can be switched while the radio
   is stopped. Backends are loaded at runtime (no build-time dependency) and a
   synthetic source is used when no hardware is present.
 - **Software LoRa demodulation** from raw SDR IQ (CSS / chirp-chat),

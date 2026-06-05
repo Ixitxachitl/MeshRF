@@ -19,7 +19,7 @@
                        FontSize="12" Margin="0,0,0,14" />
 
             <TextBlock TextWrapping="Wrap" FontSize="12"
-                       Text="Windows-native, receive-only Meshtastic client. Demodulates LoRa chirps in software from a HackRF One or RTL-SDR and decodes Meshtastic frames on the host CPU." />
+                       Text="Windows-native Meshtastic client. Demodulates and modulates LoRa chirps in software using a HackRF One or RTL-SDR and decodes Meshtastic frames on the host CPU." />
 
             <TextBlock Margin="0,14,0,0" FontSize="12">
                 <Hyperlink NavigateUri="https://meshtastic.org/"
@@ -34,7 +34,7 @@
 
             <TextBlock Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource BrushSubtle}"
-                       Text="Licensed under GPL-3.0-or-later. Receive-only; this project is not affiliated with or endorsed by the Meshtastic project." />
+                       Text="Licensed under GPL-3.0-or-later. This project is not affiliated with or endorsed by the Meshtastic project." />
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                         Margin="0,18,0,0">

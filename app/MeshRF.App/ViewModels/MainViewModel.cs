@@ -732,6 +732,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var idx = Channels.IndexOf(Channels.First(c => c.Config.Index == cfg.Index));
         var keepSelected = SelectedChannel?.Config.Index;
         ReloadChannels();
+        // ReloadChannels rebuilds the channel view models with empty message
+        // lists, so repopulate them from history (otherwise saving settings
+        // appears to wipe the chat).
+        LoadChatHistory();
         if (keepSelected is int wanted)
             SelectedTab = Channels.FirstOrDefault(c => c.Config.Index == wanted)
                               ?? (object?)Channels.FirstOrDefault();
