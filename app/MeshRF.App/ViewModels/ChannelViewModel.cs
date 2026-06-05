@@ -6,6 +6,9 @@ using MeshRF.Channels;
 
 namespace MeshRF.App.ViewModels;
 
+/// <summary>One selectable location-sharing precision (Meshtastic <c>position_precision</c>).</summary>
+public sealed record PositionPrecisionOption(byte Bits, string Label);
+
 /// <summary>
 /// One row in the channel TabControl. Holds the persisted <see cref="ChannelConfig"/>
 /// plus in-memory <see cref="Messages"/> and <see cref="Log"/> buffers, and
@@ -51,29 +54,29 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private byte _editPositionPrecision;
 
-    partial void OnEditPositionPrecisionChanged(byte value) =>
-        OnPropertyChanged(nameof(PositionPrecisionText));
-
     /// <summary>
-    /// Human-readable position precision: the approximate radius the shared
-    /// location is fuzzed to. Mirrors Meshtastic: 0 bits disables sharing, 32
-    /// sends the exact location, and each bit roughly halves the uncertainty.
+    /// Discrete location-sharing precisions offered per channel, matching the
+    /// official Meshtastic clients: 0 disables sharing, 32 sends the exact
+    /// location, and 10–19 fuzz it to the listed radius (each step roughly
+    /// halves the uncertainty). Only these <c>position_precision</c> values are
+    /// considered valid on the mesh.
     /// </summary>
-    public string PositionPrecisionText
-    {
-        get
+    public static IReadOnlyList<PositionPrecisionOption> PositionPrecisionOptions { get; } =
+        new[]
         {
-            int bits = EditPositionPrecision;
-            if (bits <= 0) return "off";
-            if (bits >= 32) return "exact";
-            // Masked-off low bits span 2^(32-bits) units of 1e-7 deg; one degree
-            // of latitude is ~111.32 km.
-            double meters = Math.Pow(2, 32 - bits) * 1e-7 * 111_320.0;
-            return meters >= 1000
-                ? $"~{meters / 1000.0:0.#} km"
-                : $"~{meters:0} m";
-        }
-    }
+            new PositionPrecisionOption(0,  "Do not share location"),
+            new PositionPrecisionOption(10, "Within 23 km"),
+            new PositionPrecisionOption(11, "Within 12 km"),
+            new PositionPrecisionOption(12, "Within 5.8 km"),
+            new PositionPrecisionOption(13, "Within 2.9 km"),
+            new PositionPrecisionOption(14, "Within 1.5 km"),
+            new PositionPrecisionOption(15, "Within 700 m"),
+            new PositionPrecisionOption(16, "Within 350 m"),
+            new PositionPrecisionOption(17, "Within 200 m"),
+            new PositionPrecisionOption(18, "Within 90 m"),
+            new PositionPrecisionOption(19, "Within 50 m"),
+            new PositionPrecisionOption(32, "Precise"),
+        };
 
     public IReadOnlyList<ChannelRole> RoleOptions { get; } = Enum.GetValues<ChannelRole>();
 

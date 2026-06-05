@@ -228,11 +228,15 @@ public static class MeshEncoder
     /// <summary>
     /// Broadcast our location (POSITION_APP <c>Position</c> protobuf). The
     /// channel's <paramref name="precisionBits"/> fuzzes the transmitted
-    /// coordinates exactly like firmware <c>PositionModule</c>: keep the top
-    /// N bits of each lat/lon i32, add a half-bit for rounding, and advertise
-    /// the precision so receivers know the uncertainty. 0 disables sharing,
-    /// 32 sends full precision.
+    /// coordinates exactly like firmware <c>applyPositionPrecision</c>: keep the
+    /// top N bits of each lat/lon i32, re-centre in the masked cell, and
+    /// advertise the same precision so receivers know the uncertainty. 32 sends
+    /// full precision. Precision 0 means sharing is disabled, so it throws
+    /// rather than leak an exact location; callers must check before sending.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="precisionBits"/> is 0 (location sharing disabled).
+    /// </exception>
     public static byte[] EncodePosition(ChannelConfig channel,
                                         uint from,
                                         uint packetId,
@@ -245,10 +249,15 @@ public static class MeshEncoder
                                         bool wantResponse = false,
                                         bool okToMqtt = false)
     {
+        if (precisionBits == 0)
+            throw new ArgumentOutOfRangeException(nameof(precisionBits),
+                "Location sharing is disabled (precision 0); nothing to transmit.");
+        if (precisionBits > 32) precisionBits = 32;
+
         int latI = (int)Math.Round(latitude / 1e-7);
         int lonI = (int)Math.Round(longitude / 1e-7);
 
-        if (precisionBits > 0 && precisionBits < 32)
+        if (precisionBits < 32)
         {
             latI = (int)((uint)latI & (uint.MaxValue << (32 - precisionBits)));
             lonI = (int)((uint)lonI & (uint.MaxValue << (32 - precisionBits)));
@@ -262,7 +271,7 @@ public static class MeshEncoder
         if (altitudeM is int alt)
             pos.WriteVarintField(3, (ulong)(long)alt);        // altitude (int32)
         pos.WriteFixed32Field(4, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds()); // time
-        pos.WriteVarintField(22, precisionBits == 0 ? 32u : precisionBits);        // precision_bits
+        pos.WriteVarintField(22, precisionBits);              // precision_bits (advertised uncertainty)
 
         return Encode(channel, from, to, packetId, PortNum.Position,
                       pos.ToArray(), hopLimit, wantAck: false,

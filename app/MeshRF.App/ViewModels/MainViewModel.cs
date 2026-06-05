@@ -586,6 +586,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private ChannelMessage BuildHistoryMessage(MessageRecord msg)
     {
         bool outgoing = _myNodeNum != 0 && msg.FromNode == _myNodeNum;
+        // Broadcasts (to 0xFFFFFFFF) are never ACKed, so they carry no delivery
+        // status — only our own directed sends (DMs) show sent/delivered/failed.
+        bool isBroadcast = msg.ToNode == 0xFFFFFFFFu;
         return new ChannelMessage
         {
             Timestamp = DateTimeOffset.FromUnixTimeSeconds(msg.RxEpoch).LocalDateTime,
@@ -595,7 +598,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SnrDb = msg.SnrDb,
             PacketId = msg.PacketId,
             IsOutgoing = outgoing,
-            Delivery = outgoing ? (MessageDelivery)msg.Delivery : MessageDelivery.None,
+            Delivery = outgoing && !isBroadcast
+                ? (MessageDelivery)msg.Delivery
+                : MessageDelivery.None,
         };
     }
 
@@ -1276,7 +1281,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     Text = text,
                 });
                 if (ch.Messages.Count > 1000) ch.Messages.RemoveAt(0);
-                PersistOutgoingText(0xFFFFFFFFu, packetId, text, ch.Config.Name);
+                PersistOutgoingText(0xFFFFFFFFu, packetId, text, ch.Config.Name,
+                                    MessageDelivery.None);
                 ComposeText = string.Empty;
                 Status = $"Sent {frame.Length} B on {ch.DisplayName}";
             }
@@ -1484,6 +1490,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (primary.Config.PositionPrecision == 0)
+        {
+            Status = $"Location sharing is off for {primary.DisplayName} " +
+                     "(choose a precision in the channel's settings first).";
+            Log(Status);
+            return;
+        }
+
         try
         {
             uint packetId = NextPacketId();
@@ -1580,8 +1594,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>Persist an outgoing text message we transmitted so it survives a
     /// restart (received messages are stored in <see cref="DecodePayloadIfPossible"/>;
-    /// our own sends are never heard back as decodable, so store them here).</summary>
-    private void PersistOutgoingText(uint to, uint packetId, string text, string channel)
+    /// our own sends are never heard back as decodable, so store them here). The
+    /// <paramref name="delivery"/> state is stored verbatim so it reloads the
+    /// same way the live UI showed it: channel broadcasts are never ACKed, so
+    /// they carry <see cref="MessageDelivery.None"/> and show no status, while
+    /// direct messages start as <see cref="MessageDelivery.Sent"/> and are later
+    /// updated to delivered/failed.</summary>
+    private void PersistOutgoingText(uint to, uint packetId, string text, string channel,
+                                    MessageDelivery delivery = MessageDelivery.Sent)
     {
         try
         {
@@ -1595,7 +1615,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Text = text,
                 Decrypted = true,
                 RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                Delivery = (int)MessageDelivery.Sent,
+                Delivery = (int)delivery,
             });
         }
         catch (Exception ex) { Log($"message store failed: {ex.Message}"); }

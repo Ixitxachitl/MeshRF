@@ -700,19 +700,15 @@
                                                             Command="{Binding GenerateRandomKeyCommand}" />
                                                 </StackPanel>
 
-                                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Location precision"
+                                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Location sharing"
                                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                                <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,4,0,4">
-                                                    <TextBlock DockPanel.Dock="Right" Width="56"
-                                                               TextAlignment="Right"
-                                                               VerticalAlignment="Center"
-                                                               Text="{Binding PositionPrecisionText}" />
-                                                    <Slider Minimum="0" Maximum="32"
-                                                            TickFrequency="1" IsSnapToTickEnabled="True"
-                                                            ToolTip="How precisely your location is shared (0 = off, 32 = exact)"
-                                                            Value="{Binding EditPositionPrecision, Mode=TwoWay}"
-                                                            VerticalAlignment="Center" />
-                                                </DockPanel>
+                                                <ComboBox Grid.Row="3" Grid.Column="1" Margin="0,4,0,4"
+                                                          VerticalAlignment="Center"
+                                                          ItemsSource="{Binding PositionPrecisionOptions}"
+                                                          DisplayMemberPath="Label"
+                                                          SelectedValuePath="Bits"
+                                                          SelectedValue="{Binding EditPositionPrecision, Mode=TwoWay}"
+                                                          ToolTip="How precisely your location is shared on this channel: off, an approximate radius, or precise (matches Meshtastic)" />
 
                                                 <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal"
                                                             Margin="0,8,0,0" HorizontalAlignment="Right">
