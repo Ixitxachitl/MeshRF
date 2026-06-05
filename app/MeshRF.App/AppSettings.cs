@@ -65,6 +65,11 @@ public sealed class AppSettings
     /// <c>Config.LoRaConfig.hop_limit</c>, 1..7). Meshtastic default is 3.</summary>
     public int HopLimit { get; set; } = 3;
 
+    /// <summary>When true, transmitted packets set the <c>Data.bitfield</c>
+    /// ok_to_mqtt flag so gateways may uplink them to the public MQTT broker
+    /// (firmware <c>Config.LoRaConfig.config_ok_to_mqtt</c>). Off by default.</summary>
+    public bool OkToMqtt { get; set; } = false;
+
     /// <summary>Base64 X25519 public key for PKI direct messages (TX).</summary>
     public string UserPublicKey  { get; set; } = string.Empty;
 

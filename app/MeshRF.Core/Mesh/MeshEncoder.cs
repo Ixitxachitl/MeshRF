@@ -18,6 +18,9 @@ namespace MeshRF.Mesh;
 /// </summary>
 public static class MeshEncoder
 {
+    // Data.bitfield (field 9) bit 0: gateways may uplink this packet to the
+    // public MQTT broker. Mirrors firmware BITFIELD_OK_TO_MQTT_MASK.
+    private const ulong BitfieldOkToMqtt = 0x01;
     /// <summary>
     /// Encode a frame carrying <paramref name="port"/> + <paramref name="payload"/>.
     /// </summary>
@@ -29,6 +32,8 @@ public static class MeshEncoder
     /// <param name="payload">Application payload bytes (the <c>Data.payload</c>).</param>
     /// <param name="hopLimit">Hops remaining (0..7). Also stored as hop_start.</param>
     /// <param name="wantAck">Request an ACK.</param>
+    /// <param name="okToMqtt">Set Data.bitfield ok_to_mqtt so gateways may
+    /// uplink this packet to the public MQTT broker.</param>
     public static byte[] Encode(ChannelConfig channel,
                                 uint from,
                                 uint to,
@@ -38,12 +43,14 @@ public static class MeshEncoder
                                 byte hopLimit = 3,
                                 bool wantAck = false,
                                 bool wantResponse = false,
-                                uint requestId = 0)
+                                uint requestId = 0,
+                                bool okToMqtt = false)
     {
         ArgumentNullException.ThrowIfNull(channel);
 
         // 1. Build the Data sub-message: field 1 = portnum, field 2 = payload,
-        //    field 3 = want_response, field 6 = request_id (fixed32).
+        //    field 3 = want_response, field 6 = request_id (fixed32),
+        //    field 9 = bitfield (bit 0 = ok_to_mqtt).
         var data = new ProtoWriter();
         data.WriteVarintField(1, (ulong)port);
         if (!payload.IsEmpty)
@@ -52,6 +59,8 @@ public static class MeshEncoder
             data.WriteVarintField(3, 1);
         if (requestId != 0)
             data.WriteFixed32Field(6, requestId);
+        if (okToMqtt)
+            data.WriteVarintField(9, BitfieldOkToMqtt);
         var plain = data.ToArray();
 
         // 2. Encrypt with the channel's effective key. An empty key means the
@@ -81,9 +90,11 @@ public static class MeshEncoder
                                            string text,
                                            uint to = 0xFFFFFFFFu,
                                            byte hopLimit = 3,
-                                           bool wantAck = false)
+                                           bool wantAck = false,
+                                           bool okToMqtt = false)
         => Encode(channel, from, to, packetId, PortNum.TextMessage,
-                  Encoding.UTF8.GetBytes(text), hopLimit, wantAck);
+                  Encoding.UTF8.GetBytes(text), hopLimit, wantAck,
+                  okToMqtt: okToMqtt);
     /// <summary>
     /// Encode a PKC (public-key) direct message addressed to a single peer,
     /// mirroring firmware <c>perhapsEncode</c>'s PKI path. The <c>Data</c>
@@ -111,7 +122,8 @@ public static class MeshEncoder
                                    byte hopLimit = 3,
                                    bool wantAck = false,
                                    bool wantResponse = false,
-                                   uint requestId = 0)
+                                   uint requestId = 0,
+                                   bool okToMqtt = false)
     {
         ArgumentNullException.ThrowIfNull(myPrivateKey);
         ArgumentNullException.ThrowIfNull(peerPublicKey);
@@ -119,7 +131,8 @@ public static class MeshEncoder
             throw new ArgumentException("PKC packets must be addressed to a single node.", nameof(to));
 
         // 1. Build the Data sub-message: field 1 = portnum, field 2 = payload,
-        //    field 3 = want_response, field 6 = request_id (fixed32).
+        //    field 3 = want_response, field 6 = request_id (fixed32),
+        //    field 9 = bitfield (bit 0 = ok_to_mqtt).
         var data = new ProtoWriter();
         data.WriteVarintField(1, (ulong)port);
         if (!payload.IsEmpty)
@@ -128,6 +141,8 @@ public static class MeshEncoder
             data.WriteVarintField(3, 1);
         if (requestId != 0)
             data.WriteFixed32Field(6, requestId);
+        if (okToMqtt)
+            data.WriteVarintField(9, BitfieldOkToMqtt);
         var plain = data.ToArray();
 
         // 2. Seal with X25519 + AES-CCM (ciphertext || 8-byte tag || 4-byte nonce).
@@ -155,10 +170,11 @@ public static class MeshEncoder
                                               byte[] myPrivateKey,
                                               byte[] peerPublicKey,
                                               byte hopLimit = 3,
-                                              bool wantAck = false)
+                                              bool wantAck = false,
+                                              bool okToMqtt = false)
         => EncodePkc(from, to, packetId, PortNum.TextMessage,
                      Encoding.UTF8.GetBytes(text), myPrivateKey, peerPublicKey,
-                     hopLimit, wantAck);
+                     hopLimit, wantAck, okToMqtt: okToMqtt);
 
     /// <summary>
     /// Encode a NODEINFO_APP frame carrying our <c>User</c> protobuf — the
@@ -190,7 +206,8 @@ public static class MeshEncoder
                                         ReadOnlySpan<byte> publicKey = default,
                                         uint to = 0xFFFFFFFFu,
                                         byte hopLimit = 3,
-                                        bool wantResponse = false)
+                                        bool wantResponse = false,
+                                        bool okToMqtt = false)
     {
         var user = new ProtoWriter();
         user.WriteStringField(1, $"!{from:x8}");          // id
@@ -205,7 +222,7 @@ public static class MeshEncoder
 
         return Encode(channel, from, to, packetId, PortNum.NodeInfo,
                       user.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: wantResponse);
+                      wantResponse: wantResponse, okToMqtt: okToMqtt);
     }
 
     /// <summary>
@@ -225,7 +242,8 @@ public static class MeshEncoder
                                         byte precisionBits = 32,
                                         uint to = 0xFFFFFFFFu,
                                         byte hopLimit = 3,
-                                        bool wantResponse = false)
+                                        bool wantResponse = false,
+                                        bool okToMqtt = false)
     {
         int latI = (int)Math.Round(latitude / 1e-7);
         int lonI = (int)Math.Round(longitude / 1e-7);
@@ -248,7 +266,7 @@ public static class MeshEncoder
 
         return Encode(channel, from, to, packetId, PortNum.Position,
                       pos.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: wantResponse);
+                      wantResponse: wantResponse, okToMqtt: okToMqtt);
     }
 
     /// <summary>

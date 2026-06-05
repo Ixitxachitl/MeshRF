@@ -387,6 +387,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID"
@@ -485,6 +486,14 @@
                                             Value="{Binding HopLimit, Mode=TwoWay}"
                                             ToolTip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
                                 </DockPanel>
+
+                                <TextBlock Grid.Row="10" Grid.Column="0" Text="OK to MQTT"
+                                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                                <CheckBox Grid.Row="10" Grid.Column="1" Margin="0,4,0,4"
+                                          VerticalAlignment="Center"
+                                          Content="Allow gateways to uplink my packets to public MQTT"
+                                          IsChecked="{Binding OkToMqtt, Mode=TwoWay}"
+                                          ToolTip="Sets the ok_to_mqtt flag on packets you transmit so MQTT gateways may forward them to the public broker." />
                             </Grid>
                         </Border>
                     </Expander>

@@ -202,6 +202,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// firmware LoRa config; broadcasts and DMs are sent with this many hops.</summary>
     [ObservableProperty] private int _hopLimit = 3;
 
+    /// <summary>When set, transmitted packets flag <c>ok_to_mqtt</c> so gateways
+    /// may uplink them to the public MQTT broker.</summary>
+    [ObservableProperty] private bool _okToMqtt;
+
     [ObservableProperty] private string _homeLatitudeText = string.Empty;
     [ObservableProperty] private string _homeLongitudeText = string.Empty;
 
@@ -346,19 +350,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return $"{(int)delta.TotalDays}d {delta.Hours}h ago";
     }
 
-    /// <summary>Common Meshtastic hardware models (subset of the firmware
-    /// <c>HardwareModel</c> enum). "UNSET" leaves it unspecified.</summary>
-    public IReadOnlyList<string> HwModelOptions { get; } = new[]
-    {
-        "UNSET", "TBEAM", "TBEAM_S3_CORE", "TLORA_V2", "TLORA_V1",
-        "TLORA_V2_1_1P6", "TLORA_V2_1_1P8", "TLORA_T3_S3",
-        "HELTEC_V2_1", "HELTEC_V3", "HELTEC_WSL_V3", "HELTEC_WIRELESS_TRACKER",
-        "HELTEC_WIRELESS_PAPER", "RAK4631", "RAK11200", "RAK2560",
-        "NANO_G1", "NANO_G1_EXPLORER", "NANO_G2_ULTRA",
-        "STATION_G1", "STATION_G2", "T_ECHO", "T_DECK", "T_WATCH_S3",
-        "PICOMPUTER_S3", "SENSECAP_INDICATOR", "TRACKER_T1000_E",
-        "SEEED_XIAO_S3", "WIO_WM1110", "RPI_PICO", "PORTDUINO", "PRIVATE_HW",
-    };
+    /// <summary>Meshtastic hardware models (full firmware <c>HardwareModel</c>
+    /// enum). "UNSET" leaves it unspecified.</summary>
+    public IReadOnlyList<string> HwModelOptions { get; } = HardwareModels.AllNames;
 
     /// <summary>Firmware <c>Config.DeviceConfig.RebroadcastMode</c> options.</summary>
     public IReadOnlyList<string> RebroadcastModeOptions { get; } = new[]
@@ -414,6 +408,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MyHwModel = string.IsNullOrEmpty(_settings.UserHwModel) ? "UNSET" : _settings.UserHwModel;
         RebroadcastMode = string.IsNullOrEmpty(_settings.RebroadcastMode) ? "ALL" : _settings.RebroadcastMode;
         HopLimit = Math.Clamp(_settings.HopLimit, 1, 7);
+        OkToMqtt = _settings.OkToMqtt;
         MyPublicKey = _settings.UserPublicKey;
         MyPrivateKey = _settings.UserPrivateKey;
 
@@ -869,6 +864,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserHwModel = MyHwModel ?? "UNSET";
         _settings.RebroadcastMode = RebroadcastMode ?? "ALL";
         _settings.HopLimit = Math.Clamp(HopLimit, 1, 7);
+        _settings.OkToMqtt = OkToMqtt;
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.HomeLatitude = HomeLatitude;
@@ -892,6 +888,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnMyRoleChanged(string value) => SaveSettings();
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnRebroadcastModeChanged(string value) => SaveSettings();
+    partial void OnOkToMqttChanged(bool value) => SaveSettings();
 
     partial void OnHopLimitChanged(int value)
     {
@@ -1266,7 +1263,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodeTextMessage(
-                ch.Config, _myNodeNum, packetId, text, hopLimit: (byte)HopLimit);
+                ch.Config, _myNodeNum, packetId, text, hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
             bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
@@ -1361,10 +1359,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             byte[] frame = usePkc
                 ? MeshEncoder.EncodePkcTextMessage(
                       _myNodeNum, convo.NodeNum, packetId, text,
-                      myPriv, peerPub, hopLimit: (byte)HopLimit, wantAck: true)
+                      myPriv, peerPub, hopLimit: (byte)HopLimit, wantAck: true,
+                      okToMqtt: OkToMqtt)
                 : MeshEncoder.EncodeTextMessage(
                       ch!.Config, _myNodeNum, packetId, text,
-                      to: convo.NodeNum, hopLimit: (byte)HopLimit, wantAck: true);
+                      to: convo.NodeNum, hopLimit: (byte)HopLimit, wantAck: true,
+                      okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
             bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
@@ -1433,7 +1433,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var frame = MeshEncoder.EncodeNodeInfo(
                 primary.Config, _myNodeNum, packetId,
                 MyLongName ?? string.Empty, MyShortName ?? string.Empty,
-                hwModel: 0, role: role, publicKey: pubKey, hopLimit: (byte)HopLimit);
+                hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey, hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
             bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
@@ -1490,7 +1491,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 primary.Config, _myNodeNum, packetId,
                 lat, lon, altitudeM: null,
                 precisionBits: primary.Config.PositionPrecision,
-                hopLimit: (byte)HopLimit);
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
             bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
@@ -1526,7 +1527,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var frame = MeshEncoder.EncodeNodeInfo(
                 primary.Config, _myNodeNum, packetId,
                 MyLongName ?? string.Empty, MyShortName ?? string.Empty,
-                hwModel: 0, role: role, publicKey: pubKey,
+                hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: true);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
@@ -1556,7 +1557,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var frame = MeshEncoder.EncodeNodeInfo(
                 primary.Config, _myNodeNum, packetId,
                 MyLongName ?? string.Empty, MyShortName ?? string.Empty,
-                hwModel: 0, role: role, publicKey: pubKey,
+                hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: false);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
@@ -2097,7 +2098,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             UserId = string.IsNullOrEmpty(result.User.Id) ? header.FromId : result.User.Id,
                             LongName = result.User.LongName,
                             ShortName = result.User.ShortName,
-                            HwModel = result.User.HwModel.ToString(),
+                            HwModel = HardwareModels.Name(result.User.HwModel),
                             // Empty on mismatch keeps the previously trusted key.
                             PublicKey = keyMismatch ? string.Empty : newKeyHex,
                             // Only touch the flag when this NodeInfo carried a key.

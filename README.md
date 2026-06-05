@@ -40,6 +40,11 @@ the host CPU.
 - **Position broadcast**: share your location (from the home marker) on the
   primary channel, fuzzed to the channel's **location precision** (configured
   in meters, Meshtastic-style) so you can trade accuracy for privacy.
+- **OK to MQTT**: opt in to set the `ok_to_mqtt` flag on packets you transmit
+  so gateways may uplink them to the public MQTT broker (off by default).
+- **Hardware model**: pick your node's model from the full Meshtastic
+  `HardwareModel` list; it is advertised in your NodeInfo and received nodes
+  show their model name instead of a raw number.
 - **Node database** with positions, signal stats, and telemetry. Nodes whose
   X25519 public key is known show a key icon (PKC direct messages enabled);
   a red key flags a public-key mismatch, with a right-click option to request
