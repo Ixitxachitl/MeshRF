@@ -3,7 +3,7 @@ hackrf.dll vendored from the HackRF project
 
 This directory contains a binary copy of `hackrf.dll` from the upstream
 HackRF project at https://github.com/greatscottgadgets/hackrf, vendored so
-that builds of MeshtasticRF do not require a separate SDR install on Windows.
+that builds of MeshRF do not require a separate SDR install on Windows.
 
 Upstream license: GPL-2.0-or-later. See
 https://github.com/greatscottgadgets/hackrf/blob/master/COPYING

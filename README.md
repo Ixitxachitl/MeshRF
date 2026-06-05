@@ -35,8 +35,15 @@ the host CPU.
 - **Delivery tracking**: sent messages show **sent / delivered / no ack** using
   Meshtastic-style Routing ACK/NACK, and the app acknowledges direct messages
   addressed to it.
+- **Markdown in messages**: message text renders inline `**bold**` and
+  `*italic*` emphasis instead of showing the raw markers.
+- **Position broadcast**: share your location (from the home marker) on the
+  primary channel, fuzzed to the channel's **location precision** (configured
+  in meters, Meshtastic-style) so you can trade accuracy for privacy.
 - **Node database** with positions, signal stats, and telemetry. Nodes whose
-  X25519 public key is known show a key icon (PKC direct messages enabled).
+  X25519 public key is known show a key icon (PKC direct messages enabled);
+  a red key flags a public-key mismatch, with a right-click option to request
+  fresh keys.
 - **Telemetry**: device metrics (battery, voltage, channel/air utilization,
   uptime) and **environment metrics** (temperature, humidity, barometric
   pressure, gas resistance, IAQ), shown per node in its conversation tab.
@@ -48,20 +55,20 @@ the host CPU.
 
 ```
 +-----------------------------+
-|  MeshtasticRF.App (WPF)     |   .NET 8, MVVM (CommunityToolkit.Mvvm)
+|  MeshRF.App (WPF)     |   .NET 8, MVVM (CommunityToolkit.Mvvm)
 +--------------+--------------+
                | P/Invoke (C ABI)
 +--------------v--------------+
-|  MeshtasticRF.Native (DLL)  |   C++20
+|  MeshRF.Native (DLL)  |   C++20
 |  - HAL (HackRF, RTL-SDR)    |
 |  - DSP / LoRa demod         |   (port of gr-lora_sdr)
 |  - Spectrum / waterfall     |
 +-----------------------------+
 
 Managed side (C#):
-  MeshtasticRF.Core   - P/Invoke bindings, channel/node/message stores (SQLite),
+  MeshRF.Core   - P/Invoke bindings, channel/node/message stores (SQLite),
                         Meshtastic frame decoder, AES-CTR + X25519 crypto
-  MeshtasticRF.App    - WPF UI, view models, map, waterfall
+  MeshRF.App    - WPF UI, view models, map, waterfall
 ```
 
 ## Building
@@ -86,7 +93,7 @@ cmake --preset windows-x64
 cmake --build build/windows-x64 --config RelWithDebInfo -j
 
 # Build the managed app (copies the native DLL alongside it).
-dotnet build app/MeshtasticRF.App/MeshtasticRF.App.csproj -c Debug
+dotnet build app/MeshRF.App/MeshRF.App.csproj -c Debug
 ```
 
 VS Code tasks are provided for **Build Native**, **Deploy Native DLL**,
@@ -115,7 +122,7 @@ on the toolbar) and is derived from `Directory.Build.props`.
 ctest --test-dir build/windows-x64 --output-on-failure -C RelWithDebInfo
 
 # Managed (xUnit)
-dotnet test tests/managed/MeshtasticRF.Tests.csproj
+dotnet test tests/managed/MeshRF.Tests.csproj
 ```
 
 ## Layout
@@ -124,8 +131,8 @@ dotnet test tests/managed/MeshtasticRF.Tests.csproj
 | ---- | ------- |
 | `native/core/` | C++20 core: HAL, DSP, LoRa demod, spectrum |
 | `native/bridge/` | C ABI surface (`extern "C"`) consumed by P/Invoke |
-| `app/MeshtasticRF.App/` | WPF .NET 8 desktop UI |
-| `app/MeshtasticRF.Core/` | Managed bindings, decoder, crypto, SQLite stores |
+| `app/MeshRF.App/` | WPF .NET 8 desktop UI |
+| `app/MeshRF.Core/` | Managed bindings, decoder, crypto, SQLite stores |
 | `tests/native/` | GoogleTest unit tests |
 | `tests/managed/` | xUnit unit tests |
 | `third_party/hackrf/` | Vendored HackRF runtime DLLs |

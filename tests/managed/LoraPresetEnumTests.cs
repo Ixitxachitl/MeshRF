@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Xunit;
 
-namespace MeshtasticRF.Tests;
+namespace MeshRF.Tests;
 
 public class LoraPresetEnumTests
 {

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text;
-using MeshtasticRF.Channels;
-using MeshtasticRF.Mesh;
+using MeshRF.Channels;
+using MeshRF.Mesh;
 using Xunit;
 
-namespace MeshtasticRF.Tests;
+namespace MeshRF.Tests;
 
 public class MeshDecoderTests
 {

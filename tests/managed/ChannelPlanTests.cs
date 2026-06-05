@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-using MeshtasticRF;
+using MeshRF;
 using Xunit;
 
-namespace MeshtasticRF.Tests;
+namespace MeshRF.Tests;
 
 public class ChannelPlanTests
 {

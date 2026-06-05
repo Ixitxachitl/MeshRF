@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// C ABI consumed by the managed P/Invoke layer in app/MeshtasticRF.Core.
+// C ABI consumed by the managed P/Invoke layer in app/MeshRF.Core.
 // Keep this header valid C — no C++ types — so other languages can also bind.
 
 #pragma once

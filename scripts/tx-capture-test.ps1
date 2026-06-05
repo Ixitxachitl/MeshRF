@@ -60,7 +60,7 @@ Write-Host ""
 $env:MRF_TX_CAPTURE = $capturePath
 
 Write-Host "Launching app... (close its window when you've sent one packet)" -ForegroundColor Green
-dotnet run --project app/MeshtasticRF.App/MeshtasticRF.App.csproj -c Debug --no-build
+dotnet run --project app/MeshRF.App/MeshRF.App.csproj -c Debug --no-build
 
 # Clean up the env var for this shell.
 Remove-Item Env:\MRF_TX_CAPTURE -ErrorAction SilentlyContinue

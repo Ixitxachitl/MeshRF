@@ -2,7 +2,7 @@ rtlsdr.dll vendored from the rtl-sdr (librtlsdr) project
 =======================================================
 
 This directory contains a binary copy of `rtlsdr.dll` (Osmocom librtlsdr),
-vendored so that builds of MeshtasticRF do not require a separate SDR install
+vendored so that builds of MeshRF do not require a separate SDR install
 on Windows. The DLL dynamically links `libusb-1.0.dll`, which is already
 vendored in `third_party/hackrf/` and shared by both backends.
 

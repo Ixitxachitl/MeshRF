@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(MeshtasticRF
+project(MeshRF
     VERSION 0.0.1
     DESCRIPTION "Windows-native Meshtastic client using HackRF"
     LANGUAGES CXX C

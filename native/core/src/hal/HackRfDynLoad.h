@@ -57,7 +57,7 @@ struct Api {
 };
 
 // Tries to load hackrf.dll from (in order):
-//   1. The directory of the calling module (next to MeshtasticRF.Native.dll)
+//   1. The directory of the calling module (next to MeshRF.Native.dll)
 //   2. %HACKRF_DIR% / %HACKRF_ROOT%
 //   3. C:\Program Files\SDRangel
 //   4. C:\Program Files\PothosSDR\bin

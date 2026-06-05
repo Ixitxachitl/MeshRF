@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds a self-contained Windows release of MeshtasticRF and packages it as a
+    Builds a self-contained Windows release of MeshRF and packages it as a
     versioned .zip under dist/.
 
 .DESCRIPTION
@@ -8,7 +8,7 @@
     2. Publishes the WPF app as a self-contained single-file win-x64 build
        (no .NET install required on the target machine).
     3. Copies the native runtime DLLs next to the published executable.
-    4. Zips the staged folder to dist/MeshtasticRF-v<version>-win-x64.zip.
+    4. Zips the staged folder to dist/MeshRF-v<version>-win-x64.zip.
 
     The version defaults to <VersionPrefix> in Directory.Build.props. Pass
     -Tag to also create an annotated git tag (v<version>) for the release.
@@ -45,7 +45,7 @@ if (-not $Version) {
     $Version = ($xml.Project.PropertyGroup.VersionPrefix | Where-Object { $_ }) | Select-Object -First 1
     if (-not $Version) { throw 'Could not read VersionPrefix from Directory.Build.props.' }
 }
-Write-Host "Building MeshtasticRF v$Version ($NativeConfig)" -ForegroundColor Cyan
+Write-Host "Building MeshRF v$Version ($NativeConfig)" -ForegroundColor Cyan
 
 # --- Don't fight a running instance for the DLL --------------------------
 Get-Process -Name MeshRF -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -59,7 +59,7 @@ if ($LASTEXITCODE) { throw "native build failed ($LASTEXITCODE)" }
 
 $nativeBin = Join-Path $repoRoot "build/windows-x64/bin/$NativeConfig"
 $nativeDlls = @(
-    'MeshtasticRF.Native.dll',
+    'MeshRF.Native.dll',
     'hackrf.dll',
     'libusb-1.0.dll',
     'pthreadVC2.dll',
@@ -72,7 +72,7 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
 Write-Host '==> Publishing self-contained app' -ForegroundColor Yellow
-dotnet publish app/MeshtasticRF.App/MeshtasticRF.App.csproj `
+dotnet publish app/MeshRF.App/MeshRF.App.csproj `
     -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true `
     -p:NativeConfig=$NativeConfig `
@@ -86,7 +86,7 @@ foreach ($dll in $nativeDlls) {
     $src = Join-Path $nativeBin $dll
     if (Test-Path $src) {
         Copy-Item $src -Destination $stage -Force
-    } elseif ($dll -eq 'MeshtasticRF.Native.dll') {
+    } elseif ($dll -eq 'MeshRF.Native.dll') {
         throw "Required native DLL missing: $src"
     } else {
         Write-Warning "Optional native DLL missing (skipped): $dll"
@@ -113,7 +113,7 @@ if ($Tag) {
     if (git tag --list $tagName) {
         Write-Warning "Tag $tagName already exists; skipping."
     } else {
-        git tag -a $tagName -m "MeshtasticRF $tagName"
+        git tag -a $tagName -m "MeshRF $tagName"
         Write-Host "Created git tag $tagName (push with: git push origin $tagName)" -ForegroundColor Green
     }
 }

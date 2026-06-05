@@ -12,7 +12,7 @@ target_include_directories(mrf_bridge
 target_compile_definitions(mrf_bridge PRIVATE MRF_BUILDING_BRIDGE=1)
 
 set_target_properties(mrf_bridge PROPERTIES
-    OUTPUT_NAME "MeshtasticRF.Native"
+    OUTPUT_NAME "MeshRF.Native"
     FOLDER "native"
 )
 
