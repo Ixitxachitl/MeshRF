@@ -84,6 +84,25 @@ public sealed class AppSettings
     /// <summary>Home longitude in degrees, null if unset.</summary>
     public double? HomeLongitude { get; set; }
 
+    /// <summary>Node numbers of the direct-message conversation tabs the user
+    /// had open, so only those are reopened on the next launch (rather than
+    /// every node we happen to have chat history with).</summary>
+    public List<uint> OpenConversations { get; set; } = new();
+
+    /// <summary>Channel indexes whose incoming text messages should not play the RTTTL ringtone.</summary>
+    public List<int> MutedRingtoneChannels { get; set; } = new();
+
+    /// <summary>Incoming-message ringtone duration: "Off", "Play once",
+    /// "5 seconds", "10 seconds" or "30 seconds".</summary>
+    public string RingtoneMode { get; set; } = "Play once";
+
+    /// <summary>Ringtone volume, 0..100.</summary>
+    public int RingtoneVolume { get; set; } = 70;
+
+    /// <summary>RTTTL ringtone string; defaults to the stock Meshtastic tune.</summary>
+    public string RingtoneRtttl { get; set; } =
+        "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b,p,b6,p,b,p,b6,2p,p,b,p,b6,p,b,p,b6";
+
     private static readonly JsonSerializerOptions s_opts = new()
     {
         WriteIndented = true,

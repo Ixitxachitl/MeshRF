@@ -44,6 +44,11 @@
             "tooltip": "Build native and run ctest"
         },
         {
+            "label": "$(package) Release Zip",
+            "task": "Build Release Zip",
+            "tooltip": "Run scripts/build-release.ps1 and package dist/MeshRF-v0.6.0-win-x64.zip"
+        },
+        {
             "label": "$(trash) Clean",
             "task": "Clean",
             "tooltip": "Clean native + dotnet build outputs"

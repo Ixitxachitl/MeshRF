@@ -10,4 +10,46 @@
     <SolidColorBrush x:Key="BrushPanelBorder"       Color="#FFDDDDDD" />
     <SolidColorBrush x:Key="BrushSplitter"          Color="#FFDDDDDD" />
     <SolidColorBrush x:Key="BrushSpectrumBackground" Color="#FF101418" />
+     <SolidColorBrush x:Key="BrushMenuHover"         Color="#FFF0F0F0" />
+     <SolidColorBrush x:Key="BrushMenuPressed"       Color="#FFE6E6E6" />
+
+     <ContextMenu x:Key="TextEditingContextMenu" x:Shared="False">
+          <MenuItem Header="Cut"
+                      Command="{x:Static ApplicationCommands.Cut}"
+                      CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+          <MenuItem Header="Copy"
+                      Command="{x:Static ApplicationCommands.Copy}"
+                      CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+          <MenuItem Header="Paste"
+                      Command="{x:Static ApplicationCommands.Paste}"
+                      CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+          <Separator />
+          <MenuItem Header="Select All"
+                      Command="{x:Static ApplicationCommands.SelectAll}"
+                      CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+     </ContextMenu>
+
+     <Style TargetType="{x:Type ContextMenu}">
+          <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+          <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+          <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+          <Setter Property="TextElement.Foreground" Value="{DynamicResource BrushAppForeground}" />
+     </Style>
+     <Style TargetType="{x:Type MenuItem}">
+          <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+          <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+          <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+          <Style.Triggers>
+               <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource BrushMenuHover}" />
+               </Trigger>
+               <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource BrushMenuPressed}" />
+               </Trigger>
+          </Style.Triggers>
+     </Style>
+
+     <Style TargetType="{x:Type TextBox}">
+          <Setter Property="ContextMenu" Value="{StaticResource TextEditingContextMenu}" />
+     </Style>
 </ResourceDictionary>

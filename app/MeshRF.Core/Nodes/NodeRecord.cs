@@ -60,6 +60,12 @@ public sealed class NodeRecord
     /// state and should be shown as suspect (red key icon).</summary>
     public bool HasKeyMismatch => KeyMismatch == true;
 
+    /// <summary>When true, text messages from this node do not play the RTTTL ringtone.</summary>
+    public bool MuteRtttl { get; set; }
+
+    /// <summary>When true, packets from this node are ignored by the app.</summary>
+    public bool Ignored { get; set; }
+
     public DateTime LastHeard =>
         LastHeardEpoch == 0 ? DateTime.MinValue
             : DateTimeOffset.FromUnixTimeSeconds(LastHeardEpoch).LocalDateTime;

@@ -22,16 +22,21 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     /// <summary>Channels are permanent tabs and cannot be closed by the user.</summary>
     public bool CanClose => false;
     private readonly Action<ChannelConfig>? _onSave;
+    private readonly Action<ChannelViewModel, bool>? _onMuteRtttlChanged;
 
-    public ChannelViewModel(ChannelConfig cfg, Action<ChannelConfig>? onSave = null)
+    public ChannelViewModel(ChannelConfig cfg, Action<ChannelConfig>? onSave = null,
+                            bool muteRtttl = false,
+                            Action<ChannelViewModel, bool>? onMuteRtttlChanged = null)
     {
         Config = cfg;
         _onSave = onSave;
+        _onMuteRtttlChanged = onMuteRtttlChanged;
 
         _editName = cfg.Name;
         _editRole = cfg.Role;
         _editPsk = (byte[])cfg.Psk.Clone();
         _editPositionPrecision = cfg.PositionPrecision;
+        _muteRtttl = muteRtttl;
     }
 
     /// <summary>Decoded text messages, newest last.</summary>
@@ -39,6 +44,12 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
 
     [ObservableProperty]
     private int _packetCount;
+
+    /// <summary>Suppress the incoming-text RTTTL ringtone for this channel.</summary>
+    [ObservableProperty]
+    private bool _muteRtttl;
+
+    partial void OnMuteRtttlChanged(bool value) => _onMuteRtttlChanged?.Invoke(this, value);
 
     // -- Editable fields (two-way bound to the settings panel) ---------------
 

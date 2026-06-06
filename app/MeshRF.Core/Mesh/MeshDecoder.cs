@@ -39,6 +39,9 @@ public sealed class MeshDecodeResult
     /// (NONE), non-zero = NAK reason. -1 when this isn't a routing packet.</summary>
     public int RoutingError { get; init; } = -1;
 
+    /// <summary>Parsed RouteDiscovery (TRACEROUTE_APP); null otherwise.</summary>
+    public MeshRouteDiscovery? RouteDiscovery { get; init; }
+
     /// <summary>Raw decrypted application payload (the Data.payload bytes).</summary>
     public byte[] AppPayload { get; init; } = Array.Empty<byte>();
 }
@@ -90,6 +93,27 @@ public sealed class MeshTelemetry
     public bool HasEnvironmentMetrics =>
         TemperatureC.HasValue || RelativeHumidityPct.HasValue ||
         BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || Iaq.HasValue;
+}
+
+/// <summary>
+/// Subset of the Meshtastic <c>RouteDiscovery</c> protobuf carried by
+/// TRACEROUTE_APP: the list of node numbers a packet hopped through towards the
+/// destination (and back), with the per-hop SNR (stored scaled by 4 in the
+/// firmware, e.g. a value of 18 means 4.5 dB).
+/// </summary>
+public sealed class MeshRouteDiscovery
+{
+    /// <summary>Intermediate node numbers towards the destination (field 1).</summary>
+    public IReadOnlyList<uint> Route { get; init; } = Array.Empty<uint>();
+
+    /// <summary>Per-hop SNR towards the destination, scaled by 4 (field 2).</summary>
+    public IReadOnlyList<int> SnrTowards { get; init; } = Array.Empty<int>();
+
+    /// <summary>Intermediate node numbers on the way back (field 3).</summary>
+    public IReadOnlyList<uint> RouteBack { get; init; } = Array.Empty<uint>();
+
+    /// <summary>Per-hop SNR on the way back, scaled by 4 (field 4).</summary>
+    public IReadOnlyList<int> SnrBack { get; init; } = Array.Empty<int>();
 }
 
 /// <summary>
@@ -268,6 +292,7 @@ public static class MeshDecoder
         MeshUser? user = null;
         MeshPosition? pos = null;
         MeshTelemetry? telem = null;
+        MeshRouteDiscovery? route = null;
         int routingError = -1;
 
         switch (port)
@@ -287,6 +312,9 @@ public static class MeshDecoder
             case PortNum.Routing:
                 routingError = ParseRoutingError(payload);
                 break;
+            case PortNum.Traceroute:
+                route = ParseRouteDiscovery(payload);
+                break;
         }
 
         return new MeshDecodeResult
@@ -298,12 +326,69 @@ public static class MeshDecoder
             User = user,
             Position = pos,
             Telemetry = telem,
+            RouteDiscovery = route,
             WantResponse = wantResponse,
             RequestId = requestId,
             OkToMqtt = okToMqtt,
             RoutingError = routingError,
             AppPayload = payload,
         };
+    }
+
+    // RouteDiscovery (TRACEROUTE_APP): 1 = route (repeated fixed32),
+    // 2 = snr_towards (repeated int32), 3 = route_back (repeated fixed32),
+    // 4 = snr_back (repeated int32). Repeated scalars may arrive packed (a
+    // single length-delimited field) or unpacked (one field each); handle both.
+    private static MeshRouteDiscovery ParseRouteDiscovery(byte[] data)
+    {
+        var route = new List<uint>();
+        var snrTowards = new List<int>();
+        var routeBack = new List<uint>();
+        var snrBack = new List<int>();
+        var rdr = new ProtoReader(data);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            switch (field)
+            {
+                case 1 when wt == ProtoReader.WireType.Len:
+                    ReadPackedFixed32(rdr.ReadLengthDelimited(), route); break;
+                case 1 when wt == ProtoReader.WireType.I32:
+                    route.Add(rdr.ReadFixed32()); break;
+                case 2 when wt == ProtoReader.WireType.Len:
+                    ReadPackedVarintInt32(rdr.ReadLengthDelimited(), snrTowards); break;
+                case 2 when wt == ProtoReader.WireType.Varint:
+                    snrTowards.Add((int)(long)rdr.ReadVarint()); break;
+                case 3 when wt == ProtoReader.WireType.Len:
+                    ReadPackedFixed32(rdr.ReadLengthDelimited(), routeBack); break;
+                case 3 when wt == ProtoReader.WireType.I32:
+                    routeBack.Add(rdr.ReadFixed32()); break;
+                case 4 when wt == ProtoReader.WireType.Len:
+                    ReadPackedVarintInt32(rdr.ReadLengthDelimited(), snrBack); break;
+                case 4 when wt == ProtoReader.WireType.Varint:
+                    snrBack.Add((int)(long)rdr.ReadVarint()); break;
+                default:
+                    rdr.SkipField(wt); break;
+            }
+        }
+        return new MeshRouteDiscovery
+        {
+            Route = route,
+            SnrTowards = snrTowards,
+            RouteBack = routeBack,
+            SnrBack = snrBack,
+        };
+    }
+
+    private static void ReadPackedFixed32(ReadOnlySpan<byte> span, List<uint> dst)
+    {
+        var r = new ProtoReader(span);
+        while (!r.End) dst.Add(r.ReadFixed32());
+    }
+
+    private static void ReadPackedVarintInt32(ReadOnlySpan<byte> span, List<int> dst)
+    {
+        var r = new ProtoReader(span);
+        while (!r.End) dst.Add((int)(long)r.ReadVarint());
     }
 
     // Routing: oneof variant { ... error_reason = 3 (varint) }. 0 = NONE (ACK),

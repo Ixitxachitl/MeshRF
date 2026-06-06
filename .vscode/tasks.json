@@ -136,6 +136,24 @@
             "problemMatcher": []
         },
         {
+            "label": "Build Release Zip",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "scripts/build-release.ps1"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "always",
+                "clear": true
+            }
+        },
+        {
             "label": "Clean",
             "type": "shell",
             "command": "powershell",

@@ -75,6 +75,8 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("iaq", "INTEGER");
         AddColumnIfMissing("public_key", "TEXT");
         AddColumnIfMissing("key_mismatch", "INTEGER");
+        AddColumnIfMissing("mute_rtttl", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("ignored", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private void AddColumnIfMissing(string name, string sqlType)
@@ -103,8 +105,9 @@ public sealed class NodeStore : IDisposable
                                battery_pct, voltage_v,
                                channel_util_pct, air_util_tx_pct,
                                uptime_seconds, temperature_c,
-                               relative_humidity_pct, barometric_pressure_hpa,
-                               gas_resistance_mohm, iaq, public_key, key_mismatch)
+                                   relative_humidity_pct, barometric_pressure_hpa,
+                                   gas_resistance_mohm, iaq, public_key, key_mismatch,
+                                   mute_rtttl, ignored)
             VALUES ($node_num, $user_id, $long_name, $short_name,
                     $hw_model, $role, $last_heard,
                     $snr, $rssi, $hops,
@@ -113,7 +116,8 @@ public sealed class NodeStore : IDisposable
                     $chan, $airx,
                     $uptime, $temp,
                     $hum, $pres,
-                    $gas, $iaq, $pubkey, $mismatch)
+                                $gas, $iaq, $pubkey, $mismatch,
+                                $mute_rtttl, $ignored)
             ON CONFLICT(node_num) DO UPDATE SET
                 user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
                 long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
@@ -166,6 +170,30 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$pubkey", rec.PublicKey ?? string.Empty);
         cmd.Parameters.AddWithValue("$mismatch",
             rec.KeyMismatch is bool km ? (km ? 1 : 0) : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$mute_rtttl", rec.MuteRtttl ? 1 : 0);
+        cmd.Parameters.AddWithValue("$ignored", rec.Ignored ? 1 : 0);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Persist the UI's per-node RTTTL ignore flag without affecting any other fields.</summary>
+    public void SetMuteRtttl(uint nodeNum, bool muted)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE nodes SET mute_rtttl = $mute WHERE node_num = $node_num";
+        cmd.Parameters.AddWithValue("$node_num", nodeNum);
+        cmd.Parameters.AddWithValue("$mute", muted ? 1 : 0);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Persist the UI's per-node ignore flag without affecting any other fields.</summary>
+    public void SetIgnored(uint nodeNum, bool ignored)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE nodes SET ignored = $ignored WHERE node_num = $node_num";
+        cmd.Parameters.AddWithValue("$node_num", nodeNum);
+        cmd.Parameters.AddWithValue("$ignored", ignored ? 1 : 0);
         cmd.ExecuteNonQuery();
     }
 
@@ -279,6 +307,8 @@ public sealed class NodeStore : IDisposable
             Iaq                   = Nullable<int>("iaq"),
             PublicKey             = ReadStringOrEmpty(r, "public_key"),
             KeyMismatch           = Nullable<bool>("key_mismatch"),
+            MuteRtttl             = Nullable<bool>("mute_rtttl") == true,
+            Ignored               = Nullable<bool>("ignored") == true,
         };
     }
 

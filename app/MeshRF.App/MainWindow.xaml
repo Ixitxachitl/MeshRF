@@ -246,6 +246,34 @@
             </Button>
         </ToolBar>
 
+        <ToolBar DockPanel.Dock="Top">
+            <TextBlock Text="Ringtone" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <ComboBox Width="100"
+                      ItemsSource="{Binding RingtoneModes}"
+                      SelectedItem="{Binding RingtoneMode, Mode=TwoWay}"
+                      ToolTip="How long the alert tone plays when a text message arrives" />
+
+            <Separator />
+            <TextBlock Text="Volume" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <Slider Width="120"
+                    Minimum="0" Maximum="100"
+                    TickFrequency="5" IsSnapToTickEnabled="False"
+                    Value="{Binding RingtoneVolume, Mode=TwoWay}"
+                    VerticalAlignment="Center" />
+            <TextBlock Width="36" VerticalAlignment="Center"
+                       Text="{Binding RingtoneVolume, StringFormat={}{0:F0}%}" />
+
+            <Separator />
+            <TextBlock Text="RTTTL" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBox Width="260"
+                     Text="{Binding RingtoneRtttl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalAlignment="Center"
+                     ToolTip="Ringtone in Meshtastic RTTTL format" />
+                <Button Content="Preview" Margin="4,0,0,0"
+                    Command="{Binding TestRingtoneCommand}"
+                    ToolTip="Preview the current ringtone" />
+        </ToolBar>
+
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
                 <TextBlock>
@@ -513,12 +541,55 @@
                               HeadersVisibility="Column"
                               MouseDoubleClick="NodesGrid_MouseDoubleClick"
                               KeyDown="NodesGrid_KeyDown">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Ignored}" Value="True">
+                                        <Setter Property="Foreground" Value="#E57373" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.CellStyle>
+                            <Style TargetType="DataGridCell">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Ignored}" Value="True">
+                                        <Setter Property="Foreground" Value="#E57373" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.CellStyle>
                         <DataGrid.ContextMenu>
-                            <ContextMenu>
+                            <ContextMenu Opened="OnNodesContextMenuOpened">
+                                <MenuItem Header="Traceroute"
+                                          Click="OnTraceroute">
+                                    <MenuItem.Icon>
+                                        <TextBlock Text="&#xE968;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Header="Request position"
+                                          Click="OnRequestPosition">
+                                    <MenuItem.Icon>
+                                        <TextBlock Text="&#xE707;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
                                 <MenuItem Header="Request new keys"
                                           Click="OnRequestKeys">
                                     <MenuItem.Icon>
                                         <TextBlock Text="&#xE192;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem x:Name="ToggleNodeIgnoredMenuItem"
+                                          Header="Ignore node"
+                                          Click="OnToggleNodeIgnored">
+                                    <MenuItem.Icon>
+                                        <TextBlock Text="&#xE767;"
                                                    FontFamily="Segoe MDL2 Assets"
                                                    FontSize="12" />
                                     </MenuItem.Icon>
@@ -563,7 +634,8 @@
                             <DataGridTextColumn Header="Short" Width="Auto"
                                                 SortMemberPath="ShortName"
                                                 Binding="{Binding ShortName}"
-                                                FontFamily="Consolas" />                            <DataGridTextColumn Header="Node name" Width="*"
+                                                FontFamily="Consolas" />
+                            <DataGridTextColumn Header="Node name" Width="*"
                                                 SortMemberPath="LongName"
                                                 Binding="{Binding LongName}" />
                             <DataGridTextColumn Header="Node ID" Width="Auto"
@@ -731,6 +803,12 @@
                                                     CommandParameter="{Binding}" />
                                             <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
                                                     Command="{Binding CopyMessagesCommand}" />
+                                                <CheckBox DockPanel.Dock="Right"
+                                                      Content="Mute RTTTL"
+                                                      Margin="0,0,8,0"
+                                                      VerticalAlignment="Center"
+                                                      IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
+                                                      ToolTip="Mute RTTTL ringtone for text messages on this channel" />
                                             <TextBlock Text="Messages" FontWeight="SemiBold" VerticalAlignment="Center" />
                                         </DockPanel>
                                         <!-- Compose bar: visible only when the active device can transmit (HackRF). -->
@@ -809,6 +887,12 @@
                                                     VerticalAlignment="Center"
                                                     ToolTip="Copy this conversation to the clipboard"
                                                     Command="{Binding CopyMessagesCommand}" />
+                                                <CheckBox DockPanel.Dock="Right"
+                                                      Content="Mute RTTTL"
+                                                      Margin="0,0,8,0"
+                                                      VerticalAlignment="Center"
+                                                      IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
+                                                      ToolTip="Mute RTTTL ringtone for text messages from this node" />
                                             <StackPanel>
                                                 <TextBlock FontWeight="SemiBold"
                                                            Text="{Binding PeerName}" />

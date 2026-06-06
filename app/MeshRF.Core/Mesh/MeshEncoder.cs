@@ -279,6 +279,22 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// Encode a POSITION_APP request directed at <paramref name="to"/>: an empty
+    /// Position payload with <c>want_response</c> set, prompting that node to
+    /// reply with its own position. Mirrors the Meshtastic client's "request
+    /// position" — the request carries no coordinates of our own.
+    /// </summary>
+    public static byte[] EncodePositionRequest(ChannelConfig channel,
+                                               uint from,
+                                               uint to,
+                                               uint packetId,
+                                               byte hopLimit = 3,
+                                               bool okToMqtt = false)
+        => Encode(channel, from, to, packetId, PortNum.Position,
+                  ReadOnlySpan<byte>.Empty, hopLimit, wantAck: false,
+                  wantResponse: true, okToMqtt: okToMqtt);
+
+    /// <summary>
     /// Encode a ROUTING_APP acknowledgement (or negative-ack) for a received
     /// packet, mirroring firmware <c>Router::sendAckNak</c>. The Routing
     /// sub-message carries <c>error_reason</c> (0 = ACK/NONE, non-zero = NAK
@@ -325,6 +341,82 @@ public static class MeshEncoder
         var r = new ProtoWriter();
         r.WriteVarintField(3, errorReason);
         return r.ToArray();
+    }
+
+    /// <summary>
+    /// Encode a TRACEROUTE_APP request directed at <paramref name="to"/>,
+    /// mirroring the Meshtastic <c>--traceroute</c> client: an empty
+    /// <c>RouteDiscovery</c> payload with <c>want_response</c> set so the
+    /// destination (and each relay along the way) appends itself and replies
+    /// with the accumulated path. Channel-PSK encrypted on the given channel.
+    /// </summary>
+    public static byte[] EncodeTraceroute(ChannelConfig channel,
+                                          uint from,
+                                          uint to,
+                                          uint packetId,
+                                          byte hopLimit = 3,
+                                          bool okToMqtt = false)
+        => Encode(channel, from, to, packetId, PortNum.Traceroute,
+                  ReadOnlySpan<byte>.Empty, hopLimit, wantAck: false,
+                  wantResponse: true, okToMqtt: okToMqtt);
+
+    /// <summary>
+    /// Encode a TRACEROUTE_APP reply for a request we received as the
+    /// destination, echoing the discovered route/SNR and referencing the
+    /// original request via <c>request_id</c>. Mirrors firmware
+    /// <c>TraceRouteModule</c>'s response (sent back on the same channel).
+    /// </summary>
+    public static byte[] EncodeTracerouteReply(ChannelConfig channel,
+                                               uint from,
+                                               uint to,
+                                               uint packetId,
+                                               uint requestId,
+                                               IReadOnlyList<uint>? route,
+                                               IReadOnlyList<int>? snrTowards,
+                                               byte hopLimit = 3)
+        => Encode(channel, from, to, packetId, PortNum.Traceroute,
+                  BuildRouteDiscovery(route, snrTowards, null, null),
+                  hopLimit, wantAck: false, wantResponse: false,
+                  requestId: requestId);
+
+    // RouteDiscovery protobuf: 1 = route (packed fixed32), 2 = snr_towards
+    // (packed int32), 3 = route_back (packed fixed32), 4 = snr_back (packed
+    // int32). Empty lists are omitted entirely.
+    private static byte[] BuildRouteDiscovery(IReadOnlyList<uint>? route,
+                                              IReadOnlyList<int>? snrTowards,
+                                              IReadOnlyList<uint>? routeBack,
+                                              IReadOnlyList<int>? snrBack)
+    {
+        var w = new ProtoWriter();
+        WritePackedFixed32(w, 1, route);
+        WritePackedVarintInt32(w, 2, snrTowards);
+        WritePackedFixed32(w, 3, routeBack);
+        WritePackedVarintInt32(w, 4, snrBack);
+        return w.ToArray();
+    }
+
+    private static void WritePackedFixed32(ProtoWriter w, int field, IReadOnlyList<uint>? values)
+    {
+        if (values is null || values.Count == 0) return;
+        var inner = new byte[values.Count * 4];
+        for (int i = 0; i < values.Count; i++)
+        {
+            uint v = values[i];
+            inner[i * 4] = (byte)(v & 0xFF);
+            inner[i * 4 + 1] = (byte)((v >> 8) & 0xFF);
+            inner[i * 4 + 2] = (byte)((v >> 16) & 0xFF);
+            inner[i * 4 + 3] = (byte)((v >> 24) & 0xFF);
+        }
+        w.WriteBytesField(field, inner);
+    }
+
+    private static void WritePackedVarintInt32(ProtoWriter w, int field, IReadOnlyList<int>? values)
+    {
+        if (values is null || values.Count == 0) return;
+        var inner = new ProtoWriter();
+        // int32 is sign-extended to 64 bits on the wire, so cast through long.
+        foreach (var v in values) inner.WriteVarint((ulong)(long)v);
+        w.WriteBytesField(field, inner.ToArray());
     }
 
     // flags: [0..2]=hop_limit [3]=want_ack [4]=via_mqtt [5..7]=hop_start.

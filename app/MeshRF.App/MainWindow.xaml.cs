@@ -92,6 +92,30 @@ public partial class MainWindow : Window
     // Context-menu "Delete" removes the selected node(s).
     private void OnDeleteNodes(object sender, RoutedEventArgs e) => DeleteSelectedNodes();
 
+    // Context-menu "Traceroute" sends a Meshtastic-style route-discovery request
+    // to the selected node (rate-limited to one per cooldown by the view model).
+    private void OnTraceroute(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var node = NodesGrid.SelectedItems
+            .OfType<MeshRF.Nodes.NodeRecord>()
+            .FirstOrDefault();
+        if (node is null) return;
+        vm.Traceroute(node);
+    }
+
+    // Context-menu "Request position" asks the selected node to reply with its
+    // location (rate-limited to one per cooldown by the view model).
+    private void OnRequestPosition(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var node = NodesGrid.SelectedItems
+            .OfType<MeshRF.Nodes.NodeRecord>()
+            .FirstOrDefault();
+        if (node is null) return;
+        vm.RequestPosition(node);
+    }
+
     // Context-menu "Request new keys" forgets the stored key(s) and asks the
     // selected node(s) to re-send their NodeInfo so a changed key can be trusted.
     private void OnRequestKeys(object sender, RoutedEventArgs e)

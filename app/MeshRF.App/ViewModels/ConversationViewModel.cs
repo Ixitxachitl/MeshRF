@@ -18,10 +18,15 @@ public sealed record TelemetryItem(string Label, string Value);
 /// </summary>
 public partial class ConversationViewModel : ObservableObject, ITabItem
 {
-    public ConversationViewModel(uint nodeNum, string? peerName = null)
+    private readonly Action<ConversationViewModel, bool>? _onMuteRtttlChanged;
+    private bool _syncingNodeMute;
+
+    public ConversationViewModel(uint nodeNum, string? peerName = null,
+                                 Action<ConversationViewModel, bool>? onMuteRtttlChanged = null)
     {
         NodeNum = nodeNum;
         _peerName = string.IsNullOrWhiteSpace(peerName) ? string.Empty : peerName!;
+        _onMuteRtttlChanged = onMuteRtttlChanged;
     }
 
     /// <summary>32-bit node number of the conversation peer.</summary>
@@ -51,6 +56,10 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private string _composeText = string.Empty;
 
+    /// <summary>Suppress the incoming-text RTTTL ringtone for this peer.</summary>
+    [ObservableProperty]
+    private bool _muteRtttl;
+
     public string TabHeader =>
         string.IsNullOrEmpty(PeerName) ? PeerId : PeerName;
 
@@ -58,7 +67,19 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 
     partial void OnPeerNameChanged(string value) => OnPropertyChanged(nameof(TabHeader));
 
-    partial void OnNodeChanged(NodeRecord? value) => RebuildTelemetry();
+    partial void OnNodeChanged(NodeRecord? value)
+    {
+        _syncingNodeMute = true;
+        MuteRtttl = value?.MuteRtttl == true;
+        _syncingNodeMute = false;
+        RebuildTelemetry();
+    }
+
+    partial void OnMuteRtttlChanged(bool value)
+    {
+        if (!_syncingNodeMute)
+            _onMuteRtttlChanged?.Invoke(this, value);
+    }
 
     private void RebuildTelemetry()
     {

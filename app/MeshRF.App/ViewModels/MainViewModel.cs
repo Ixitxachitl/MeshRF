@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MeshRF.App.Audio;
 using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
@@ -22,6 +23,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly AppSettings _settings;
     private bool _settingsLoaded;
 
+    // Plays the RTTTL ringtone when a text message arrives.
+    private readonly RtttlPlayer _ringtone = new();
     // Payload recording: open StreamWriter when active. Each decoded payload is
     // appended as one JSON object (JSONL). Null when not recording.
     private StreamWriter? _payloadWriter;
@@ -67,6 +70,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _theme = "System";
 
     public IReadOnlyList<string> Themes { get; } = new[] { "System", "Light", "Dark" };
+
+    /// <summary>Incoming-message ringtone duration.</summary>
+    [ObservableProperty]
+    private string _ringtoneMode = "Play once";
+
+    public IReadOnlyList<string> RingtoneModes { get; } = new[]
+    {
+        "Off", "Play once", "5 seconds", "10 seconds", "30 seconds",
+    };
+
+    /// <summary>Ringtone volume, 0..100.</summary>
+    [ObservableProperty]
+    private double _ringtoneVolume = 70;
+
+    /// <summary>RTTTL ringtone string (Meshtastic format).</summary>
+    [ObservableProperty]
+    private string _ringtoneRtttl = RtttlPlayer.MeshtasticDefault;
+
+    partial void OnRingtoneModeChanged(string value) => SaveSettings();
+    partial void OnRingtoneVolumeChanged(double value) => SaveSettings();
+    partial void OnRingtoneRtttlChanged(string value) => SaveSettings();
+
+    /// <summary>Preview the current ringtone settings.</summary>
+    [RelayCommand]
+    private void TestRingtone() =>
+        _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+
+    /// <summary>Map the user-facing mode label to the player enum.</summary>
+    private static MeshRF.App.Audio.RingtoneMode ParseRingtoneMode(string mode) => mode switch
+    {
+        "Off" => MeshRF.App.Audio.RingtoneMode.Off,
+        "5 seconds" => MeshRF.App.Audio.RingtoneMode.Seconds5,
+        "10 seconds" => MeshRF.App.Audio.RingtoneMode.Seconds10,
+        "30 seconds" => MeshRF.App.Audio.RingtoneMode.Seconds30,
+        _ => MeshRF.App.Audio.RingtoneMode.PlayOnce,
+    };
+
+    /// <summary>Play the configured ringtone for an incoming text message.</summary>
+    private void PlayRingtone() =>
+        _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
 
     [ObservableProperty]
     private string _waterfallColormap = "Turbo";
@@ -276,11 +319,183 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             _nodeStore.ClearPublicKey(n.NodeNum);
-            RequestNodeInfo(n.NodeNum);
-            Log($"  requested new keys from {NodeDisplayName(n.NodeNum)}");
+            uint packetId = NextPacketId();
+            RequestNodeInfo(n.NodeNum, packetId);
+            var name = NodeDisplayName(n.NodeNum);
+            Log($"  requested new keys from {name}");
+            // Surface the request in the node's DM tab (and persist it) so the
+            // user sees it happened and the later NodeInfo reply lands here.
+            var convo = OpenConversation(n.NodeNum, name, focus: false);
+            var noteText = $"Requested new keys from {name}\u2026";
+            convo.Add(new ChannelMessage
+            {
+                FromId = "keys",
+                Text = noteText,
+                IsOutgoing = true,
+            });
+            PersistConversationNote(n.NodeNum, outgoing: true, packetId,
+                                    "keys", noteText);
         }
 
         ReloadNodes();
+    }
+
+    /// <summary>
+    /// Send a Meshtastic-style traceroute (TRACEROUTE_APP) to <paramref name="node"/>:
+    /// an empty RouteDiscovery with <c>want_response</c> set, addressed to the
+    /// node on the primary channel. The destination (and any relays) reply with
+    /// the accumulated hop path, which we render in the log and the node's DM
+    /// tab. Rate-limited to one request per <see cref="TracerouteCooldown"/>.
+    /// </summary>
+    public void Traceroute(MeshRF.Nodes.NodeRecord? node)
+    {
+        if (node is null) return;
+        if (_myNodeNum != 0 && node.NodeNum == _myNodeNum)
+        {
+            Status = "You can't traceroute your own node.";
+            Log("  " + Status);
+            return;
+        }
+        if (!CanTransmit || _myNodeNum == 0)
+        {
+            Status = "Traceroute needs a transmit-capable device and your node id set.";
+            Log("  " + Status);
+            return;
+        }
+
+        var remaining = TracerouteCooldown - (DateTime.UtcNow - _lastTracerouteUtc);
+        if (remaining > TimeSpan.Zero)
+        {
+            Status = $"Traceroute on cooldown — wait {Math.Ceiling(remaining.TotalSeconds):F0}s.";
+            Log("  " + Status);
+            return;
+        }
+
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null)
+        {
+            Status = "Traceroute needs a primary channel.";
+            Log("  " + Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeTraceroute(
+                primary.Config, _myNodeNum, node.NodeNum, packetId,
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            {
+                _lastTracerouteUtc = DateTime.UtcNow;
+                _pendingTraceroutes[packetId] = node.NodeNum;
+                var name = NodeDisplayName(node.NodeNum);
+                Status = $"Traceroute requested to {name}";
+                Log($"  traceroute → {name} (id {packetId:x8})");
+                // Echo the request into the node's DM tab so the reply lands there.
+                var convo = OpenConversation(node.NodeNum, name, focus: false);
+                var noteText = $"Traceroute requested to {name}\u2026";
+                convo.Add(new ChannelMessage
+                {
+                    FromId = "traceroute",
+                    Text = noteText,
+                    IsOutgoing = true,
+                });
+                PersistConversationNote(node.NodeNum, outgoing: true, packetId,
+                                        "traceroute", noteText);
+            }
+            else
+            {
+                Status = "Transmit failed (device cannot transmit).";
+                Log("  " + Status);
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = $"Traceroute error: {ex.Message}";
+            Log("  " + Status);
+        }
+    }
+
+    /// <summary>
+    /// Request <paramref name="node"/>'s current position (POSITION_APP): an
+    /// empty Position payload with <c>want_response</c> set, addressed to the
+    /// node on the primary channel, prompting it to reply with its location.
+    /// The reply is handled by the normal POSITION_APP receive path (updating
+    /// the node row / map). Rate-limited to one request per
+    /// <see cref="PositionRequestCooldown"/>.
+    /// </summary>
+    public void RequestPosition(MeshRF.Nodes.NodeRecord? node)
+    {
+        if (node is null) return;
+        if (_myNodeNum != 0 && node.NodeNum == _myNodeNum)
+        {
+            Status = "You can't request a position from your own node.";
+            Log("  " + Status);
+            return;
+        }
+        if (!CanTransmit || _myNodeNum == 0)
+        {
+            Status = "Position request needs a transmit-capable device and your node id set.";
+            Log("  " + Status);
+            return;
+        }
+
+        var remaining = PositionRequestCooldown - (DateTime.UtcNow - _lastPositionRequestUtc);
+        if (remaining > TimeSpan.Zero)
+        {
+            Status = $"Position request on cooldown — wait {Math.Ceiling(remaining.TotalSeconds):F0}s.";
+            Log("  " + Status);
+            return;
+        }
+
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null)
+        {
+            Status = "Position request needs a primary channel.";
+            Log("  " + Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodePositionRequest(
+                primary.Config, _myNodeNum, node.NodeNum, packetId,
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            {
+                _lastPositionRequestUtc = DateTime.UtcNow;
+                var name = NodeDisplayName(node.NodeNum);
+                Status = $"Position requested from {name}";
+                Log($"  position request → {name} (id {packetId:x8})");
+                // Echo the request into the node's DM tab so the reply lands there.
+                var convo = OpenConversation(node.NodeNum, name, focus: false);
+                var noteText = $"Position requested from {name}\u2026";
+                convo.Add(new ChannelMessage
+                {
+                    FromId = "position",
+                    Text = noteText,
+                    IsOutgoing = true,
+                });
+                PersistConversationNote(node.NodeNum, outgoing: true, packetId,
+                                        "position", noteText);
+            }
+            else
+            {
+                Status = "Transmit failed (device cannot transmit).";
+                Log("  " + Status);
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = $"Position request error: {ex.Message}";
+            Log("  " + Status);
+        }
     }
 
     /// <summary>Builds the multi-line tooltip shown when hovering a node on the
@@ -394,6 +609,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         BiasTee = _settings.BiasTee;
         Theme = _settings.Theme;
         WaterfallColormap = _settings.WaterfallColormap;
+        RingtoneMode = _settings.RingtoneMode;
+        RingtoneVolume = _settings.RingtoneVolume;
+        RingtoneRtttl = _settings.RingtoneRtttl;
         WaterfallAutoLevels = _settings.WaterfallAutoLevels;
         WaterfallFloorDb = _settings.WaterfallFloorDb;
         WaterfallCeilDb = _settings.WaterfallCeilDb;
@@ -556,12 +774,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        // Reopen a DM tab for every peer we have a conversation with (sent or
-        // received), so closed/relaunched conversations reappear with history.
+        // Reopen only the DM tabs that were left open last session (not every
+        // peer we have history with). Snapshot the saved list first: opening a
+        // tab calls SaveSettings, which would otherwise rewrite the list we're
+        // iterating (it's a no-op here anyway, since _settingsLoaded is still
+        // false during this initial load, but the snapshot keeps it robust).
         if (_myNodeNum != 0)
         {
-            foreach (var peer in _messageStore.ConversationPeers(_myNodeNum))
+            var toReopen = (_settings.OpenConversations ?? new List<uint>()).ToList();
+            foreach (var peer in toReopen)
+            {
+                if (peer == 0 || peer == 0xFFFFFFFFu || peer == _myNodeNum) continue;
                 OpenConversation(peer, NodeDisplayName(peer), focus: false);
+            }
         }
 
         // Restoring DM tabs moves selection; leave the primary channel focused.
@@ -586,6 +811,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private ChannelMessage BuildHistoryMessage(MessageRecord msg)
     {
         bool outgoing = _myNodeNum != 0 && msg.FromNode == _myNodeNum;
+
+        // App-generated conversation notes (traceroute results, position-request
+        // echoes) store their display tag in the channel column and never carry
+        // a delivery status.
+        if (msg.PortNum == MessageStore.ConversationNotePort)
+        {
+            return new ChannelMessage
+            {
+                Timestamp = DateTimeOffset.FromUnixTimeSeconds(msg.RxEpoch).LocalDateTime,
+                FromId = string.IsNullOrEmpty(msg.Channel) ? "info" : msg.Channel,
+                Text = msg.Text,
+                RssiDbm = msg.RssiDbfs,
+                SnrDb = msg.SnrDb,
+                PacketId = msg.PacketId,
+                IsOutgoing = outgoing,
+                Delivery = MessageDelivery.None,
+            };
+        }
+
         // Broadcasts (to 0xFFFFFFFF) are never ACKed, so they carry no delivery
         // status — only our own directed sends (DMs) show sent/delivered/failed.
         bool isBroadcast = msg.ToNode == 0xFFFFFFFFu;
@@ -678,10 +922,72 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         Channels.Clear();
-        foreach (var c in existing) Channels.Add(new ChannelViewModel(c, OnChannelSaved));
+        foreach (var c in existing)
+            Channels.Add(new ChannelViewModel(c, OnChannelSaved,
+                IsChannelRtttlMuted(c.Index), OnChannelRtttlMuteChanged));
         SyncPrimaryChannelName();
         RebuildTabs();
         SelectedTab = Channels.FirstOrDefault();
+    }
+
+    private bool IsChannelRtttlMuted(int channelIndex) =>
+        _settings.MutedRingtoneChannels.Contains(channelIndex);
+
+    private void OnChannelRtttlMuteChanged(ChannelViewModel channel, bool muted)
+    {
+        int index = channel.Config.Index;
+        if (muted)
+        {
+            if (!_settings.MutedRingtoneChannels.Contains(index))
+                _settings.MutedRingtoneChannels.Add(index);
+        }
+        else
+        {
+            _settings.MutedRingtoneChannels.Remove(index);
+        }
+        SaveSettings();
+    }
+
+    public void SetNodeRtttlMuted(NodeRecord node, bool muted)
+    {
+        node.MuteRtttl = muted;
+        _nodeStore.SetMuteRtttl(node.NodeNum, muted);
+    }
+
+    public void SetNodesRtttlMuted(IEnumerable<NodeRecord> nodes, bool muted)
+    {
+        foreach (var node in nodes)
+            SetNodeRtttlMuted(node, muted);
+    }
+
+    private bool IsNodeRtttlMuted(uint nodeNum) =>
+        Nodes.FirstOrDefault(n => n.NodeNum == nodeNum)?.MuteRtttl == true;
+
+    public void SetNodeIgnored(NodeRecord node, bool ignored)
+    {
+        node.Ignored = ignored;
+        _nodeStore.SetIgnored(node.NodeNum, ignored);
+        ReloadNodes();
+    }
+
+    public void SetNodesIgnored(IEnumerable<NodeRecord> nodes, bool ignored)
+    {
+        foreach (var node in nodes)
+        {
+            node.Ignored = ignored;
+            _nodeStore.SetIgnored(node.NodeNum, ignored);
+        }
+        ReloadNodes();
+    }
+
+    private bool IsNodeIgnored(uint nodeNum) =>
+        Nodes.FirstOrDefault(n => n.NodeNum == nodeNum)?.Ignored == true;
+
+    private void OnConversationMuteRtttlChanged(ConversationViewModel convo, bool muted)
+    {
+        var node = Nodes.FirstOrDefault(n => n.NodeNum == convo.NodeNum);
+        if (node is not null)
+            SetNodeRtttlMuted(node, muted);
     }
 
     /// <summary>
@@ -859,6 +1165,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.BiasTee = BiasTee;
         _settings.Theme = Theme;
         _settings.WaterfallColormap = WaterfallColormap;
+        _settings.MutedRingtoneChannels = Channels
+            .Where(c => c.MuteRtttl)
+            .Select(c => c.Config.Index)
+            .Distinct()
+            .OrderBy(i => i)
+            .ToList();
+        _settings.RingtoneMode = RingtoneMode;
+        _settings.RingtoneVolume = (int)Math.Round(RingtoneVolume);
+        _settings.RingtoneRtttl = RingtoneRtttl;
         _settings.WaterfallAutoLevels = WaterfallAutoLevels;
         _settings.WaterfallFloorDb = WaterfallFloorDb;
         _settings.WaterfallCeilDb = WaterfallCeilDb;
@@ -874,6 +1189,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.HomeLatitude = HomeLatitude;
         _settings.HomeLongitude = HomeLongitude;
+        _settings.OpenConversations = Tabs.OfType<ConversationViewModel>()
+                                          .Select(c => c.NodeNum)
+                                          .ToList();
         _settings.Save();
     }
 
@@ -1022,13 +1340,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return existing;
         }
 
-        var convo = new ConversationViewModel(nodeNum, name ?? NodeDisplayName(nodeNum));
+        var convo = new ConversationViewModel(nodeNum, name ?? NodeDisplayName(nodeNum),
+            OnConversationMuteRtttlChanged);
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
         // Restore this peer's prior message history so reopening a closed tab
         // (or relaunching the app) shows the existing conversation.
         LoadConversationHistory(convo);
         Tabs.Add(convo);
         if (focus) SelectedTab = convo;
+        // Remember that this tab is open so it (and only it) reopens next launch.
+        SaveSettings();
         return convo;
     }
 
@@ -1063,6 +1384,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SelectedTab = Tabs.Count > 0
                     ? Tabs[Math.Min(idx, Tabs.Count - 1)]
                     : null;
+            // Closing a DM tab means it should not reopen next launch.
+            SaveSettings();
         }
     }
 
@@ -1231,6 +1554,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan AckTimeout = TimeSpan.FromSeconds(30);
 
     private sealed record PendingAck(ChannelMessage Message, DateTime SentUtc);
+
+    // Outstanding traceroute requests, keyed by the request packet id, so an
+    // inbound TRACEROUTE_APP reply referencing that id can be matched to the
+    // node we traced. Entries are best-effort and never expire-swept (the reply
+    // either arrives or the user can trace again after the cooldown).
+    private readonly Dictionary<uint, uint> _pendingTraceroutes = new();
+
+    /// <summary>Minimum spacing between traceroute requests (Meshtastic-style
+    /// client throttle to avoid flooding the mesh with discovery traffic).</summary>
+    private static readonly TimeSpan TracerouteCooldown = TimeSpan.FromSeconds(30);
+
+    /// <summary>When the last traceroute request was transmitted (for the cooldown).</summary>
+    private DateTime _lastTracerouteUtc = DateTime.MinValue;
+
+    /// <summary>Minimum spacing between position requests (client throttle).</summary>
+    private static readonly TimeSpan PositionRequestCooldown = TimeSpan.FromSeconds(30);
+
+    /// <summary>When the last position request was transmitted (for the cooldown).</summary>
+    private DateTime _lastPositionRequestUtc = DateTime.MinValue;
 
     private uint NextPacketId()
     {
@@ -1525,9 +1867,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Send our NodeInfo directed at <paramref name="to"/> with
     /// <c>want_response</c> set, prompting that node to reply with its own
     /// NodeInfo — the standard Meshtastic way to learn a peer's public key
-    /// before a PKC direct message. No-op when we can't transmit.
+    /// before a PKC direct message. No-op when we can't transmit. When
+    /// <paramref name="packetId"/> is 0 a fresh id is allocated; callers that
+    /// need to reference the sent packet (e.g. to log a conversation note) can
+    /// pass one in.
     /// </summary>
-    private void RequestNodeInfo(uint to)
+    private void RequestNodeInfo(uint to, uint packetId = 0)
     {
         if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
         var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
@@ -1535,7 +1880,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            uint packetId = NextPacketId();
+            if (packetId == 0) packetId = NextPacketId();
             uint role = RoleEnumValue(MyRole);
             byte[] pubKey = TryParseKeyBase64(MyPublicKey);
             var frame = MeshEncoder.EncodeNodeInfo(
@@ -1582,6 +1927,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Reply to a directed position request with our location (POSITION_APP),
+    /// fuzzed to the primary channel's precision, addressed back to the
+    /// requester. No-op when we can't transmit, have no home location set, or
+    /// the primary channel has location sharing disabled (precision 0).
+    /// </summary>
+    private void ReplyWithPosition(uint to)
+    {
+        if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
+        if (HomeLatitude is not double lat || HomeLongitude is not double lon) return;
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null || primary.Config.PositionPrecision == 0) return;
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodePosition(
+                primary.Config, _myNodeNum, packetId,
+                lat, lon, altitudeM: null,
+                precisionBits: primary.Config.PositionPrecision,
+                to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+        }
+        catch (Exception ex)
+        {
+            Log($"  position reply failed: {ex.Message}");
+        }
+    }
+
     // -- ACK / NAK tracking --------------------------------------------------
 
     /// <summary>Register an outgoing message so an inbound ROUTING ack/nak can
@@ -1619,6 +1994,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
             });
         }
         catch (Exception ex) { Log($"message store failed: {ex.Message}"); }
+    }
+
+    /// <summary>Persist an app-generated conversation note (a traceroute result
+    /// or position-request echo shown in a DM tab) so it survives a refresh /
+    /// restart. Stored under <see cref="MessageStore.ConversationNotePort"/>
+    /// with the display tag in the channel column; reloaded by
+    /// <see cref="LoadConversationHistory"/> via <see cref="BuildHistoryMessage"/>.</summary>
+    private void PersistConversationNote(uint peer, bool outgoing, uint packetId,
+                                         string tag, string text,
+                                         float? rssi = null, float? snr = null)
+    {
+        if (_myNodeNum == 0 || peer == 0 || peer == 0xFFFFFFFFu) return;
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = packetId,
+                FromNode = outgoing ? _myNodeNum : peer,
+                ToNode = outgoing ? peer : _myNodeNum,
+                Channel = tag ?? string.Empty,
+                PortNum = MessageStore.ConversationNotePort,
+                Text = text,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                RssiDbfs = rssi,
+                SnrDb = snr,
+                Delivery = (int)MessageDelivery.None,
+            });
+        }
+        catch (Exception ex) { Log($"note store failed: {ex.Message}"); }
     }
 
     /// <summary>Flag outgoing DMs that never got an ACK within the timeout.</summary>
@@ -1660,6 +2065,113 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? $"  ACK from {NodeDisplayName(header.From)} for id {result.RequestId:x8}"
             : $"  NAK ({result.RoutingError}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
     }
+
+    /// <summary>Handle an inbound TRACEROUTE_APP packet: a reply to a request we
+    /// sent (render the path), a request directed at us (reply with the route so
+    /// the tracer sees us), or overheard traceroute traffic (just logged).</summary>
+    private void HandleTraceroute(MeshHeader header, MeshDecodeResult result, float? snrDb)
+    {
+        bool addressedToUs = _myNodeNum != 0 && header.To == _myNodeNum && !header.IsBroadcast;
+
+        // A reply to a request we sent: request_id matches and addressed to us.
+        if (result.RequestId != 0 && addressedToUs)
+        {
+            _pendingTraceroutes.Remove(result.RequestId);
+            var name = NodeDisplayName(header.From);
+            string path = FormatTraceroute(_myNodeNum, header.From, result.RouteDiscovery);
+            Log($"  traceroute reply from {name}: {path}");
+            var convo = OpenConversation(header.From, name, focus: false);
+            float? rssi = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
+            var noteText = $"Route to {name}: {path}";
+            convo.Add(new ChannelMessage
+            {
+                FromId = "traceroute",
+                Text = noteText,
+                RssiDbm = rssi,
+                SnrDb = snrDb,
+            });
+            PersistConversationNote(header.From, outgoing: false, header.PacketId,
+                                    "traceroute", noteText, rssi, snrDb);
+            return;
+        }
+
+        // A request directed at us: reply so the originator sees us in the path.
+        if (result.WantResponse && addressedToUs)
+        {
+            Log($"  traceroute request from {NodeDisplayName(header.From)} — replying");
+            SendTracerouteReply(header, result, snrDb);
+            return;
+        }
+
+        // Otherwise it's traceroute traffic we merely overheard.
+        Log($"  traceroute {header.FromId} \u2192 !{header.To:x8}");
+    }
+
+    /// <summary>Reply to a traceroute request directed at us, echoing the
+    /// forward route with the SNR of the hop that reached us appended (mirrors
+    /// firmware <c>TraceRouteModule</c>), referencing the original packet id.</summary>
+    private void SendTracerouteReply(MeshHeader origHeader, MeshDecodeResult result, float? snrDb)
+    {
+        if (!CanTransmit || _myNodeNum == 0) return;
+        var ch = Channels.FirstOrDefault(c => c.Config.Name == result.ChannelName)
+                 ?? Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)
+                 ?? Channels.FirstOrDefault();
+        if (ch is null) return;
+
+        try
+        {
+            var rd = result.RouteDiscovery;
+            var route = rd?.Route?.ToList() ?? new List<uint>();
+            var snrTowards = rd?.SnrTowards?.ToList() ?? new List<int>();
+            // SNR of the hop that reached us, scaled by 4 (-128 = unknown).
+            snrTowards.Add(snrDb is float s ? (int)Math.Round(s * 4) : -128);
+
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeTracerouteReply(
+                ch.Config, _myNodeNum, origHeader.From, packetId, origHeader.PacketId,
+                route, snrTowards, hopLimit: (byte)HopLimit);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+        }
+        catch (Exception ex)
+        {
+            Log($"  traceroute reply failed: {ex.Message}");
+        }
+    }
+
+    // Render a traceroute RouteDiscovery as "us → hop (snr) → … → dest". SNR
+    // entries are stored scaled by 4; a sentinel of -128 (unknown hop) shows "?".
+    private string FormatTraceroute(uint origin, uint dest, MeshRouteDiscovery? rd)
+    {
+        var nodes = new List<uint> { origin };
+        if (rd?.Route is { Count: > 0 } hops) nodes.AddRange(hops);
+        nodes.Add(dest);
+        var snr = rd?.SnrTowards ?? (IReadOnlyList<int>)Array.Empty<int>();
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append("  \u2192  ");
+                int idx = i - 1;
+                if (idx < snr.Count)
+                {
+                    int raw = snr[idx];
+                    sb.Append(raw <= -128
+                        ? "(?) "
+                        : $"({(raw / 4.0).ToString("0.#", CultureInfo.InvariantCulture)} dB) ");
+                }
+            }
+            sb.Append(TracerouteNodeLabel(nodes[i]));
+        }
+        int hopCount = nodes.Count - 1;
+        sb.Append(hopCount <= 1 ? "  [direct]" : $"  [{hopCount} hops]");
+        return sb.ToString();
+    }
+
+    private string TracerouteNodeLabel(uint nodeNum)
+        => (nodeNum == 0 || nodeNum == 0xFFFFFFFFu) ? "unknown" : NodeDisplayName(nodeNum);
 
     /// <summary>Persist a sent message's delivery state so its ACK/NAK status
     /// survives a restart (the row was written by PersistOutgoingText).</summary>
@@ -1964,6 +2476,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (IsNodeIgnored(header.From)) return;
+
         var rxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var channels = Channels.Select(c => c.Config).ToList();
         var result = MeshDecoder.Decode(frame, channels);
@@ -2082,6 +2596,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         // Acknowledge if the sender asked for one (firmware does
                         // this for any unicast packet addressed to it).
                         if (header.WantAck) SendAck(header, result);
+                        if (!IsNodeRtttlMuted(header.From)) PlayRingtone();
                     }
                     else
                     {
@@ -2097,6 +2612,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         if (chanVm is not null && chanVm.Messages.Count > 1000)
                             chanVm.Messages.RemoveAt(0);
                         Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
+                        if (chanVm?.MuteRtttl != true && !IsNodeRtttlMuted(header.From))
+                            PlayRingtone();
                     }
                     break;
                 case PortNum.Routing:
@@ -2104,6 +2621,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     HandleRouting(header, result);
                     break;
                 case PortNum.NodeInfo when result.User is not null:
+                    // An empty NodeInfo payload with want_response is a pure
+                    // *request* (no User content), not an advertisement — reply
+                    // with ours instead of overwriting the node with blanks.
+                    if (result.AppPayload.Length == 0)
+                    {
+                        if (result.WantResponse && _myNodeNum != 0 &&
+                            header.To == _myNodeNum && !header.IsBroadcast)
+                        {
+                            Log($"  NodeInfo requested by {senderName} — replying");
+                            RequestNodeInfoReply(header.From);
+                        }
+                        break;
+                    }
                     nodeChanged = true;
                     {
                         string newKeyHex = result.User.PublicKey.Length == 32
@@ -2151,6 +2681,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     }
                     break;
                 case PortNum.Position when result.Position is not null:
+                    // An empty Position payload with want_response is a position
+                    // *request* (no coordinates), not a location update — reply
+                    // with ours instead of recording a bogus 0,0 fix.
+                    if (result.AppPayload.Length == 0)
+                    {
+                        if (result.WantResponse && _myNodeNum != 0 &&
+                            header.To == _myNodeNum && !header.IsBroadcast)
+                        {
+                            Log($"  position requested by {senderName} — replying");
+                            ReplyWithPosition(header.From);
+                        }
+                        break;
+                    }
                     nodeChanged = true;
                     _nodeStore.Upsert(new NodeRecord
                     {
@@ -2184,6 +2727,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         Log($"  telemetry {header.FromId}: {t.TemperatureC:F1}\u00B0C {t.RelativeHumidityPct:F0}% {t.BarometricPressureHpa:F0}hPa");
                     else
                         Log($"  telemetry {header.FromId}: batt {t.BatteryLevel}% {t.Voltage:F2}V");
+                    break;
+                case PortNum.Traceroute:
+                    HandleTraceroute(header, result, snrDb);
                     break;
                 default:
                     Log($"  [{result.ChannelName}] {header.FromId} {result.Port} ({result.AppPayload.Length} B)");
@@ -2313,5 +2859,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _nodeStore.Dispose();
         _channelStore.Dispose();
         _messageStore.Dispose();
+        _ringtone.Dispose();
     }
 }

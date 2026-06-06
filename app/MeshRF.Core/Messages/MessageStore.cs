@@ -10,6 +10,12 @@ namespace MeshRF.Messages;
 /// </summary>
 public sealed class MessageStore : IDisposable
 {
+    /// <summary>Synthetic port number for app-generated conversation notes
+    /// (traceroute results, position-request echoes). Stored alongside real
+    /// packets so they reload into the right DM tab; chosen well outside the
+    /// real Meshtastic port range so it never collides with a decoded packet.</summary>
+    public const int ConversationNotePort = 0x10000;
+
     private readonly SqliteConnection _conn;
     private bool _disposed;
 
@@ -198,7 +204,7 @@ public sealed class MessageStore : IDisposable
         cmd.CommandText = """
             SELECT * FROM (
                 SELECT * FROM messages
-                WHERE portnum = 1
+                WHERE portnum IN (1, $note)
                   AND ((from_node = $peer AND to_node = $me)
                     OR (from_node = $me   AND to_node = $peer))
                 ORDER BY rx_epoch DESC, id DESC
@@ -207,6 +213,7 @@ public sealed class MessageStore : IDisposable
             """;
         cmd.Parameters.AddWithValue("$peer", peerNode);
         cmd.Parameters.AddWithValue("$me", myNode);
+        cmd.Parameters.AddWithValue("$note", ConversationNotePort);
         cmd.Parameters.AddWithValue("$n", limit);
         using var rd = cmd.ExecuteReader();
         while (rd.Read()) list.Add(Read(rd));
@@ -231,12 +238,13 @@ public sealed class MessageStore : IDisposable
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             DELETE FROM messages
-            WHERE portnum = 1
+            WHERE portnum IN (1, $note)
               AND ((from_node = $peer AND to_node = $me)
                 OR (from_node = $me   AND to_node = $peer));
             """;
         cmd.Parameters.AddWithValue("$peer", peerNode);
         cmd.Parameters.AddWithValue("$me", myNode);
+        cmd.Parameters.AddWithValue("$note", ConversationNotePort);
         cmd.ExecuteNonQuery();
     }
 
