@@ -101,7 +101,7 @@ public sealed class AppSettings
 
     /// <summary>RTTTL ringtone string; defaults to the stock Meshtastic tune.</summary>
     public string RingtoneRtttl { get; set; } =
-        "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b,p,b6,p,b,p,b6,2p,p,b,p,b6,p,b,p,b6";
+        "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p";
 
     private static readonly JsonSerializerOptions s_opts = new()
     {

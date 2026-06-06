@@ -29,7 +29,7 @@ public sealed class RtttlPlayer : IDisposable
 {
     /// <summary>The stock Meshtastic external-notification ringtone.</summary>
     public const string MeshtasticDefault =
-        "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b,p,b6,p,b,p,b6,2p,p,b,p,b6,p,b,p,b6";
+        "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p";
 
     private const int SampleRate = 44100;
     private const int LoopGapMs = 400;
