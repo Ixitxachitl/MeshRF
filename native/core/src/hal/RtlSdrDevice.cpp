@@ -243,8 +243,7 @@ private:
 } // namespace
 
 // Exposed to HackRfDevice.cpp's open_device() dispatcher. Returns a working
-// RtlSdrDevice or nullptr (with `status` describing why), so the caller can
-// fall back to a synthetic NullDevice.
+// RtlSdrDevice or nullptr (with `status` describing why).
 std::unique_ptr<IRadioDevice> open_rtlsdr_device(std::string& status) {
     rtlsdr_dyn::Api api{};
     if (!rtlsdr_dyn::load(api)) {

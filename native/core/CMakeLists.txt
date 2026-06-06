@@ -70,7 +70,7 @@ endforeach()
 if(MRF_HACKRF_DLL)
     message(STATUS "mrf_core: vendoring hackrf.dll from ${MRF_HACKRF_DLL}")
 else()
-    message(STATUS "mrf_core: hackrf.dll not found on this machine; the app will use the synthetic NullDevice. Install SDRangel/PothosSDR or set HACKRF_DIR.")
+    message(STATUS "mrf_core: hackrf.dll not found on this machine; HackRF RX/TX will be unavailable. Install SDRangel/PothosSDR or set HACKRF_DIR.")
 endif()
 
 set_target_properties(mrf_core PROPERTIES

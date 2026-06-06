@@ -19,13 +19,20 @@
 
     <DockPanel LastChildFill="True">
         <ToolBar DockPanel.Dock="Top">
-            <TextBlock Text="Device" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <TextBlock Text="RX" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox Width="150"
                       ItemsSource="{Binding DeviceOptions}"
                       DisplayMemberPath="Label"
                       SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                       IsEnabled="{Binding CanSelectDevice}"
-                      ToolTip="Active SDR backend (selectable when stopped)" />
+                      ToolTip="Receive SDR backend (selectable when stopped)" />
+            <TextBlock Text="TX" VerticalAlignment="Center" Margin="8,0,4,0" />
+            <ComboBox Width="150"
+                      ItemsSource="{Binding TxDeviceOptions}"
+                      DisplayMemberPath="Label"
+                      SelectedItem="{Binding SelectedTxDevice, Mode=TwoWay}"
+                      IsEnabled="{Binding CanSelectDevice}"
+                      ToolTip="Transmit SDR backend; HackRF can transmit, RTL-SDR cannot" />
             <Separator />
             <TextBlock Text="Region" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox Width="90"
@@ -902,10 +909,11 @@
                                             </StackPanel>
                                         </DockPanel>
                                     </Border>
-                                    <!-- Compose bar: send a direct message to this peer. Shown on
-                                         any device; transmit only succeeds on a TX-capable radio.
-                                         DMs require sharing the channel key with the peer. -->
-                                    <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0" LastChildFill="True">
+                                     <!-- Compose bar: visible only when the active device can transmit (HackRF). -->
+                                     <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0" LastChildFill="True"
+                                              Visibility="{Binding DataContext.CanTransmit,
+                                                        RelativeSource={RelativeSource AncestorType=TabControl},
+                                                        Converter={StaticResource BoolToVis}}">
                                         <Button DockPanel.Dock="Right" Content="Send" Padding="14,4"
                                                 Margin="4,0,0,0"
                                                 ToolTip="Encode and transmit a direct message to this node"

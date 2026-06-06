@@ -41,9 +41,12 @@ constexpr std::uint32_t kDeviceRateHz = 2'400'000u;
 }
 
 struct Core::Impl {
-    std::unique_ptr<hal::IRadioDevice> radio;
-    hal::DeviceKind requested_kind{hal::DeviceKind::Auto};
-    std::string device_name{"(none)"};
+    std::unique_ptr<hal::IRadioDevice> rx_radio;
+    std::unique_ptr<hal::IRadioDevice> tx_radio;
+    hal::DeviceKind rx_requested_kind{hal::DeviceKind::Null};
+    hal::DeviceKind tx_requested_kind{hal::DeviceKind::HackRf};
+    std::string rx_device_name{"(none)"};
+    std::string tx_device_name{"(none)"};
     std::uint8_t lna_db{24};
     std::uint8_t vga_db{20};
     bool         amp_enable{false};
@@ -88,10 +91,11 @@ struct Core::Impl {
 };
 
 Core::Core() : impl_(std::make_unique<Impl>()) {
-    // Probe the radio at construction so the UI can display which backend
-    // (real HackRF or synthetic null device) is in use even before RX starts.
-    impl_->radio = hal::open_default_device();
-    if (impl_->radio) impl_->device_name = impl_->radio->info().board_name;
+    // RX starts disabled. TX defaults to HackRF so transmit controls appear
+    // when a HackRF is connected, without any auto-detected synthetic fallback.
+    impl_->rx_device_name = "(none)";
+    impl_->tx_radio = hal::open_device(hal::DeviceKind::HackRf);
+    impl_->tx_device_name = impl_->tx_radio ? impl_->tx_radio->info().board_name : "(none)";
 }
 Core::~Core() { stop(); }
 
@@ -111,10 +115,12 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
         impl_->events.push_back(std::move(msg));
     });
 
-    if (!impl_->radio) {
-        impl_->radio = hal::open_device(impl_->requested_kind);
-        if (impl_->radio) impl_->device_name = impl_->radio->info().board_name;
+    if (!impl_->rx_radio) {
+        impl_->rx_radio = hal::open_device(impl_->rx_requested_kind);
+        if (impl_->rx_radio) impl_->rx_device_name = impl_->rx_radio->info().board_name;
     }
+    if (!impl_->rx_radio)
+        throw std::runtime_error("No RX device selected or available");
     hal::RxConfig rx{};
     rx.center_freq_hz = center_freq_hz + static_cast<std::uint64_t>(kLoOffsetHz);
     rx.lna_gain_db = impl_->lna_db;
@@ -159,7 +165,7 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
         start_capture(path);
     }
 
-    impl_->radio->start_rx(rx, [this](const hal::SampleType* s, std::size_t n) {
+    impl_->rx_radio->start_rx(rx, [this](const hal::SampleType* s, std::size_t n) {
         // 0. Strip the DC offset from the raw zero-IF input so the rest of
         //    the pipeline (stats, spectrum, modem) doesn't see a giant
         //    center-bin spike. HackRF / RTL-SDR / etc. all leak LO into the
@@ -245,8 +251,8 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
 
         // 4. Report dropped samples (ring overflow = consumer can't keep up).
         //    Throttled to once per ~0.5 s of new drops so the log isn't spammed.
-        if (impl_->radio) {
-            const std::uint64_t drops = impl_->radio->dropped_samples();
+        if (impl_->rx_radio) {
+            const std::uint64_t drops = impl_->rx_radio->dropped_samples();
             if (drops > impl_->last_drops_reported + impl_->device_rate / 2) {
                 impl_->last_drops_reported = drops;
                 std::lock_guard<std::mutex> lk(impl_->events_mu);
@@ -260,7 +266,7 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
 
     // Re-apply cached device-specific options now that the radio is open and
     // the stream is running (RTL-SDR only acquires its handle in start_rx).
-    impl_->radio->set_rx_option("bias_tee", impl_->bias_tee ? 1 : 0);
+    impl_->rx_radio->set_rx_option("bias_tee", impl_->bias_tee ? 1 : 0);
 
     impl_->running = true;
 }
@@ -268,20 +274,34 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
 void Core::stop() {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (!impl_->running) return;
-    if (impl_->radio) impl_->radio->stop_rx();
+    if (impl_->rx_radio) impl_->rx_radio->stop_rx();
     // The RX callback has now stopped; safe to close any capture.
     stop_capture();
     impl_->running = false;
 }
 
 bool Core::can_transmit() const noexcept {
-    return impl_->radio && impl_->radio->kind() == hal::DeviceKind::HackRf;
+    const hal::IRadioDevice* tx =
+        (!impl_->tx_radio && impl_->rx_radio &&
+         impl_->rx_radio->kind() == impl_->tx_requested_kind)
+            ? impl_->rx_radio.get()
+            : impl_->tx_radio.get();
+    return tx && tx->kind() == hal::DeviceKind::HackRf;
 }
 
 bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
                     std::span<const std::uint8_t> payload,
                     std::uint8_t txvga_gain_db, bool amp_enable) {
-    if (!impl_->radio || impl_->radio->kind() != hal::DeviceKind::HackRf)
+    hal::IRadioDevice* tx_radio = nullptr;
+    bool tx_uses_rx_radio = false;
+    if (!impl_->tx_radio && impl_->rx_radio &&
+        impl_->rx_radio->kind() == impl_->tx_requested_kind) {
+        tx_radio = impl_->rx_radio.get();
+        tx_uses_rx_radio = true;
+    } else {
+        tx_radio = impl_->tx_radio.get();
+    }
+    if (!tx_radio || tx_radio->kind() != hal::DeviceKind::HackRf)
         return false;
     if (payload.empty()) return false;
 
@@ -360,11 +380,12 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
         }
     }
 
-    // 5. Pause RX for the half-duplex burst, remembering its config.
+    // 5. Pause RX only when TX shares the same HackRF handle. If RX is on a
+    // separate device (for example RTL-SDR), keep receiving during TX.
     const bool was_running = is_running();
     const modem::Preset rx_preset = impl_->last_rx_preset;
     const std::uint64_t rx_center = impl_->last_rx_center;
-    if (was_running) stop();
+    if (was_running && tx_uses_rx_radio) stop();
 
     // 6. Stream the buffer once via the HackRF TX callback, blocking until the
     //    burst has physically clocked out of the DAC.
@@ -396,7 +417,7 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
             static_cast<long long>((burst_secs + 0.050) * 1e6));
         const auto t_start = std::chrono::steady_clock::now();
 
-        impl_->radio->start_tx(cfg, [&](hal::SampleType* out, std::size_t cap)
+        tx_radio->start_tx(cfg, [&](hal::SampleType* out, std::size_t cap)
                                         -> std::size_t {
             // First, drain the real payload.
             if (pos < tx.size()) {
@@ -430,11 +451,11 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
             // Bound the wait so a stalled USB callback can't hang the UI thread.
             cv.wait_for(l, std::chrono::seconds(2), [&] { return done; });
         }
-        impl_->radio->stop_tx();
+        tx_radio->stop_tx();
     }
 
-    // 7. Resume RX if it was running before the burst.
-    if (was_running) start_rx(rx_preset, rx_center);
+    // 7. Resume RX if a shared-radio burst paused it.
+    if (was_running && tx_uses_rx_radio) start_rx(rx_preset, rx_center);
     return true;
 }
 
@@ -481,13 +502,13 @@ void Core::set_gains(std::uint8_t lna_db, std::uint8_t vga_db, bool amp) {
     impl_->lna_db = lna_db;
     impl_->vga_db = vga_db;
     impl_->amp_enable = amp;
-    if (impl_->radio) impl_->radio->set_rx_gains(lna_db, vga_db, amp);
+    if (impl_->rx_radio) impl_->rx_radio->set_rx_gains(lna_db, vga_db, amp);
 }
 
 void Core::set_device_option(std::string_view key, int value) {
     // Cache so the option survives a stop/start cycle, then push live.
     if (key == "bias_tee") impl_->bias_tee = (value != 0);
-    if (impl_->radio) impl_->radio->set_rx_option(key, value);
+    if (impl_->rx_radio) impl_->rx_radio->set_rx_option(key, value);
 }
 
 std::size_t Core::spectrum_size() const noexcept {
@@ -700,23 +721,56 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     return n_time;
 }
 
-bool Core::set_device(hal::DeviceKind kind) {
+bool Core::set_rx_device(hal::DeviceKind kind) {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (impl_->running) return false;
-    impl_->requested_kind = kind;
+    impl_->rx_requested_kind = kind;
     // Release the current device BEFORE opening the new one. Otherwise the old
     // HackRF still holds its USB handle while open_device() calls hackrf_open()
     // for the new selection, so the second open hits the already-claimed device
     // and fails with rc=-5 (HACKRF_ERROR_NOT_FOUND). Closing first guarantees a
     // clean re-open even when re-selecting the same HackRF.
-    impl_->radio.reset();
-    impl_->radio = hal::open_device(kind);
-    impl_->device_name = impl_->radio ? impl_->radio->info().board_name : "(none)";
+    if (impl_->tx_requested_kind == kind) impl_->tx_radio.reset();
+    impl_->rx_radio.reset();
+    impl_->rx_radio = hal::open_device(kind);
+    impl_->rx_device_name = impl_->rx_radio ? impl_->rx_radio->info().board_name : "(none)";
+
+    if (impl_->rx_radio && impl_->rx_radio->kind() == impl_->tx_requested_kind) {
+        impl_->tx_radio.reset();
+        impl_->tx_device_name = impl_->rx_device_name;
+    } else if (!impl_->tx_radio) {
+        impl_->tx_radio = hal::open_device(impl_->tx_requested_kind);
+        impl_->tx_device_name = impl_->tx_radio ? impl_->tx_radio->info().board_name : "(none)";
+    }
     return true;
 }
 
-hal::DeviceKind Core::device_kind() const noexcept {
-    return impl_->radio ? impl_->radio->kind() : hal::DeviceKind::Null;
+bool Core::set_tx_device(hal::DeviceKind kind) {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    if (impl_->running) return false;
+    impl_->tx_requested_kind = kind;
+    if (impl_->rx_radio && impl_->rx_radio->kind() == impl_->tx_requested_kind) {
+        impl_->tx_radio.reset();
+        impl_->tx_device_name = impl_->rx_device_name;
+    } else {
+        impl_->tx_radio.reset();
+        impl_->tx_radio = hal::open_device(kind);
+        impl_->tx_device_name = impl_->tx_radio ? impl_->tx_radio->info().board_name : "(none)";
+    }
+    return true;
+}
+
+hal::DeviceKind Core::rx_device_kind() const noexcept {
+    return impl_->rx_radio ? impl_->rx_radio->kind() : hal::DeviceKind::Null;
+}
+
+hal::DeviceKind Core::tx_device_kind() const noexcept {
+    const hal::IRadioDevice* tx =
+        (!impl_->tx_radio && impl_->rx_radio &&
+         impl_->rx_radio->kind() == impl_->tx_requested_kind)
+            ? impl_->rx_radio.get()
+            : impl_->tx_radio.get();
+    return tx ? tx->kind() : hal::DeviceKind::Null;
 }
 
 bool Core::is_device_available(hal::DeviceKind kind) const noexcept {
@@ -724,7 +778,11 @@ bool Core::is_device_available(hal::DeviceKind kind) const noexcept {
 }
 
 const char* Core::device_name() const noexcept {
-    return impl_->device_name.c_str();
+    return impl_->rx_device_name.c_str();
+}
+
+const char* Core::tx_device_name() const noexcept {
+    return impl_->tx_device_name.c_str();
 }
 
 const char* Core::device_status() const noexcept {

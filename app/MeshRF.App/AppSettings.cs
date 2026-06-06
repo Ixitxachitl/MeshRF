@@ -19,9 +19,15 @@ public sealed class AppSettings
     public byte VgaGainDb { get; set; } = 20;
     public bool AmpEnable { get; set; } = false;
 
-    /// <summary>Selected radio backend: "Auto", "HackRf", "RtlSdr" or "Null".
+    /// <summary>Legacy selected radio backend, now treated as RX on migration.</summary>
+    public string DeviceKind { get; set; } = "Null";
+
+    /// <summary>Selected RX radio backend: "Auto", "HackRf", "RtlSdr" or "Null".
     /// Matches <see cref="MeshRF.RadioDeviceKind"/>.</summary>
-    public string DeviceKind { get; set; } = "Auto";
+    public string RxDeviceKind { get; set; } = "Null";
+
+    /// <summary>Selected TX radio backend. HackRF can transmit; RTL-SDR cannot.</summary>
+    public string TxDeviceKind { get; set; } = "HackRf";
 
     /// <summary>Auto-Gain-Control: when on, the app pushes LNA/VGA to keep
     /// the peak power around <see cref="AgcTargetDbfs"/>.</summary>

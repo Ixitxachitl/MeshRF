@@ -28,13 +28,20 @@ MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core);
 MRF_API int  MRF_CALL mrf_core_is_running(const mrf_core_t* core);
 
 // Radio backend selection. `kind` mirrors mrf::hal::DeviceKind:
-//   0 = Auto, 1 = HackRF, 2 = RTL-SDR, 3 = Synthetic/Null.
-// Reopens the device immediately when RX is stopped so the device name/status
-// reflect the choice. Returns 0 on success, -1 if RX is running, -2 on null.
+//   0 = legacy Auto (disabled), 1 = HackRF, 2 = RTL-SDR, 3 = None.
+// mrf_core_set_device is a back-compat alias for mrf_core_set_rx_device.
+// Reopens the selected device immediately when RX is stopped so the names/status
+// reflect the choices. Returns 0 on success, -1 if RX is running, -2 on null.
 MRF_API int32_t MRF_CALL mrf_core_set_device(mrf_core_t* core, int32_t kind);
+MRF_API int32_t MRF_CALL mrf_core_set_rx_device(mrf_core_t* core, int32_t kind);
+MRF_API int32_t MRF_CALL mrf_core_set_tx_device(mrf_core_t* core, int32_t kind);
 
-// The backend that actually opened (may differ from the requested kind).
+// The RX backend that actually opened (may differ from the requested kind).
 MRF_API int32_t MRF_CALL mrf_core_get_device_kind(const mrf_core_t* core);
+MRF_API int32_t MRF_CALL mrf_core_get_rx_device_kind(const mrf_core_t* core);
+
+// The TX backend that actually opened/selected.
+MRF_API int32_t MRF_CALL mrf_core_get_tx_device_kind(const mrf_core_t* core);
 
 // 1 if the given backend's runtime library can be loaded (selectable), else 0.
 MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
@@ -102,6 +109,9 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_packet_spectrogram(const mrf_core_t* cor
 MRF_API uint32_t MRF_CALL mrf_core_get_device_name(const mrf_core_t* core,
                                                    char* buf,
                                                    uint32_t capacity);
+MRF_API uint32_t MRF_CALL mrf_core_get_tx_device_name(const mrf_core_t* core,
+                                                      char* buf,
+                                                      uint32_t capacity);
 
 // Diagnostic string from the most recent device-open attempt.
 MRF_API uint32_t MRF_CALL mrf_core_get_device_status(const mrf_core_t* core,
@@ -116,13 +126,14 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_event(mrf_core_t* core,
                                               uint32_t capacity);
 
 // Transmit ----------------------------------------------------------------
-// 1 if the active radio backend can transmit (HackRF only), else 0.
+// 1 if the selected TX radio backend can transmit (HackRF only), else 0.
 MRF_API int32_t MRF_CALL mrf_core_can_transmit(const mrf_core_t* core);
 
 // Modulates `payload` (the fully framed/encrypted on-air bytes produced by the
 // managed layer) into a LoRa burst for `preset` and transmits it centered on
-// `center_freq_hz`. HackRF only; if RX is running it is paused for the burst
-// and resumed afterwards. `txvga_gain_db` is the HackRF TX VGA gain (0..47).
+// `center_freq_hz`. HackRF only; if TX shares the RX HackRF, RX is paused for
+// the burst and resumed afterwards. Separate RX/TX devices can run full duplex.
+// `txvga_gain_db` is the HackRF TX VGA gain (0..47).
 // Blocks until the burst has been streamed. Returns 1 on success, 0 if the
 // device cannot transmit, the payload is empty, or modulation failed.
 MRF_API int32_t MRF_CALL mrf_core_transmit(mrf_core_t* core,

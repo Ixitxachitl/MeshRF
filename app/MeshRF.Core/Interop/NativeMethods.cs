@@ -29,8 +29,20 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_set_device")]
     public static partial int CoreSetDevice(nint core, int kind);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_rx_device")]
+    public static partial int CoreSetRxDevice(nint core, int kind);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_tx_device")]
+    public static partial int CoreSetTxDevice(nint core, int kind);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_get_device_kind")]
     public static partial int CoreGetDeviceKind(nint core);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_rx_device_kind")]
+    public static partial int CoreGetRxDeviceKind(nint core);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_tx_device_kind")]
+    public static partial int CoreGetTxDeviceKind(nint core);
 
     [LibraryImport(Dll, EntryPoint = "mrf_core_device_available")]
     public static partial int CoreDeviceAvailable(nint core, int kind);
@@ -80,6 +92,9 @@ internal static partial class NativeMethods
 
     [LibraryImport(Dll, EntryPoint = "mrf_core_get_device_name")]
     public static unsafe partial uint CoreGetDeviceName(nint core, byte* buf, uint capacity);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_tx_device_name")]
+    public static unsafe partial uint CoreGetTxDeviceName(nint core, byte* buf, uint capacity);
 
     [LibraryImport(Dll, EntryPoint = "mrf_core_get_device_status")]
     public static unsafe partial uint CoreGetDeviceStatus(nint core, byte* buf, uint capacity);

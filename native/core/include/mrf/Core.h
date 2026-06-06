@@ -40,26 +40,40 @@ public:
     // (16-byte L1 header + encrypted Data payload) produced by the managed
     // MeshEncoder; this modulates it into a full LoRa frame (preamble + sync +
     // SFD + FEC + chirps), upsamples to the radio rate, offset-mixes, and keys
-    // the transmitter. TX is HackRF-only (half-duplex): if RX is currently
-    // running it is paused for the burst and resumed afterward. Blocks until
-    // the burst has been streamed. Returns false if the active device cannot
-    // transmit (not a HackRF) or the payload is empty/invalid.
+    // the transmitter. TX is HackRF-only. If TX uses the same HackRF that is
+    // currently receiving, RX is paused for the burst and resumed afterward;
+    // when RX is on a separate device, RX continues during TX. Blocks until
+    // the burst has been streamed. Returns false if the selected TX device
+    // cannot transmit or the payload is empty/invalid.
     bool transmit(modem::Preset preset, std::uint64_t center_freq_hz,
                   std::span<const std::uint8_t> payload,
                   std::uint8_t txvga_gain_db = 30, bool amp_enable = false);
 
-    // True if the active radio backend can transmit (HackRF only).
+    // True if the selected TX radio backend can transmit (HackRF only).
     [[nodiscard]] bool can_transmit() const noexcept;
 
-    // Select the radio backend used for the next start_rx. Reopens the device
+    // Select the RX radio backend used for the next start_rx. Reopens the device
     // immediately (so device_name()/device_status() reflect the choice) when
     // RX is not running. Returns false if RX is currently running (the caller
     // must stop first).
-    bool set_device(hal::DeviceKind kind);
+    bool set_rx_device(hal::DeviceKind kind);
 
-    // The backend that actually opened (may differ from the requested kind
+    // Back-compat alias for set_rx_device().
+    bool set_device(hal::DeviceKind kind) { return set_rx_device(kind); }
+
+    // Select the TX radio backend. HackRF can transmit; RTL-SDR and Null cannot.
+    // Like RX selection, this is only allowed while RX is stopped.
+    bool set_tx_device(hal::DeviceKind kind);
+
+    // The RX backend that actually opened (may differ from the requested kind
     // when Auto probes, or when the requested device was unavailable).
-    [[nodiscard]] hal::DeviceKind device_kind() const noexcept;
+    [[nodiscard]] hal::DeviceKind rx_device_kind() const noexcept;
+
+    // Back-compat alias for rx_device_kind().
+    [[nodiscard]] hal::DeviceKind device_kind() const noexcept { return rx_device_kind(); }
+
+    // The TX backend that actually opened/selected.
+    [[nodiscard]] hal::DeviceKind tx_device_kind() const noexcept;
 
     // True if a backend's runtime library can be loaded (so the user could
     // select it). Auto and Null are always available; does not need hardware.
@@ -116,9 +130,12 @@ public:
     // detected: ...") and consumed by the UI for display in the log.
     std::size_t pull_event(std::span<char> out) noexcept;
 
-    // Human-readable name of the radio backend currently in use
-    // (e.g. "HackRF One", or "null-synth" if no hardware was found).
+    // Human-readable name of the RX radio backend currently in use
+    // (e.g. "HackRF One", or "(none)" if no RX device is selected/available).
     [[nodiscard]] const char* device_name() const noexcept;
+
+    // Human-readable name of the TX radio backend currently selected.
+    [[nodiscard]] const char* tx_device_name() const noexcept;
 
     // Diagnostic string from the most recent device-open attempt, e.g.
     // "HackRF open OK" or "libhackrf load failed: hackrf.dll not found".

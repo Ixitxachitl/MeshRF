@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // HackRF One implementation of IRadioDevice. Loads libhackrf at runtime via
-// HackRfDynLoad — no build-time dependency on hackrf.h or hackrf.lib. When
-// the DLL can't be found we fall back to a synthetic NullDevice so the rest
-// of the stack works without hardware.
+// HackRfDynLoad, with no build-time dependency on hackrf.h or hackrf.lib.
 #include "mrf/hal/RadioDevice.h"
 #include "HackRfDynLoad.h"
 
@@ -13,8 +11,6 @@
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
-#include <numbers>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -35,66 +31,6 @@ const char* open_default_device_status() { return g_open_status.c_str(); }
 
 namespace {
 
-// ---------------------------------------------------------------------------
-// Synthetic NullDevice fallback. Emits white noise + a pilot tone so the WPF
-// spectrum view animates when no hardware is wired in.
-// ---------------------------------------------------------------------------
-class NullDevice final : public IRadioDevice {
-public:
-    DeviceInfo info() const override { return DeviceInfo{"", "null-synth", 0}; }
-
-    void start_rx(const RxConfig& cfg, RxCallback cb) override {
-        if (rx_running_) return;
-        rx_cb_ = std::move(cb);
-        sample_rate_ = cfg.sample_rate_hz == 0 ? 2'000'000u : cfg.sample_rate_hz;
-        rx_running_ = true;
-        rx_thread_ = std::thread(&NullDevice::rx_loop, this);
-    }
-    void stop_rx() override {
-        rx_running_ = false;
-        if (rx_thread_.joinable()) rx_thread_.join();
-        rx_cb_ = {};
-    }
-    void start_tx(const TxConfig&, TxCallback) override { tx_running_ = true; }
-    void stop_tx() override { tx_running_ = false; }
-    bool is_rx_running() const override { return rx_running_; }
-    bool is_tx_running() const override { return tx_running_; }
-
-private:
-    void rx_loop() {
-        constexpr std::size_t kChunk = 16384;
-        std::vector<SampleType> buf(kChunk);
-        std::mt19937 rng{0xC0FFEEu};
-        std::normal_distribution<float> nd(0.0f, 0.05f);
-        const float two_pi = 2.0f * std::numbers::pi_v<float>;
-        const float dphase = two_pi * 0.10f;
-        const float tone_amp = 0.20f;
-        float phase = 0.0f;
-
-        const auto chunk_us = std::chrono::microseconds{
-            static_cast<long long>(1e6 * static_cast<double>(kChunk) /
-                                   static_cast<double>(sample_rate_))};
-
-        while (rx_running_) {
-            for (std::size_t i = 0; i < kChunk; ++i) {
-                buf[i] = SampleType(nd(rng) + tone_amp * std::cos(phase),
-                                    nd(rng) + tone_amp * std::sin(phase));
-                phase += dphase;
-                if (phase > two_pi) phase -= two_pi;
-            }
-            if (rx_cb_) rx_cb_(buf.data(), buf.size());
-            std::this_thread::sleep_for(chunk_us);
-        }
-    }
-
-    std::atomic<bool> rx_running_{false};
-    std::atomic<bool> tx_running_{false};
-    std::thread rx_thread_;
-    RxCallback rx_cb_;
-    std::uint32_t sample_rate_{2'000'000u};
-};
-
-// ---------------------------------------------------------------------------
 // Real HackRF One via runtime-loaded libhackrf.
 // ---------------------------------------------------------------------------
 class HackRfDevice final : public IRadioDevice {
@@ -380,22 +316,16 @@ std::unique_ptr<IRadioDevice> try_open_rtlsdr() {
 std::unique_ptr<IRadioDevice> open_device(DeviceKind kind) {
     switch (kind) {
         case DeviceKind::HackRf:
-            if (auto d = try_open_hackrf()) return d;
-            return std::make_unique<NullDevice>();
+            return try_open_hackrf();
         case DeviceKind::RtlSdr:
-            if (auto d = try_open_rtlsdr()) return d;
-            return std::make_unique<NullDevice>();
+            return try_open_rtlsdr();
         case DeviceKind::Null:
-            g_open_status = "Synthetic NullDevice selected (no hardware)";
-            return std::make_unique<NullDevice>();
+            g_open_status = "No device selected";
+            return nullptr;
         case DeviceKind::Auto:
         default: {
-            if (auto d = try_open_hackrf()) return d;
-            const std::string hackrf_why = g_open_status;
-            if (auto d = try_open_rtlsdr()) return d;
-            g_open_status = "No SDR found \u2014 " + hackrf_why +
-                            "; " + g_open_status + "; using synthetic NullDevice";
-            return std::make_unique<NullDevice>();
+            g_open_status = "Auto-detect disabled; select RX/TX device explicitly";
+            return nullptr;
         }
     }
 }
@@ -413,9 +343,10 @@ bool device_available(DeviceKind kind) {
         case DeviceKind::RtlSdr:
             return rtlsdr_backend_available();
         case DeviceKind::Null:
+            return true;
         case DeviceKind::Auto:
         default:
-            return true;
+            return false;
     }
 }
 

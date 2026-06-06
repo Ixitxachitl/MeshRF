@@ -36,13 +36,31 @@ MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core) {
 }
 
 MRF_API int32_t MRF_CALL mrf_core_set_device(mrf_core_t* core, int32_t kind) {
+    return mrf_core_set_rx_device(core, kind);
+}
+
+MRF_API int32_t MRF_CALL mrf_core_set_rx_device(mrf_core_t* core, int32_t kind) {
     if (!core) return -2;
-    return core->core.set_device(static_cast<mrf::hal::DeviceKind>(kind)) ? 0 : -1;
+    return core->core.set_rx_device(static_cast<mrf::hal::DeviceKind>(kind)) ? 0 : -1;
+}
+
+MRF_API int32_t MRF_CALL mrf_core_set_tx_device(mrf_core_t* core, int32_t kind) {
+    if (!core) return -2;
+    return core->core.set_tx_device(static_cast<mrf::hal::DeviceKind>(kind)) ? 0 : -1;
 }
 
 MRF_API int32_t MRF_CALL mrf_core_get_device_kind(const mrf_core_t* core) {
+    return mrf_core_get_rx_device_kind(core);
+}
+
+MRF_API int32_t MRF_CALL mrf_core_get_rx_device_kind(const mrf_core_t* core) {
     if (!core) return static_cast<int32_t>(mrf::hal::DeviceKind::Null);
-    return static_cast<int32_t>(core->core.device_kind());
+    return static_cast<int32_t>(core->core.rx_device_kind());
+}
+
+MRF_API int32_t MRF_CALL mrf_core_get_tx_device_kind(const mrf_core_t* core) {
+    if (!core) return static_cast<int32_t>(mrf::hal::DeviceKind::Null);
+    return static_cast<int32_t>(core->core.tx_device_kind());
 }
 
 MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
@@ -140,6 +158,21 @@ MRF_API uint32_t MRF_CALL mrf_core_get_device_name(const mrf_core_t* core,
     return len;
 }
 
+MRF_API uint32_t MRF_CALL mrf_core_get_tx_device_name(const mrf_core_t* core,
+                                                      char* buf,
+                                                      uint32_t capacity) {
+    const char* name = (core && core->core.tx_device_name())
+                           ? core->core.tx_device_name() : "(none)";
+    uint32_t len = 0;
+    while (name[len] != '\0') ++len;
+    if (buf && capacity > 0) {
+        uint32_t copy = len < (capacity - 1) ? len : (capacity - 1);
+        for (uint32_t i = 0; i < copy; ++i) buf[i] = name[i];
+        buf[copy] = '\0';
+    }
+    return len;
+}
+
 MRF_API uint32_t MRF_CALL mrf_core_get_device_status(const mrf_core_t* core,
                                                      char* buf,
                                                      uint32_t capacity) {
@@ -186,6 +219,6 @@ MRF_API int32_t MRF_CALL mrf_core_transmit(mrf_core_t* core,
     }
 }
 
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 6u; }
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 7u; }
 
 } // extern "C"

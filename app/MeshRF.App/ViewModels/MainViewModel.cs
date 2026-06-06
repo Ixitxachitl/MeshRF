@@ -138,34 +138,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _status = "Idle";
 
     public string DeviceName => _core.DeviceName;
+    public string TxDeviceName => _core.TxDeviceName;
     public bool HasRealRadio => _core.HasRealRadio;
     public string DeviceStatus => _core.DeviceStatus;
     public string DeviceBadge => _core.HasRealRadio
-        ? $"Device: {_core.DeviceName}"
-        : $"Device: {_core.DeviceName} (no hardware \u2014 synthetic)";
+        ? $"RX: {_core.DeviceName}  TX: {_core.TxDeviceName}"
+        : $"RX: {_core.DeviceName} (unavailable)  TX: {_core.TxDeviceName}";
 
     /// <summary>An entry in the device-backend selector.</summary>
     public sealed record DeviceOption(RadioDeviceKind Kind, string Label);
 
-    /// <summary>Selectable radio backends (HackRF / RTL-SDR / Auto / Synthetic).
+    /// <summary>Selectable RX radio backends (HackRF / RTL-SDR / None).
     /// Populated at construction with an availability annotation.</summary>
     public IReadOnlyList<DeviceOption> DeviceOptions { get; private set; } =
+        Array.Empty<DeviceOption>();
+
+    public IReadOnlyList<DeviceOption> TxDeviceOptions { get; private set; } =
         Array.Empty<DeviceOption>();
 
     [ObservableProperty]
     private DeviceOption? _selectedDevice;
 
+    [ObservableProperty]
+    private DeviceOption? _selectedTxDevice;
+
     private bool _suppressDeviceUpdate;
 
-    /// <summary>True when the selected backend is an RTL-SDR (drives which
-    /// hardware controls the toolbar shows).</summary>
+    /// <summary>True when the selected RX backend is an RTL-SDR (drives which
+    /// receiver controls the toolbar shows).</summary>
     public bool IsRtlSdr => SelectedDevice?.Kind == RadioDeviceKind.RtlSdr;
 
-    /// <summary>True for everything that isn't an RTL-SDR (HackRF / Auto /
-    /// Synthetic) — those use the LNA/VGA/AMP gain model.</summary>
+    /// <summary>True for everything that isn't an RTL-SDR; those use the
+    /// HackRF-style LNA/VGA/AMP gain model.</summary>
     public bool IsHackRf => !IsRtlSdr;
 
-    /// <summary>The device selector is only editable while RX is stopped.</summary>
+    /// <summary>The device selectors are only editable while RX is stopped.</summary>
     public bool CanSelectDevice => !IsRunning;
 
     [ObservableProperty]
@@ -661,14 +668,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Push gains into the native core so they take effect when RX starts.
         _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
 
-        // Select the persisted radio backend before probing names/status below.
-        var deviceKind = Enum.TryParse<RadioDeviceKind>(_settings.DeviceKind, out var dk)
-            ? dk : RadioDeviceKind.Auto;
-        _core.SetDevice(deviceKind);
-        DeviceOptions = BuildDeviceOptions();
+        // Select persisted RX/TX backends before probing names/status below.
+        // Older settings only had DeviceKind; treat it as RX and default TX to HackRF.
+        var rxDeviceText = string.IsNullOrWhiteSpace(_settings.RxDeviceKind)
+            ? _settings.DeviceKind
+            : _settings.RxDeviceKind;
+        var rxDeviceKind = Enum.TryParse<RadioDeviceKind>(rxDeviceText, out var rxDk)
+            ? rxDk : RadioDeviceKind.Auto;
+        if (rxDeviceKind == RadioDeviceKind.Auto) rxDeviceKind = RadioDeviceKind.Null;
+        var txDeviceKind = Enum.TryParse<RadioDeviceKind>(_settings.TxDeviceKind, out var txDk)
+            ? txDk : RadioDeviceKind.HackRf;
+        if (txDeviceKind is RadioDeviceKind.Auto or RadioDeviceKind.RtlSdr)
+            txDeviceKind = RadioDeviceKind.Null;
+        _core.SetRxDevice(rxDeviceKind);
+        _core.SetTxDevice(txDeviceKind);
+        DeviceOptions = BuildRxDeviceOptions();
+        TxDeviceOptions = BuildTxDeviceOptions();
         _suppressDeviceUpdate = true;
-        SelectedDevice = DeviceOptions.FirstOrDefault(o => o.Kind == deviceKind)
+        SelectedDevice = DeviceOptions.FirstOrDefault(o => o.Kind == rxDeviceKind)
                              ?? DeviceOptions[0];
+        SelectedTxDevice = TxDeviceOptions.FirstOrDefault(o => o.Kind == txDeviceKind)
+                             ?? TxDeviceOptions.FirstOrDefault(o => o.Kind == RadioDeviceKind.HackRf)
+                             ?? TxDeviceOptions[0];
         _suppressDeviceUpdate = false;
 
         // Now that the backend is known, push the gains appropriate for it and
@@ -677,6 +698,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _core.SetDeviceOption("bias_tee", BiasTee ? 1 : 0);
         OnPropertyChanged(nameof(IsRtlSdr));
         OnPropertyChanged(nameof(IsHackRf));
+        OnPropertyChanged(nameof(CanTransmit));
 
         // Bring up channel and node tabs before logging anything, so boot
         // messages land on the Primary tab.
@@ -686,7 +708,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ReloadMessages();
         LoadChatHistory();
 
-        Status = $"Idle ({_core.DeviceName})";
+        Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (!string.IsNullOrEmpty(_core.DeviceStatus))
             Log(_core.DeviceStatus);
@@ -1125,7 +1147,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsRtlSdr));
         OnPropertyChanged(nameof(IsHackRf));
         if (_suppressDeviceUpdate || value is null) return;
-        ApplyDevice(value.Kind);
+        ApplyRxDevice(value.Kind);
+    }
+    partial void OnSelectedTxDeviceChanged(DeviceOption? value)
+    {
+        if (_suppressDeviceUpdate || value is null) return;
+        ApplyTxDevice(value.Kind);
     }
     partial void OnAgcEnableChanged(bool value) { SaveSettings(); }
     partial void OnAgcTargetDbfsChanged(double value) { SaveSettings(); }
@@ -1159,6 +1186,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.VgaGainDb = VgaGainDb;
         _settings.AmpEnable = AmpEnable;
         _settings.DeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
+        _settings.RxDeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
+        _settings.TxDeviceKind = SelectedTxDevice?.Kind.ToString() ?? "HackRf";
         _settings.AgcEnable = AgcEnable;
         _settings.AgcTargetDbfs = AgcTargetDbfs;
         _settings.RtlGainDb = RtlGainDb;
@@ -1408,28 +1437,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return $"!{nodeNum:x8}";
     }
 
-    /// <summary>Build the device-backend selector list with an availability
-    /// annotation for the hardware backends.</summary>
-    private IReadOnlyList<DeviceOption> BuildDeviceOptions()
+    /// <summary>Build the RX device selector list with an availability
+    /// annotation for hardware backends.</summary>
+    private IReadOnlyList<DeviceOption> BuildRxDeviceOptions()
     {
         string Label(RadioDeviceKind kind, string name) =>
             _core.IsDeviceAvailable(kind) ? name : $"{name} (not found)";
         return new[]
         {
-            new DeviceOption(RadioDeviceKind.Auto, "Auto-detect"),
             new DeviceOption(RadioDeviceKind.HackRf, Label(RadioDeviceKind.HackRf, "HackRF")),
             new DeviceOption(RadioDeviceKind.RtlSdr, Label(RadioDeviceKind.RtlSdr, "RTL-SDR")),
-            new DeviceOption(RadioDeviceKind.Null, "Synthetic (no hardware)"),
+            new DeviceOption(RadioDeviceKind.Null, "None"),
         };
     }
 
-    /// <summary>Switch the active radio backend (only valid while stopped) and
+    /// <summary>Build the TX device selector list. RTL-SDR is receive-only, so
+    /// it is intentionally not offered here.</summary>
+    private IReadOnlyList<DeviceOption> BuildTxDeviceOptions()
+    {
+        string Label(RadioDeviceKind kind, string name) =>
+            _core.IsDeviceAvailable(kind) ? name : $"{name} (not found)";
+        return new[]
+        {
+            new DeviceOption(RadioDeviceKind.HackRf, Label(RadioDeviceKind.HackRf, "HackRF")),
+            new DeviceOption(RadioDeviceKind.Null, "None"),
+        };
+    }
+
+    /// <summary>Switch the RX radio backend (only valid while stopped) and
     /// refresh the device badge / status.</summary>
-    private void ApplyDevice(RadioDeviceKind kind)
+    private void ApplyRxDevice(RadioDeviceKind kind)
     {
         if (IsRunning) return;
-        _core.SetDevice(kind);
+        _core.SetRxDevice(kind);
         OnPropertyChanged(nameof(DeviceName));
+        OnPropertyChanged(nameof(TxDeviceName));
         OnPropertyChanged(nameof(DeviceStatus));
         OnPropertyChanged(nameof(HasRealRadio));
         OnPropertyChanged(nameof(DeviceBadge));
@@ -1437,8 +1479,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
-        Status = $"Idle ({_core.DeviceName})";
+        Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
+        if (!string.IsNullOrEmpty(_core.DeviceStatus))
+            Log(_core.DeviceStatus);
+        SaveSettings();
+    }
+
+    /// <summary>Switch the TX radio backend (only valid while stopped) and
+    /// refresh transmit affordances.</summary>
+    private void ApplyTxDevice(RadioDeviceKind kind)
+    {
+        if (IsRunning) return;
+        _core.SetTxDevice(kind);
+        OnPropertyChanged(nameof(TxDeviceName));
+        OnPropertyChanged(nameof(DeviceStatus));
+        OnPropertyChanged(nameof(HasRealRadio));
+        OnPropertyChanged(nameof(DeviceBadge));
+        OnPropertyChanged(nameof(CanTransmit));
+        SendMessageCommand.NotifyCanExecuteChanged();
+        SendNodeInfoCommand.NotifyCanExecuteChanged();
+        SendPositionCommand.NotifyCanExecuteChanged();
+        Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
+        Log(DeviceBadge);
+        if (!_core.CanTransmit)
+            Log("TX device cannot transmit; choose HackRF for transmit.");
         if (!string.IsNullOrEmpty(_core.DeviceStatus))
             Log(_core.DeviceStatus);
         SaveSettings();
@@ -1448,6 +1513,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void RetuneIfRunning()
     {
         if (!IsRunning) return;
+        if (SelectedDevice?.Kind == RadioDeviceKind.Null)
+        {
+            Stop();
+            Status = "RX stopped (no RX device selected).";
+            Log(Status);
+            return;
+        }
         try
         {
             _core.Stop();
@@ -1501,6 +1573,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void StartRx()
     {
+        if (SelectedDevice?.Kind == RadioDeviceKind.Null)
+        {
+            Status = "Select an RX device before starting receive.";
+            Log(Status);
+            return;
+        }
         try
         {
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
@@ -1529,7 +1607,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // -- Transmit (HackRF only) ---------------------------------------------
 
-    /// <summary>True when the active radio backend can transmit (HackRF).</summary>
+    /// <summary>True when the selected TX radio backend can transmit (HackRF).</summary>
     public bool CanTransmit => _core.CanTransmit;
 
     /// <summary>Text typed into the per-channel compose box.</summary>

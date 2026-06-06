@@ -17,10 +17,10 @@ using SampleType = std::complex<float>;
 // Selectable radio backend. Values are part of the C ABI (mirrored by the
 // managed RadioDeviceKind enum and mrf_core_set_device); keep them stable.
 enum class DeviceKind : int {
-    Auto   = 0, // probe HackRF, then RTL-SDR, then fall back to synthetic
+    Auto   = 0, // disabled legacy value; select explicit RX/TX devices instead
     HackRf = 1,
     RtlSdr = 2,
-    Null   = 3, // synthetic NullDevice (no hardware)
+    Null   = 3, // no device selected
 };
 
 struct DeviceInfo {
@@ -52,7 +52,7 @@ using RxCallback = std::function<void(const SampleType* samples, std::size_t cou
 // samples actually written; returning 0 ends the TX stream.
 using TxCallback = std::function<std::size_t(SampleType* out, std::size_t capacity)>;
 
-// Abstract radio device. Implementations: HackRfDevice (real), NullDevice (test).
+// Abstract radio device. Implementations: HackRfDevice and RtlSdrDevice.
 class IRadioDevice {
 public:
     virtual ~IRadioDevice() = default;
@@ -90,18 +90,18 @@ public:
     virtual std::uint64_t dropped_samples() const { return 0; }
 };
 
-// Factory: returns a HackRfDevice if libhackrf is available and a device is
-// connected; otherwise returns a NullDevice that produces zero samples (so
-// higher layers can still be exercised in tests / dev without hardware).
+// Factory: legacy alias for open_device(DeviceKind::Auto). Auto is disabled and
+// returns nullptr; callers should select explicit RX/TX devices.
 std::unique_ptr<IRadioDevice> open_default_device();
 
 // Open a specific backend. DeviceKind::Auto behaves like open_default_device().
-// HackRf / RtlSdr fall back to a NullDevice when the requested backend's DLL or
-// hardware is unavailable. The reason is recorded in open_default_device_status().
+// HackRf / RtlSdr return nullptr when the requested backend's DLL or hardware
+// is unavailable. Null is the explicit no-device selection. The reason is
+// recorded in open_default_device_status().
 std::unique_ptr<IRadioDevice> open_device(DeviceKind kind);
 
 // True if the backend's runtime library can be loaded (i.e. the user could
-// select it). DeviceKind::Auto and DeviceKind::Null are always available.
+// select it). DeviceKind::Null is always available as "None".
 // Does not require hardware to be connected.
 bool device_available(DeviceKind kind);
 

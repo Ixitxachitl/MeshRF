@@ -56,19 +56,21 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
-    /// Human-readable name of the radio backend in use (e.g. "HackRF One",
-    /// "RTL-SDR" or "null-synth" if no hardware was detected). Re-read from the
+    /// Human-readable name of the RX radio backend in use (e.g. "HackRF One",
+    /// "RTL-SDR" or "(none)" if no RX device is selected/available). Re-read from the
     /// native core each access so it reflects the latest <see cref="SetDevice"/>.
     /// </summary>
     public string DeviceName => ReadDeviceName();
 
+    /// <summary>Human-readable name of the selected TX backend.</summary>
+    public string TxDeviceName => ReadTxDeviceName();
+
     /// <summary>
-    /// Diagnostic string from the most recent device-open attempt — explains
-    /// *why* a synthetic backend was selected when no real radio came up.
+    /// Diagnostic string from the most recent device-open attempt.
     /// </summary>
     public string DeviceStatus => ReadDeviceStatus();
 
-    /// <summary>True if a real (non-synthetic) radio backend is in use.</summary>
+    /// <summary>True if a real RX radio backend is in use.</summary>
     public bool HasRealRadio
     {
         get
@@ -81,21 +83,40 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
-    /// Select the radio backend used for the next <see cref="StartRx"/>. Reopens
+    /// Select the RX radio backend used for the next <see cref="StartRx"/>. Reopens
     /// the device immediately (so <see cref="DeviceName"/>/<see cref="DeviceStatus"/>
     /// reflect the choice) when RX is stopped. Returns false if RX is running.
     /// </summary>
     public bool SetDevice(RadioDeviceKind kind)
     {
-        if (_disposed || _handle == 0) return false;
-        return NativeMethods.CoreSetDevice(_handle, (int)kind) == 0;
+        return SetRxDevice(kind);
     }
 
-    /// <summary>The backend that actually opened (may differ from the request).</summary>
+    /// <summary>Select the RX radio backend used for the next <see cref="StartRx"/>.</summary>
+    public bool SetRxDevice(RadioDeviceKind kind)
+    {
+        if (_disposed || _handle == 0) return false;
+        return NativeMethods.CoreSetRxDevice(_handle, (int)kind) == 0;
+    }
+
+    /// <summary>Select the TX radio backend. HackRF can transmit; RTL-SDR cannot.</summary>
+    public bool SetTxDevice(RadioDeviceKind kind)
+    {
+        if (_disposed || _handle == 0) return false;
+        return NativeMethods.CoreSetTxDevice(_handle, (int)kind) == 0;
+    }
+
+    /// <summary>The RX backend that actually opened (may differ from the request).</summary>
     public RadioDeviceKind DeviceKind =>
         _disposed || _handle == 0
             ? RadioDeviceKind.Null
-            : (RadioDeviceKind)NativeMethods.CoreGetDeviceKind(_handle);
+            : (RadioDeviceKind)NativeMethods.CoreGetRxDeviceKind(_handle);
+
+    /// <summary>The TX backend that actually opened/selected.</summary>
+    public RadioDeviceKind TxDeviceKind =>
+        _disposed || _handle == 0
+            ? RadioDeviceKind.Null
+            : (RadioDeviceKind)NativeMethods.CoreGetTxDeviceKind(_handle);
 
     /// <summary>
     /// True if the given backend's runtime library can be loaded (so the user
@@ -112,6 +133,19 @@ public sealed class MeshtasticCore : IDisposable
             const int cap = 128;
             byte* buf = stackalloc byte[cap];
             var n = NativeMethods.CoreGetDeviceName(_handle, buf, cap);
+            if (n == 0) return "(none)";
+            int len = (int)Math.Min(n, (uint)(cap - 1));
+            return System.Text.Encoding.UTF8.GetString(buf, len);
+        }
+    }
+
+    private string ReadTxDeviceName()
+    {
+        unsafe
+        {
+            const int cap = 128;
+            byte* buf = stackalloc byte[cap];
+            var n = NativeMethods.CoreGetTxDeviceName(_handle, buf, cap);
             if (n == 0) return "(none)";
             int len = (int)Math.Min(n, (uint)(cap - 1));
             return System.Text.Encoding.UTF8.GetString(buf, len);
@@ -149,7 +183,7 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
-    /// True if the active radio backend can transmit (HackRF only).
+    /// True if the selected TX radio backend can transmit (HackRF only).
     /// </summary>
     public bool CanTransmit =>
         !_disposed && _handle != 0 && NativeMethods.CoreCanTransmit(_handle) != 0;
@@ -158,9 +192,10 @@ public sealed class MeshtasticCore : IDisposable
     /// Transmit a LoRa burst carrying <paramref name="payload"/> (the fully
     /// framed/encrypted on-air bytes from <c>MeshEncoder</c>) for the given
     /// <paramref name="preset"/>, centered on <paramref name="centerFreqHz"/>.
-    /// HackRF only; if RX is running it is paused for the burst and resumed
-    /// afterwards. Blocks until the burst has been streamed. Returns true on
-    /// success, false if the device cannot transmit or modulation failed.
+    /// HackRF only. If TX shares the RX HackRF, RX is paused for the burst and
+    /// resumed afterwards; separate RX/TX devices can run full duplex. Blocks
+    /// until the burst has been streamed. Returns true on success, false if
+    /// the device cannot transmit or modulation failed.
     /// </summary>
     public bool Transmit(LoraPreset preset, ulong centerFreqHz,
                          ReadOnlySpan<byte> payload,
