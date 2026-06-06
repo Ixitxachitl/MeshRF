@@ -55,6 +55,31 @@ TEST(Spectrum, ToneShowsPeakAtExpectedBin) {
     EXPECT_GT(*it, -10.0f);
 }
 
+TEST(Spectrum, LatestMaxHoldsFramesBetweenPulls) {
+    constexpr std::size_t N = 1024;
+    constexpr float kPi = std::numbers::pi_v<float>;
+    Spectrum sp(N);
+
+    auto tone = [=](float freq) {
+        std::vector<std::complex<float>> x(N);
+        for (std::size_t i = 0; i < N; ++i) {
+            const float ph = 2.0f * kPi * freq * static_cast<float>(i);
+            x[i] = {std::cos(ph), std::sin(ph)};
+        }
+        return x;
+    };
+
+    sp.push(tone(96.0f / static_cast<float>(N)));
+    sp.push(tone(-160.0f / static_cast<float>(N)));
+    ASSERT_EQ(sp.frame_count(), 2u);
+
+    std::vector<float> out(N);
+    ASSERT_TRUE(sp.latest(out));
+
+    EXPECT_GT(out[N / 2 - 96], -10.0f);
+    EXPECT_GT(out[N / 2 + 160], -10.0f);
+}
+
 TEST(SignalStats, RssiOfUnitTone) {
     SignalStats s;
     constexpr float kPi = std::numbers::pi_v<float>;

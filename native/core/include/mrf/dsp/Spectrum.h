@@ -2,8 +2,8 @@
 //
 // Streaming spectrum analyzer. Accepts samples in arbitrary chunk sizes,
 // accumulates them in a ring of length fft_size, and on each fill computes a
-// Hann-windowed magnitude spectrum (dBFS). Latest frame is double-buffered
-// behind a mutex for the UI thread to consume.
+// Hann-windowed magnitude spectrum (dBFS). Frames are max-held between UI
+// pulls so short bursts are still visible when the UI polls slowly.
 
 #pragma once
 
@@ -29,9 +29,10 @@ public:
     // accumulated since the last frame.
     void push(std::span<const sample_t> samples);
 
-    // Copy the latest dBFS spectrum (length fft_size, FFT-shifted so DC is at
-    // bin n/2). Returns true if a frame is available; out must have capacity
-    // >= fft_size().
+    // Copy the max-held dBFS spectrum since the previous pull (length fft_size,
+    // FFT-shifted so DC is at bin n/2). If no new frame arrived since the last
+    // pull, copies the most recent frame. Returns true if a frame is available;
+    // out must have capacity >= fft_size().
     bool latest(std::span<float> out_dbfs) const;
 
     [[nodiscard]] std::uint64_t frame_count() const noexcept;
@@ -48,6 +49,8 @@ private:
 
     mutable std::mutex mu_;
     std::vector<float> latest_db_;    // length n_, FFT-shifted
+    mutable std::vector<float> held_db_; // max-held rows since previous pull
+    mutable bool held_valid_{false};
     std::uint64_t frames_{0};
     std::vector<sample_t> scratch_;   // FFT working buffer
 };

@@ -276,14 +276,21 @@ public sealed class WaterfallView : Image
                     return;
                 }
 
-                Span<int> mxStack = stackalloc int[Math.Min(w, 4096)];
-                int[]? heap = w > mxStack.Length ? new int[w] : null;
-                Span<int> mx = heap ?? mxStack;
+                Span<int> x0Stack = stackalloc int[Math.Min(w, 4096)];
+                Span<int> x1Stack = stackalloc int[Math.Min(w, 4096)];
+                int[]? x0Heap = w > x0Stack.Length ? new int[w] : null;
+                int[]? x1Heap = w > x1Stack.Length ? new int[w] : null;
+                Span<int> x0 = x0Heap ?? x0Stack;
+                Span<int> x1 = x1Heap ?? x1Stack;
                 for (int x = 0; x < w; x++)
                 {
-                    int sx = (int)(((long)x * 2 + 1) * n / (2L * w));
-                    if (sx < 0) sx = 0; else if (sx >= n) sx = n - 1;
-                    mx[x] = sx;
+                    int start = (int)((long)x * n / w);
+                    int end = (int)(((long)(x + 1) * n + w - 1) / w);
+                    if (start < 0) start = 0; else if (start >= n) start = n - 1;
+                    if (end <= start) end = start + 1;
+                    if (end > n) end = n;
+                    x0[x] = start;
+                    x1[x] = end;
                 }
 
                 fixed (uint* lut = _lut)
@@ -302,8 +309,14 @@ public sealed class WaterfallView : Image
                         float* src = ring + rowOffset;
                         for (int x = 0; x < w; x++)
                         {
-                            float v = src[mx[x]];
-                            if (float.IsNaN(v) || float.IsInfinity(v)) v = floorF;
+                            float v = float.NegativeInfinity;
+                            for (int sx = x0[x]; sx < x1[x]; sx++)
+                            {
+                                float candidate = src[sx];
+                                if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) && candidate > v)
+                                    v = candidate;
+                            }
+                            if (float.IsNegativeInfinity(v)) v = floorF;
                             int idx = (int)((v - floorF) * invRange);
                             if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
                             dstRow[x] = lut[idx];

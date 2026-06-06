@@ -19,6 +19,7 @@ Spectrum::Spectrum(std::size_t fft_size)
     }
     ring_.assign(n_, sample_t{0.0f, 0.0f});
     latest_db_.assign(n_, -120.0f);
+    held_db_.assign(n_, -200.0f);
     scratch_.assign(n_, sample_t{0.0f, 0.0f});
 }
 
@@ -54,10 +55,13 @@ void Spectrum::compute_frame_locked() {
         const std::size_t mirror  = (n_ - shifted) % n_;
         const auto v = scratch_[k] * norm;
         const float power = v.real() * v.real() + v.imag() * v.imag();
-        latest_db_[mirror] = (power > 1e-20f)
+        const float db = (power > 1e-20f)
             ? 10.0f * std::log10(power)
             : -200.0f;
+        latest_db_[mirror] = db;
+        held_db_[mirror] = held_valid_ ? std::max(held_db_[mirror], db) : db;
     }
+    held_valid_ = true;
     ++frames_;
 }
 
@@ -65,7 +69,13 @@ bool Spectrum::latest(std::span<float> out_dbfs) const {
     if (out_dbfs.size() < n_) return false;
     std::lock_guard<std::mutex> lk(mu_);
     if (frames_ == 0) return false;
-    std::copy_n(latest_db_.begin(), n_, out_dbfs.begin());
+    if (held_valid_) {
+        std::copy_n(held_db_.begin(), n_, out_dbfs.begin());
+        std::fill(held_db_.begin(), held_db_.end(), -200.0f);
+        held_valid_ = false;
+    } else {
+        std::copy_n(latest_db_.begin(), n_, out_dbfs.begin());
+    }
     return true;
 }
 
