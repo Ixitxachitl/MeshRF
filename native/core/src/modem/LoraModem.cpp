@@ -138,6 +138,21 @@ public:
             }
             event_cb_(msg);
 
+            if (frame_cb_ && ev.crc_ok) {
+                DecodedFrame frame{};
+                frame.payload.assign(ev.bytes, ev.bytes + ev.length);
+                // Anchor frozen snapshots to the decoded payload start rather
+                // than the preamble start so the view hugs the useful chirps
+                // instead of showing a long quiet lead-in before the frame.
+                frame.sample_index = ev.sample_index;
+                const std::uint64_t symbol_samples =
+                    (static_cast<std::uint64_t>(1u) << params_.spreading_factor) *
+                    static_cast<std::uint64_t>(kOversampling);
+                frame.end_sample_index = ev.sample_index +
+                    static_cast<std::uint64_t>(ev.payload_symbol_count) * symbol_samples;
+                frame_cb_(frame);
+            }
+
             // -- Diagnostic dumps when CRC fails --------------------------
             // Emit the raw payload symbols and pre-dewhiten bytes so they
             // can be cross-checked against gr-lora_sdr / SDRangel offline.

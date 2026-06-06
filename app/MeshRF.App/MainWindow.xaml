@@ -386,6 +386,7 @@
                             </DockPanel>
                             <views:WaterfallView x:Name="LastPacket"
                                                  AutoLevels="True"
+                                                 SmoothPixels="True"
                                                  TimeHorizontal="True"
                                                  Margin="2" />
                         </DockPanel>

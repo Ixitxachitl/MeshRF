@@ -69,6 +69,7 @@ struct HeaderEvent {
     std::size_t   nibble_count;
     bool          parity_ok;        // header CRC-5 (not yet validated, always false for now)
     std::uint64_t sample_index;
+    std::uint32_t payload_symbol_count;
 
     // -- Diagnostics ----------------------------------------------------
     // The 8 raw header symbol bins as captured (post integer-CFO correction,
@@ -104,6 +105,7 @@ struct PayloadEvent {
     std::uint16_t crc_received;     // big-endian uint16 of the trailing 2 bytes
     std::uint16_t crc_computed;
     std::uint64_t sample_index;
+    std::uint32_t payload_symbol_count;
 
     // -- Diagnostics ----------------------------------------------------
     // Raw payload symbol values (post CFO correction, 0..N-1) and the

@@ -35,11 +35,15 @@ public sealed class WaterfallView : Image
     public static readonly DependencyProperty TimeHorizontalProperty =
         DependencyProperty.Register(nameof(TimeHorizontal), typeof(bool), typeof(WaterfallView),
             new PropertyMetadata(false, (d, _) => ((WaterfallView)d).Render()));
+    public static readonly DependencyProperty SmoothPixelsProperty =
+        DependencyProperty.Register(nameof(SmoothPixels), typeof(bool), typeof(WaterfallView),
+            new PropertyMetadata(false, (d, _) => ((WaterfallView)d).OnSmoothPixelsChanged()));
 
     public double FloorDb { get => (double)GetValue(FloorDbProperty); set => SetValue(FloorDbProperty, value); }
     public double CeilDb  { get => (double)GetValue(CeilDbProperty);  set => SetValue(CeilDbProperty, value); }
     public WaterfallColormap Colormap { get => (WaterfallColormap)GetValue(ColormapProperty); set => SetValue(ColormapProperty, value); }
     public bool AutoLevels { get => (bool)GetValue(AutoLevelsProperty); set => SetValue(AutoLevelsProperty, value); }
+    public bool SmoothPixels { get => (bool)GetValue(SmoothPixelsProperty); set => SetValue(SmoothPixelsProperty, value); }
 
     /// <summary>When true, time runs along the horizontal axis (left = oldest,
     /// right = newest) and frequency along the vertical axis (bottom = low).
@@ -83,9 +87,15 @@ public sealed class WaterfallView : Image
     {
         Stretch = Stretch.Fill;
         SnapsToDevicePixels = true;
-        RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.NearestNeighbor);
+        ApplyBitmapScalingMode();
         SizeChanged += (_, _) => { EnsureBitmap(); Render(); };
     }
+
+    private void OnSmoothPixelsChanged() => ApplyBitmapScalingMode();
+
+    private void ApplyBitmapScalingMode() =>
+        RenderOptions.SetBitmapScalingMode(this,
+            SmoothPixels ? BitmapScalingMode.Fant : BitmapScalingMode.NearestNeighbor);
 
     private void EnsureBitmap()
     {
@@ -179,6 +189,9 @@ public sealed class WaterfallView : Image
     {
         _filled = 0;
         _head = 0;
+        _autoFloor = FloorDb;
+        _autoCeil = CeilDb;
+        _autoFrameCounter = 0;
         if (_bmp is not null) Render();
     }
 

@@ -698,6 +698,7 @@ void MeshtasticRx::decode_payload_() {
         out.length       = std::min<std::size_t>(payload_length_bytes_, raw_bytes.size());
         out.has_crc      = payload_has_crc_;
         out.sample_index = payload_first_sample_;
+        out.payload_symbol_count = static_cast<std::uint32_t>(payload_total_symbols_);
 
         out.raw_symbol_count = std::min<std::size_t>(payload_symbols_.size(),
             sizeof(out.raw_symbols) / sizeof(out.raw_symbols[0]));

@@ -192,10 +192,10 @@ public partial class MainWindow : Window
     {
         if (DataContext is not MainViewModel vm) return;
 
-        // Fine-grained STFT from native IQ history: nTime rows over ~150 ms,
-        // each nFreq wide across the cropped channel. This resolves the chirp
-        // sweeps that the 20 Hz waterfall history cannot.
-        const int nTime = 256;
+        // Fine-grained STFT from native IQ history. Native code chooses the
+        // packet-length time window; use enough rows that long frames do not
+        // collapse into a cramped snapshot.
+        const int nTime = 512;
         const int nFreq = 256;
         var grid = new float[nTime * nFreq];
         int rows = vm.Core.PullPacketSpectrogram(grid, nTime, nFreq);

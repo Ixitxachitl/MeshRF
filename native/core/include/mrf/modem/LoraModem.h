@@ -25,6 +25,7 @@ struct DecodedFrame {
     float snr_db{};
     float rssi_dbm{};
     std::uint64_t sample_index{};      // start sample of detected preamble
+    std::uint64_t end_sample_index{};  // first sample after decoded payload
 };
 
 // Callback invoked when a frame is successfully demodulated.

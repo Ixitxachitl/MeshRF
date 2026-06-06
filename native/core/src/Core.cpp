@@ -80,11 +80,14 @@ struct Core::Impl {
     std::uint64_t last_drops_reported{0}; // throttle RX-overrun log spam
 
     // Rolling raw-IQ ring at the modem rate, used to compute a high-time-
-    // resolution spectrogram of the last detected packet on demand. ~0.5 s.
+    // resolution spectrogram of the last detected packet on demand.
     std::mutex iq_mu;
     std::vector<std::complex<float>> iq_ring;
     std::size_t iq_pos{0};
     std::size_t iq_filled{0};
+    std::uint64_t iq_total_samples{0};
+    std::uint64_t last_packet_start{0};
+    std::uint64_t last_packet_end{0};
 
     std::mutex events_mu;
     std::deque<std::string> events; // produced by modem callback
@@ -109,6 +112,11 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
 
     const auto params = modem::params_for(preset);
     impl_->modem = modem::make_modem(params);
+    impl_->modem->set_frame_callback([this](const modem::DecodedFrame& frame) {
+        std::lock_guard<std::mutex> lk(impl_->iq_mu);
+        impl_->last_packet_start = frame.sample_index;
+        impl_->last_packet_end = frame.end_sample_index;
+    });
     impl_->modem->set_event_callback([this](std::string msg) {
         std::lock_guard<std::mutex> lk(impl_->events_mu);
         if (impl_->events.size() >= kMaxQueuedEvents) impl_->events.pop_front();
@@ -137,16 +145,20 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     impl_->spectrum = std::make_unique<dsp::Spectrum>(kSpectrumFftSize);
     impl_->mix_phase     = 0.0;
     impl_->last_drops_reported = 0;
-    // Allocate ~1 s of modem-rate IQ history for the last-packet spectrogram.
-    // A long SF11 packet runs ~0.4-0.5 s; combined with event-drain latency a
-    // 0.5 s ring could let the preamble scroll out before we snapshot, so keep
-    // a full second of headroom.
+    // Allocate enough modem-rate IQ history for full-frame packet snapshots.
+    // Long SF11 frames can run multiple seconds, and the UI only commits the
+    // snapshot after CRC OK, so a short ring can lose the preamble before the
+    // snapshot is requested.
     {
+        constexpr std::size_t kPacketHistorySeconds = 6u;
         std::lock_guard<std::mutex> lk(impl_->iq_mu);
-        impl_->iq_ring.assign(static_cast<std::size_t>(target),
+        impl_->iq_ring.assign(static_cast<std::size_t>(target) * kPacketHistorySeconds,
                               std::complex<float>{0.0f, 0.0f});
         impl_->iq_pos = 0;
         impl_->iq_filled = 0;
+        impl_->iq_total_samples = 0;
+        impl_->last_packet_start = 0;
+        impl_->last_packet_end = 0;
     }
     // Offset tuning: the radio is tuned kLoOffsetHz ABOVE the channel, so the
     // LoRa signal lands at -kLoOffsetHz in baseband. Mix it back to DC by
@@ -245,6 +257,7 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
                         std::complex<float>{s.real(), s.imag()};
                     impl_->iq_pos = (impl_->iq_pos + 1u) % cap;
                     if (impl_->iq_filled < cap) ++impl_->iq_filled;
+                    ++impl_->iq_total_samples;
                 }
             }
         }
@@ -533,25 +546,32 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     // Snapshot the rolling IQ ring in chronological order.
     std::vector<std::complex<float>> snap;
     std::size_t filled = 0;
+    std::uint64_t total_samples = 0;
+    std::uint64_t packet_start = 0;
+    std::uint64_t packet_end = 0;
     {
         std::lock_guard<std::mutex> lk(impl_->iq_mu);
         const std::size_t cap = impl_->iq_ring.size();
         filled = impl_->iq_filled;
         if (cap == 0u || filled < 64u) return 0u;
+        total_samples = impl_->iq_total_samples;
+        packet_start = impl_->last_packet_start;
+        packet_end = impl_->last_packet_end;
         snap.resize(filled);
         const std::size_t start = (impl_->iq_pos + cap - filled) % cap;
         for (std::size_t i = 0; i < filled; ++i)
             snap[i] = impl_->iq_ring[(start + i) % cap];
     }
 
+    const std::uint64_t history_begin = total_samples >= filled
+        ? total_samples - filled
+        : 0u;
+
     constexpr std::size_t kFft = 512u;
     if (filled < kFft) return 0u;
 
-    // Window length: cover the preamble (a run of identical up-chirps) plus the
-    // sync word and start of the header, scaled to the *symbol* duration so the
-    // individual chirps are always resolvable regardless of spreading factor.
-    // A fixed millisecond window would squash fast (low-SF) packets into a few
-    // pixels; sizing by symbols keeps each chirp several rows tall.
+    // Minimum window: preamble + sync/header. The energy locator below expands
+    // this to the whole burst when enough history is available.
     const std::size_t rate = impl_->modem_rate ? impl_->modem_rate : 1'000'000u;
     std::uint8_t sf = 11;
     std::uint32_t bw = 250'000u;
@@ -565,9 +585,8 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     // Samples per LoRa symbol at the modem rate (= 2^SF * oversampling).
     const std::size_t sym_samples =
         (static_cast<std::size_t>(1u) << sf) * (rate / std::max<std::uint32_t>(1u, bw));
-    // Show the whole preamble plus ~12 symbols of sync/header.
-    const std::size_t window_symbols = static_cast<std::size_t>(preamble) + 12u;
-    std::size_t window = std::min<std::size_t>(filled, window_symbols * sym_samples);
+    const std::size_t min_window_symbols = static_cast<std::size_t>(preamble) + 12u;
+    std::size_t window = std::min<std::size_t>(filled, min_window_symbols * sym_samples);
     if (window < kFft) window = kFft;
 
     // Auto-locate the packet by energy instead of relying on capture timing.
@@ -583,8 +602,21 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     // locator lock onto noise and snapshot static instead of the frame. A
     // per-block FFT restricted to the channel bins fixes that.
     std::size_t off0 = filled - window; // default: newest window
-    if (filled > window) {
-        constexpr std::size_t kBlk = 2048u;
+    constexpr std::size_t kBlk = 2048u;
+    if (packet_end > packet_start && packet_end > history_begin) {
+        const std::size_t exact_start = packet_start > history_begin
+            ? static_cast<std::size_t>(packet_start - history_begin)
+            : 0u;
+        const std::size_t exact_end = static_cast<std::size_t>(
+            std::min<std::uint64_t>(packet_end - history_begin, filled));
+        const std::size_t exact_len = exact_end > exact_start ? exact_end - exact_start : window;
+        const std::size_t lead_margin = 0u;
+        const std::size_t tail_margin = std::max<std::size_t>(1u, sym_samples / 8u);
+        window = std::min<std::size_t>(filled, exact_len + lead_margin + tail_margin);
+        if (window < kFft) window = kFft;
+        off0 = exact_start;
+        if (off0 + window > filled) off0 = filled - window;
+    } else if (filled > window && filled >= kBlk) {
         const std::size_t nblk = filled / kBlk;
 
         // Channel half-width in FFT bins: (bw/2) / rate of the kBlk spectrum.
@@ -629,17 +661,11 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
             median = sorted[sorted.size() / 2];
         }
 
-        // Reject noise-only captures: the strongest block must stand clearly
-        // above the noise floor. Returning 0 leaves the previous snapshot
-        // untouched instead of freezing static. (Threshold lowered from 4x so
-        // weaker first frames aren't dropped.)
-        if (nblk >= 4u && peak_e < median * 2.5f) return 0u;
-
-        // A block counts as "in a burst" when its channel power is roughly
-        // halfway (geometric) between the noise floor and the peak. This is
-        // robust to SNR: strong and weak packets both trip it.
-        const float burst_thr = std::max(median * 2.0f,
-                                          std::sqrt(std::max(median, 1e-20f) * peak_e));
+        // A block counts as "in a burst" when it rises above the channel noise
+        // floor. This function is called after CRC OK, so prefer showing the
+        // best available region over rejecting a weak-but-real packet.
+        const float burst_thr = std::max(median * 1.8f,
+                          median + (peak_e - median) * 0.35f);
 
         // Prefer the *most recent* burst, not the globally strongest one. The
         // snapshot is triggered by the packet that just decoded, which sits at
@@ -652,14 +678,37 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
             if (blk_e[b] >= burst_thr) { burst_end = b; break; }
         }
         std::size_t burst_start = burst_end;
-        while (burst_start > 0 && blk_e[burst_start - 1] >= burst_thr)
-            --burst_start;
+        std::size_t quiet = 0;
+        while (burst_start > 0) {
+            if (blk_e[burst_start - 1] >= burst_thr) {
+                --burst_start;
+                quiet = 0;
+            } else if (++quiet <= 2u) {
+                --burst_start;
+            } else {
+                break;
+            }
+        }
 
-        const std::size_t onset_sample = burst_start * kBlk;
-        // Keep a small lead before the onset so the very start of the preamble
-        // and any sub-block timing slack stay on-screen.
-        const std::size_t lead = window * 8ull / 100ull;
-        off0 = (onset_sample > lead) ? onset_sample - lead : 0u;
+        std::size_t burst_stop = burst_end;
+        quiet = 0;
+        while (burst_stop + 1u < nblk) {
+            if (blk_e[burst_stop + 1u] >= burst_thr) {
+                ++burst_stop;
+                quiet = 0;
+            } else if (++quiet <= 2u) {
+                ++burst_stop;
+            } else {
+                break;
+            }
+        }
+
+        const std::size_t burst_first = burst_start * kBlk;
+        const std::size_t burst_last = std::min<std::size_t>((burst_stop + 1u) * kBlk, filled);
+        const std::size_t burst_len = burst_last > burst_first ? burst_last - burst_first : window;
+        const std::size_t margin = std::max<std::size_t>(sym_samples / 2u, burst_len / 100u);
+        window = std::min<std::size_t>(filled, std::max(window, burst_len + 2u * margin));
+        off0 = (burst_first > margin) ? burst_first - margin : 0u;
         if (off0 + window > filled) off0 = filled - window;
     }
 
@@ -716,6 +765,32 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
                                            (cropN - 1u) / (n_freq - 1u))
                 : 0u;
             row[f] = fulldb[cropLo + c];
+        }
+    }
+
+    // Light separable smoothing so frozen chirps read as continuous sweeps
+    // rather than jagged bin stair-steps. Keep it gentle to avoid smearing
+    // short packets into static.
+    if (n_time >= 3u && n_freq >= 3u) {
+        std::vector<float> tmp(static_cast<std::size_t>(n_time) * n_freq);
+        for (std::uint32_t t = 0; t < n_time; ++t) {
+            const float* src = &out[static_cast<std::size_t>(t) * n_freq];
+            float* dst = &tmp[static_cast<std::size_t>(t) * n_freq];
+            dst[0] = src[0];
+            for (std::uint32_t f = 1; f + 1 < n_freq; ++f)
+                dst[f] = 0.25f * src[f - 1] + 0.5f * src[f] + 0.25f * src[f + 1];
+            dst[n_freq - 1] = src[n_freq - 1];
+        }
+        for (std::uint32_t f = 0; f < n_freq; ++f) {
+            out[f] = tmp[f];
+            for (std::uint32_t t = 1; t + 1 < n_time; ++t) {
+                out[static_cast<std::size_t>(t) * n_freq + f] =
+                    0.25f * tmp[static_cast<std::size_t>(t - 1) * n_freq + f] +
+                    0.5f * tmp[static_cast<std::size_t>(t) * n_freq + f] +
+                    0.25f * tmp[static_cast<std::size_t>(t + 1) * n_freq + f];
+            }
+            out[static_cast<std::size_t>(n_time - 1) * n_freq + f] =
+                tmp[static_cast<std::size_t>(n_time - 1) * n_freq + f];
         }
     }
     return n_time;
