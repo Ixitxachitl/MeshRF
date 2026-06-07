@@ -16,6 +16,13 @@ public class LoraPresetEnumTests
     [InlineData(LoraPreset.LongTurbo,    5)]
     [InlineData(LoraPreset.LongFast,     6)]
     [InlineData(LoraPreset.LongModerate, 7)]
+    [InlineData(LoraPreset.LongSlow,     8)]
+    [InlineData(LoraPreset.LiteFast,     9)]
+    [InlineData(LoraPreset.LiteSlow,     10)]
+    [InlineData(LoraPreset.NarrowFast,   11)]
+    [InlineData(LoraPreset.NarrowSlow,   12)]
+    [InlineData(LoraPreset.TinyFast,     13)]
+    [InlineData(LoraPreset.TinySlow,     14)]
     public void EnumValuesMatchNativeOrder(LoraPreset preset, int expected)
     {
         Assert.Equal(expected, (int)preset);

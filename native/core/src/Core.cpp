@@ -59,7 +59,7 @@ struct Core::Impl {
 
     // Last RX configuration, remembered so a transmit() burst can pause and
     // then resume the receiver on the same preset/frequency.
-    modem::Preset last_rx_preset{modem::Preset::LongFast};
+    modem::LoraParams last_rx_params{modem::params_for(modem::Preset::LongFast)};
     std::uint64_t last_rx_center{915'000'000};
 
     // Optional raw IQ capture of the modem-input (decimated) stream, gated by
@@ -96,14 +96,17 @@ Core::Core() : impl_(std::make_unique<Impl>()) {
 Core::~Core() { stop(); }
 
 void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
+    start_rx(modem::params_for(preset), center_freq_hz);
+}
+
+void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_hz) {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (impl_->running) return;
 
     // Remember the active RX config so transmit() can resume it after a burst.
-    impl_->last_rx_preset = preset;
+    impl_->last_rx_params = params;
     impl_->last_rx_center = center_freq_hz;
 
-    const auto params = modem::params_for(preset);
     impl_->modem = modem::make_modem(params);
     impl_->modem->set_frame_callback([this](const modem::DecodedFrame& frame) {
         std::lock_guard<std::mutex> iq_lk(impl_->iq_mu);
@@ -253,6 +256,12 @@ bool Core::can_transmit() const noexcept {
 bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
                     std::span<const std::uint8_t> payload,
                     std::uint8_t txvga_gain_db, bool amp_enable) {
+    return transmit(modem::params_for(preset), center_freq_hz, payload, txvga_gain_db, amp_enable);
+}
+
+bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_hz,
+                    std::span<const std::uint8_t> payload,
+                    std::uint8_t txvga_gain_db, bool amp_enable) {
     hal::IRadioDevice* tx_radio = nullptr;
     bool tx_uses_rx_radio = false;
     if (!impl_->tx_radio && impl_->rx_radio &&
@@ -267,7 +276,6 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
     if (payload.empty()) return false;
 
     // 1. Modulate the on-air bytes into a LoRa IQ frame at the modem rate.
-    const auto params = modem::params_for(preset);
     auto modem = modem::make_modem(params);
     auto iq = modem->encode(payload);
     if (iq.empty()) return false;
@@ -326,7 +334,7 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
     // 5. Pause RX only when TX shares the same HackRF handle. If RX is on a
     // separate device (for example RTL-SDR), keep receiving during TX.
     const bool was_running = is_running();
-    const modem::Preset rx_preset = impl_->last_rx_preset;
+    const auto rx_params = impl_->last_rx_params;
     const std::uint64_t rx_center = impl_->last_rx_center;
     if (was_running && tx_uses_rx_radio) stop();
 
@@ -398,7 +406,7 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
     }
 
     // 7. Resume RX if a shared-radio burst paused it.
-    if (was_running && tx_uses_rx_radio) start_rx(rx_preset, rx_center);
+    if (was_running && tx_uses_rx_radio) start_rx(rx_params, rx_center);
     return true;
 }
 

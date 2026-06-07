@@ -41,6 +41,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private LoraPreset _selectedPreset = LoraPreset.LongFast;
 
+    /// <summary>Spreading factor (5–12). Auto-filled from preset; editable for custom use.</summary>
+    [ObservableProperty]
+    private byte _overrideSf = 11;
+
+    /// <summary>Bandwidth in kHz. Auto-filled from preset; editable for custom use.</summary>
+    [ObservableProperty]
+    private double _overrideBwKhz = 250.0;
+
+    /// <summary>Coding rate denominator (5–8 → 4/N). Auto-filled from preset; editable.</summary>
+    [ObservableProperty]
+    private byte _overrideCr = 5;
+
+    /// <summary>Returns true when the current SF/BW/CR values differ from the
+    /// preset defaults — used by the UI to hint that custom params are active.</summary>
+    public bool IsCustomLoraParams
+    {
+        get
+        {
+            var p = MeshRF.LoraParamsHelper.FromPreset(SelectedPreset);
+            return OverrideSf != p.Sf || Math.Abs(OverrideBwKhz - p.BwKhz) > 0.01 || OverrideCr != p.Cr;
+        }
+    }
+
     [ObservableProperty]
     private Region _selectedRegion = Region.US;
 
@@ -632,6 +655,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // change doesn't trigger its own retune — the preset/region handler that
     // called RebuildSlots performs a single retune itself.
     private bool _suppressRetune;
+    private bool _suppressLoraParamSync;
 
     public MainViewModel()
     {
@@ -644,6 +668,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // which we guard against re-saving until _settingsLoaded becomes true.
         if (Enum.TryParse<Region>(_settings.Region, out var r)) SelectedRegion = r;
         if (Enum.TryParse<LoraPreset>(_settings.Preset, out var p)) SelectedPreset = p;
+        // Restore manual overrides if they were saved; otherwise derive from the preset.
+        if (_settings.OverrideSf != 0 || _settings.OverrideBwHz != 0 || _settings.OverrideCr != 0)
+        {
+            var preset = SelectedPreset;
+            var defaults = MeshRF.LoraParamsHelper.FromPreset(preset);
+            OverrideSf    = _settings.OverrideSf    != 0 ? _settings.OverrideSf    : defaults.Sf;
+            OverrideBwKhz = _settings.OverrideBwHz  != 0 ? _settings.OverrideBwHz / 1000.0 : defaults.BwKhz;
+            OverrideCr    = _settings.OverrideCr    != 0 ? _settings.OverrideCr    : defaults.Cr;
+        }
+        else
+        {
+            ApplyPresetToLoraParams(SelectedPreset);
+        }
         LnaGainDb = _settings.LnaGainDb;
         VgaGainDb = _settings.VgaGainDb;
         AmpEnable = _settings.AmpEnable;
@@ -1177,7 +1214,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearLog() => LogLines.Clear();
 
-    partial void OnSelectedPresetChanged(LoraPreset value) { RebuildSlots(snapToDefault: true); RetuneIfRunning(); SyncPrimaryChannelName(); SaveSettings(); }
+    partial void OnSelectedPresetChanged(LoraPreset value)
+    {
+        // Autofill SF/BW/CR from the new preset (unless the user is in the middle
+        // of typing — but overwriting is the right UX here: preset is the anchor).
+        ApplyPresetToLoraParams(value);
+        RebuildSlots(snapToDefault: true);
+        RetuneIfRunning();
+        SyncPrimaryChannelName();
+        SaveSettings();
+    }
+    partial void OnOverrideSfChanged(byte value)    { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); RetuneIfRunning(); SaveSettings(); } }
+    partial void OnOverrideBwKhzChanged(double value) { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); RetuneIfRunning(); SaveSettings(); } }
+    partial void OnOverrideCrChanged(byte value)    { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); RetuneIfRunning(); SaveSettings(); } }
     partial void OnSelectedRegionChanged(Region value)     { RebuildSlots(snapToDefault: true); RetuneIfRunning(); SaveSettings(); }
     partial void OnSelectedSlotChanged(int value)
     {
@@ -1231,6 +1280,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.Preset = SelectedPreset.ToString();
         _settings.Slot = SelectedSlot;
         _settings.CenterFreqMHz = CenterFreqMHz;
+        _settings.OverrideSf    = OverrideSf;
+        _settings.OverrideBwHz  = (uint)Math.Round(OverrideBwKhz * 1000.0);
+        _settings.OverrideCr    = OverrideCr;
         _settings.LnaGainDb = LnaGainDb;
         _settings.VgaGainDb = VgaGainDb;
         _settings.AmpEnable = AmpEnable;
@@ -1695,6 +1747,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
+    /// <summary>Syncs OverrideSf/BwKhz/Cr to the firmware defaults for
+    /// <paramref name="preset"/> without triggering retune or save.</summary>
+    private void ApplyPresetToLoraParams(LoraPreset preset)
+    {
+        var p = MeshRF.LoraParamsHelper.FromPreset(preset);
+        // Suppress change handlers so we don't retune three times.
+        _suppressLoraParamSync = true;
+        try
+        {
+            OverrideSf    = p.Sf;
+            OverrideBwKhz = p.BwKhz;
+            OverrideCr    = p.Cr;
+        }
+        finally
+        {
+            _suppressLoraParamSync = false;
+        }
+        OnPropertyChanged(nameof(IsCustomLoraParams));
+    }
+
     /// <summary>Restart the receiver with the current parameters if it's running.</summary>
     private void RetuneIfRunning()
     {
@@ -1710,8 +1782,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _core.Stop();
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            _core.StartRx(SelectedPreset, hz);
-            Status = $"RX @ {CenterFreqMHz:F3} MHz / {SelectedPreset}";
+            StartRxWithCurrentParams(hz);
+            Status = IsCustomLoraParams
+                ? $"RX @ {CenterFreqMHz:F3} MHz / SF{OverrideSf} BW{OverrideBwKhz:G}kHz CR4/{OverrideCr}"
+                : $"RX @ {CenterFreqMHz:F3} MHz / {SelectedPreset}";
             Log($"retuned \u2192 {Status}");
         }
         catch (Exception ex)
@@ -1719,6 +1793,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsRunning = false;
             Status = $"Error: {ex.Message}";
             Log(Status);
+        }
+    }
+
+    /// <summary>Starts RX using explicit SF/BW/CR when they differ from the preset,
+    /// or the faster preset path otherwise.</summary>
+    private void StartRxWithCurrentParams(ulong centerFreqHz)
+    {
+        if (IsCustomLoraParams)
+        {
+            var bwHz = (uint)Math.Round(OverrideBwKhz * 1000.0);
+            _core.StartRxParams(OverrideSf, bwHz, OverrideCr, centerFreqHz);
+        }
+        else
+        {
+            _core.StartRx(SelectedPreset, centerFreqHz);
         }
     }
 
@@ -1768,9 +1857,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            _core.StartRx(SelectedPreset, hz);
+            StartRxWithCurrentParams(hz);
             IsRunning = true;
-            Status = $"RX @ {CenterFreqMHz:F3} MHz / {SelectedPreset}";
+            Status = IsCustomLoraParams
+                ? $"RX @ {CenterFreqMHz:F3} MHz / SF{OverrideSf} BW{OverrideBwKhz:G}kHz CR4/{OverrideCr}"
+                : $"RX @ {CenterFreqMHz:F3} MHz / {SelectedPreset}";
             Log(Status);
         }
         catch (Exception ex)

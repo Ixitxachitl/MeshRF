@@ -7,6 +7,7 @@ namespace mrf::modem {
 
 // Standard Meshtastic LoRa presets. Source:
 // https://meshtastic.org/docs/overview/radio-settings/#presets
+// Parameters verified against firmware develop branch modemPresetToParams().
 enum class Preset : std::uint8_t {
     ShortTurbo,    // SF7  / 500 kHz / 4-5
     ShortFast,     // SF7  / 250 kHz / 4-5
@@ -15,7 +16,14 @@ enum class Preset : std::uint8_t {
     MediumSlow,    // SF10 / 250 kHz / 4-5
     LongTurbo,     // SF11 / 500 kHz / 4-8
     LongFast,      // SF11 / 250 kHz / 4-5  (default)
-    LongModerate,  // SF11 / 125 kHz / 4-8
+    LongModerate,  // SF11 / 125 kHz / 4-8  (LDRO)
+    LongSlow,      // SF12 / 125 kHz / 4-8  (LDRO)
+    LiteFast,      // SF9  / 125 kHz / 4-5
+    LiteSlow,      // SF10 / 125 kHz / 4-5
+    NarrowFast,    // SF7  /  62.5 kHz / 4-6
+    NarrowSlow,    // SF8  /  62.5 kHz / 4-6
+    TinyFast,      // SF7  /  15.6 kHz / 4-5
+    TinySlow,      // SF8  /  15.6 kHz / 4-6  (LDRO)
 };
 
 struct LoraParams {
@@ -39,6 +47,13 @@ constexpr LoraParams params_for(Preset p) noexcept {
         case Preset::LongTurbo:     return {11, 500'000, 8};
         case Preset::LongFast:      return {11, 250'000, 5};
         case Preset::LongModerate:  return {11, 125'000, 8, 0x2B, 16, true, true, true};
+        case Preset::LongSlow:      return {12, 125'000, 8, 0x2B, 16, true, true, true};
+        case Preset::LiteFast:      return {9,  125'000, 5};
+        case Preset::LiteSlow:      return {10, 125'000, 5};
+        case Preset::NarrowFast:    return {7,   62'500, 6};
+        case Preset::NarrowSlow:    return {8,   62'500, 6};
+        case Preset::TinyFast:      return {7,   15'600, 5};
+        case Preset::TinySlow:      return {8,   15'600, 6, 0x2B, 16, true, true, true};
     }
     return params_for(Preset::LongFast);
 }

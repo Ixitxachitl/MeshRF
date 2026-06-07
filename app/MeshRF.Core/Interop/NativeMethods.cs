@@ -23,6 +23,9 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_start_rx")]
     public static partial int CoreStartRx(nint core, int preset, ulong centerFreqHz);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_start_rx_params")]
+    public static partial int CoreStartRxParams(nint core, byte sf, uint bwHz, byte cr, ulong centerFreqHz);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_stop")]
     public static partial void CoreStop(nint core);
 

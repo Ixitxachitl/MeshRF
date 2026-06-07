@@ -15,6 +15,13 @@ public sealed class AppSettings
     public int Slot { get; set; } = 20;
     public double CenterFreqMHz { get; set; } = 906.875;
 
+    /// <summary>Spreading factor override (5–12). 0 = derive from preset.</summary>
+    public byte OverrideSf { get; set; } = 0;
+    /// <summary>Bandwidth override in Hz (e.g. 250000). 0 = derive from preset.</summary>
+    public uint OverrideBwHz { get; set; } = 0;
+    /// <summary>Coding rate denominator override (5–8 → 4/N). 0 = derive from preset.</summary>
+    public byte OverrideCr { get; set; } = 0;
+
     public byte LnaGainDb { get; set; } = 24;
     public byte VgaGainDb { get; set; } = 20;
     public bool AmpEnable { get; set; } = false;

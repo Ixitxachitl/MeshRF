@@ -17,6 +17,13 @@ public enum LoraPreset
     LongTurbo,
     LongFast,
     LongModerate,
+    LongSlow,
+    LiteFast,
+    LiteSlow,
+    NarrowFast,
+    NarrowSlow,
+    TinyFast,
+    TinySlow,
 }
 
 /// <summary>Immutable snapshot of receiver signal statistics.</summary>
@@ -174,6 +181,18 @@ public sealed class MeshtasticCore : IDisposable
         var rc = NativeMethods.CoreStartRx(_handle, (int)preset, centerFreqHz);
         if (rc != 0)
             throw new InvalidOperationException($"mrf_core_start_rx failed (rc={rc})");
+    }
+
+    /// <summary>
+    /// Start the receiver with explicit modem parameters rather than a preset.
+    /// LDRO is applied automatically when the symbol time is ≥ 16 ms.
+    /// </summary>
+    public void StartRxParams(byte sf, uint bwHz, byte cr, ulong centerFreqHz)
+    {
+        ThrowIfDisposed();
+        var rc = NativeMethods.CoreStartRxParams(_handle, sf, bwHz, cr, centerFreqHz);
+        if (rc != 0)
+            throw new InvalidOperationException($"mrf_core_start_rx_params failed (rc={rc})");
     }
 
     public void Stop()

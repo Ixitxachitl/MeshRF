@@ -29,3 +29,54 @@ TEST(Preset, LongModerateEnablesLowDataRateOptimize) {
     EXPECT_EQ(p.coding_rate, 8);
     EXPECT_TRUE(p.low_data_rate_optimize);
 }
+
+TEST(Preset, LongSlowIsSF12With125kHzAndLdro) {
+    const auto p = params_for(Preset::LongSlow);
+    EXPECT_EQ(p.spreading_factor, 12);
+    EXPECT_EQ(p.bandwidth_hz, 125'000u);
+    EXPECT_EQ(p.coding_rate, 8);
+    EXPECT_TRUE(p.low_data_rate_optimize);
+}
+
+TEST(Preset, LiteFastIsSF9With125kHz) {
+    const auto p = params_for(Preset::LiteFast);
+    EXPECT_EQ(p.spreading_factor, 9);
+    EXPECT_EQ(p.bandwidth_hz, 125'000u);
+    EXPECT_EQ(p.coding_rate, 5);
+}
+
+TEST(Preset, LiteSlowIsSF10With125kHz) {
+    const auto p = params_for(Preset::LiteSlow);
+    EXPECT_EQ(p.spreading_factor, 10);
+    EXPECT_EQ(p.bandwidth_hz, 125'000u);
+    EXPECT_EQ(p.coding_rate, 5);
+}
+
+TEST(Preset, NarrowFastIsSF7With62_5kHz) {
+    const auto p = params_for(Preset::NarrowFast);
+    EXPECT_EQ(p.spreading_factor, 7);
+    EXPECT_EQ(p.bandwidth_hz, 62'500u);
+    EXPECT_EQ(p.coding_rate, 6);
+}
+
+TEST(Preset, NarrowSlowIsSF8With62_5kHz) {
+    const auto p = params_for(Preset::NarrowSlow);
+    EXPECT_EQ(p.spreading_factor, 8);
+    EXPECT_EQ(p.bandwidth_hz, 62'500u);
+    EXPECT_EQ(p.coding_rate, 6);
+}
+
+TEST(Preset, TinyFastIsSF7With15_6kHz) {
+    const auto p = params_for(Preset::TinyFast);
+    EXPECT_EQ(p.spreading_factor, 7);
+    EXPECT_EQ(p.bandwidth_hz, 15'600u);
+    EXPECT_EQ(p.coding_rate, 5);
+}
+
+TEST(Preset, TinySlowIsSF8With15_6kHzAndLdro) {
+    const auto p = params_for(Preset::TinySlow);
+    EXPECT_EQ(p.spreading_factor, 8);
+    EXPECT_EQ(p.bandwidth_hz, 15'600u);
+    EXPECT_EQ(p.coding_rate, 6);
+    EXPECT_TRUE(p.low_data_rate_optimize);
+}

@@ -34,6 +34,7 @@ public:
     Core& operator=(const Core&) = delete;
 
     void start_rx(modem::Preset preset, std::uint64_t center_freq_hz);
+    void start_rx(const modem::LoraParams& params, std::uint64_t center_freq_hz);
     void stop();
 
     // Transmit a single Meshtastic frame. `payload` is the on-air byte stream
@@ -46,6 +47,9 @@ public:
     // the burst has been streamed. Returns false if the selected TX device
     // cannot transmit or the payload is empty/invalid.
     bool transmit(modem::Preset preset, std::uint64_t center_freq_hz,
+                  std::span<const std::uint8_t> payload,
+                  std::uint8_t txvga_gain_db = 30, bool amp_enable = false);
+    bool transmit(const modem::LoraParams& params, std::uint64_t center_freq_hz,
                   std::span<const std::uint8_t> payload,
                   std::uint8_t txvga_gain_db = 30, bool amp_enable = false);
 

@@ -65,9 +65,12 @@ public static class ChannelPlan
 
     public static double BandwidthMHz(LoraPreset preset) => preset switch
     {
-        LoraPreset.ShortTurbo or LoraPreset.LongTurbo => 0.500,
-        LoraPreset.LongModerate                       => 0.125,
-        _                                             => 0.250,
+        LoraPreset.ShortTurbo or LoraPreset.LongTurbo                                        => 0.500,
+        LoraPreset.LongModerate or LoraPreset.LongSlow
+            or LoraPreset.LiteFast or LoraPreset.LiteSlow                                    => 0.125,
+        LoraPreset.NarrowFast or LoraPreset.NarrowSlow                                       => 0.0625,
+        LoraPreset.TinyFast or LoraPreset.TinySlow                                           => 0.0156,
+        _                                                                                     => 0.250,
     };
 
     /// <summary>Channel name used for djb2 default-slot hashing. Matches
@@ -83,6 +86,13 @@ public static class ChannelPlan
         LoraPreset.LongFast     => "LongFast",
         LoraPreset.LongTurbo    => "LongTurbo",
         LoraPreset.LongModerate => "LongMod",
+        LoraPreset.LongSlow     => "LongSlow",
+        LoraPreset.LiteFast     => "LiteFast",
+        LoraPreset.LiteSlow     => "LiteSlow",
+        LoraPreset.NarrowFast   => "NarrowFast",
+        LoraPreset.NarrowSlow   => "NarrowSlow",
+        LoraPreset.TinyFast     => "TinyFast",
+        LoraPreset.TinySlow     => "TinySlow",
         _                       => "Invalid",
     };
 

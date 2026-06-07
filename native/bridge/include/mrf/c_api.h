@@ -24,6 +24,15 @@ MRF_API void        MRF_CALL mrf_core_destroy(mrf_core_t* core);
 MRF_API int  MRF_CALL mrf_core_start_rx(mrf_core_t* core,
                                         int32_t preset,
                                         uint64_t center_freq_hz);
+
+// Start RX with explicit modem parameters instead of a preset.
+// sf = spreading factor (5..12), bw_hz = bandwidth in Hz (e.g. 250000),
+// cr = coding rate denominator (5..8 → 4/N). Other params use Meshtastic defaults.
+MRF_API int  MRF_CALL mrf_core_start_rx_params(mrf_core_t* core,
+                                               uint8_t sf,
+                                               uint32_t bw_hz,
+                                               uint8_t cr,
+                                               uint64_t center_freq_hz);
 MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core);
 MRF_API int  MRF_CALL mrf_core_is_running(const mrf_core_t* core);
 
@@ -148,6 +157,17 @@ MRF_API int32_t MRF_CALL mrf_core_transmit(mrf_core_t* core,
                                            uint32_t payload_len,
                                            uint8_t txvga_gain_db,
                                            int32_t amp_enable);
+
+// Transmit with explicit modem parameters instead of a preset.
+MRF_API int32_t MRF_CALL mrf_core_transmit_params(mrf_core_t* core,
+                                                  uint8_t sf,
+                                                  uint32_t bw_hz,
+                                                  uint8_t cr,
+                                                  uint64_t center_freq_hz,
+                                                  const uint8_t* payload,
+                                                  uint32_t payload_len,
+                                                  uint8_t txvga_gain_db,
+                                                  int32_t amp_enable);
 
 // Returns the bridge ABI version. Bumped on breaking change.
 MRF_API uint32_t MRF_CALL mrf_abi_version(void);

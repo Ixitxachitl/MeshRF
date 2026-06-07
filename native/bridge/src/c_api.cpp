@@ -31,6 +31,28 @@ MRF_API int MRF_CALL mrf_core_start_rx(mrf_core_t* core,
     }
 }
 
+MRF_API int MRF_CALL mrf_core_start_rx_params(mrf_core_t* core,
+                                              uint8_t sf,
+                                              uint32_t bw_hz,
+                                              uint8_t cr,
+                                              uint64_t center_freq_hz) {
+    if (!core) return -1;
+    try {
+        mrf::modem::LoraParams p{};
+        p.spreading_factor = sf;
+        p.bandwidth_hz     = bw_hz;
+        p.coding_rate      = cr;
+        // Auto-enable LDRO when the symbol time is >= 16 ms, matching the
+        // firmware's modemPresetToParams / applyModemConfig behaviour.
+        const double t_sym_ms = static_cast<double>(1u << sf) / (bw_hz / 1000.0);
+        p.low_data_rate_optimize = (t_sym_ms >= 16.0);
+        core->core.start_rx(p, center_freq_hz);
+        return 0;
+    } catch (...) {
+        return -2;
+    }
+}
+
 MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core) {
     if (core) core->core.stop();
 }

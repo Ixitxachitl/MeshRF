@@ -43,6 +43,22 @@
             <ComboBox Width="130"
                       ItemsSource="{Binding Presets}"
                       SelectedItem="{Binding SelectedPreset, Mode=TwoWay}" />
+            <!-- LoRa parameter overrides: auto-filled from preset, manually editable -->
+            <TextBlock Text="SF" VerticalAlignment="Center" Margin="8,0,2,0"
+                       ToolTip="Spreading factor — auto-filled from preset; edit to override" />
+            <TextBox Width="28"
+                     Text="{Binding OverrideSf, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                     ToolTip="Spreading factor (5–12). Auto-filled from preset; edit to override." />
+            <TextBlock Text="BW" VerticalAlignment="Center" Margin="6,0,2,0"
+                       ToolTip="Bandwidth in kHz — auto-filled from preset; edit to override" />
+            <TextBox Width="52"
+                     Text="{Binding OverrideBwKhz, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                     ToolTip="Bandwidth in kHz (e.g. 250, 125, 62.5, 15.6). Auto-filled from preset; edit to override." />
+            <TextBlock Text="CR" VerticalAlignment="Center" Margin="6,0,2,0"
+                       ToolTip="Coding rate denominator — auto-filled from preset; edit to override" />
+            <TextBox Width="24"
+                     Text="{Binding OverrideCr, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                     ToolTip="Coding rate denominator (5–8 → 4/N). Auto-filled from preset; edit to override." />
             <TextBlock Text="Slot" VerticalAlignment="Center" Margin="8,0,4,0" />
             <ComboBox Width="70"
                       ItemsSource="{Binding Slots}"
