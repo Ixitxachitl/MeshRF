@@ -24,7 +24,7 @@ TEST(DcBlocker, PassesAcSignalNearUnity) {
     DcBlocker blk;
     constexpr float kPi = std::numbers::pi_v<float>;
     const std::size_t N = 8192;
-    const float freq = 0.05f; // cycles/sample, well above the ~0.0008*Fs corner
+    const float freq = 0.05f; // cycles/sample, well above the ~0.00008*Fs corner
     std::vector<std::complex<float>> data(N);
     for (std::size_t i = 0; i < N; ++i) {
         const float ph = 2.0f * kPi * freq * static_cast<float>(i);

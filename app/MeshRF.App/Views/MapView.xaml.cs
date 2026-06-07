@@ -528,14 +528,6 @@ public partial class MapView : UserControl
             };
             spider.Children.Add(leg);
 
-            var spoke = new Canvas
-            {
-                Width = 120,
-                Height = 32,
-                Background = Brushes.Transparent,
-                ToolTip = toolTip,
-            };
-
             var dot = new Ellipse
             {
                 Width = 12,
@@ -543,13 +535,13 @@ public partial class MapView : UserControl
                 Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)),
                 Stroke = Brushes.White,
                 StrokeThickness = 1.5,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                IsHitTestVisible = false,
+                ToolTip = toolTip,
             };
-            Canvas.SetLeft(dot, 8);
-            Canvas.SetTop(dot, 10);
-            spoke.Children.Add(dot);
+            ToolTipService.SetInitialShowDelay(dot, 100);
+            ToolTipService.SetShowDuration(dot, 60000);
+            Canvas.SetLeft(dot, mx - 6);
+            Canvas.SetTop(dot, my - 6);
+            spider.Children.Add(dot);
 
             var label = new TextBlock
             {
@@ -558,17 +550,17 @@ public partial class MapView : UserControl
                 Foreground = Brushes.White,
                 Background = new SolidColorBrush(Color.FromArgb(0xCC, 0, 0, 0)),
                 Padding = new Thickness(2, 0, 2, 0),
-                IsHitTestVisible = false,
+                ToolTip = toolTip,
             };
-            Canvas.SetLeft(label, 24);
-            Canvas.SetTop(label, 8);
-            spoke.Children.Add(label);
-
-            ToolTipService.SetInitialShowDelay(spoke, 100);
-            ToolTipService.SetShowDuration(spoke, 60000);
-            Canvas.SetLeft(spoke, mx - 14);
-            Canvas.SetTop(spoke, my - 14);
-            spider.Children.Add(spoke);
+            ToolTipService.SetInitialShowDelay(label, 100);
+            ToolTipService.SetShowDuration(label, 60000);
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var labelSize = label.DesiredSize;
+            bool labelOnRight = Math.Cos(angle) >= 0;
+            double labelLeft = labelOnRight ? mx + 10 : mx - 10 - labelSize.Width;
+            Canvas.SetLeft(label, labelLeft);
+            Canvas.SetTop(label, my - labelSize.Height / 2.0);
+            spider.Children.Add(label);
         }
     }
 

@@ -74,6 +74,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _biasTee;
 
+    /// <summary>Enable the IIR DC-blocker that suppresses the LO leakage spike at
+    /// the tuned centre frequency. Default on; turn off for diagnostics.</summary>
+    [ObservableProperty]
+    private bool _dcBlockEnable = true;
+
     [ObservableProperty]
     private string _theme = "System";
 
@@ -139,8 +144,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private double _spectrumSpanHz;
 
-    /// <summary>Center frequency of the displayed span in Hz (= tuned freq).</summary>
-    public double SpectrumCenterHz => CenterFreqMHz * 1_000_000.0;
+    /// <summary>Center frequency of the displayed spectrum in Hz. When running
+    /// this is the actual LO frequency (channel + offset-tune shift), so the
+    /// frequency axis labels are accurate. Falls back to the channel frequency
+    /// when stopped.</summary>
+    [ObservableProperty]
+    private double _spectrumCenterHz;
 
     [ObservableProperty]
     private string _status = "Idle";
@@ -642,6 +651,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AgcTargetDbfs = _settings.AgcTargetDbfs;
         RtlGainDb = _settings.RtlGainDb;
         BiasTee = _settings.BiasTee;
+        DcBlockEnable = _settings.DcBlockEnable;
         Theme = _settings.Theme;
         WaterfallColormap = _settings.WaterfallColormap;
         RingtoneMode = _settings.RingtoneMode;
@@ -731,6 +741,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // apply the RTL-SDR bias-T option.
         PushGains();
         _core.SetDeviceOption("bias_tee", BiasTee ? 1 : 0);
+        _core.SetDcBlock(DcBlockEnable);
         OnPropertyChanged(nameof(IsRtlSdr));
         OnPropertyChanged(nameof(IsHackRf));
         OnPropertyChanged(nameof(CanTransmit));
@@ -749,6 +760,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Log(_core.DeviceStatus);
 
         _settingsLoaded = true;
+        SpectrumCenterHz = CenterFreqMHz * 1_000_000.0;
         ApplyLocationSourceSelection(startOrStopGps: true, saveSettings: false);
     }
 
@@ -1173,7 +1185,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, value);
         SaveSettings();
     }
-    partial void OnCenterFreqMHzChanged(double value) { if (!_suppressRetune) RetuneIfRunning(); SaveSettings(); OnPropertyChanged(nameof(SpectrumCenterHz)); }
+    partial void OnCenterFreqMHzChanged(double value) { if (!_suppressRetune) RetuneIfRunning(); SaveSettings(); SpectrumCenterHz = CenterFreqMHz * 1_000_000.0; }
     partial void OnLnaGainDbChanged(byte value) { _core.SetGains(value, VgaGainDb, AmpEnable); SaveSettings(); }
     partial void OnVgaGainDbChanged(byte value) { _core.SetGains(LnaGainDb, value, AmpEnable); SaveSettings(); }
     partial void OnAmpEnableChanged(bool value) { PushGains(); SaveSettings(); }
@@ -1194,6 +1206,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnAgcTargetDbfsChanged(double value) { SaveSettings(); }
     partial void OnRtlGainDbChanged(byte value) { PushGains(); SaveSettings(); }
     partial void OnBiasTeeChanged(bool value) { _core.SetDeviceOption("bias_tee", value ? 1 : 0); SaveSettings(); }
+    partial void OnDcBlockEnableChanged(bool value) { _core.SetDcBlock(value); SaveSettings(); }
 
     /// <summary>Push the gain settings appropriate for the selected backend.
     /// RTL-SDR uses its single manual tuner gain (or auto when AGC is on);
@@ -1228,6 +1241,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.AgcTargetDbfs = AgcTargetDbfs;
         _settings.RtlGainDb = RtlGainDb;
         _settings.BiasTee = BiasTee;
+        _settings.DcBlockEnable = DcBlockEnable;
         _settings.Theme = Theme;
         _settings.WaterfallColormap = WaterfallColormap;
         _settings.MutedRingtoneChannels = Channels

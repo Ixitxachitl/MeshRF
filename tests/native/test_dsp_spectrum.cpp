@@ -31,8 +31,8 @@ TEST(Spectrum, ToneShowsPeakAtExpectedBin) {
     Spectrum sp(N);
 
     // Tone at +0.10 of normalized frequency. After FFT-shift DC is at N/2;
-    // the display axis is then inverted about DC (waterfall mirror fix), so a
-    // positive tone lands at bin (N/2 - 0.10*N) = 410.
+    // standard layout (no mirror), so a positive tone lands at
+    // bin (N/2 + 0.10*N) = 614.
     const float freq = 0.10f;
     std::vector<std::complex<float>> x(N);
     for (std::size_t i = 0; i < N; ++i) {
@@ -48,7 +48,7 @@ TEST(Spectrum, ToneShowsPeakAtExpectedBin) {
     // Find peak bin and check it is close to the expected location.
     const auto it = std::max_element(out.begin(), out.end());
     const std::size_t peak_bin = static_cast<std::size_t>(it - out.begin());
-    const std::size_t expected = N / 2 - static_cast<std::size_t>(freq * N);
+    const std::size_t expected = N / 2 + static_cast<std::size_t>(freq * N);
     EXPECT_LE(std::abs(static_cast<long long>(peak_bin) -
                        static_cast<long long>(expected)), 2);
     // Peak should be well above floor.
@@ -76,8 +76,8 @@ TEST(Spectrum, LatestMaxHoldsFramesBetweenPulls) {
     std::vector<float> out(N);
     ASSERT_TRUE(sp.latest(out));
 
-    EXPECT_GT(out[N / 2 - 96], -10.0f);
-    EXPECT_GT(out[N / 2 + 160], -10.0f);
+    EXPECT_GT(out[N / 2 + 96], -10.0f);
+    EXPECT_GT(out[N / 2 - 160], -10.0f);
 }
 
 TEST(SignalStats, RssiOfUnitTone) {

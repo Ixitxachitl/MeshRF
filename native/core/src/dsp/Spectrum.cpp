@@ -43,23 +43,21 @@ void Spectrum::compute_frame_locked() {
     }
     fft_.forward(std::span<sample_t>(scratch_.data(), n_));
 
-    // Magnitude in dBFS, FFT-shifted (DC at index n/2). The display frequency
-    // axis is then inverted about DC (mirror = (n - shifted) % n) so the
-    // waterfall reads low->high frequency left->right to match the spectrum
-    // the decoder sees. This is a display-only reflection; the modem path
-    // consumes the unflipped IQ separately, so decoding is unaffected.
+    // Magnitude in dBFS, FFT-shifted (DC at index n/2). Standard layout:
+    // index 0 = most negative frequency, index n/2 = DC (tuned LO), index
+    // n-1 = most positive frequency. No additional mirror is applied so the
+    // display centre always corresponds to the tuned frequency.
     const float norm = 1.0f / static_cast<float>(n_);
     const std::size_t half = n_ / 2;
     for (std::size_t k = 0; k < n_; ++k) {
         const std::size_t shifted = (k + half) % n_;
-        const std::size_t mirror  = (n_ - shifted) % n_;
         const auto v = scratch_[k] * norm;
         const float power = v.real() * v.real() + v.imag() * v.imag();
         const float db = (power > 1e-20f)
             ? 10.0f * std::log10(power)
             : -200.0f;
-        latest_db_[mirror] = db;
-        held_db_[mirror] = held_valid_ ? std::max(held_db_[mirror], db) : db;
+        latest_db_[shifted] = db;
+        held_db_[shifted] = held_valid_ ? std::max(held_db_[shifted], db) : db;
     }
     held_valid_ = true;
     ++frames_;

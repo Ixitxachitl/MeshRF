@@ -86,6 +86,11 @@ MRF_API uint32_t MRF_CALL mrf_core_spectrum_size(const mrf_core_t* core);
 // frequency.
 MRF_API uint32_t MRF_CALL mrf_core_sample_rate_hz(const mrf_core_t* core);
 
+// Returns the actual center frequency of the displayed spectrum in Hz. Because
+// the radio is offset-tuned, this equals the user channel frequency plus the
+// LO offset (~500 kHz). Use this for frequency-axis labels. 0 if not running.
+MRF_API uint64_t MRF_CALL mrf_core_spectrum_center_hz(const mrf_core_t* core);
+
 // Copies the latest dBFS spectrum frame into out. Returns the number of bins
 // copied (0 if no frame is available or capacity is insufficient). Bins are
 // FFT-shifted: index 0 is the most negative frequency, index n/2 is DC.

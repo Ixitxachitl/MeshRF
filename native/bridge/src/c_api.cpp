@@ -122,6 +122,11 @@ MRF_API uint32_t MRF_CALL mrf_core_sample_rate_hz(const mrf_core_t* core) {
     return core->core.sample_rate_hz();
 }
 
+MRF_API uint64_t MRF_CALL mrf_core_spectrum_center_hz(const mrf_core_t* core) {
+    if (!core) return 0u;
+    return core->core.spectrum_center_hz();
+}
+
 MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum(const mrf_core_t* core,
                                                  float* out_dbfs,
                                                  uint32_t capacity) {

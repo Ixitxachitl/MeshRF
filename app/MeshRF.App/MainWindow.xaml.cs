@@ -182,9 +182,11 @@ public partial class MainWindow : Window
         if (n <= 0) return;
         if (_spectrumBuffer.Length != n) _spectrumBuffer = new float[n];
 
-        // Keep the frequency-axis span in sync with the device sample rate.
+        // Keep the frequency-axis span and centre in sync with the running pipeline.
         var rate = vm.Core.SampleRateHz;
         if (rate > 0) vm.SpectrumSpanHz = rate;
+        var centre = vm.Core.SpectrumCenterHz;
+        if (centre > 0) vm.SpectrumCenterHz = centre;
 
         var written = vm.Core.PullSpectrum(_spectrumBuffer);
         if (written > 0)

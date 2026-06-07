@@ -214,6 +214,11 @@
         </ToolBar>
 
         <ToolBar DockPanel.Dock="Top">
+            <CheckBox Content="DC block"
+                      IsChecked="{Binding DcBlockEnable, Mode=TwoWay}"
+                      VerticalAlignment="Center"
+                      ToolTip="IIR high-pass to remove the LO leakage spike at the tuned centre frequency. Leave on for normal use; disable only for diagnostics." />
+            <Separator />
             <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox Width="90"
                       ItemsSource="{Binding Themes}"

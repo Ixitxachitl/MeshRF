@@ -109,6 +109,11 @@ public:
     // not running.
     [[nodiscard]] std::uint32_t sample_rate_hz() const noexcept;
 
+    // Actual center frequency of the displayed spectrum in Hz. Because the
+    // radio is offset-tuned by kLoOffsetHz, this equals the user's channel
+    // frequency plus that offset. 0 if not running.
+    [[nodiscard]] std::uint64_t spectrum_center_hz() const noexcept;
+
     // Copy the latest dBFS spectrum into `out`. Returns true if a frame is
     // available and out.size() >= spectrum_size().
     bool latest_spectrum(std::span<float> out) const;

@@ -2,7 +2,8 @@
 //
 // Single-pole IIR DC blocker for complex<float> streams.
 //   y[n] = x[n] - x[n-1] + R * y[n-1]
-// At R=0.995 the -3 dB corner is approximately (1-R)*Fs/(2*pi).
+// At R=0.9995 and Fs=2.4 MHz the -3 dB corner is ~191 Hz — tight enough to
+// suppress only the LO spike without affecting adjacent signal content.
 
 #pragma once
 
@@ -16,7 +17,7 @@ class DcBlocker {
 public:
     using sample_t = std::complex<float>;
 
-    explicit DcBlocker(float pole = 0.995f) noexcept : R_(pole) {}
+    explicit DcBlocker(float pole = 0.9995f) noexcept : R_(pole) {}
 
     void reset() noexcept { prev_x_ = {}; prev_y_ = {}; }
 

@@ -84,6 +84,9 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_sample_rate_hz")]
     public static partial uint CoreSampleRateHz(nint core);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_spectrum_center_hz")]
+    public static partial ulong CoreSpectrumCenterHz(nint core);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_pull_spectrum")]
     public static unsafe partial uint CorePullSpectrum(nint core, float* outDbfs, uint capacity);
 

@@ -27,16 +27,11 @@ namespace mrf {
 namespace {
 constexpr std::size_t kSpectrumFftSize = 1024;
 constexpr std::size_t kMaxQueuedEvents = 256;
-// HackRF One has a strong DC spike + 1/f LO leakage at the tuned frequency.
-// We tune the radio +kLoOffsetHz off-channel and digitally mix back so the
-// LoRa signal sits at baseband DC while the spike sits at -kLoOffsetHz where
-// the decimator's antialias filter rejects it.
-constexpr double kLoOffsetHz = 500'000.0;
 // Device sample rate used for live RX and raw IQ capture. 2.4 MS/s matches
 // SDRangel's HackRF setup (2.4 MHz, decimation 2 -> 1.2 MHz channel) so a raw
 // capture is directly comparable to an SDRangel .sdriq recording. The minimum
 // legal HackRF rate is 2 MS/s; 2.4 MS/s keeps a clean guard band around the
-// 250 kHz LoRa channel after the offset-tuning mix.
+// 250 kHz LoRa channel.
 constexpr std::uint32_t kDeviceRateHz = 2'400'000u;
 }
 
@@ -54,15 +49,13 @@ struct Core::Impl {
     std::unique_ptr<modem::ILoraModem> modem;
     std::unique_ptr<dsp::Resampler> resampler;
     dsp::DcBlocker dc_blocker;
+    bool dc_block_enabled{true}; // toggleable via set_device_option("dc_block", 0/1)
     dsp::SignalStats stats;
     std::unique_ptr<dsp::Spectrum> spectrum;
     router::FloodingRouter flooder{};
-    std::vector<hal::SampleType> work; // scratch for DC-blocking after decimation
+    std::vector<hal::SampleType> work; // scratch for DC-blocking
     std::atomic<bool> running{false};
     std::mutex start_mu;
-    // Offset-tuning NCO state (mixes LoRa channel from +LoOffset back to 0).
-    double mix_phase{0.0};
-    double mix_phase_inc{0.0};
 
     // Last RX configuration, remembered so a transmit() burst can pause and
     // then resume the receiver on the same preset/frequency.
@@ -113,12 +106,12 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     const auto params = modem::params_for(preset);
     impl_->modem = modem::make_modem(params);
     impl_->modem->set_frame_callback([this](const modem::DecodedFrame& frame) {
-        std::lock_guard<std::mutex> lk(impl_->iq_mu);
+        std::lock_guard<std::mutex> iq_lk(impl_->iq_mu);
         impl_->last_packet_start = frame.sample_index;
         impl_->last_packet_end = frame.end_sample_index;
     });
     impl_->modem->set_event_callback([this](std::string msg) {
-        std::lock_guard<std::mutex> lk(impl_->events_mu);
+        std::lock_guard<std::mutex> ev_lk(impl_->events_mu);
         if (impl_->events.size() >= kMaxQueuedEvents) impl_->events.pop_front();
         impl_->events.push_back(std::move(msg));
     });
@@ -130,7 +123,7 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     if (!impl_->rx_radio)
         throw std::runtime_error("No RX device selected or available");
     hal::RxConfig rx{};
-    rx.center_freq_hz = center_freq_hz + static_cast<std::uint64_t>(kLoOffsetHz);
+    rx.center_freq_hz = center_freq_hz;
     rx.lna_gain_db = impl_->lna_db;
     rx.vga_gain_db = impl_->vga_db;
     rx.amp_enable  = impl_->amp_enable;
@@ -143,7 +136,6 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     impl_->dc_blocker.reset();
     impl_->stats.reset();
     impl_->spectrum = std::make_unique<dsp::Spectrum>(kSpectrumFftSize);
-    impl_->mix_phase     = 0.0;
     impl_->last_drops_reported = 0;
     // Allocate enough modem-rate IQ history for full-frame packet snapshots.
     // Long SF11 frames can run multiple seconds, and the UI only commits the
@@ -151,7 +143,7 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
     // snapshot is requested.
     {
         constexpr std::size_t kPacketHistorySeconds = 6u;
-        std::lock_guard<std::mutex> lk(impl_->iq_mu);
+        std::lock_guard<std::mutex> ring_init_lk(impl_->iq_mu);
         impl_->iq_ring.assign(static_cast<std::size_t>(target) * kPacketHistorySeconds,
                               std::complex<float>{0.0f, 0.0f});
         impl_->iq_pos = 0;
@@ -160,13 +152,6 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
         impl_->last_packet_start = 0;
         impl_->last_packet_end = 0;
     }
-    // Offset tuning: the radio is tuned kLoOffsetHz ABOVE the channel, so the
-    // LoRa signal lands at -kLoOffsetHz in baseband. Mix it back to DC by
-    // multiplying with exp(+j*2*pi*kLoOffsetHz*t). The DC spike (now at raw DC,
-    // removed by the DC blocker) shifts to +kLoOffsetHz, outside the channel.
-    impl_->mix_phase_inc =
-        2.0 * std::numbers::pi * kLoOffsetHz / static_cast<double>(rx.sample_rate_hz);
-
     impl_->modem_rate = target;
     impl_->device_rate = rx.sample_rate_hz;
     // Optional raw IQ capture for offline replay/debugging. The path can come
@@ -184,51 +169,14 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
         //    baseband; without this, the waterfall has a permanent vertical
         //    line at the tuned frequency.
         impl_->work.assign(s, s + n);
-        impl_->dc_blocker.process(std::span<hal::SampleType>(impl_->work));
-        // 0b. Offset-tuning mix-back. The DC blocker above just removed the LO
-        //     leakage spike at raw DC; now shift the LoRa channel from
-        //     -kLoOffsetHz up to baseband DC with an incremental complex NCO.
-        //     Single-precision and fused into the work-buffer to keep the
-        //     2.4 MS/s consumer real-time (a double-precision per-sample mix
-        //     was the dominant cost causing RX overruns).
-        {
-            const float inc_f = static_cast<float>(impl_->mix_phase_inc);
-            const float step_re = std::cos(inc_f);
-            const float step_im = std::sin(inc_f);
-            float osc_re = static_cast<float>(std::cos(impl_->mix_phase));
-            float osc_im = static_cast<float>(std::sin(impl_->mix_phase));
-            for (std::size_t i = 0; i < n; ++i) {
-                const float xr = impl_->work[i].real();
-                const float xi = impl_->work[i].imag();
-                impl_->work[i] = hal::SampleType{xr * osc_re - xi * osc_im,
-                                                 xr * osc_im + xi * osc_re};
-                const float nr = osc_re * step_re - osc_im * step_im;
-                const float ni = osc_re * step_im + osc_im * step_re;
-                osc_re = nr;
-                osc_im = ni;
-                // Renormalize occasionally to counter drift; cheap reciprocal
-                // sqrt suffices and avoids a divide.
-                if ((i & 0xFFF) == 0xFFF) {
-                    const float mag = std::sqrt(osc_re * osc_re + osc_im * osc_im);
-                    if (mag > 0.0f) {
-                        const float inv = 1.0f / mag;
-                        osc_re *= inv;
-                        osc_im *= inv;
-                    }
-                }
-            }
-            double phase = impl_->mix_phase + impl_->mix_phase_inc * static_cast<double>(n);
-            phase = std::fmod(phase, 2.0 * std::numbers::pi);
-            impl_->mix_phase = phase;
-        }
+        if (impl_->dc_block_enabled)
+            impl_->dc_blocker.process(std::span<hal::SampleType>(impl_->work));
+        // 1. Spectrum / waterfall on the DC-blocked signal.
+        impl_->spectrum->push({impl_->work.data(), n});
         const hal::SampleType* clean = impl_->work.data();
-        // 1. Stats over DC-corrected input.
+        // 2. Stats.
         impl_->stats.process({clean, n});
-        // 2. Spectrum / waterfall.
-        impl_->spectrum->push({clean, n});
-        // 2b. Optional raw IQ capture: the post-mix baseband stream at the
-        //     DEVICE rate (before any resampling), so the recording matches
-        //     SDRangel's raw HackRF input for apples-to-apples comparison.
+        // 3. Optional raw IQ capture.
         {
             std::lock_guard<std::mutex> clk(impl_->capture_mu);
             if (impl_->capture_file && impl_->capture_remaining > 0) {
@@ -249,12 +197,12 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
 
         // 3b. Append to the rolling IQ ring for the last-packet spectrogram.
         {
-            std::lock_guard<std::mutex> lk(impl_->iq_mu);
+            std::lock_guard<std::mutex> ring_lk(impl_->iq_mu);
             const std::size_t cap = impl_->iq_ring.size();
             if (cap > 0) {
-                for (const auto& s : resampled) {
+                for (const auto& sample : resampled) {
                     impl_->iq_ring[impl_->iq_pos] =
-                        std::complex<float>{s.real(), s.imag()};
+                        std::complex<float>{sample.real(), sample.imag()};
                     impl_->iq_pos = (impl_->iq_pos + 1u) % cap;
                     if (impl_->iq_filled < cap) ++impl_->iq_filled;
                     ++impl_->iq_total_samples;
@@ -349,25 +297,7 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
     std::vector<hal::SampleType> tx(rs.begin(), rs.end());
     if (tx.empty()) return false;
 
-    // 3. Offset-tuning mix. The radio is tuned center_freq + kLoOffsetHz, so to
-    //    emit the signal at center_freq we place it at -kLoOffsetHz in baseband
-    //    by multiplying with exp(-j*2*pi*kLoOffsetHz*n/dev_rate). This is the
-    //    exact inverse of the RX mix-back in start_rx.
-    {
-        const double inc = -2.0 * std::numbers::pi * kLoOffsetHz /
-                           static_cast<double>(dev_rate);
-        double phase = 0.0;
-        for (auto& s : tx) {
-            const float c = static_cast<float>(std::cos(phase));
-            const float sn = static_cast<float>(std::sin(phase));
-            const float xr = s.real();
-            const float xi = s.imag();
-            s = hal::SampleType{xr * c - xi * sn, xr * sn + xi * c};
-            phase += inc;
-            if (phase < -2.0 * std::numbers::pi) phase += 2.0 * std::numbers::pi;
-        }
-    }
-
+    // 3. Offset-tuning mix removed — radio is tuned directly to the channel.
     // 4. Normalize to ~0.95 full-scale so the int8 DAC is driven hard (more
     //    radiated power) while keeping a little headroom against the resampler
     //    + offset-mix overshoot so the chirp envelope doesn't clip to a square.
@@ -412,7 +342,7 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
     //    whole burst (plus margin) to be clocked out at dev_rate.
     {
         hal::TxConfig cfg{};
-        cfg.center_freq_hz = center_freq_hz + static_cast<std::uint64_t>(kLoOffsetHz);
+        cfg.center_freq_hz = center_freq_hz;
         cfg.sample_rate_hz = dev_rate;
         cfg.txvga_gain_db  = txvga_gain_db;
         cfg.amp_enable     = amp_enable;
@@ -520,7 +450,9 @@ void Core::set_gains(std::uint8_t lna_db, std::uint8_t vga_db, bool amp) {
 
 void Core::set_device_option(std::string_view key, int value) {
     // Cache so the option survives a stop/start cycle, then push live.
-    if (key == "bias_tee") impl_->bias_tee = (value != 0);
+    if (key == "bias_tee")   impl_->bias_tee          = (value != 0);
+    if (key == "dc_block")  { impl_->dc_block_enabled  = (value != 0);
+                              impl_->dc_blocker.reset(); return; }
     if (impl_->rx_radio) impl_->rx_radio->set_rx_option(key, value);
 }
 
@@ -530,6 +462,10 @@ std::size_t Core::spectrum_size() const noexcept {
 
 std::uint32_t Core::sample_rate_hz() const noexcept {
     return impl_->running ? impl_->device_rate : 0u;
+}
+
+std::uint64_t Core::spectrum_center_hz() const noexcept {
+    return impl_->running ? impl_->last_rx_center : 0u;
 }
 
 bool Core::latest_spectrum(std::span<float> out) const {
@@ -748,14 +684,12 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
             buf[i] = snap[base + i] * win[i];
         fft.forward(std::span<std::complex<float>>(buf.data(), kFft));
 
-        // Same fftshift + display mirror the live waterfall uses, so the
-        // snapshot's frequency axis matches.
+        // fftshift so DC lands at bin kFft/2, matching the live waterfall.
         for (std::size_t k = 0; k < kFft; ++k) {
             const std::size_t shifted = (k + half) % kFft;
-            const std::size_t mirror  = (kFft - shifted) % kFft;
             const auto v = buf[k] * norm;
             const float p = v.real() * v.real() + v.imag() * v.imag();
-            fulldb[mirror] = (p > 1e-20f) ? 10.0f * std::log10(p) : -200.0f;
+            fulldb[shifted] = (p > 1e-20f) ? 10.0f * std::log10(p) : -200.0f;
         }
 
         float* row = &out[static_cast<std::size_t>(t) * n_freq];

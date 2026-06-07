@@ -254,6 +254,14 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
+    /// Enable or disable the single-pole IIR DC blocker that runs on the raw
+    /// zero-IF baseband before the spectrum and modem. Default is enabled; only
+    /// turn off for diagnostic/calibration purposes.
+    /// </summary>
+    public void SetDcBlock(bool enable) =>
+        SetDeviceOption("dc_block", enable ? 1 : 0);
+
+    /// <summary>
     /// Latest signal statistics (RSSI, peak, residual DC). Cheap; safe to
     /// poll at UI rates.
     /// </summary>
@@ -276,6 +284,14 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public uint SampleRateHz =>
         _disposed || _handle == 0 ? 0u : NativeMethods.CoreSampleRateHz(_handle);
+
+    /// <summary>
+    /// Actual center frequency of the displayed spectrum in Hz. Because the
+    /// radio is offset-tuned, this is the channel frequency plus the LO offset
+    /// (~500 kHz). Use this for frequency-axis labels. 0 if RX is stopped.
+    /// </summary>
+    public ulong SpectrumCenterHz =>
+        _disposed || _handle == 0 ? 0ul : NativeMethods.CoreSpectrumCenterHz(_handle);
 
     /// <summary>
     /// Copies the latest dBFS spectrum frame into <paramref name="buffer"/>.

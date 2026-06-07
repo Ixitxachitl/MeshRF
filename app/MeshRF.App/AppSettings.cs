@@ -38,6 +38,10 @@ public sealed class AppSettings
     public byte RtlGainDb { get; set; } = 30;
     /// <summary>RTL-SDR 5 V bias-T on the antenna port. Off by default.</summary>
     public bool BiasTee { get; set; } = false;
+    /// <summary>When true (default), the single-pole IIR DC blocker runs before
+    /// the spectrum / modem to suppress the LO leakage spike at the tuned centre
+    /// frequency. Disable only for diagnostic / calibration purposes.</summary>
+    public bool DcBlockEnable { get; set; } = true;
 
     /// <summary>Visual color ramp for the waterfall ("Turbo" or "Inferno").</summary>
     public string WaterfallColormap { get; set; } = "Turbo";
