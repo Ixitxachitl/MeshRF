@@ -84,11 +84,70 @@ public sealed class AppSettings
 
     // -- Home / base-station location (shown on the map) ---------------------
 
-    /// <summary>Home latitude in degrees, null if unset.</summary>
+    /// <summary>Selected home location source: "Manual" or "UsbSerial".</summary>
+    public string HomeLocationSource { get; set; } = "Manual";
+
+    /// <summary>Manual home latitude in degrees, null if unset.</summary>
     public double? HomeLatitude  { get; set; }
 
-    /// <summary>Home longitude in degrees, null if unset.</summary>
+    /// <summary>Manual home longitude in degrees, null if unset.</summary>
     public double? HomeLongitude { get; set; }
+
+    /// <summary>Optional USB GPS COM port override (blank = auto-detect).</summary>
+    public string GpsSerialPort { get; set; } = string.Empty;
+
+    /// <summary>Optional USB GPS baud override (0 = auto-detect).</summary>
+    public int GpsBaudRate { get; set; }
+
+    // -- Main window geometry / layout -------------------------------------
+
+    /// <summary>Left edge of the main window in device-independent pixels.</summary>
+    public double? WindowLeft { get; set; }
+
+    /// <summary>Top edge of the main window in device-independent pixels.</summary>
+    public double? WindowTop { get; set; }
+
+    /// <summary>Width of the main window in device-independent pixels.</summary>
+    public double? WindowWidth { get; set; }
+
+    /// <summary>Height of the main window in device-independent pixels.</summary>
+    public double? WindowHeight { get; set; }
+
+    /// <summary>Window state at shutdown: Normal, Maximized, or Minimized.</summary>
+    public string WindowState { get; set; } = "Normal";
+
+    /// <summary>Main 2x2 shell left-pane star width.</summary>
+    public double? MainLeftPaneStar { get; set; }
+
+    /// <summary>Main 2x2 shell right-pane star width.</summary>
+    public double? MainRightPaneStar { get; set; }
+
+    /// <summary>Main 2x2 shell top-pane star height.</summary>
+    public double? MainTopPaneStar { get; set; }
+
+    /// <summary>Main 2x2 shell bottom-pane star height.</summary>
+    public double? MainBottomPaneStar { get; set; }
+
+    /// <summary>Spectrum panel top star height.</summary>
+    public double? SpectrumTopPaneStar { get; set; }
+
+    /// <summary>Waterfall panel bottom star height.</summary>
+    public double? SpectrumBottomPaneStar { get; set; }
+
+    /// <summary>Messages panel star height above the log.</summary>
+    public double? MessagesTopPaneStar { get; set; }
+
+    /// <summary>Log panel star height below the tabs/messages.</summary>
+    public double? MessagesBottomPaneStar { get; set; }
+
+    /// <summary>Whether the identity expander is open.</summary>
+    public bool IdentityExpanded { get; set; } = false;
+
+    /// <summary>Persisted selected channel index; -1 when a DM tab was active.</summary>
+    public int SelectedChannelIndex { get; set; } = -1;
+
+    /// <summary>Persisted selected DM conversation node number; 0 when not applicable.</summary>
+    public uint SelectedConversationNode { get; set; }
 
     /// <summary>Node numbers of the direct-message conversation tabs the user
     /// had open, so only those are reopened on the next launch (rather than

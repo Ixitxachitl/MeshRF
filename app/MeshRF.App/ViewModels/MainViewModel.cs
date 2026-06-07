@@ -4,9 +4,11 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.App.Audio;
+using MeshRF.App.Location;
 using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
@@ -20,8 +22,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly NodeStore _nodeStore = new();
     private readonly ChannelStore _channelStore = new();
     private readonly MessageStore _messageStore = new();
+    private readonly UsbSerialGpsService _gpsService = new();
     private readonly AppSettings _settings;
     private bool _settingsLoaded;
+    private double? _manualHomeLatitude;
+    private double? _manualHomeLongitude;
+
+    private const string ManualLocationSourceValue = "Manual";
+    private const string UsbSerialLocationSourceValue = "UsbSerial";
 
     // Plays the RTTTL ringtone when a text message arrives.
     private readonly RtttlPlayer _ringtone = new();
@@ -148,6 +156,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>An entry in the device-backend selector.</summary>
     public sealed record DeviceOption(RadioDeviceKind Kind, string Label);
 
+    /// <summary>An entry in the home-location source selector.</summary>
+    public sealed record LocationSourceOption(string Value, string Label);
+
     /// <summary>Selectable RX radio backends (HackRF / RTL-SDR / None).
     /// Populated at construction with an availability annotation.</summary>
     public IReadOnlyList<DeviceOption> DeviceOptions { get; private set; } =
@@ -258,6 +269,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string _homeLatitudeText = string.Empty;
     [ObservableProperty] private string _homeLongitudeText = string.Empty;
+    [ObservableProperty] private LocationSourceOption? _selectedLocationSource;
+    [ObservableProperty] private string _gpsStatus = "Manual location selected.";
+    [ObservableProperty] private string _gpsPortName = string.Empty;
+    [ObservableProperty] private string _gpsBaudRateText = string.Empty;
+
+    public IReadOnlyList<LocationSourceOption> LocationSourceOptions { get; } =
+    [
+        new(ManualLocationSourceValue, "Manual"),
+        new(UsbSerialLocationSourceValue, "USB serial (auto)"),
+    ];
+
+    public bool IsManualLocationSource =>
+        !string.Equals(SelectedLocationSource?.Value, UsbSerialLocationSourceValue, StringComparison.Ordinal);
+
+    public bool IsUsbSerialLocationSource => !IsManualLocationSource;
 
     /// <summary>Resolved home location (null when unset/invalid).</summary>
     public double? HomeLatitude { get; private set; }
@@ -601,6 +627,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel()
     {
         _settings = AppSettings.Load();
+        _gpsService.StatusChanged += HandleGpsStatusChanged;
+        _gpsService.FixReceived += HandleGpsFixReceived;
 
         // Apply persisted values BEFORE wiring change handlers fire usefully.
         // We rely on the [ObservableProperty] setters to fire OnXChanged,
@@ -647,15 +675,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
             MyPublicKey = Convert.ToBase64String(Curve25519.GetPublicKey(priv));
         }
 
-        HomeLatitude = _settings.HomeLatitude;
-        HomeLongitude = _settings.HomeLongitude;
+        _manualHomeLatitude = _settings.HomeLatitude;
+        _manualHomeLongitude = _settings.HomeLongitude;
+        GpsPortName = _settings.GpsSerialPort ?? string.Empty;
+        GpsBaudRateText = _settings.GpsBaudRate > 0
+            ? _settings.GpsBaudRate.ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
         // Populate the text boxes without retriggering UpdateHomeLocation: doing
         // so one box at a time would transiently null the not-yet-set coordinate
         // (and persist that null) before the second box is assigned.
         _suppressHomeTextUpdate = true;
-        HomeLatitudeText = HomeLatitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
-        HomeLongitudeText = HomeLongitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
+        HomeLatitudeText = _manualHomeLatitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
+        HomeLongitudeText = _manualHomeLongitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
         _suppressHomeTextUpdate = false;
+        SelectedLocationSource = LocationSourceOptions.FirstOrDefault(o =>
+            string.Equals(o.Value, _settings.HomeLocationSource, StringComparison.OrdinalIgnoreCase))
+            ?? LocationSourceOptions[0];
 
         RebuildSlots(snapToDefault: false);
         // Restore the user's last slot/freq if it's still valid for this preset.
@@ -714,6 +749,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Log(_core.DeviceStatus);
 
         _settingsLoaded = true;
+        ApplyLocationSourceSelection(startOrStopGps: true, saveSettings: false);
     }
 
     /// <summary>Refresh the in-memory <see cref="Nodes"/> collection from disk.</summary>
@@ -1216,8 +1252,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.OkToMqtt = OkToMqtt;
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
-        _settings.HomeLatitude = HomeLatitude;
-        _settings.HomeLongitude = HomeLongitude;
+        _settings.HomeLocationSource = SelectedLocationSource?.Value ?? ManualLocationSourceValue;
+        _settings.HomeLatitude = _manualHomeLatitude;
+        _settings.HomeLongitude = _manualHomeLongitude;
+        _settings.GpsSerialPort = GpsPortName?.Trim() ?? string.Empty;
+        _settings.GpsBaudRate = ParseGpsBaudRateOrNull() ?? 0;
         _settings.OpenConversations = Tabs.OfType<ConversationViewModel>()
                                           .Select(c => c.NodeNum)
                                           .ToList();
@@ -1279,6 +1318,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!_suppressHomeTextUpdate) UpdateHomeLocation();
     }
 
+    partial void OnSelectedLocationSourceChanged(LocationSourceOption? value)
+    {
+        ApplyLocationSourceSelection(startOrStopGps: true, saveSettings: _settingsLoaded);
+    }
+
+    partial void OnGpsPortNameChanged(string value)
+    {
+        HandleGpsConfigChanged();
+    }
+
+    partial void OnGpsBaudRateTextChanged(string value)
+    {
+        HandleGpsConfigChanged();
+    }
+
     /// <summary>Re-parse the home lat/lon text boxes, persist, and notify the map.
     /// Each coordinate is parsed independently so an empty/partial value in one
     /// box can never clobber the other (e.g. while typing a negative longitude).</summary>
@@ -1286,13 +1340,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         // Empty box clears that coordinate; a non-empty box only updates when it
         // parses to a valid in-range value (ignores partial input like "-").
-        HomeLatitude = string.IsNullOrWhiteSpace(HomeLatitudeText)
-            ? null : (TryParseCoord(HomeLatitudeText, -90, 90) ?? HomeLatitude);
-        HomeLongitude = string.IsNullOrWhiteSpace(HomeLongitudeText)
-            ? null : (TryParseCoord(HomeLongitudeText, -180, 180) ?? HomeLongitude);
+        _manualHomeLatitude = string.IsNullOrWhiteSpace(HomeLatitudeText)
+            ? null : (TryParseCoord(HomeLatitudeText, -90, 90) ?? _manualHomeLatitude);
+        _manualHomeLongitude = string.IsNullOrWhiteSpace(HomeLongitudeText)
+            ? null : (TryParseCoord(HomeLongitudeText, -180, 180) ?? _manualHomeLongitude);
+        if (IsManualLocationSource)
+            ApplyResolvedHomeLocation(_manualHomeLatitude, _manualHomeLongitude);
         SaveSettings();
-        SendPositionCommand.NotifyCanExecuteChanged();
-        MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Set the home location from a map click (lat/lon in degrees).</summary>
@@ -1306,14 +1360,132 @@ public partial class MainViewModel : ObservableObject, IDisposable
         HomeLongitudeText = lon.ToString("0.######", CultureInfo.InvariantCulture);
         _suppressHomeTextUpdate = false;
 
-        HomeLatitude = lat;
-        HomeLongitude = lon;
+        _manualHomeLatitude = lat;
+        _manualHomeLongitude = lon;
+        if (IsManualLocationSource)
+            ApplyResolvedHomeLocation(lat, lon);
         SaveSettings();
+    }
+
+    private bool _suppressHomeTextUpdate;
+
+    private void ApplyLocationSourceSelection(bool startOrStopGps, bool saveSettings)
+    {
+        OnPropertyChanged(nameof(IsManualLocationSource));
+        OnPropertyChanged(nameof(IsUsbSerialLocationSource));
+        var gpsOptions = BuildGpsSerialOptions();
+        _gpsService.UpdateOptions(gpsOptions);
+
+        if (IsUsbSerialLocationSource)
+        {
+            if (startOrStopGps)
+                _gpsService.Restart();
+            GpsStatus = BuildGpsWaitingStatus(gpsOptions);
+            ApplyResolvedHomeLocation(null, null);
+        }
+        else
+        {
+            if (startOrStopGps)
+                _gpsService.Stop();
+            GpsStatus = "Manual location selected.";
+            ApplyResolvedHomeLocation(_manualHomeLatitude, _manualHomeLongitude);
+        }
+
+        if (saveSettings)
+            SaveSettings();
+    }
+
+    private void HandleGpsConfigChanged()
+    {
+        if (!_settingsLoaded)
+            return;
+
+        var options = BuildGpsSerialOptions();
+        _gpsService.UpdateOptions(options);
+        if (IsUsbSerialLocationSource)
+        {
+            _gpsService.Restart();
+            GpsStatus = BuildGpsWaitingStatus(options);
+            ApplyResolvedHomeLocation(null, null);
+        }
+        else if (ParseGpsBaudRateOrNull() is null && !string.IsNullOrWhiteSpace(GpsBaudRateText))
+        {
+            GpsStatus = "USB GPS: baud must be a positive integer; using auto when blank.";
+        }
+        SaveSettings();
+    }
+
+    private void ApplyResolvedHomeLocation(double? latitude, double? longitude)
+    {
+        bool changed = HomeLatitude != latitude || HomeLongitude != longitude;
+        HomeLatitude = latitude;
+        HomeLongitude = longitude;
+        if (!changed) return;
         SendPositionCommand.NotifyCanExecuteChanged();
         MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private bool _suppressHomeTextUpdate;
+    private void HandleGpsStatusChanged(string status)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            ApplyGpsStatus(status);
+            return;
+        }
+
+        _ = dispatcher.InvokeAsync(() => ApplyGpsStatus(status));
+    }
+
+    private void ApplyGpsStatus(string status)
+    {
+        if (!IsUsbSerialLocationSource) return;
+        GpsStatus = status;
+    }
+
+    private void HandleGpsFixReceived(GpsFix fix)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            ApplyGpsFix(fix);
+            return;
+        }
+
+        _ = dispatcher.InvokeAsync(() => ApplyGpsFix(fix));
+    }
+
+    private void ApplyGpsFix(GpsFix fix)
+    {
+        GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}";
+        if (!IsUsbSerialLocationSource) return;
+        ApplyResolvedHomeLocation(fix.Latitude, fix.Longitude);
+    }
+
+    private GpsSerialOptions BuildGpsSerialOptions() => new(
+        string.IsNullOrWhiteSpace(GpsPortName) ? null : GpsPortName.Trim(),
+        ParseGpsBaudRateOrNull());
+
+    private int? ParseGpsBaudRateOrNull()
+    {
+        if (string.IsNullOrWhiteSpace(GpsBaudRateText))
+            return null;
+        return int.TryParse(GpsBaudRateText.Trim(), NumberStyles.Integer,
+                   CultureInfo.InvariantCulture, out var baudRate) && baudRate > 0
+            ? baudRate
+            : null;
+    }
+
+    private static string BuildGpsWaitingStatus(GpsSerialOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.PortName) && options.BaudRate is int baudRate)
+            return $"USB GPS: waiting for NMEA on {options.PortName} @ {baudRate} baud...";
+        if (!string.IsNullOrWhiteSpace(options.PortName))
+            return $"USB GPS: waiting for NMEA on {options.PortName} at common GPS baud rates...";
+        if (options.BaudRate is int forcedBaud)
+            return $"USB GPS: scanning serial ports at {forcedBaud} baud...";
+        return "USB GPS: scanning serial ports...";
+    }
 
     private static double? TryParseCoord(string? text, double min, double max)
     {
@@ -2933,6 +3105,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         StopPayloadRecording();
+        _gpsService.Stop();
+        _gpsService.StatusChanged -= HandleGpsStatusChanged;
+        _gpsService.FixReceived -= HandleGpsFixReceived;
+        _gpsService.Dispose();
         _core.Dispose();
         _nodeStore.Dispose();
         _channelStore.Dispose();

@@ -11,6 +11,7 @@ public partial class MainWindow : Window
 {
     private readonly DispatcherTimer _timer;
     private float[] _spectrumBuffer = Array.Empty<float>();
+    private bool _layoutApplied;
 
     // Rolling history of recent spectrum frames, used to freeze a spectrogram
     // of the last detected packet. Holds the most recent HistoryFrames frames.
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ApplySavedLayout();
 
         _timer = new DispatcherTimer(DispatcherPriority.Render)
         {
@@ -27,6 +29,7 @@ public partial class MainWindow : Window
         };
         _timer.Tick += OnTick;
         Loaded   += OnLoaded;
+        Closing  += OnClosing;
         Unloaded += (_, _) => _timer.Stop();
     }
 
@@ -39,6 +42,12 @@ public partial class MainWindow : Window
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
         _timer.Start();
+        if (!_layoutApplied)
+        {
+            ApplySavedLayout();
+            _layoutApplied = true;
+        }
+
         // When the waterfall recomputes auto-levels, mirror them back onto
         // the VM so the manual sliders track. Only do this when AutoLevels
         // is on; otherwise the user-driven slider values must win.
@@ -52,6 +61,11 @@ public partial class MainWindow : Window
 
         if (DataContext is MainViewModel mvm)
             mvm.PacketDecoded += OnPacketDecoded;
+    }
+
+    private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        SaveLayout();
     }
 
     // Marks that a CRC-valid packet was just decoded. A bad frame or a false
@@ -249,5 +263,176 @@ public partial class MainWindow : Window
         }
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
         LastPacketPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ApplySavedLayout()
+    {
+        var settings = AppSettings.Load();
+
+        ApplyWindowBounds(settings);
+        ApplyStarPair(MainLayoutGrid.ColumnDefinitions[0], settings.MainLeftPaneStar,
+                      MainLayoutGrid.ColumnDefinitions[2], settings.MainRightPaneStar);
+        ApplyStarPair(MainLayoutGrid.RowDefinitions[0], settings.MainTopPaneStar,
+                      MainLayoutGrid.RowDefinitions[2], settings.MainBottomPaneStar);
+        ApplyStarPair(SpectrumLayoutGrid.RowDefinitions[0], settings.SpectrumTopPaneStar,
+                      SpectrumLayoutGrid.RowDefinitions[2], settings.SpectrumBottomPaneStar);
+        ApplyStarPair(MessagesLayoutGrid.RowDefinitions[0], settings.MessagesTopPaneStar,
+                      MessagesLayoutGrid.RowDefinitions[2], settings.MessagesBottomPaneStar);
+
+        IdentityExpander.IsExpanded = settings.IdentityExpanded;
+        RestoreSelectedTab(settings);
+        _layoutApplied = true;
+    }
+
+    private void ApplyWindowBounds(AppSettings settings)
+    {
+        double width = settings.WindowWidth ?? Width;
+        double height = settings.WindowHeight ?? Height;
+        width = Math.Max(MinWidth, width);
+        height = Math.Max(MinHeight, height);
+
+        var left = settings.WindowLeft;
+        var top = settings.WindowTop;
+        bool hasPosition = left is not null && top is not null;
+        if (hasPosition && IsVisibleOnAnyScreen(left!.Value, top!.Value, width, height))
+        {
+            Left = left.Value;
+            Top = top.Value;
+        }
+
+        Width = width;
+        Height = height;
+
+        if (Enum.TryParse<WindowState>(settings.WindowState, out var savedState) &&
+            savedState == WindowState.Maximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+        else
+        {
+            WindowState = WindowState.Normal;
+        }
+    }
+
+    private static bool IsVisibleOnAnyScreen(double left, double top, double width, double height)
+    {
+        double screenLeft = SystemParameters.VirtualScreenLeft;
+        double screenTop = SystemParameters.VirtualScreenTop;
+        double screenRight = screenLeft + SystemParameters.VirtualScreenWidth;
+        double screenBottom = screenTop + SystemParameters.VirtualScreenHeight;
+        return left + Math.Min(width, 80) > screenLeft &&
+               top + Math.Min(height, 80) > screenTop &&
+               left < screenRight - 40 &&
+               top < screenBottom - 40;
+    }
+
+    private static void ApplyStarPair(System.Windows.Controls.RowDefinition firstRow, double? firstStar,
+                                      System.Windows.Controls.RowDefinition secondRow, double? secondStar)
+    {
+        if (firstStar is not > 0 || secondStar is not > 0) return;
+        firstRow.Height = new GridLength(firstStar.Value, GridUnitType.Star);
+        secondRow.Height = new GridLength(secondStar.Value, GridUnitType.Star);
+    }
+
+    private static void ApplyStarPair(System.Windows.Controls.ColumnDefinition firstColumn, double? firstStar,
+                                      System.Windows.Controls.ColumnDefinition secondColumn, double? secondStar)
+    {
+        if (firstStar is not > 0 || secondStar is not > 0) return;
+        firstColumn.Width = new GridLength(firstStar.Value, GridUnitType.Star);
+        secondColumn.Width = new GridLength(secondStar.Value, GridUnitType.Star);
+    }
+
+    private void RestoreSelectedTab(AppSettings settings)
+    {
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        if (settings.SelectedConversationNode != 0)
+        {
+            var convo = vm.Tabs.OfType<ConversationViewModel>()
+                               .FirstOrDefault(t => t.NodeNum == settings.SelectedConversationNode);
+            if (convo is not null)
+            {
+                vm.SelectedTab = convo;
+                return;
+            }
+        }
+
+        if (settings.SelectedChannelIndex >= 0)
+        {
+            var channel = vm.Tabs.OfType<ChannelViewModel>()
+                                .FirstOrDefault(t => t.Config.Index == settings.SelectedChannelIndex);
+            if (channel is not null)
+                vm.SelectedTab = channel;
+        }
+    }
+
+    private void SaveLayout()
+    {
+        var settings = AppSettings.Load();
+        var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+
+        settings.WindowLeft = bounds.Left;
+        settings.WindowTop = bounds.Top;
+        settings.WindowWidth = Math.Max(MinWidth, bounds.Width);
+        settings.WindowHeight = Math.Max(MinHeight, bounds.Height);
+        settings.WindowState = (WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal).ToString();
+
+        SaveStarPair(MainLayoutGrid.ColumnDefinitions[0], MainLayoutGrid.ColumnDefinitions[2],
+                     out var mainLeft, out var mainRight);
+        settings.MainLeftPaneStar = mainLeft;
+        settings.MainRightPaneStar = mainRight;
+
+        SaveStarPair(MainLayoutGrid.RowDefinitions[0], MainLayoutGrid.RowDefinitions[2],
+                     out var mainTop, out var mainBottom);
+        settings.MainTopPaneStar = mainTop;
+        settings.MainBottomPaneStar = mainBottom;
+
+        SaveStarPair(SpectrumLayoutGrid.RowDefinitions[0], SpectrumLayoutGrid.RowDefinitions[2],
+                     out var spectrumTop, out var spectrumBottom);
+        settings.SpectrumTopPaneStar = spectrumTop;
+        settings.SpectrumBottomPaneStar = spectrumBottom;
+
+        SaveStarPair(MessagesLayoutGrid.RowDefinitions[0], MessagesLayoutGrid.RowDefinitions[2],
+                     out var messagesTop, out var messagesBottom);
+        settings.MessagesTopPaneStar = messagesTop;
+        settings.MessagesBottomPaneStar = messagesBottom;
+
+        settings.IdentityExpanded = IdentityExpander.IsExpanded;
+
+        settings.SelectedChannelIndex = -1;
+        settings.SelectedConversationNode = 0;
+        if (DataContext is MainViewModel vm)
+        {
+            switch (vm.SelectedTab)
+            {
+                case ChannelViewModel channel:
+                    settings.SelectedChannelIndex = channel.Config.Index;
+                    break;
+                case ConversationViewModel conversation:
+                    settings.SelectedConversationNode = conversation.NodeNum;
+                    break;
+            }
+        }
+
+        settings.Save();
+    }
+
+    private static void SaveStarPair(System.Windows.Controls.ColumnDefinition firstColumn,
+                                     System.Windows.Controls.ColumnDefinition secondColumn,
+                                     out double? firstStar,
+                                     out double? secondStar)
+    {
+        firstStar = firstColumn.Width.IsStar ? firstColumn.Width.Value : null;
+        secondStar = secondColumn.Width.IsStar ? secondColumn.Width.Value : null;
+    }
+
+    private static void SaveStarPair(System.Windows.Controls.RowDefinition firstRow,
+                                     System.Windows.Controls.RowDefinition secondRow,
+                                     out double? firstStar,
+                                     out double? secondStar)
+    {
+        firstStar = firstRow.Height.IsStar ? firstRow.Height.Value : null;
+        secondStar = secondRow.Height.IsStar ? secondRow.Height.Value : null;
     }
 }
