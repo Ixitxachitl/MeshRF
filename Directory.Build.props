@@ -5,17 +5,17 @@
        a new release; scripts/build-release.ps1 reads VersionPrefix from here. -->
   <PropertyGroup>
     <Product>MeshRF</Product>
-    <Company>MeshRF contributors</Company>
-    <Authors>MeshRF contributors</Authors>
-    <Copyright>Copyright © MeshRF contributors</Copyright>
+    <Company>MeshRF</Company>
+    <Authors>Ixitxachitl</Authors>
+    <Copyright>Copyright © Ixitxachitl</Copyright>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/</RepositoryUrl>
+    <RepositoryUrl>https://github.com/Ixitxachitl/MeshRF</RepositoryUrl>
 
-        <VersionPrefix>0.6.2</VersionPrefix>
+        <VersionPrefix>0.6.3</VersionPrefix>
     <!-- AssemblyVersion is kept at major.minor.0.0 for binding stability;
          FileVersion and InformationalVersion carry the full build identity. -->
-        <AssemblyVersion>0.6.2.0</AssemblyVersion>
-        <FileVersion>0.6.2.0</FileVersion>
+        <AssemblyVersion>0.6.3.0</AssemblyVersion>
+        <FileVersion>0.6.3.0</FileVersion>
   </PropertyGroup>
 
   <!-- Append the short git commit hash to the informational version so the

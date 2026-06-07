@@ -72,6 +72,9 @@ public partial class MapView : UserControl
     // Temporary elements added when a cluster of stacked nodes is "spidered"
     // out on hover; removed on collapse or on the next full Render.
     private readonly List<UIElement> _spiderElements = new();
+    private string? _activeSpiderClusterKey;
+    private bool _pendingMarkerRefresh;
+    private int _openNodeToolTips;
 
     public MapView()
     {
@@ -146,6 +149,12 @@ public partial class MapView : UserControl
 
     private void OnMarkersChanged()
     {
+        if (_activeSpiderClusterKey is not null || _openNodeToolTips > 0)
+        {
+            _pendingMarkerRefresh = true;
+            return;
+        }
+
         if (!_userMovedView) FitToMarkers();
         Render();
     }
@@ -314,7 +323,8 @@ public partial class MapView : UserControl
     private void DrawMarkers(double originX, double originY)
     {
         if (_vm is null) return;
-        _spiderElements.Clear();
+        SpiderCollapseImmediate();
+        bool restoredActiveSpider = false;
 
         // Node markers are collected and clustered; the home marker is drawn
         // immediately since it never stacks with nodes.
@@ -372,8 +382,16 @@ public partial class MapView : UserControl
             else
             {
                 AddCluster(c);
+                if (string.Equals(_activeSpiderClusterKey, GetClusterKey(c), StringComparison.Ordinal))
+                {
+                    SpiderExpand(c, c.Average(m => m.px), c.Average(m => m.py), persistSelection: false);
+                    restoredActiveSpider = true;
+                }
             }
         }
+
+        if (!restoredActiveSpider)
+            _activeSpiderClusterKey = null;
     }
 
     /// <summary>Draws a single node marker (blue dot with a hover tooltip).</summary>
@@ -438,21 +456,33 @@ public partial class MapView : UserControl
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         });
-        badge.ToolTip = $"{members.Count} nodes here \u2014 hover to expand";
+        badge.ToolTip = $"{members.Count} nodes here \u2014 click to expand";
         Canvas.SetLeft(badge, cx - 12);
         Canvas.SetTop(badge, cy - 12);
         Panel.SetZIndex(badge, 10);
 
-        badge.MouseEnter += (_, _) => SpiderExpand(members, cx, cy);
+        badge.MouseLeftButtonDown += (_, e) =>
+        {
+            SpiderExpand(members, cx, cy);
+            e.Handled = true;
+        };
         MapCanvas.Children.Add(badge);
     }
+
+    private static string GetClusterKey(List<(MainViewModel.MapMarker mk, double px, double py)> members) =>
+        string.Join("\n", members
+            .Select(m => $"{m.mk.Label}|{m.mk.Lat:F6}|{m.mk.Lon:F6}")
+            .OrderBy(text => text, StringComparer.Ordinal));
 
     /// <summary>Fans a stacked group of nodes out around their shared point and
     /// keeps them open via a transparent hover hull.</summary>
     private void SpiderExpand(
-        List<(MainViewModel.MapMarker mk, double px, double py)> members, double cx, double cy)
+        List<(MainViewModel.MapMarker mk, double px, double py)> members, double cx, double cy,
+        bool persistSelection = true)
     {
-        SpiderCollapse();
+        SpiderCollapseImmediate();
+        if (persistSelection)
+            _activeSpiderClusterKey = GetClusterKey(members);
 
         double legLen = Math.Max(34, 14 + members.Count * 4);
 
@@ -472,7 +502,6 @@ public partial class MapView : UserControl
         Canvas.SetLeft(spider, cx - hullR);
         Canvas.SetTop(spider, cy - hullR);
         Panel.SetZIndex(spider, 9);
-        spider.MouseLeave += (_, _) => SpiderCollapse();
         MapCanvas.Children.Add(spider);
         _spiderElements.Add(spider);
 
@@ -485,6 +514,7 @@ public partial class MapView : UserControl
             double angle = 2 * Math.PI * i / members.Count - Math.PI / 2;
             double mx = lcx + legLen * Math.Cos(angle);
             double my = lcy + legLen * Math.Sin(angle);
+            var toolTip = BuildNodeToolTip(members[i].mk.Title);
 
             var leg = new Line
             {
@@ -498,6 +528,14 @@ public partial class MapView : UserControl
             };
             spider.Children.Add(leg);
 
+            var spoke = new Canvas
+            {
+                Width = 120,
+                Height = 32,
+                Background = Brushes.Transparent,
+                ToolTip = toolTip,
+            };
+
             var dot = new Ellipse
             {
                 Width = 12,
@@ -505,13 +543,13 @@ public partial class MapView : UserControl
                 Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)),
                 Stroke = Brushes.White,
                 StrokeThickness = 1.5,
-                ToolTip = BuildNodeToolTip(members[i].mk.Title),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false,
             };
-            ToolTipService.SetInitialShowDelay(dot, 100);
-            ToolTipService.SetShowDuration(dot, 60000);
-            Canvas.SetLeft(dot, mx - 6);
-            Canvas.SetTop(dot, my - 6);
-            spider.Children.Add(dot);
+            Canvas.SetLeft(dot, 8);
+            Canvas.SetTop(dot, 10);
+            spoke.Children.Add(dot);
 
             var label = new TextBlock
             {
@@ -522,14 +560,31 @@ public partial class MapView : UserControl
                 Padding = new Thickness(2, 0, 2, 0),
                 IsHitTestVisible = false,
             };
-            Canvas.SetLeft(label, mx + 8);
-            Canvas.SetTop(label, my - 8);
-            spider.Children.Add(label);
+            Canvas.SetLeft(label, 24);
+            Canvas.SetTop(label, 8);
+            spoke.Children.Add(label);
+
+            ToolTipService.SetInitialShowDelay(spoke, 100);
+            ToolTipService.SetShowDuration(spoke, 60000);
+            Canvas.SetLeft(spoke, mx - 14);
+            Canvas.SetTop(spoke, my - 14);
+            spider.Children.Add(spoke);
         }
     }
 
     /// <summary>Removes the temporary spider elements added on hover.</summary>
     private void SpiderCollapse()
+    {
+        _activeSpiderClusterKey = null;
+        SpiderCollapseImmediate();
+        if (_pendingMarkerRefresh)
+        {
+            _pendingMarkerRefresh = false;
+            OnMarkersChanged();
+        }
+    }
+
+    private void SpiderCollapseImmediate()
     {
         foreach (var el in _spiderElements)
             MapCanvas.Children.Remove(el);
@@ -538,23 +593,61 @@ public partial class MapView : UserControl
 
     /// <summary>Wraps the multi-line marker description in a ToolTip that stays
     /// visible while the pointer hovers the node.</summary>
-    private static ToolTip BuildNodeToolTip(string text) => new()
+    private ToolTip BuildNodeToolTip(string text)
     {
-        Content = new TextBlock
+        var toolTip = new ToolTip
         {
-            Text = text,
-            FontSize = 11,
-            FontFamily = new FontFamily("Segoe UI"),
-        },
-    };
+            Content = new TextBlock
+            {
+                Text = text,
+                FontSize = 11,
+                FontFamily = new FontFamily("Segoe UI"),
+            },
+        };
+
+        toolTip.Opened += (_, _) => _openNodeToolTips++;
+        toolTip.Closed += (_, _) =>
+        {
+            if (_openNodeToolTips > 0)
+                _openNodeToolTips--;
+
+            if (_openNodeToolTips == 0 && _activeSpiderClusterKey is null && _pendingMarkerRefresh)
+            {
+                _pendingMarkerRefresh = false;
+                OnMarkersChanged();
+            }
+        };
+
+        return toolTip;
+    }
 
     // -- Interaction --------------------------------------------------------
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
+        bool withinSpider = IsWithinSpider(e.OriginalSource as DependencyObject);
+        if (_spiderElements.Count > 0)
+        {
+            if (!withinSpider)
+                SpiderCollapse();
+            else
+                return;
+        }
+
         _dragging = true;
         _lastMouse = e.GetPosition(MapCanvas);
         MapCanvas.CaptureMouse();
+    }
+
+    private bool IsWithinSpider(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is UIElement element && _spiderElements.Contains(element))
+                return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return false;
     }
 
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
