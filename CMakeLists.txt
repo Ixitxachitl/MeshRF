@@ -24,9 +24,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 option(MRF_BUILD_TESTS "Build native unit tests" ON)
 
-# Custom find modules (e.g. FindHackRF for libhackrf via HACKRF_DIR hint).
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-
 # ---------------------------------------------------------------------------
 # Subprojects
 # ---------------------------------------------------------------------------
