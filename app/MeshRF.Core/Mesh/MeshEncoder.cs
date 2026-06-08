@@ -18,9 +18,11 @@ namespace MeshRF.Mesh;
 /// </summary>
 public static class MeshEncoder
 {
-    // Data.bitfield (field 9) bit 0: gateways may uplink this packet to the
-    // public MQTT broker. Mirrors firmware BITFIELD_OK_TO_MQTT_MASK.
-    private const ulong BitfieldOkToMqtt = 0x01;
+    // Data.bitfield (field 9) per firmware Router.h:
+    //   bit 0 (BITFIELD_OK_TO_MQTT_SHIFT=0):    gateway may uplink to MQTT
+    //   bit 1 (BITFIELD_WANT_RESPONSE_SHIFT=1):  mirrors Data.want_response
+    private const ulong BitfieldOkToMqtt     = 1 << 0;
+    private const ulong BitfieldWantResponse = 1 << 1;
     /// <summary>
     /// Encode a frame carrying <paramref name="port"/> + <paramref name="payload"/>.
     /// </summary>
@@ -59,8 +61,9 @@ public static class MeshEncoder
             data.WriteVarintField(3, 1);
         if (requestId != 0)
             data.WriteFixed32Field(6, requestId);
-        if (okToMqtt)
-            data.WriteVarintField(9, BitfieldOkToMqtt);
+        ulong bitfield = (okToMqtt ? BitfieldOkToMqtt : 0) | (wantResponse ? BitfieldWantResponse : 0);
+        if (bitfield != 0)
+            data.WriteVarintField(9, bitfield);
         var plain = data.ToArray();
 
         // 2. Encrypt with the channel's effective key. An empty key means the
@@ -141,8 +144,9 @@ public static class MeshEncoder
             data.WriteVarintField(3, 1);
         if (requestId != 0)
             data.WriteFixed32Field(6, requestId);
-        if (okToMqtt)
-            data.WriteVarintField(9, BitfieldOkToMqtt);
+        ulong bitfieldPkc = (okToMqtt ? BitfieldOkToMqtt : 0) | (wantResponse ? BitfieldWantResponse : 0);
+        if (bitfieldPkc != 0)
+            data.WriteVarintField(9, bitfieldPkc);
         var plain = data.ToArray();
 
         // 2. Seal with X25519 + AES-CCM (ciphertext || 8-byte tag || 4-byte nonce).

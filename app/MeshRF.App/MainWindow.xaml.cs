@@ -130,6 +130,18 @@ public partial class MainWindow : Window
         vm.RequestPosition(node);
     }
 
+    // Context-menu "Exchange node info" asks the selected node(s) to reply
+    // with NodeInfo without clearing any stored keys.
+    private void OnExchangeNodeInfo(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = NodesGrid.SelectedItems
+            .OfType<MeshRF.Nodes.NodeRecord>()
+            .ToList();
+        if (selected.Count == 0) return;
+        vm.RequestNodeInfo(selected);
+    }
+
     // Context-menu "Request new keys" forgets the stored key(s) and asks the
     // selected node(s) to re-send their NodeInfo so a changed key can be trusted.
     private void OnRequestKeys(object sender, RoutedEventArgs e)

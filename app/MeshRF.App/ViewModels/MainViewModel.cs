@@ -282,6 +282,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         "Client", "ClientMute", "ClientHidden", "Router", "RouterClient",
         "Repeater", "Tracker", "Sensor", "TAK", "TakTracker", "LostAndFound",
+        "RouterLate", "ClientBase",
     };
 
     // -- Hardware model / rebroadcast / TX keys / home location -------------
@@ -403,6 +404,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         ReloadNodes();
+    }
+
+    /// <summary>Ask the given node(s) to exchange NodeInfo with us without
+    /// clearing any stored keys. This uses a directed NodeInfo request so the
+    /// peer replies with its own NodeInfo while our existing trust state stays
+    /// intact.</summary>
+    public void RequestNodeInfo(IEnumerable<MeshRF.Nodes.NodeRecord> nodes)
+    {
+        var targets = nodes?.Where(n => n is not null).ToList();
+        if (targets is null || targets.Count == 0) return;
+
+        foreach (var n in targets)
+        {
+            if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
+            uint packetId = NextPacketId();
+            RequestNodeInfo(n.NodeNum, packetId);
+            var name = NodeDisplayName(n.NodeNum);
+            Log($"  requested NodeInfo from {name}");
+            var convo = OpenConversation(n.NodeNum, name, focus: false);
+            var noteText = $"Requested NodeInfo from {name}\u2026";
+            convo.Add(new ChannelMessage
+            {
+                FromId = "nodeinfo",
+                Text = noteText,
+                IsOutgoing = true,
+            });
+            PersistConversationNote(n.NodeNum, outgoing: true, packetId,
+                                    "nodeinfo", noteText);
+        }
     }
 
     /// <summary>
@@ -2494,6 +2524,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Handle an inbound NEIGHBORINFO_APP packet: log the sender's
+    /// neighbor list with per-neighbor SNR.</summary>
+    private void HandleNeighborInfo(MeshHeader header, MeshRF.Mesh.MeshNeighborInfo ni)
+    {
+        var senderName = NodeDisplayName(header.From);
+        if (ni.Neighbors.Count == 0)
+        {
+            Log($"  neighborinfo {header.FromId} ({senderName}): no neighbors reported");
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"  neighborinfo {header.FromId} ({senderName}): {ni.Neighbors.Count} neighbor");
+        if (ni.Neighbors.Count != 1) sb.Append('s');
+        sb.Append(" — ");
+        for (int i = 0; i < ni.Neighbors.Count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            var n = ni.Neighbors[i];
+            sb.Append($"!{n.NodeId:x8}");
+            var name = NodeDisplayName(n.NodeId);
+            if (!string.IsNullOrEmpty(name) && name != $"!{n.NodeId:x8}")
+                sb.Append($" ({name})");
+            sb.Append($" {n.Snr:+0.0;-0.0}dB");
+        }
+        Log(sb.ToString());
+    }
+
     // Render a traceroute RouteDiscovery as "us → hop (snr) → … → dest". SNR
     // entries are stored scaled by 4; a sentinel of -128 (unknown hop) shows "?".
     private string FormatTraceroute(uint origin, uint dest, MeshRouteDiscovery? rd)
@@ -2596,6 +2654,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         "ClientHidden" => 8,
         "LostAndFound" => 9,
         "TakTracker"   => 10,
+        "RouterLate"   => 11,
+        "ClientBase"   => 12,
         _              => 0,
     };
 
@@ -3011,6 +3071,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             LongName = result.User.LongName,
                             ShortName = result.User.ShortName,
                             HwModel = HardwareModels.Name(result.User.HwModel),
+                            // If field 7 was absent from the wire, proto3 default = CLIENT.
+                            // Store "Client" so we can distinguish "received NodeInfo but
+                            // role is Client" from "never received NodeInfo at all" (blank).
+                            Role = string.IsNullOrEmpty(result.User.Role) ? "Client" : result.User.Role,
                             // Empty on mismatch keeps the previously trusted key.
                             PublicKey = keyMismatch ? string.Empty : newKeyHex,
                             // Only touch the flag when this NodeInfo carried a key.
@@ -3023,6 +3087,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 + "keeping the old key. Right-click the node → Request new keys to accept it.");
                         else
                             Log($"  nodeinfo {header.FromId}: {result.User.LongName} ({result.User.ShortName})"
+                                + (string.IsNullOrEmpty(result.User.Role) ? string.Empty : $" role={result.User.Role}")
                                 + (newKeyHex.Length > 0 ? " [PKC key]" : string.Empty));
                     }
                     // If they directed a NodeInfo request at us (want_response),
@@ -3085,6 +3150,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     break;
                 case PortNum.Traceroute:
                     HandleTraceroute(header, result, snrDb);
+                    break;
+                case PortNum.NeighborInfo when result.NeighborInfo is not null:
+                    HandleNeighborInfo(header, result.NeighborInfo);
                     break;
                 default:
                     Log($"  [{result.ChannelName}] {header.FromId} {result.Port} ({result.AppPayload.Length} B)");

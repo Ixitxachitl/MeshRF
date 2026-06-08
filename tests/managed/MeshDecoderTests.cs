@@ -216,4 +216,60 @@ public class MeshDecoderTests
         Assert.Equal(4.05f, result.Telemetry.Voltage);
         Assert.Equal(328u, result.Telemetry.UptimeSeconds);
     }
+
+    [Fact]
+    public void DecodesNodeInfoRoleRouter()
+    {
+        const uint from = 0x1A2B3C4Du;
+        const uint id   = 0x00000001u;
+
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "LongFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+
+        var frame = MeshEncoder.EncodeNodeInfo(channel, from, id,
+            longName: "Test Router", shortName: "TR",
+            hwModel: 43, role: 2 /* ROUTER */);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.NodeInfo, result!.Port);
+        Assert.NotNull(result.User);
+        Assert.Equal("Router", result.User!.Role);
+        Assert.Equal("Test Router", result.User.LongName);
+    }
+
+    [Fact]
+    public void DecodesNodeInfoRoleAbsentIsEmpty()
+    {
+        // role=0 → encoder omits field 7 → MeshDecoder returns "" (absent from wire).
+        // The UI layer (MainViewModel) promotes "" → "Client" on NodeInfo receive,
+        // but the decoder itself stays honest about what was on the wire.
+        const uint from = 0x1A2B3C4Du;
+        const uint id   = 0x00000002u;
+
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "LongFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+
+        var frame = MeshEncoder.EncodeNodeInfo(channel, from, id,
+            longName: "Test Client", shortName: "TC",
+            hwModel: 43, role: 0 /* CLIENT — field 7 omitted */);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.NodeInfo, result!.Port);
+        Assert.NotNull(result.User);
+        Assert.Equal(string.Empty, result.User!.Role);
+    }
 }

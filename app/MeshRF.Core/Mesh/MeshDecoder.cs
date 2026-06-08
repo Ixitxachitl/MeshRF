@@ -42,6 +42,9 @@ public sealed class MeshDecodeResult
     /// <summary>Parsed RouteDiscovery (TRACEROUTE_APP); null otherwise.</summary>
     public MeshRouteDiscovery? RouteDiscovery { get; init; }
 
+    /// <summary>Parsed NeighborInfo (NEIGHBORINFO_APP); null otherwise.</summary>
+    public MeshNeighborInfo? NeighborInfo { get; init; }
+
     /// <summary>Raw decrypted application payload (the Data.payload bytes).</summary>
     public byte[] AppPayload { get; init; } = Array.Empty<byte>();
 }
@@ -53,6 +56,7 @@ public sealed class MeshUser
     public string LongName { get; init; } = string.Empty;
     public string ShortName { get; init; } = string.Empty;
     public int HwModel { get; init; }
+    public string Role { get; init; } = string.Empty;
 
     /// <summary>32-byte X25519 public key (field 8), empty if not advertised.</summary>
     public byte[] PublicKey { get; init; } = Array.Empty<byte>();
@@ -114,6 +118,28 @@ public sealed class MeshRouteDiscovery
 
     /// <summary>Per-hop SNR on the way back, scaled by 4 (field 4).</summary>
     public IReadOnlyList<int> SnrBack { get; init; } = Array.Empty<int>();
+}
+
+/// <summary>A single entry in a <see cref="MeshNeighborInfo"/> neighbors list.</summary>
+public sealed class MeshNeighborEntry
+{
+    public uint NodeId { get; init; }
+    /// <summary>SNR of the last received packet from this neighbor (dB, float).</summary>
+    public float Snr { get; init; }
+}
+
+/// <summary>Parsed NeighborInfo (NEIGHBORINFO_APP): the sender's view of its direct
+/// neighbours, each with an SNR measurement.</summary>
+public sealed class MeshNeighborInfo
+{
+    /// <summary>Node number of the node reporting its neighbors (field 1).</summary>
+    public uint NodeId { get; init; }
+    /// <summary>Last node that relayed this info onwards (field 2).</summary>
+    public uint LastSentById { get; init; }
+    /// <summary>Broadcast interval of the reporting node in seconds (field 3).</summary>
+    public uint BroadcastIntervalSecs { get; init; }
+    /// <summary>Neighbor list (field 4, repeated sub-message).</summary>
+    public IReadOnlyList<MeshNeighborEntry> Neighbors { get; init; } = Array.Empty<MeshNeighborEntry>();
 }
 
 /// <summary>
@@ -263,7 +289,9 @@ public static class MeshDecoder
                     requestId = rdr.ReadFixed32();
                     break;
                 case 9 when wt == ProtoReader.WireType.Varint:
-                    okToMqtt = (rdr.ReadVarint() & 0x01) != 0;
+                    { var bf = rdr.ReadVarint();
+                      okToMqtt     = (bf & 0x01) != 0;  // bit 0
+                      wantResponse = wantResponse || (bf & 0x02) != 0; } // bit 1 mirrors want_response
                     break;
                 default:
                     rdr.SkipField(wt);
@@ -293,6 +321,7 @@ public static class MeshDecoder
         MeshPosition? pos = null;
         MeshTelemetry? telem = null;
         MeshRouteDiscovery? route = null;
+        MeshNeighborInfo? neighborInfo = null;
         int routingError = -1;
 
         switch (port)
@@ -315,6 +344,9 @@ public static class MeshDecoder
             case PortNum.Traceroute:
                 route = ParseRouteDiscovery(payload);
                 break;
+            case PortNum.NeighborInfo:
+                neighborInfo = ParseNeighborInfo(payload);
+                break;
         }
 
         return new MeshDecodeResult
@@ -327,6 +359,7 @@ public static class MeshDecoder
             Position = pos,
             Telemetry = telem,
             RouteDiscovery = route,
+            NeighborInfo = neighborInfo,
             WantResponse = wantResponse,
             RequestId = requestId,
             OkToMqtt = okToMqtt,
@@ -409,11 +442,12 @@ public static class MeshDecoder
     }
 
     // User: 1=id(string) 2=long_name(string) 3=short_name(string) 5=hw_model(varint)
-    //       8=public_key(bytes)
+    //       7=role(varint) 8=public_key(bytes)
     private static MeshUser ParseUser(byte[] data)
     {
         string id = "", ln = "", sn = "";
         int hw = 0;
+        int role = -1;
         byte[] pub = Array.Empty<byte>();
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
@@ -424,12 +458,41 @@ public static class MeshDecoder
                 case 2 when wt == ProtoReader.WireType.Len: ln = rdr.ReadString(); break;
                 case 3 when wt == ProtoReader.WireType.Len: sn = rdr.ReadString(); break;
                 case 5 when wt == ProtoReader.WireType.Varint: hw = (int)rdr.ReadVarint(); break;
+                case 7 when wt == ProtoReader.WireType.Varint: role = (int)rdr.ReadVarint(); break;
                 case 8 when wt == ProtoReader.WireType.Len: pub = rdr.ReadLengthDelimited().ToArray(); break;
                 default: rdr.SkipField(wt); break;
             }
         }
-        return new MeshUser { Id = id, LongName = ln, ShortName = sn, HwModel = hw, PublicKey = pub };
+        return new MeshUser
+        {
+            Id = id,
+            LongName = ln,
+            ShortName = sn,
+            HwModel = hw,
+            Role = RoleName(role),
+            PublicKey = pub,
+        };
     }
+
+    private static string RoleName(int role) => role switch
+    {
+        // -1 means field 7 was absent from the wire — role unknown, keep blank.
+        // 0 = CLIENT (explicit). Protobuf omits default values, so absent ≠ Client.
+        0 => "Client",
+        1 => "ClientMute",
+        2 => "Router",
+        3 => "RouterClient",
+        4 => "Repeater",
+        5 => "Tracker",
+        6 => "Sensor",
+        7 => "TAK",
+        8 => "ClientHidden",
+        9 => "LostAndFound",
+        10 => "TakTracker",
+        11 => "RouterLate",
+        12 => "ClientBase",
+        _ => string.Empty,
+    };
 
     // Position: 1=latitude_i(sfixed32) 2=longitude_i(sfixed32) 3=altitude(varint)
     private static MeshPosition ParsePosition(byte[] data)
@@ -521,6 +584,54 @@ public static class MeshDecoder
             BarometricPressureHpa = pres,
             GasResistanceMohm = gas,
             Iaq = iaq,
+        };
+    }
+
+    // NeighborInfo: 1=node_id(varint) 2=last_sent_by_id(varint)
+    //               3=node_broadcast_interval_secs(varint)
+    //               4=neighbors(repeated message: 1=node_id(varint) 2=snr(float/I32))
+    private static MeshNeighborInfo ParseNeighborInfo(byte[] data)
+    {
+        uint nodeId = 0, lastSentById = 0, broadcastInterval = 0;
+        var neighbors = new List<MeshNeighborEntry>();
+        var rdr = new ProtoReader(data);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            switch (field)
+            {
+                case 1 when wt == ProtoReader.WireType.Varint:
+                    nodeId = (uint)rdr.ReadVarint(); break;
+                case 2 when wt == ProtoReader.WireType.Varint:
+                    lastSentById = (uint)rdr.ReadVarint(); break;
+                case 3 when wt == ProtoReader.WireType.Varint:
+                    broadcastInterval = (uint)rdr.ReadVarint(); break;
+                case 4 when wt == ProtoReader.WireType.Len:
+                {
+                    var sub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
+                    uint nId = 0; float snr = 0;
+                    while (sub.TryReadTag(out int f, out var swt))
+                    {
+                        switch (f)
+                        {
+                            case 1 when swt == ProtoReader.WireType.Varint:
+                                nId = (uint)sub.ReadVarint(); break;
+                            case 2 when swt == ProtoReader.WireType.I32:
+                                snr = sub.ReadFloat(); break;
+                            default: sub.SkipField(swt); break;
+                        }
+                    }
+                    neighbors.Add(new MeshNeighborEntry { NodeId = nId, Snr = snr });
+                    break;
+                }
+                default: rdr.SkipField(wt); break;
+            }
+        }
+        return new MeshNeighborInfo
+        {
+            NodeId = nodeId,
+            LastSentById = lastSentById,
+            BroadcastIntervalSecs = broadcastInterval,
+            Neighbors = neighbors,
         };
     }
 
