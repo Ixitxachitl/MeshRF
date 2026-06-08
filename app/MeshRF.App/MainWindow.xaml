@@ -447,6 +447,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID"
@@ -461,43 +462,52 @@
                                              Text="{Binding MyNodeIdText, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
                                 </DockPanel>
 
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Long name"
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="MAC address"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
                                 <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4"
-                                         Text="{Binding MyLongName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                         FontFamily="Consolas"
+                                         IsReadOnly="True"
+                                         Foreground="{DynamicResource BrushSecondaryText}"
+                                         ToolTip="Derived from node ID (02:00 + last 4 bytes). Set the node ID to change this."
+                                         Text="{Binding MyMacAddress, Mode=OneWay}" />
 
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Short name"
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Long name"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
                                 <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4,0,4"
+                                         Text="{Binding MyLongName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Short name"
+                                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4,0,4"
                                          MaxLength="4"
                                          Text="{Binding MyShortName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
 
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Role"
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Role"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <ComboBox Grid.Row="3" Grid.Column="1" Margin="0,4,0,4"
+                                <ComboBox Grid.Row="4" Grid.Column="1" Margin="0,4,0,4"
                                           HorizontalAlignment="Left" Width="160"
                                           ItemsSource="{Binding NodeRoleOptions}"
                                           SelectedItem="{Binding MyRole, Mode=TwoWay}" />
 
-                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Hardware"
+                                <TextBlock Grid.Row="5" Grid.Column="0" Text="Hardware"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <ComboBox Grid.Row="4" Grid.Column="1" Margin="0,4,0,4"
+                                <ComboBox Grid.Row="5" Grid.Column="1" Margin="0,4,0,4"
                                           HorizontalAlignment="Left" Width="200"
                                           ItemsSource="{Binding HwModelOptions}"
                                           SelectedItem="{Binding MyHwModel, Mode=TwoWay}"
                                           ToolTip="Hardware model (for when TX is added)" />
 
-                                <TextBlock Grid.Row="5" Grid.Column="0" Text="Rebroadcast"
+                                <TextBlock Grid.Row="6" Grid.Column="0" Text="Rebroadcast"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <ComboBox Grid.Row="5" Grid.Column="1" Margin="0,4,0,4"
+                                <ComboBox Grid.Row="6" Grid.Column="1" Margin="0,4,0,4"
                                           HorizontalAlignment="Left" Width="200"
                                           ItemsSource="{Binding RebroadcastModeOptions}"
                                           SelectedItem="{Binding RebroadcastMode, Mode=TwoWay}"
                                           ToolTip="Rebroadcast mode (used once TX is enabled)" />
 
-                                <TextBlock Grid.Row="6" Grid.Column="0" Text="Public key"
+                                <TextBlock Grid.Row="7" Grid.Column="0" Text="Public key"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="6" Grid.Column="1" Margin="0,4,0,4">
+                                <DockPanel Grid.Row="7" Grid.Column="1" Margin="0,4,0,4">
                                     <Button DockPanel.Dock="Right" Content="Generate"
                                             Margin="6,0,0,0" Padding="8,2"
                                             Command="{Binding GenerateKeyPairCommand}"
@@ -507,16 +517,16 @@
                                              Text="{Binding MyPublicKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
                                 </DockPanel>
 
-                                <TextBlock Grid.Row="7" Grid.Column="0" Text="Private key"
+                                <TextBlock Grid.Row="8" Grid.Column="0" Text="Private key"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <TextBox Grid.Row="7" Grid.Column="1" Margin="0,4,0,4"
+                                <TextBox Grid.Row="8" Grid.Column="1" Margin="0,4,0,4"
                                          FontFamily="Consolas"
                                          ToolTip="Base64 X25519 private key (kept locally)"
                                          Text="{Binding MyPrivateKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
 
-                                <TextBlock Grid.Row="8" Grid.Column="0" Text="Location source"
+                                <TextBlock Grid.Row="9" Grid.Column="0" Text="Location source"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <StackPanel Grid.Row="8" Grid.Column="1" Margin="0,4,0,4">
+                                <StackPanel Grid.Row="9" Grid.Column="1" Margin="0,4,0,4">
                                     <ComboBox HorizontalAlignment="Left" Width="160"
                                               ItemsSource="{Binding LocationSourceOptions}"
                                               SelectedItem="{Binding SelectedLocationSource, Mode=TwoWay}"
@@ -542,9 +552,9 @@
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 
-                                <TextBlock Grid.Row="9" Grid.Column="0" Text="Home (lat, lon)"
+                                <TextBlock Grid.Row="10" Grid.Column="0" Text="Home (lat, lon)"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <Grid Grid.Row="9" Grid.Column="1" Margin="0,4,0,4"
+                                <Grid Grid.Row="10" Grid.Column="1" Margin="0,4,0,4"
                                       IsEnabled="{Binding IsManualLocationSource}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -560,9 +570,9 @@
                                              Text="{Binding HomeLongitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </Grid>
 
-                                <TextBlock Grid.Row="10" Grid.Column="0" Text="Hop limit"
+                                <TextBlock Grid.Row="11" Grid.Column="0" Text="Hop limit"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="10" Grid.Column="1" Margin="0,4,0,4">
+                                <DockPanel Grid.Row="11" Grid.Column="1" Margin="0,4,0,4">
                                     <TextBlock DockPanel.Dock="Right" Width="20"
                                                Margin="6,0,0,0" VerticalAlignment="Center"
                                                TextAlignment="Center"
@@ -575,9 +585,9 @@
                                             ToolTip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
                                 </DockPanel>
 
-                                <TextBlock Grid.Row="11" Grid.Column="0" Text="OK to MQTT"
+                                <TextBlock Grid.Row="12" Grid.Column="0" Text="OK to MQTT"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <CheckBox Grid.Row="11" Grid.Column="1" Margin="0,4,0,4"
+                                <CheckBox Grid.Row="12" Grid.Column="1" Margin="0,4,0,4"
                                           VerticalAlignment="Center"
                                           Content="Allow gateways to uplink my packets to public MQTT"
                                           IsChecked="{Binding OkToMqtt, Mode=TwoWay}"

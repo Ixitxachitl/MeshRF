@@ -272,6 +272,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string _myNodeIdText = string.Empty;
     [ObservableProperty] private string _myLongName = string.Empty;
+
+    /// <summary>MAC address derived from the node number: <c>02:00:xx:xx:xx:xx</c>
+    /// where the last four bytes are the node number. Matches the Meshtastic
+    /// convention that the 32-bit node number is the low four bytes of the MAC.</summary>
+    public string MyMacAddress =>
+        _myNodeNum == 0
+            ? string.Empty
+            : $"02:00:{(_myNodeNum >> 24) & 0xFF:x2}:{(_myNodeNum >> 16) & 0xFF:x2}:{(_myNodeNum >> 8) & 0xFF:x2}:{_myNodeNum & 0xFF:x2}";
     [ObservableProperty] private string _myShortName = string.Empty;
     [ObservableProperty] private string _myRole = "Client";
 
@@ -1365,6 +1373,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnMyNodeIdTextChanged(string value)
     {
         _myNodeNum = ParseNodeId(value);
+        OnPropertyChanged(nameof(MyMacAddress));
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SaveSettings();
@@ -2510,7 +2519,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var route = rd?.Route?.ToList() ?? new List<uint>();
             var snrTowards = rd?.SnrTowards?.ToList() ?? new List<int>();
             // SNR of the hop that reached us, scaled by 4 (-128 = unknown).
-            snrTowards.Add(snrDb is float s ? (int)Math.Round(s * 4) : -128);
+            // Cast through sbyte to match the firmware's (int8_t)(snr * 4) — the
+            // nanopb-generated struct stores snr_towards as int8_t and rejects
+            // values outside [-128, 127] with "integer too large".
+            snrTowards.Add(snrDb is float s ? (int)(sbyte)(int)Math.Round(s * 4) : -128);
 
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodeTracerouteReply(
