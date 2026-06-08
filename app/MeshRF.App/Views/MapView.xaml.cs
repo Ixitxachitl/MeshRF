@@ -38,13 +38,13 @@ public partial class MapView : UserControl
         "osm",
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         "abc",
-        "© OpenStreetMap contributors  ·  right-click to set home");
+        "© OpenStreetMap contributors  ·  Ctrl+right-click to set home");
 
     private static readonly TileProvider DarkTiles = new(
         "cartodark",
         "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
         "abcd",
-        "© OpenStreetMap · © CARTO  ·  right-click to set home",
+        "© OpenStreetMap · © CARTO  ·  Ctrl+right-click to set home",
         // CARTO dark_all renders roads/labels very dark; lift them so they read
         // against the dark theme.
         Brightness: 1.7);
