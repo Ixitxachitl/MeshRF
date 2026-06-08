@@ -37,6 +37,13 @@ public sealed class MessageStore : IDisposable
     {
         _conn = new SqliteConnection($"Data Source={dbPath}");
         _conn.Open();
+        // WAL mode: writes are sequential appends (no reader-writer conflicts);
+        // synchronous=NORMAL is safe with WAL and avoids per-write fsync stalls.
+        using (var wal = _conn.CreateCommand())
+        {
+            wal.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            wal.ExecuteNonQuery();
+        }
         EnsureSchema();
     }
 

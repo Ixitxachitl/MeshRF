@@ -91,7 +91,7 @@ public partial class MainWindow : Window
     // far end of the ring and risks the preamble scrolling out.
     private void OnPacketDecoded()
     {
-        FreezeLastPacket();
+        _ = FreezeLastPacketAsync();
     }
 
     private void OnCloseLastPacket(object sender, RoutedEventArgs e)
@@ -123,26 +123,26 @@ public partial class MainWindow : Window
 
     // Context-menu "Traceroute" sends a Meshtastic-style route-discovery request
     // to the selected node (rate-limited to one per cooldown by the view model).
-    private void OnTraceroute(object sender, RoutedEventArgs e)
+    private async void OnTraceroute(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
         var node = NodesGrid.SelectedItems
             .OfType<MeshRF.Nodes.NodeRecord>()
             .FirstOrDefault();
         if (node is null) return;
-        vm.Traceroute(node);
+        await vm.TracerouteAsync(node);
     }
 
     // Context-menu "Request position" asks the selected node to reply with its
     // location (rate-limited to one per cooldown by the view model).
-    private void OnRequestPosition(object sender, RoutedEventArgs e)
+    private async void OnRequestPosition(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
         var node = NodesGrid.SelectedItems
             .OfType<MeshRF.Nodes.NodeRecord>()
             .FirstOrDefault();
         if (node is null) return;
-        vm.RequestPosition(node);
+        await vm.RequestPositionAsync(node);
     }
 
     // Context-menu "Exchange node info" asks the selected node(s) to reply
@@ -231,20 +231,28 @@ public partial class MainWindow : Window
     // Snapshots the last detected packet as a high-time-resolution STFT
     // spectrogram computed natively from buffered modem-rate IQ, cropped
     // (zoomed) to the LoRa channel so the individual chirps are visible.
-    private void FreezeLastPacket()
+    //
+    // PullPacketSpectrogram is CPU-heavy (IQ ring copy + energy locator FFTs +
+    // 512-frame STFT) so it runs on a thread-pool thread; only the final row
+    // push and visibility update are marshalled back to the UI thread.
+    private async Task FreezeLastPacketAsync()
     {
         if (DataContext is not MainViewModel vm) return;
 
-        // Fine-grained STFT from native IQ history. Native code chooses the
-        // packet-length time window; use enough rows that long frames do not
-        // collapse into a cramped snapshot.
         const int nTime = 512;
         const int nFreq = 256;
         var grid = new float[nTime * nFreq];
-        int rows = vm.Core.PullPacketSpectrogram(grid, nTime, nFreq);
+
+        // Capture locals the background lambda can close over safely.
+        var core = vm.Core;
+        var specHistory = _specHistory;
+        double spectrumSpanHz = vm.SpectrumSpanHz;
+
+        int rows = await Task.Run(() => core.PullPacketSpectrogram(grid, nTime, nFreq))
+                              .ConfigureAwait(true); // resume on UI thread
+
         if (rows <= 0)
         {
-            // Fallback: replay the coarse waterfall history if no IQ yet.
             FreezeLastPacketFromHistory(vm);
             return;
         }

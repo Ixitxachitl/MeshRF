@@ -30,6 +30,11 @@ public sealed class ChannelStore : IDisposable
     {
         _conn = new SqliteConnection($"Data Source={dbPath}");
         _conn.Open();
+        using (var wal = _conn.CreateCommand())
+        {
+            wal.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            wal.ExecuteNonQuery();
+        }
         EnsureSchema();
     }
 

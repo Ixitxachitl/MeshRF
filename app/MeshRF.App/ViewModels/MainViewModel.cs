@@ -31,6 +31,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private double? _manualHomeLongitude;
     private int?    _manualHomeAltitude;
 
+    // Serializes all transmit calls so concurrent sends (user + auto-reply)
+    // don't race on the shared native Core handle.
+    private readonly SemaphoreSlim _txSemaphore = new(1, 1);
+
+    // Set when a received packet updates node state; consumed by the 20 Hz
+    // timer tick so ReloadNodes() runs at most once per tick rather than once
+    // per received packet (avoids stutter from Nodes.Clear + full rebind).
+    private bool _nodesDirty;
+
     private const string ManualLocationSourceValue = "Manual";
     private const string UsbSerialLocationSourceValue = "UsbSerial";
 
@@ -587,7 +596,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// the accumulated hop path, which we render in the log and the node's DM
     /// tab. Rate-limited to one request per <see cref="TracerouteCooldown"/>.
     /// </summary>
-    public void Traceroute(MeshRF.Nodes.NodeRecord? node)
+    public async Task TracerouteAsync(MeshRF.Nodes.NodeRecord? node)
     {
         if (node is null) return;
         if (_myNodeNum != 0 && node.NodeNum == _myNodeNum)
@@ -627,7 +636,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
             {
                 _lastTracerouteUtc = DateTime.UtcNow;
                 _pendingTraceroutes[packetId] = node.NodeNum;
@@ -667,7 +676,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// the node row / map). Rate-limited to one request per
     /// <see cref="PositionRequestCooldown"/>.
     /// </summary>
-    public void RequestPosition(MeshRF.Nodes.NodeRecord? node)
+    public async Task RequestPositionAsync(MeshRF.Nodes.NodeRecord? node)
     {
         if (node is null) return;
         if (_myNodeNum != 0 && node.NodeNum == _myNodeNum)
@@ -707,7 +716,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
             {
                 _lastPositionRequestUtc = DateTime.UtcNow;
                 var name = NodeDisplayName(node.NodeNum);
@@ -1003,6 +1012,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == convo.NodeNum);
         MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    // -- Transmit helpers ----------------------------------------------------
+
+    /// <summary>
+    /// Offloads a blocking <see cref="MeshtasticCore.Transmit"/> call to a
+    /// thread-pool thread, serialized through <see cref="_txSemaphore"/> so
+    /// concurrent sends never race on the shared native Core handle.
+    /// Await this from async <c>[RelayCommand]</c> methods to keep the UI thread
+    /// responsive during transmit (stop-RX + USB streaming + restart-RX).
+    /// </summary>
+    private async Task<bool> TransmitAsync(LoraPreset preset, ulong hz, byte[] frame,
+                                           byte gain, bool amp)
+    {
+        await _txSemaphore.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
+                             .ConfigureAwait(false);
+        }
+        finally
+        {
+            _txSemaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Fire-and-forget transmit for auto-reply helpers (ACK, NodeInfo reply,
+    /// position reply, traceroute reply) that are triggered on packet receipt.
+    /// Serialized through <see cref="_txSemaphore"/> like <see cref="TransmitAsync"/>.
+    /// Any exception is silently swallowed — auto-replies are best-effort.
+    /// </summary>
+    private void TransmitBackground(LoraPreset preset, ulong hz, byte[] frame,
+                                    byte gain, bool amp)
+    {
+        _ = Task.Run(async () =>
+        {
+            await _txSemaphore.WaitAsync().ConfigureAwait(false);
+            try { _core.Transmit(preset, hz, frame, gain, amp); }
+            catch { /* best-effort */ }
+            finally { _txSemaphore.Release(); }
+        });
     }
 
     /// <summary>
@@ -1363,6 +1414,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Name = $"Channel {idx}",
             Psk = ChannelConfig.NewRandomPsk(),
             Role = ChannelRole.Secondary,
+            PositionPrecision = 0,
         };
         _channelStore.Upsert(cfg);
         ReloadChannels();
@@ -1816,13 +1868,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var convo = new ConversationViewModel(nodeNum, name ?? NodeDisplayName(nodeNum),
             OnConversationMuteRtttlChanged);
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
-        // Restore this peer's prior message history so reopening a closed tab
-        // (or relaunching the app) shows the existing conversation.
-        LoadConversationHistory(convo);
+        // Add the tab immediately so the UI is responsive while history loads.
         Tabs.Add(convo);
         if (focus) SelectedTab = convo;
         // Remember that this tab is open so it (and only it) reopens next launch.
         SaveSettings();
+        // Restore persisted history on a background thread so the UI thread is
+        // never blocked by the SQLite read + repeated ObservableCollection.Add.
+        // All convo.Add calls are marshalled back to the UI thread via
+        // Dispatcher.InvokeAsync so WPF binding sees them on the right thread.
+        var myNodeNum = _myNodeNum;
+        _ = Task.Run(() =>
+        {
+            if (myNodeNum == 0) return;
+            var history = _messageStore.Conversation(convo.NodeNum, myNodeNum).ToList();
+            foreach (var msg in history)
+            {
+                if (string.IsNullOrEmpty(msg.Text)) continue;
+                var cm = BuildHistoryMessage(msg);
+                System.Windows.Application.Current?.Dispatcher.InvokeAsync(
+                    () => convo.Add(cm));
+            }
+        });
         return convo;
     }
 
@@ -2153,7 +2220,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// sent line is echoed into the channel's message list.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
-    private void SendMessage()
+    private async Task SendMessageAsync()
     {
         var ch = SelectedChannel;
         if (ch is null) return;
@@ -2175,7 +2242,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
             if (ok)
             {
                 ch.Messages.Add(new ChannelMessage
@@ -2215,7 +2282,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// actual transmit only succeeds on a TX-capable radio (HackRF).
     /// </summary>
     [RelayCommand]
-    private void SendDirectMessage(ConversationViewModel? convo)
+    private async Task SendDirectMessageAsync(ConversationViewModel? convo)
     {
         if (convo is null) return;
         var text = (convo.ComposeText ?? string.Empty).Trim();
@@ -2276,7 +2343,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                       okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
             if (ok)
             {
                 var sent = new ChannelMessage
@@ -2317,7 +2384,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// the primary channel (firmware behaviour), regardless of the active tab.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanSendNodeInfo))]
-    private void SendNodeInfo()
+    private async Task SendNodeInfoAsync()
     {
         if (_myNodeNum == 0)
         {
@@ -2346,7 +2413,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
             Status = ok
                 ? $"Sent node info ({frame.Length} B) on {primary.DisplayName}"
                 : "Transmit failed (device cannot transmit).";
@@ -2369,7 +2436,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// latitude/longitude configured in settings.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanSendPosition))]
-    private void SendPosition()
+    private async Task SendPositionAsync()
     {
         if (_myNodeNum == 0)
         {
@@ -2411,7 +2478,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
             Status = ok
                 ? $"Sent position ({frame.Length} B) on {primary.DisplayName}"
                 : "Transmit failed (device cannot transmit).";
@@ -2450,8 +2517,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: true);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
-                Log($"  requested NodeInfo from !{to:x8}");
+            var preset = SelectedPreset; var gain = TxGainDb; var amp = AmpEnable;
+            TransmitBackground(preset, hz, frame, gain, amp);
+            Log($"  requested NodeInfo from !{to:x8}");
         }
         catch (Exception ex)
         {
@@ -2480,7 +2548,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: false);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
         }
         catch (Exception ex)
         {
@@ -2511,7 +2579,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
                 requestId: requestId);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
         }
         catch (Exception ex)
         {
@@ -2696,7 +2764,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ch.Config, _myNodeNum, origHeader.From, packetId, origHeader.PacketId,
                 route, snrTowards, hopLimit: (byte)HopLimit);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
         }
         catch (Exception ex)
         {
@@ -2810,8 +2878,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (frame is null) return;
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            if (_core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
-                Log($"  sent ACK to {NodeDisplayName(origHeader.From)} for id {origHeader.PacketId:x8}");
+            var ackTarget = NodeDisplayName(origHeader.From);
+            var ackId = origHeader.PacketId;
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            Log($"  sent ACK to {ackTarget} for id {ackId:x8}");
         }
         catch (Exception ex)
         {
@@ -3140,7 +3210,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!isNew)
         {
             // Still refresh the sighting timestamp (done above), but don't echo.
-            ReloadNodes();
+            _nodesDirty = true;
             return;
         }
 
@@ -3181,7 +3251,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         // Acknowledge if the sender asked for one (firmware does
                         // this for any unicast packet addressed to it).
                         if (header.WantAck) SendAck(header, result);
-                        if (!IsNodeRtttlMuted(header.From)) PlayRingtone();
+                        if (!IsNodeRtttlMuted(header.From))
+                        {
+                            var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
+                            Task.Run(() => _ringtone.Play(rtttl, mode, vol));
+                        }
                     }
                     else
                     {
@@ -3198,7 +3272,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             chanVm.Messages.RemoveAt(0);
                         Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
                         if (chanVm?.MuteRtttl != true && !IsNodeRtttlMuted(header.From))
-                            PlayRingtone();
+                        {
+                            var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
+                            Task.Run(() => _ringtone.Play(rtttl, mode, vol));
+                        }
                     }
                     break;
                 case PortNum.Routing:
@@ -3332,7 +3409,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        ReloadNodes();
+        _nodesDirty = true;
         if (nodeChanged) { /* names already refreshed by ReloadNodes */ }
     }
 
@@ -3397,6 +3474,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // keeping. The View uses this to commit the frozen spectrogram.
             else if (IsCrcOkPayload(ev))
                 PacketDecoded?.Invoke();
+        }
+
+        // Flush any node-list changes accumulated during the event drain in one
+        // pass rather than once per packet (avoids Nodes.Clear + full DataGrid
+        // rebind stutter on every received frame).
+        if (_nodesDirty)
+        {
+            ReloadNodes();
+            _nodesDirty = false;
         }
     }
 

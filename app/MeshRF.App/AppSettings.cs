@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.IO;
 using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace MeshRF.App;
 
@@ -253,8 +254,15 @@ public sealed class AppSettings
     {
         try
         {
+            // Serialize on the caller's thread (fast, <1 ms), then write the
+            // file on a thread-pool thread so the UI never blocks on disk I/O.
+            // Each call captures its own snapshot so concurrent calls are safe.
             var json = JsonSerializer.Serialize(this, s_opts);
-            File.WriteAllText(SettingsPath, json);
+            _ = Task.Run(() =>
+            {
+                try { File.WriteAllText(SettingsPath, json); }
+                catch { }
+            });
         }
         catch
         {
