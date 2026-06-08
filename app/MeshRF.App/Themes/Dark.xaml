@@ -309,6 +309,47 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <Style TargetType="{x:Type ToggleButton}">
+        <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Margin="{TemplateBinding Padding}"
+                                          RecognizesAccessKey="True"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#FF3A3A3A" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#FF222222" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#FF1E5FA8" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="#FF2D8CFF" />
+                            <Setter Property="Foreground" Value="White" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BrushAppBackground}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+                            <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style TargetType="{x:Type ComboBox}">
         <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />

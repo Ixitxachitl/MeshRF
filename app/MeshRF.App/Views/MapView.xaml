@@ -5,9 +5,15 @@
              ClipToBounds="True"
              Focusable="True">
     <Grid>
-        <!-- Tiles + markers are added to this canvas in code-behind. -->
-        <Canvas x:Name="MapCanvas"
+        <!-- Base layer: tile images. IsHitTestVisible=False so mouse events
+             fall through to the marker canvas above. -->
+        <Canvas x:Name="TileCanvas"
                 Background="#FF1B1B1B"
+                IsHitTestVisible="False" />
+        <!-- Overlay layer: node markers + interaction. Transparent background
+             keeps the full canvas area hit-testable for dragging/right-click. -->
+        <Canvas x:Name="MarkerCanvas"
+                Background="Transparent"
                 MouseLeftButtonDown="OnMouseDown"
                 MouseLeftButtonUp="OnMouseUp"
                 MouseMove="OnMouseMove"
@@ -32,9 +38,23 @@
                 <Button Content="&#x2013;" Width="28" Height="28" FontSize="16"
                         Margin="0,2,0,0"
                         Click="OnZoomOut" ToolTip="Zoom out" />
-                <Button Content="&#x2302;" Width="28" Height="28" FontSize="14"
+                <Button Width="28" Height="28" FontSize="12"
                         Margin="0,2,0,0"
-                        Click="OnRecenter" ToolTip="Fit all markers" />
+                        Content="&#xE80F;"
+                        FontFamily="Segoe MDL2 Assets"
+                        Click="OnGoHome" ToolTip="Go to home location" />
+                <Button Width="28" Height="28" FontSize="11"
+                        Margin="0,2,0,0"
+                        Content="&#xE740;"
+                        FontFamily="Segoe MDL2 Assets"
+                        Click="OnFitAll" ToolTip="Fit all visible nodes" />
+                <ToggleButton x:Name="FollowHomeButton"
+                              Width="28" Height="28" FontSize="11"
+                              Margin="0,2,0,0"
+                              Content="&#xE707;"
+                              FontFamily="Segoe MDL2 Assets"
+                              Click="OnFollowHomeToggle"
+                              ToolTip="Follow GPS / home location" />
             </StackPanel>
         </Border>
     </Grid>

@@ -16,6 +16,7 @@
         <conv:PskTextConverter x:Key="PskText" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <conv:InverseBoolConverter x:Key="InverseBool" />
+        <conv:BoolToOpacityConverter x:Key="BoolToOpacity" />
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
@@ -605,8 +606,68 @@
                                Text="Nodes"
                                FontWeight="SemiBold"
                                Margin="2,0,0,2" />
+
+                    <!-- Node list filter bar -->
+                    <Border DockPanel.Dock="Top"
+                            Margin="0,0,0,3" Padding="4,3"
+                            Background="{DynamicResource BrushPanelBackground}"
+                            BorderBrush="{DynamicResource BrushPanelBorder}"
+                            BorderThickness="1">
+                        <StackPanel>
+                            <!-- Row 1: text search + dropdowns + clear -->
+                            <DockPanel LastChildFill="True" Margin="0,0,0,3">
+                                <Button DockPanel.Dock="Right"
+                                        Content="&#xE711;"
+                                        FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                        Width="22" Height="22" Padding="0"
+                                        Margin="3,0,0,0"
+                                        Command="{Binding ClearNodeFiltersCommand}"
+                                        ToolTip="Clear all filters" />
+                                <ComboBox DockPanel.Dock="Right" Width="100" Height="22" Margin="3,0,0,0"
+                                          FontSize="11"
+                                          ItemsSource="{Binding NodeIgnoredFilterOptions}"
+                                          SelectedItem="{Binding NodeIgnoredFilter, Mode=TwoWay}"
+                                          ToolTip="Ignored nodes" />
+                                <ComboBox DockPanel.Dock="Right" Width="100" Height="22" Margin="3,0,0,0"
+                                          FontSize="11"
+                                          ItemsSource="{Binding NodeLocationFilterOptions}"
+                                          SelectedItem="{Binding NodeLocationFilter, Mode=TwoWay}"
+                                          ToolTip="Position filter" />
+                                <ComboBox DockPanel.Dock="Right" Width="90" Height="22" Margin="3,0,0,0"
+                                          FontSize="11"
+                                          ItemsSource="{Binding NodeKeyFilterOptions}"
+                                          SelectedItem="{Binding NodeKeyFilter, Mode=TwoWay}"
+                                          ToolTip="Key filter" />
+                                <ComboBox DockPanel.Dock="Right" Width="80" Height="22" Margin="3,0,0,0"
+                                          FontSize="11"
+                                          ItemsSource="{Binding NodeHopsFilterOptions}"
+                                          SelectedItem="{Binding NodeHopsFilter, Mode=TwoWay}"
+                                          ToolTip="Hops filter" />
+                                <TextBox Height="22" FontSize="11"
+                                         Text="{Binding NodeSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Search by name, short name, or node ID" />
+                            </DockPanel>
+                            <!-- Row 2: heard-within + distance -->
+                            <DockPanel LastChildFill="False">
+                                <TextBlock VerticalAlignment="Center" FontSize="11" Margin="0,0,3,0" Text="Heard within:" />
+                                <TextBox Width="40" Height="22" FontSize="11" Margin="0,0,2,0"
+                                         Text="{Binding NodeMaxAgeMinutesText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Show only nodes heard within the last N minutes (blank = any)" />
+                                <TextBlock VerticalAlignment="Center" FontSize="11" Margin="0,0,12,0" Text="min" />
+                                <TextBlock VerticalAlignment="Center" FontSize="11" Margin="0,0,3,0" Text="Max dist:"
+                                           Opacity="{Binding HasHomeLocation, Converter={StaticResource BoolToOpacity}}" />
+                                <TextBox Width="48" Height="22" FontSize="11" Margin="0,0,2,0"
+                                         IsEnabled="{Binding HasHomeLocation}"
+                                         Text="{Binding NodeDistanceKmText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Max distance from home location in km (blank = any; requires home to be set)" />
+                                <TextBlock VerticalAlignment="Center" FontSize="11" Text="km"
+                                           Opacity="{Binding HasHomeLocation, Converter={StaticResource BoolToOpacity}}" />
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+
                     <DataGrid x:Name="NodesGrid"
-                              ItemsSource="{Binding Nodes}"
+                              ItemsSource="{Binding NodesView}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
                               CanUserSortColumns="True"

@@ -310,6 +310,7 @@ public partial class MainWindow : Window
 
         IdentityExpander.IsExpanded = settings.IdentityExpanded;
         RestoreSelectedTab(settings);
+        Map.LoadFromSettings(settings);
         _layoutApplied = true;
     }
 
@@ -442,8 +443,17 @@ public partial class MainWindow : Window
                     settings.SelectedConversationNode = conversation.NodeNum;
                     break;
             }
+
+            settings.NodeFilterSearch        = vm.NodeSearchText;
+            settings.NodeFilterHops          = vm.NodeHopsFilter;
+            settings.NodeFilterKey           = vm.NodeKeyFilter;
+            settings.NodeFilterLocation      = vm.NodeLocationFilter;
+            settings.NodeFilterIgnored       = vm.NodeIgnoredFilter;
+            settings.NodeFilterDistanceKm    = vm.NodeDistanceKmText;
+            settings.NodeFilterMaxAgeMinutes = vm.NodeMaxAgeMinutesText;
         }
 
+        Map.SaveToSettings(settings);
         settings.Save();
     }
 

@@ -182,6 +182,40 @@ public sealed class AppSettings
     public string RingtoneRtttl { get; set; } =
         "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p";
 
+    // -- Map viewport ------------------------------------------------------
+
+    /// <summary>Map center latitude when the app was last closed.</summary>
+    public double? MapCenterLat { get; set; }
+
+    /// <summary>Map center longitude when the app was last closed.</summary>
+    public double? MapCenterLon { get; set; }
+
+    /// <summary>Map zoom level (2–19) when the app was last closed. 0 = unset.</summary>
+    public int MapZoom { get; set; } = 0;
+
+    // -- Node list filters -------------------------------------------------
+
+    /// <summary>Persisted node text search filter.</summary>
+    public string NodeFilterSearch { get; set; } = string.Empty;
+
+    /// <summary>Persisted node hops filter (e.g. "Any", "Direct").</summary>
+    public string NodeFilterHops { get; set; } = "Any";
+
+    /// <summary>Persisted node key filter.</summary>
+    public string NodeFilterKey { get; set; } = "Any";
+
+    /// <summary>Persisted node location filter.</summary>
+    public string NodeFilterLocation { get; set; } = "Any";
+
+    /// <summary>Persisted node ignored filter.</summary>
+    public string NodeFilterIgnored { get; set; } = "Show all";
+
+    /// <summary>Persisted max-distance filter in km (empty = off).</summary>
+    public string NodeFilterDistanceKm { get; set; } = string.Empty;
+
+    /// <summary>Persisted max-age filter in minutes (empty = off).</summary>
+    public string NodeFilterMaxAgeMinutes { get; set; } = string.Empty;
+
     private static readonly JsonSerializerOptions s_opts = new()
     {
         WriteIndented = true,

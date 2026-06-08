@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.App.Audio;
@@ -246,6 +248,138 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> LogLines { get; } = new();
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
 
+    // -- Node list filters ---------------------------------------------------
+
+    /// <summary>Filtered, sorted view of <see cref="Nodes"/> bound to the DataGrid.
+    /// Uses a single <see cref="ICollectionView.Refresh"/> call so WPF virtualization
+    /// keeps scrolling smooth regardless of list size.</summary>
+    public ICollectionView NodesView { get; private set; } = null!;
+
+    [ObservableProperty] private string _nodeSearchText        = string.Empty;
+    [ObservableProperty] private string _nodeHopsFilter        = "Any";
+    [ObservableProperty] private string _nodeKeyFilter         = "Any";
+    [ObservableProperty] private string _nodeLocationFilter    = "Any";
+    [ObservableProperty] private string _nodeIgnoredFilter     = "Show all";
+    [ObservableProperty] private string _nodeDistanceKmText    = string.Empty;
+    [ObservableProperty] private string _nodeMaxAgeMinutesText = string.Empty;
+
+    public IReadOnlyList<string> NodeHopsFilterOptions     { get; } = ["Any", "Direct", "≤1 hop", "≤2 hops", "≤3 hops", "≤4 hops"];
+    public IReadOnlyList<string> NodeKeyFilterOptions      { get; } = ["Any", "Good key", "Mismatch", "No key"];
+    public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "No position"];
+    public IReadOnlyList<string> NodeIgnoredFilterOptions  { get; } = ["Show all", "Hide ignored", "Only ignored"];
+
+    /// <summary>True when a home location is set (enables the distance filter).</summary>
+    public bool HasHomeLocation => HomeLatitude.HasValue && HomeLongitude.HasValue;
+
+    private void RefreshNodesFilter()
+    {
+        NodesView?.Refresh();
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+    partial void OnNodeSearchTextChanged(string value)          => RefreshNodesFilter();
+    partial void OnNodeHopsFilterChanged(string value)          => RefreshNodesFilter();
+    partial void OnNodeKeyFilterChanged(string value)           => RefreshNodesFilter();
+    partial void OnNodeLocationFilterChanged(string value)      => RefreshNodesFilter();
+    partial void OnNodeIgnoredFilterChanged(string value)       => RefreshNodesFilter();
+    partial void OnNodeDistanceKmTextChanged(string value)      => RefreshNodesFilter();
+    partial void OnNodeMaxAgeMinutesTextChanged(string value)   => RefreshNodesFilter();
+
+    [RelayCommand]
+    private void ClearNodeFilters()
+    {
+        NodeSearchText        = string.Empty;
+        NodeHopsFilter        = "Any";
+        NodeKeyFilter         = "Any";
+        NodeLocationFilter    = "Any";
+        NodeIgnoredFilter     = "Show all";
+        NodeDistanceKmText    = string.Empty;
+        NodeMaxAgeMinutesText = string.Empty;
+    }
+
+    private bool NodePassesFilter(NodeRecord n)
+    {
+        // Text search across long name, short name, user ID.
+        if (!string.IsNullOrWhiteSpace(NodeSearchText))
+        {
+            var t = NodeSearchText.Trim();
+            if (!n.LongName.Contains(t, StringComparison.OrdinalIgnoreCase)
+             && !n.ShortName.Contains(t, StringComparison.OrdinalIgnoreCase)
+             && !n.DisplayId.Contains(t, StringComparison.OrdinalIgnoreCase)
+             && !n.UserId.Contains(t, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        // Hops filter.
+        if (NodeHopsFilter != "Any")
+        {
+            int maxH = NodeHopsFilter switch
+            {
+                "Direct"  => 0,
+                "≤1 hop"  => 1,
+                "≤2 hops" => 2,
+                "≤3 hops" => 3,
+                "≤4 hops" => 4,
+                _          => -1,
+            };
+            if (maxH >= 0 && (n.HopsAway is not byte h || h > maxH)) return false;
+        }
+
+        // Key status filter.
+        switch (NodeKeyFilter)
+        {
+            case "Good key": if (!n.HasPublicKey || n.HasKeyMismatch) return false; break;
+            case "Mismatch": if (!n.HasKeyMismatch) return false; break;
+            case "No key":   if (n.HasPublicKey) return false; break;
+        }
+
+        // Location filter.
+        bool hasPos = n.Latitude.HasValue && n.Longitude.HasValue;
+        switch (NodeLocationFilter)
+        {
+            case "Has position": if (!hasPos) return false; break;
+            case "No position":  if (hasPos)  return false; break;
+        }
+
+        // Ignored filter.
+        switch (NodeIgnoredFilter)
+        {
+            case "Hide ignored": if (n.Ignored) return false; break;
+            case "Only ignored": if (!n.Ignored) return false; break;
+        }
+
+        // Distance from home (km).
+        if (!string.IsNullOrWhiteSpace(NodeDistanceKmText)
+            && double.TryParse(NodeDistanceKmText, NumberStyles.Float, CultureInfo.CurrentCulture, out double maxKm)
+            && maxKm > 0
+            && HomeLatitude is double hlat && HomeLongitude is double hlon)
+        {
+            if (n.Latitude is not double nlat || n.Longitude is not double nlon) return false;
+            if (HaversineKm(hlat, hlon, nlat, nlon) > maxKm) return false;
+        }
+
+        // Max age (minutes since last heard).
+        if (!string.IsNullOrWhiteSpace(NodeMaxAgeMinutesText)
+            && int.TryParse(NodeMaxAgeMinutesText, out int maxMin) && maxMin > 0)
+        {
+            if (n.LastHeardEpoch == 0) return false;
+            double ageMin = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - n.LastHeardEpoch) / 60.0;
+            if (ageMin > maxMin) return false;
+        }
+
+        return true;
+    }
+
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double R = 6371.0;
+        double dLat = (lat2 - lat1) * Math.PI / 180.0;
+        double dLon = (lon2 - lon1) * Math.PI / 180.0;
+        double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
+                 + Math.Cos(lat1 * Math.PI / 180.0) * Math.Cos(lat2 * Math.PI / 180.0)
+                 * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return R * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+    }
+
     /// <summary>Most-recent decoded mesh messages, newest first.</summary>
     public ObservableCollection<MessageRecord> Messages { get; } = new();
 
@@ -351,7 +485,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (HomeLatitude is double hlat && HomeLongitude is double hlon)
             list.Add(new MapMarker(hlat, hlon, "Home", "Home", IsHome: true));
 
-        foreach (var n in Nodes)
+        foreach (var n in Nodes.Where(NodePassesFilter))
         {
             if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
             var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
@@ -701,6 +835,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel()
     {
         _settings = AppSettings.Load();
+        NodesView = CollectionViewSource.GetDefaultView(Nodes);
+        NodesView.Filter = o => o is NodeRecord n && NodePassesFilter(n);
         _gpsService.StatusChanged += HandleGpsStatusChanged;
         _gpsService.FixReceived += HandleGpsFixReceived;
 
@@ -782,6 +918,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedLocationSource = LocationSourceOptions.FirstOrDefault(o =>
             string.Equals(o.Value, _settings.HomeLocationSource, StringComparison.OrdinalIgnoreCase))
             ?? LocationSourceOptions[0];
+
+        // Restore node list filter state.
+        NodeSearchText        = _settings.NodeFilterSearch;
+        NodeHopsFilter        = _settings.NodeFilterHops;
+        NodeKeyFilter         = _settings.NodeFilterKey;
+        NodeLocationFilter    = _settings.NodeFilterLocation;
+        NodeIgnoredFilter     = _settings.NodeFilterIgnored;
+        NodeDistanceKmText    = _settings.NodeFilterDistanceKm;
+        NodeMaxAgeMinutesText = _settings.NodeFilterMaxAgeMinutes;
 
         RebuildSlots(snapToDefault: false);
         // Restore the user's last slot/freq if it's still valid for this preset.
@@ -1544,6 +1689,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         HomeLatitude = latitude;
         HomeLongitude = longitude;
         if (!changed) return;
+        OnPropertyChanged(nameof(HasHomeLocation));
         SendPositionCommand.NotifyCanExecuteChanged();
         MapDataChanged?.Invoke(this, EventArgs.Empty);
     }

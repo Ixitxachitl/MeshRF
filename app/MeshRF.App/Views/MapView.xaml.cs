@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using MeshRF.App;
 using MeshRF.App.ViewModels;
 using Path = System.IO.Path;
 namespace MeshRF.App.Views;
@@ -75,6 +76,7 @@ public partial class MapView : UserControl
     private string? _activeSpiderClusterKey;
     private bool _pendingMarkerRefresh;
     private int _openNodeToolTips;
+    private bool _followHome;
 
     /// <summary>Fired when the user double-clicks a node marker on the map.
     /// Opens the same conversation tab as double-clicking the node list.</summary>
@@ -163,8 +165,45 @@ public partial class MapView : UserControl
             return;
         }
 
-        if (!_userMovedView) FitToMarkers();
-        Render();
+        bool viewportChanged = false;
+
+        if (_followHome && _vm?.HomeLatitude is double flat && _vm.HomeLongitude is double flon)
+        {
+            double newLat = ClampLat(flat);
+            if (Math.Abs(newLat - _centerLat) > 1e-9 || Math.Abs(flon - _centerLon) > 1e-9)
+            {
+                _centerLat = newLat;
+                _centerLon = flon;
+                viewportChanged = true;
+            }
+        }
+        else if (!_userMovedView)
+        {
+            // Auto-center: prefer home if available, otherwise fit all.
+            var markers = _vm?.GetMapMarkers();
+            var home = markers?.FirstOrDefault(m => m.IsHome);
+            if (home is not null)
+            {
+                double newLat = ClampLat(home.Lat);
+                if (Math.Abs(newLat - _centerLat) > 1e-9 || Math.Abs(home.Lon - _centerLon) > 1e-9 || _zoom < 10)
+                {
+                    _centerLat = newLat;
+                    _centerLon = home.Lon;
+                    if (_zoom < 10) _zoom = 12;
+                    viewportChanged = true;
+                }
+            }
+            else
+            {
+                FitToMarkers(markers);
+                viewportChanged = true;
+            }
+        }
+
+        if (viewportChanged)
+            Render();
+        else
+            RenderMarkersOnly();
     }
 
     // -- Web-Mercator projection helpers ------------------------------------
@@ -194,11 +233,12 @@ public partial class MapView : UserControl
 
     private void Render()
     {
-        var w = MapCanvas.ActualWidth;
-        var h = MapCanvas.ActualHeight;
+        var w = MarkerCanvas.ActualWidth;
+        var h = MarkerCanvas.ActualHeight;
         if (w <= 0 || h <= 0) return;
 
-        MapCanvas.Children.Clear();
+        TileCanvas.Children.Clear();
+        MarkerCanvas.Children.Clear();
 
         // World-pixel coordinate of the viewport center.
         double cx = LonToX(_centerLon, _zoom);
@@ -229,6 +269,20 @@ public partial class MapView : UserControl
         DrawMarkers(originX, originY);
     }
 
+    /// <summary>Redraws only the marker layer without touching the tile layer.
+    /// Called when node data changes but the viewport (center/zoom) is unchanged
+    /// so the tile canvas is left in place and no blink occurs.</summary>
+    private void RenderMarkersOnly()
+    {
+        var w = MarkerCanvas.ActualWidth;
+        var h = MarkerCanvas.ActualHeight;
+        if (w <= 0 || h <= 0) return;
+        double originX = LonToX(_centerLon, _zoom) - w / 2.0;
+        double originY = LatToY(_centerLat, _zoom) - h / 2.0;
+        MarkerCanvas.Children.Clear();
+        DrawMarkers(originX, originY);
+    }
+
     private void PlaceTile(int x, int y, int zoom, double left, double top)
     {
         var img = new Image
@@ -239,7 +293,7 @@ public partial class MapView : UserControl
         };
         Canvas.SetLeft(img, left);
         Canvas.SetTop(img, top);
-        MapCanvas.Children.Add(img);
+        TileCanvas.Children.Add(img);
 
         var provider = CurrentTiles;
         var key = $"{provider.Id}/{zoom}/{x}/{y}";
@@ -354,7 +408,7 @@ public partial class MapView : UserControl
                 };
                 Canvas.SetLeft(home, px - 8);
                 Canvas.SetTop(home, py - 12);
-                MapCanvas.Children.Add(home);
+                MarkerCanvas.Children.Add(home);
                 AddNodeLabel(mk.Label, px, py);
             }
             else
@@ -419,7 +473,7 @@ public partial class MapView : UserControl
         Canvas.SetLeft(dot, px - 6);
         Canvas.SetTop(dot, py - 6);
         AttachNodeInteraction(dot, mk);
-        MapCanvas.Children.Add(dot);
+        MarkerCanvas.Children.Add(dot);
     }
 
     /// <summary>Draws a small caption to the right of a marker.</summary>
@@ -436,7 +490,7 @@ public partial class MapView : UserControl
         };
         Canvas.SetLeft(label, px + 8);
         Canvas.SetTop(label, py - 8);
-        MapCanvas.Children.Add(label);
+        MarkerCanvas.Children.Add(label);
     }
 
     /// <summary>Draws a count badge for a group of overlapping nodes. Hovering
@@ -475,7 +529,7 @@ public partial class MapView : UserControl
             SpiderExpand(members, cx, cy);
             e.Handled = true;
         };
-        MapCanvas.Children.Add(badge);
+        MarkerCanvas.Children.Add(badge);
     }
 
     private static string GetClusterKey(List<(MainViewModel.MapMarker mk, double px, double py)> members) =>
@@ -511,7 +565,7 @@ public partial class MapView : UserControl
         Canvas.SetLeft(spider, cx - hullR);
         Canvas.SetTop(spider, cy - hullR);
         Panel.SetZIndex(spider, 9);
-        MapCanvas.Children.Add(spider);
+        MarkerCanvas.Children.Add(spider);
         _spiderElements.Add(spider);
 
         // Local center within the container.
@@ -589,7 +643,7 @@ public partial class MapView : UserControl
     private void SpiderCollapseImmediate()
     {
         foreach (var el in _spiderElements)
-            MapCanvas.Children.Remove(el);
+            MarkerCanvas.Children.Remove(el);
         _spiderElements.Clear();
     }
 
@@ -656,9 +710,16 @@ public partial class MapView : UserControl
                 return;
         }
 
+        // Dragging breaks follow mode.
+        if (_followHome)
+        {
+            _followHome = false;
+            FollowHomeButton.IsChecked = false;
+        }
+
         _dragging = true;
-        _lastMouse = e.GetPosition(MapCanvas);
-        MapCanvas.CaptureMouse();
+        _lastMouse = e.GetPosition(MarkerCanvas);
+        MarkerCanvas.CaptureMouse();
     }
 
     private bool IsWithinSpider(DependencyObject? source)
@@ -675,13 +736,13 @@ public partial class MapView : UserControl
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
         _dragging = false;
-        MapCanvas.ReleaseMouseCapture();
+        MarkerCanvas.ReleaseMouseCapture();
     }
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
         if (!_dragging) return;
-        var p = e.GetPosition(MapCanvas);
+        var p = e.GetPosition(MarkerCanvas);
         double dx = p.X - _lastMouse.X;
         double dy = p.Y - _lastMouse.Y;
         _lastMouse = p;
@@ -698,7 +759,7 @@ public partial class MapView : UserControl
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        var p = e.GetPosition(MapCanvas);
+        var p = e.GetPosition(MarkerCanvas);
         ZoomAt(p, e.Delta > 0 ? 1 : -1);
     }
 
@@ -706,8 +767,8 @@ public partial class MapView : UserControl
     {
         if (_vm is null) return;
         if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
-        var p = e.GetPosition(MapCanvas);
-        double w = MapCanvas.ActualWidth, h = MapCanvas.ActualHeight;
+        var p = e.GetPosition(MarkerCanvas);
+        double w = MarkerCanvas.ActualWidth, h = MarkerCanvas.ActualHeight;
         double originX = LonToX(_centerLon, _zoom) - w / 2.0;
         double originY = LatToY(_centerLat, _zoom) - h / 2.0;
         double lon = XToLon(originX + p.X, _zoom);
@@ -718,16 +779,44 @@ public partial class MapView : UserControl
     }
 
     private void OnZoomIn(object sender, RoutedEventArgs e) =>
-        ZoomAt(new Point(MapCanvas.ActualWidth / 2, MapCanvas.ActualHeight / 2), 1);
+        ZoomAt(new Point(MarkerCanvas.ActualWidth / 2, MarkerCanvas.ActualHeight / 2), 1);
 
     private void OnZoomOut(object sender, RoutedEventArgs e) =>
-        ZoomAt(new Point(MapCanvas.ActualWidth / 2, MapCanvas.ActualHeight / 2), -1);
+        ZoomAt(new Point(MarkerCanvas.ActualWidth / 2, MarkerCanvas.ActualHeight / 2), -1);
 
-    private void OnRecenter(object sender, RoutedEventArgs e)
+    private void OnGoHome(object sender, RoutedEventArgs e)
     {
-        _userMovedView = false;
+        _followHome = false;
+        FollowHomeButton.IsChecked = false;
+        if (_vm?.HomeLatitude is double hlat && _vm.HomeLongitude is double hlon)
+        {
+            _centerLat = ClampLat(hlat);
+            _centerLon = hlon;
+            if (_zoom < 12) _zoom = 14;
+            _userMovedView = true;
+            Render();
+        }
+        else
+        {
+            _userMovedView = false;
+            FitToMarkers();
+            Render();
+        }
+    }
+
+    private void OnFitAll(object sender, RoutedEventArgs e)
+    {
+        _followHome = false;
+        FollowHomeButton.IsChecked = false;
+        _userMovedView = true;
         FitToMarkers();
         Render();
+    }
+
+    private void OnFollowHomeToggle(object sender, RoutedEventArgs e)
+    {
+        _followHome = FollowHomeButton.IsChecked == true;
+        if (_followHome) OnMarkersChanged();
     }
 
     private void ZoomAt(Point anchor, int delta)
@@ -736,7 +825,7 @@ public partial class MapView : UserControl
         if (newZoom == _zoom) return;
 
         // Keep the geographic point under the cursor fixed across the zoom.
-        double w = MapCanvas.ActualWidth, h = MapCanvas.ActualHeight;
+        double w = MarkerCanvas.ActualWidth, h = MarkerCanvas.ActualHeight;
         double originX = LonToX(_centerLon, _zoom) - w / 2.0;
         double originY = LatToY(_centerLat, _zoom) - h / 2.0;
         double anchorLon = XToLon(originX + anchor.X, _zoom);
@@ -757,21 +846,36 @@ public partial class MapView : UserControl
 
     private static double ClampLat(double lat) => Math.Clamp(lat, -85.05, 85.05);
 
-    /// <summary>Center / zoom so all markers fit, or default if there are none.</summary>
-    private void FitToMarkers()
+    /// <summary>Restores the map viewport (center + zoom) from persisted
+    /// settings. Marks the view as user-moved so auto-center logic does not
+    /// override the restored position on the first <see cref="OnMarkersChanged"/> call.</summary>
+    public void LoadFromSettings(AppSettings settings)
     {
-        var markers = _vm?.GetMapMarkers();
-        if (markers is null || markers.Count == 0) return;
-
-        // If a home location is set, anchor the initial view on it, zoomed in.
-        var home = markers.FirstOrDefault(m => m.IsHome);
-        if (home is not null)
+        if (settings.MapCenterLat is double lat && settings.MapCenterLon is double lon
+            && settings.MapZoom >= MinZoom && settings.MapZoom <= MaxZoom)
         {
-            _centerLat = ClampLat(home.Lat);
-            _centerLon = home.Lon;
-            _zoom = 12;
-            return;
+            _centerLat = ClampLat(lat);
+            _centerLon = lon;
+            _zoom = settings.MapZoom;
+            _userMovedView = true;
         }
+    }
+
+    /// <summary>Persists the current map viewport (center + zoom) to settings.</summary>
+    public void SaveToSettings(AppSettings settings)
+    {
+        settings.MapCenterLat = _centerLat;
+        settings.MapCenterLon = _centerLon;
+        settings.MapZoom = _zoom;
+    }
+
+    /// <summary>Center / zoom so all markers fit, or default if there are none.</summary>
+    /// <summary>Fits all visible markers into the viewport. Does not special-case home.</summary>
+    private void FitToMarkers() => FitToMarkers(_vm?.GetMapMarkers());
+
+    private void FitToMarkers(IReadOnlyList<MainViewModel.MapMarker>? markers)
+    {
+        if (markers is null || markers.Count == 0) return;
 
         if (markers.Count == 1)
         {
@@ -792,8 +896,8 @@ public partial class MapView : UserControl
         _centerLat = ClampLat((minLat + maxLat) / 2.0);
         _centerLon = (minLon + maxLon) / 2.0;
 
-        double w = MapCanvas.ActualWidth > 0 ? MapCanvas.ActualWidth : 600;
-        double h = MapCanvas.ActualHeight > 0 ? MapCanvas.ActualHeight : 400;
+        double w = MarkerCanvas.ActualWidth > 0 ? MarkerCanvas.ActualWidth : 600;
+        double h = MarkerCanvas.ActualHeight > 0 ? MarkerCanvas.ActualHeight : 400;
 
         int best = MinZoom;
         for (int z = MaxZoom; z >= MinZoom; z--)
