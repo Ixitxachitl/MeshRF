@@ -1218,6 +1218,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (ch.Config.Role == ChannelRole.Primary) return; // never delete primary
         _channelStore.Delete(ch.Config.Index);
         ReloadChannels();
+        LoadChatHistory();
     }
 
     /// <summary>
@@ -2970,16 +2971,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (result is null)
         {
             Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
-            // Help the user find the right key: if a single-byte "default key
-            // family" PSK decodes this frame, tell them exactly what to enter.
-            var idx = MeshDecoder.DiscoverDefaultKeyIndex(frame);
-            if (idx is int ki)
-            {
-                var b64 = Convert.ToBase64String(new[] { (byte)ki });
-                var hint = ki == 1 ? "\"default\"" : $"\"base64:{b64}\"";
-                Log($"  hint: this frame decodes with PSK index {ki} — set a " +
-                    $"channel's key to {hint} to read it");
-            }
         }
         else
         {

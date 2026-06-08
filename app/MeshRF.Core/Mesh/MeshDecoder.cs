@@ -188,37 +188,6 @@ public static class MeshDecoder
     }
 
     /// <summary>
-    /// Diagnostic helper for when <see cref="Decode"/> fails: brute-force every
-    /// single-byte "default key family" PSK (the quick-channel keys, e.g.
-    /// <c>AQ==</c>, <c>TA==</c>) and the plain default key. Returns the PSK
-    /// index (1..255) that produces a plausible decode, or null if none do.
-    /// An index of 1 is the well-known default key.
-    /// </summary>
-    public static int? DiscoverDefaultKeyIndex(ReadOnlySpan<byte> frame)
-    {
-        if (!MeshHeader.TryParse(frame, out var header)) return null;
-        if (frame.Length <= MeshHeader.Size) return null;
-
-        var cipher = frame.Slice(MeshHeader.Size).ToArray();
-        var key = (byte[])ChannelConfig.DefaultPsk.Clone();
-
-        for (int index = 1; index <= 255; index++)
-        {
-            key[^1] = (byte)(ChannelConfig.DefaultPsk[^1] + index - 1);
-            byte[] plain;
-            try { plain = MeshCrypto.Ctr(cipher, key, header.From, header.PacketId); }
-            catch { continue; }
-
-            if (TryParseData(plain, out var port, out var appPayload, out _, out _, out _) &&
-                IsPlausible(port, appPayload))
-            {
-                return index;
-            }
-        }
-        return null;
-    }
-
-    /// <summary>
     /// Attempt a PKC (public-key) decrypt of a direct message addressed to us.
     /// Modern Meshtastic firmware seals DMs with X25519 + AES-CCM instead of the
     /// channel PSK; such frames carry a channel-hash byte of 0x00. Returns null
