@@ -251,7 +251,8 @@ public static class MeshEncoder
                                         uint to = 0xFFFFFFFFu,
                                         byte hopLimit = 3,
                                         bool wantResponse = false,
-                                        bool okToMqtt = false)
+                                        bool okToMqtt = false,
+                                        uint requestId = 0)
     {
         if (precisionBits == 0)
             throw new ArgumentOutOfRangeException(nameof(precisionBits),
@@ -274,12 +275,13 @@ public static class MeshEncoder
         pos.WriteFixed32Field(2, (uint)lonI);                 // longitude_i (sfixed32)
         if (altitudeM is int alt)
             pos.WriteVarintField(3, (ulong)(long)alt);        // altitude (int32)
-        pos.WriteFixed32Field(4, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds()); // time
-        pos.WriteVarintField(22, precisionBits);              // precision_bits (advertised uncertainty)
+        pos.WriteFixed32Field(4, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds()); // time (fixed32)
+        pos.WriteVarintField(23, precisionBits);              // precision_bits (field 23)
 
         return Encode(channel, from, to, packetId, PortNum.Position,
                       pos.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: wantResponse, okToMqtt: okToMqtt);
+                      wantResponse: wantResponse, okToMqtt: okToMqtt,
+                      requestId: requestId);
     }
 
     /// <summary>
@@ -294,9 +296,16 @@ public static class MeshEncoder
                                                uint packetId,
                                                byte hopLimit = 3,
                                                bool okToMqtt = false)
-        => Encode(channel, from, to, packetId, PortNum.Position,
-                  ReadOnlySpan<byte>.Empty, hopLimit, wantAck: false,
-                  wantResponse: true, okToMqtt: okToMqtt);
+    {
+        // Include only a timestamp (field 4, fixed32) — matching what
+        // the Meshtastic firmware sends as a directed position request.
+        // An empty payload causes the firmware to record lat=0/lon=0 for us.
+        var pos = new ProtoWriter();
+        pos.WriteFixed32Field(4, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        return Encode(channel, from, to, packetId, PortNum.Position,
+                      pos.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: true, okToMqtt: okToMqtt);
+    }
 
     /// <summary>
     /// Encode a ROUTING_APP acknowledgement (or negative-ack) for a received

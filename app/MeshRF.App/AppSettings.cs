@@ -104,6 +104,9 @@ public sealed class AppSettings
     /// <summary>Manual home longitude in degrees, null if unset.</summary>
     public double? HomeLongitude { get; set; }
 
+    /// <summary>Manual home altitude in metres above sea level, null if unset.</summary>
+    public int? HomeAltitude { get; set; }
+
     /// <summary>Optional USB GPS COM port override (blank = auto-detect).</summary>
     public string GpsSerialPort { get; set; } = string.Empty;
 

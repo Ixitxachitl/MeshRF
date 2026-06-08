@@ -10,6 +10,7 @@ public sealed record GpsSerialOptions(string? PortName, int? BaudRate);
 public sealed record GpsFix(
     double Latitude,
     double Longitude,
+    int? AltitudeM,
     string PortName,
     int BaudRate,
     DateTimeOffset TimestampUtc);
@@ -216,7 +217,7 @@ public sealed class UsbSerialGpsService : IDisposable
                         announcedNmea = true;
                     }
 
-                    if (!TryParseNmeaFix(line, out var latitude, out var longitude))
+                    if (!TryParseNmeaFix(line, out var latitude, out var longitude, out var altitudeM))
                         continue;
 
                     sawFix = true;
@@ -225,6 +226,7 @@ public sealed class UsbSerialGpsService : IDisposable
                     FixReceived?.Invoke(new GpsFix(
                         latitude,
                         longitude,
+                        altitudeM,
                         portName,
                         baudRate,
                         DateTimeOffset.UtcNow));
@@ -261,10 +263,11 @@ public sealed class UsbSerialGpsService : IDisposable
     private static bool LooksLikeNmeaSentence(string line) =>
         !string.IsNullOrWhiteSpace(line) && line[0] == '$' && line.Length >= 6;
 
-    private static bool TryParseNmeaFix(string line, out double latitude, out double longitude)
+    private static bool TryParseNmeaFix(string line, out double latitude, out double longitude, out int? altitudeM)
     {
         latitude = 0;
         longitude = 0;
+        altitudeM = null;
 
         if (!LooksLikeNmeaSentence(line))
             return false;
@@ -290,8 +293,20 @@ public sealed class UsbSerialGpsService : IDisposable
                     CultureInfo.InvariantCulture, out var fixQuality) || fixQuality <= 0)
                 return false;
 
-            return TryParseCoordinate(fields[2], fields[3], 2, out latitude) &&
-                   TryParseCoordinate(fields[4], fields[5], 3, out longitude);
+            if (!TryParseCoordinate(fields[2], fields[3], 2, out latitude) ||
+                !TryParseCoordinate(fields[4], fields[5], 3, out longitude))
+                return false;
+
+            // Field 9 = MSL altitude, field 10 = unit (M). Parse when present.
+            if (fields.Length >= 10 &&
+                !string.IsNullOrWhiteSpace(fields[9]) &&
+                double.TryParse(fields[9], NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out var altMeters))
+            {
+                altitudeM = (int)Math.Round(altMeters);
+            }
+
+            return true;
         }
 
         return false;

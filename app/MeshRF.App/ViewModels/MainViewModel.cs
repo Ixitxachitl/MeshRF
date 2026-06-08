@@ -27,6 +27,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _settingsLoaded;
     private double? _manualHomeLatitude;
     private double? _manualHomeLongitude;
+    private int?    _manualHomeAltitude;
 
     private const string ManualLocationSourceValue = "Manual";
     private const string UsbSerialLocationSourceValue = "UsbSerial";
@@ -308,8 +309,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// may uplink them to the public MQTT broker.</summary>
     [ObservableProperty] private bool _okToMqtt;
 
-    [ObservableProperty] private string _homeLatitudeText = string.Empty;
+    [ObservableProperty] private string _homeLatitudeText  = string.Empty;
     [ObservableProperty] private string _homeLongitudeText = string.Empty;
+    [ObservableProperty] private string _homeAltitudeText  = string.Empty;
     [ObservableProperty] private LocationSourceOption? _selectedLocationSource;
     [ObservableProperty] private string _gpsStatus = "Manual location selected.";
     [ObservableProperty] private string _gpsPortName = string.Empty;
@@ -327,8 +329,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsUsbSerialLocationSource => !IsManualLocationSource;
 
     /// <summary>Resolved home location (null when unset/invalid).</summary>
-    public double? HomeLatitude { get; private set; }
+    public double? HomeLatitude  { get; private set; }
     public double? HomeLongitude { get; private set; }
+    public int?    HomeAltitude  { get; private set; }
 
     /// <summary>Raised when the home location or node positions change so the
     /// map view can refresh its markers.</summary>
@@ -760,8 +763,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             MyPublicKey = Convert.ToBase64String(Curve25519.GetPublicKey(priv));
         }
 
-        _manualHomeLatitude = _settings.HomeLatitude;
+        _manualHomeLatitude  = _settings.HomeLatitude;
         _manualHomeLongitude = _settings.HomeLongitude;
+        _manualHomeAltitude  = _settings.HomeAltitude;
         GpsPortName = _settings.GpsSerialPort ?? string.Empty;
         GpsBaudRateText = _settings.GpsBaudRate > 0
             ? _settings.GpsBaudRate.ToString(CultureInfo.InvariantCulture)
@@ -770,9 +774,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // so one box at a time would transiently null the not-yet-set coordinate
         // (and persist that null) before the second box is assigned.
         _suppressHomeTextUpdate = true;
-        HomeLatitudeText = _manualHomeLatitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
+        HomeLatitudeText  = _manualHomeLatitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
         HomeLongitudeText = _manualHomeLongitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
+        HomeAltitudeText  = _manualHomeAltitude?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         _suppressHomeTextUpdate = false;
+        HomeAltitude = _manualHomeAltitude;
         SelectedLocationSource = LocationSourceOptions.FirstOrDefault(o =>
             string.Equals(o.Value, _settings.HomeLocationSource, StringComparison.OrdinalIgnoreCase))
             ?? LocationSourceOptions[0];
@@ -1358,8 +1364,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.HomeLocationSource = SelectedLocationSource?.Value ?? ManualLocationSourceValue;
-        _settings.HomeLatitude = _manualHomeLatitude;
+        _settings.HomeLatitude  = _manualHomeLatitude;
         _settings.HomeLongitude = _manualHomeLongitude;
+        _settings.HomeAltitude  = _manualHomeAltitude;
         _settings.GpsSerialPort = GpsPortName?.Trim() ?? string.Empty;
         _settings.GpsBaudRate = ParseGpsBaudRateOrNull() ?? 0;
         _settings.OpenConversations = Tabs.OfType<ConversationViewModel>()
@@ -1424,6 +1431,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!_suppressHomeTextUpdate) UpdateHomeLocation();
     }
 
+    partial void OnHomeAltitudeTextChanged(string value)
+    {
+        if (!_suppressHomeTextUpdate) UpdateHomeLocation();
+    }
+
     partial void OnSelectedLocationSourceChanged(LocationSourceOption? value)
     {
         ApplyLocationSourceSelection(startOrStopGps: true, saveSettings: _settingsLoaded);
@@ -1439,9 +1451,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         HandleGpsConfigChanged();
     }
 
-    /// <summary>Re-parse the home lat/lon text boxes, persist, and notify the map.
-    /// Each coordinate is parsed independently so an empty/partial value in one
-    /// box can never clobber the other (e.g. while typing a negative longitude).</summary>
+    /// <summary>Re-parse the home lat/lon/alt text boxes, persist, and notify the map.
+    /// Each field is parsed independently so an empty/partial value in one
+    /// box can never clobber the others (e.g. while typing a negative longitude).</summary>
     private void UpdateHomeLocation()
     {
         // Empty box clears that coordinate; a non-empty box only updates when it
@@ -1450,6 +1462,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? null : (TryParseCoord(HomeLatitudeText, -90, 90) ?? _manualHomeLatitude);
         _manualHomeLongitude = string.IsNullOrWhiteSpace(HomeLongitudeText)
             ? null : (TryParseCoord(HomeLongitudeText, -180, 180) ?? _manualHomeLongitude);
+        _manualHomeAltitude = string.IsNullOrWhiteSpace(HomeAltitudeText)
+            ? null : (int.TryParse(HomeAltitudeText.Trim(), NumberStyles.Integer,
+                                   CultureInfo.InvariantCulture, out int altParsed)
+                      ? altParsed : _manualHomeAltitude);
+        HomeAltitude = _manualHomeAltitude;
         if (IsManualLocationSource)
             ApplyResolvedHomeLocation(_manualHomeLatitude, _manualHomeLongitude);
         SaveSettings();
@@ -1563,8 +1580,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyGpsFix(GpsFix fix)
     {
-        GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}";
+        var altStr = fix.AltitudeM is int a ? $"  alt {a} m" : string.Empty;
+        GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}{altStr}";
         if (!IsUsbSerialLocationSource) return;
+        if (fix.AltitudeM is int alt)
+            HomeAltitude = alt;
         ApplyResolvedHomeLocation(fix.Latitude, fix.Longitude);
     }
 
@@ -2240,7 +2260,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodePosition(
                 primary.Config, _myNodeNum, packetId,
-                lat, lon, altitudeM: null,
+                lat, lon, altitudeM: HomeAltitude,
                 precisionBits: primary.Config.PositionPrecision,
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
@@ -2328,7 +2348,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// requester. No-op when we can't transmit, have no home location set, or
     /// the primary channel has location sharing disabled (precision 0).
     /// </summary>
-    private void ReplyWithPosition(uint to)
+    private void ReplyWithPosition(uint to, uint requestId = 0)
     {
         if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
         if (HomeLatitude is not double lat || HomeLongitude is not double lon) return;
@@ -2340,9 +2360,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodePosition(
                 primary.Config, _myNodeNum, packetId,
-                lat, lon, altitudeM: null,
+                lat, lon, altitudeM: HomeAltitude,
                 precisionBits: primary.Config.PositionPrecision,
-                to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+                to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+                requestId: requestId);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             _core.Transmit(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
         }
@@ -3104,16 +3125,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     }
                     break;
                 case PortNum.Position when result.Position is not null:
-                    // An empty Position payload with want_response is a position
-                    // *request* (no coordinates), not a location update — reply
-                    // with ours instead of recording a bogus 0,0 fix.
-                    if (result.AppPayload.Length == 0)
+                    // A position *request* carries want_response=true and has no
+                    // real coordinates (lat/lon both 0 — the payload only contains
+                    // a timestamp field). Distinguish it from a real position report
+                    // so we don't store a bogus 0,0 fix. A genuine report at exactly
+                    // 0,0 (Gulf of Guinea) would not have want_response set.
+                    if (result.WantResponse &&
+                        result.Position.Latitude == 0 && result.Position.Longitude == 0)
                     {
-                        if (result.WantResponse && _myNodeNum != 0 &&
-                            header.To == _myNodeNum && !header.IsBroadcast)
+                        if (_myNodeNum != 0 && header.To == _myNodeNum && !header.IsBroadcast)
                         {
                             Log($"  position requested by {senderName} — replying");
-                            ReplyWithPosition(header.From);
+                            ReplyWithPosition(header.From, requestId: header.PacketId);
                         }
                         break;
                     }

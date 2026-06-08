@@ -552,22 +552,27 @@
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 
-                                <TextBlock Grid.Row="10" Grid.Column="0" Text="Home (lat, lon)"
+                                <TextBlock Grid.Row="10" Grid.Column="0" Text="Home (lat, lon, alt m)"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
                                 <Grid Grid.Row="10" Grid.Column="1" Margin="0,4,0,4"
                                       IsEnabled="{Binding IsManualLocationSource}">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="2*" />
+                                        <ColumnDefinition Width="2*" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Margin="0,0,2,0"
                                              FontFamily="Consolas"
                                              ToolTip="Latitude in degrees (-90..90)"
                                              Text="{Binding HomeLatitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBox Grid.Column="1" Margin="2,0,0,0"
+                                    <TextBox Grid.Column="1" Margin="2,0,2,0"
                                              FontFamily="Consolas"
                                              ToolTip="Longitude in degrees (-180..180)"
                                              Text="{Binding HomeLongitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBox Grid.Column="2" Margin="2,0,0,0"
+                                             FontFamily="Consolas"
+                                             ToolTip="Altitude in metres above sea level (optional)"
+                                             Text="{Binding HomeAltitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </Grid>
 
                                 <TextBlock Grid.Row="11" Grid.Column="0" Text="Hop limit"
