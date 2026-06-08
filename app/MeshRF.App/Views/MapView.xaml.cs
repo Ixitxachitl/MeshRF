@@ -76,6 +76,14 @@ public partial class MapView : UserControl
     private bool _pendingMarkerRefresh;
     private int _openNodeToolTips;
 
+    /// <summary>Fired when the user double-clicks a node marker on the map.
+    /// Opens the same conversation tab as double-clicking the node list.</summary>
+    public event Action<MeshRF.Nodes.NodeRecord>? NodeDoubleClicked;
+
+    /// <summary>Fired when the user right-clicks a node marker on the map.
+    /// Passes the node so the caller can show a context menu.</summary>
+    public event Action<MeshRF.Nodes.NodeRecord>? NodeRightClicked;
+
     public MapView()
     {
         InitializeComponent();
@@ -410,6 +418,7 @@ public partial class MapView : UserControl
         ToolTipService.SetShowDuration(dot, 60000);
         Canvas.SetLeft(dot, px - 6);
         Canvas.SetTop(dot, py - 6);
+        AttachNodeInteraction(dot, mk);
         MapCanvas.Children.Add(dot);
     }
 
@@ -541,6 +550,7 @@ public partial class MapView : UserControl
             ToolTipService.SetShowDuration(dot, 60000);
             Canvas.SetLeft(dot, mx - 6);
             Canvas.SetTop(dot, my - 6);
+            AttachNodeInteraction(dot, members[i].mk);
             spider.Children.Add(dot);
 
             var label = new TextBlock
@@ -615,6 +625,26 @@ public partial class MapView : UserControl
 
     // -- Interaction --------------------------------------------------------
 
+    /// <summary>Attaches double-click and right-click handlers to a node dot
+    /// so it behaves like a row in the node list.</summary>
+    private void AttachNodeInteraction(FrameworkElement element, MainViewModel.MapMarker mk)
+    {
+        if (mk.NodeNum is null) return;
+        element.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ClickCount != 2) return;
+            var node = _vm?.Nodes.FirstOrDefault(n => n.NodeNum == mk.NodeNum);
+            if (node is not null) NodeDoubleClicked?.Invoke(node);
+            e.Handled = true;
+        };
+        element.MouseRightButtonUp += (_, e) =>
+        {
+            var node = _vm?.Nodes.FirstOrDefault(n => n.NodeNum == mk.NodeNum);
+            if (node is not null) NodeRightClicked?.Invoke(node);
+            e.Handled = true;
+        };
+    }
+
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
         bool withinSpider = IsWithinSpider(e.OriginalSource as DependencyObject);
@@ -675,6 +705,7 @@ public partial class MapView : UserControl
     private void OnRightClick(object sender, MouseButtonEventArgs e)
     {
         if (_vm is null) return;
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
         var p = e.GetPosition(MapCanvas);
         double w = MapCanvas.ActualWidth, h = MapCanvas.ActualHeight;
         double originX = LonToX(_centerLon, _zoom) - w / 2.0;

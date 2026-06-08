@@ -15,7 +15,7 @@
                 MouseRightButtonUp="OnRightClick" />
 
         <TextBlock x:Name="AttributionText"
-                   Text="© OpenStreetMap contributors  ·  right-click to set home"
+                   Text="© OpenStreetMap contributors  ·  Ctrl+right-click to set home"
                    IsHitTestVisible="False"
                    HorizontalAlignment="Right"
                    VerticalAlignment="Bottom"

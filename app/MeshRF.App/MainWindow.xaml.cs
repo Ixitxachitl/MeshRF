@@ -61,6 +61,21 @@ public partial class MainWindow : Window
 
         if (DataContext is MainViewModel mvm)
             mvm.PacketDecoded += OnPacketDecoded;
+
+        Map.NodeDoubleClicked += node =>
+        {
+            if (DataContext is MainViewModel vm)
+                vm.OpenConversationForNodeCommand.Execute(node);
+        };
+        Map.NodeRightClicked += node =>
+        {
+            NodesGrid.SelectedItem = node;
+            if (NodesGrid.ContextMenu is { } cm)
+            {
+                cm.PlacementTarget = Map;
+                cm.IsOpen = true;
+            }
+        };
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)

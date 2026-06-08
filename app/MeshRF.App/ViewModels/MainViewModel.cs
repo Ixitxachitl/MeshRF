@@ -339,7 +339,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>A point shown on the map: a node position or the home marker.</summary>
     public sealed record MapMarker(
-        double Lat, double Lon, string Label, string Title, bool IsHome);
+        double Lat, double Lon, string Label, string Title, bool IsHome, uint? NodeNum = null);
 
     /// <summary>
     /// Markers for the map view: the home location (if set) plus every node
@@ -356,7 +356,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
             var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
             var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
-            list.Add(new MapMarker(lat, lon, label, BuildNodeTooltip(n), IsHome: false));
+            list.Add(new MapMarker(lat, lon, label, BuildNodeTooltip(n), IsHome: false, NodeNum: n.NodeNum));
         }
         return list;
     }
