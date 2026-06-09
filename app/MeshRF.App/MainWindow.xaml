@@ -1,6 +1,7 @@
 <Window x:Class="MeshRF.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:emoji="clr-namespace:Emoji.Wpf;assembly=Emoji.Wpf"
         xmlns:vm="clr-namespace:MeshRF.App.ViewModels"
         xmlns:views="clr-namespace:MeshRF.App.Views"
         xmlns:conv="clr-namespace:MeshRF.App.Converters"
@@ -1006,8 +1007,8 @@
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
                                                         <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                    ToolTip="{Binding FromId}" />
-                                                        <TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                   TextWrapping="Wrap" />
+                                                        <emoji:TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                         TextWrapping="Wrap" />
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
@@ -1097,8 +1098,8 @@
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
                                                         <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                    ToolTip="{Binding FromId}" />
-                                                        <TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                   TextWrapping="Wrap" />
+                                                        <emoji:TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                         TextWrapping="Wrap" />
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>

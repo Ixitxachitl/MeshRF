@@ -4,6 +4,9 @@
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <ResourceDictionary>
+            <!-- Bundled emoji font: file name before '#', internal family name after '#'. -->
+            <FontFamily x:Key="EmojiFont">./NotoColorEmoji-Regular.ttf#Noto Color Emoji</FontFamily>
+
             <ResourceDictionary.MergedDictionaries>
                 <!-- Default to Light; ThemeManager swaps this at startup
                      based on AppSettings.Theme. -->
