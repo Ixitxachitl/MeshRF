@@ -68,6 +68,7 @@ public partial class MapView : UserControl
 
     private bool _dragging;
     private Point _lastMouse;
+    private long _lastDragRenderTick;
     private bool _userMovedView;
 
     // Temporary elements added when a cluster of stacked nodes is "spidered"
@@ -387,6 +388,10 @@ public partial class MapView : UserControl
         if (_vm is null) return;
         SpiderCollapseImmediate();
         bool restoredActiveSpider = false;
+        double viewportW = MarkerCanvas.ActualWidth;
+        double viewportH = MarkerCanvas.ActualHeight;
+        // Keep a small margin so edge markers/labels do not pop in late.
+        const double cullMarginPx = 48;
 
         // Node markers are collected and clustered; the home marker is drawn
         // immediately since it never stacks with nodes.
@@ -396,6 +401,12 @@ public partial class MapView : UserControl
         {
             double px = LonToX(mk.Lon, _zoom) - originX;
             double py = LatToY(mk.Lat, _zoom) - originY;
+            bool isOnScreen =
+                px >= -cullMarginPx && px <= viewportW + cullMarginPx &&
+                py >= -cullMarginPx && py <= viewportH + cullMarginPx;
+
+            if (!isOnScreen)
+                continue;
 
             if (mk.IsHome)
             {
@@ -479,7 +490,7 @@ public partial class MapView : UserControl
     /// <summary>Draws a small caption to the right of a marker.</summary>
     private void AddNodeLabel(string text, double px, double py)
     {
-        var label = new TextBlock
+        var label = new Emoji.Wpf.TextBlock
         {
             Text = text,
             FontSize = 11,
@@ -718,6 +729,7 @@ public partial class MapView : UserControl
         }
 
         _dragging = true;
+        _lastDragRenderTick = 0;
         _lastMouse = e.GetPosition(MarkerCanvas);
         MarkerCanvas.CaptureMouse();
     }
@@ -735,8 +747,10 @@ public partial class MapView : UserControl
 
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (!_dragging) return;
         _dragging = false;
         MarkerCanvas.ReleaseMouseCapture();
+        Render();
     }
 
     private void OnMouseMove(object sender, MouseEventArgs e)
@@ -754,7 +768,14 @@ public partial class MapView : UserControl
         _centerLon = XToLon(cx, _zoom);
         _centerLat = ClampLat(YToLat(cy, _zoom));
         _userMovedView = true;
-        Render();
+
+        // Throttle full renders while dragging to keep interaction responsive.
+        long nowTick = Environment.TickCount64;
+        if (nowTick - _lastDragRenderTick >= 16)
+        {
+            _lastDragRenderTick = nowTick;
+            Render();
+        }
     }
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)

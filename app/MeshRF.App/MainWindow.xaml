@@ -776,13 +776,22 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Short" Width="Auto"
-                                                SortMemberPath="ShortName"
-                                                Binding="{Binding ShortName}"
-                                                FontFamily="Consolas" />
-                            <DataGridTextColumn Header="Node name" Width="*"
-                                                SortMemberPath="LongName"
-                                                Binding="{Binding LongName}" />
+                            <DataGridTemplateColumn Header="Short" Width="Auto"
+                                                    SortMemberPath="ShortName">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <emoji:TextBlock Text="{Binding ShortName}" FontFamily="Consolas" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Node name" Width="*"
+                                                    SortMemberPath="LongName">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <emoji:TextBlock Text="{Binding LongName}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Role" Width="Auto"
                                                 SortMemberPath="Role"
                                                 Binding="{Binding Role}" />
