@@ -285,6 +285,45 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// Broadcast or unicast a waypoint (WAYPOINT_APP <c>Waypoint</c> protobuf).
+    /// Mirrors the upstream fields: id, lat/lon, optional expiry/lock/name/
+    /// description/icon.
+    /// </summary>
+    public static byte[] EncodeWaypoint(ChannelConfig channel,
+                                        uint from,
+                                        uint packetId,
+                                        uint waypointId,
+                                        double latitude,
+                                        double longitude,
+                                        string? name = null,
+                                        string? description = null,
+                                        uint expireEpoch = 0,
+                                        uint lockedTo = 0,
+                                        uint? icon = null,
+                                        uint to = 0xFFFFFFFFu,
+                                        byte hopLimit = 3,
+                                        bool wantResponse = false,
+                                        bool okToMqtt = false)
+    {
+        int latI = (int)Math.Round(latitude / 1e-7);
+        int lonI = (int)Math.Round(longitude / 1e-7);
+
+        var wp = new ProtoWriter();
+        wp.WriteVarintField(1, waypointId);
+        wp.WriteFixed32Field(2, (uint)latI);
+        wp.WriteFixed32Field(3, (uint)lonI);
+        if (expireEpoch != 0) wp.WriteVarintField(4, expireEpoch);
+        if (lockedTo != 0) wp.WriteVarintField(5, lockedTo);
+        if (!string.IsNullOrWhiteSpace(name)) wp.WriteStringField(6, name!);
+        if (!string.IsNullOrWhiteSpace(description)) wp.WriteStringField(7, description!);
+        if (icon is uint ic) wp.WriteFixed32Field(8, ic);
+
+        return Encode(channel, from, to, packetId, PortNum.Waypoint,
+                      wp.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: wantResponse, okToMqtt: okToMqtt);
+    }
+
+    /// <summary>
     /// Encode a POSITION_APP request directed at <paramref name="to"/>: an empty
     /// Position payload with <c>want_response</c> set, prompting that node to
     /// reply with its own position. Mirrors the Meshtastic client's "request

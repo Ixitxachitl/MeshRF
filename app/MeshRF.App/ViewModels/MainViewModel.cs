@@ -15,6 +15,7 @@ using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
+using MeshRF.Waypoints;
 
 namespace MeshRF.App.ViewModels;
 
@@ -22,6 +23,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly MeshtasticCore _core = new();
     private readonly NodeStore _nodeStore = new();
+    private readonly WaypointStore _waypointStore = new();
     private readonly ChannelStore _channelStore = new();
     private readonly MessageStore _messageStore = new();
     private readonly UsbSerialGpsService _gpsService = new();
@@ -39,6 +41,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // timer tick so ReloadNodes() runs at most once per tick rather than once
     // per received packet (avoids stutter from Nodes.Clear + full rebind).
     private bool _nodesDirty;
+    private bool _waypointsDirty;
 
     private const string ManualLocationSourceValue = "Manual";
     private const string UsbSerialLocationSourceValue = "UsbSerial";
@@ -256,6 +259,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<string> LogLines { get; } = new();
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
+    public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
 
     // -- Node list filters ---------------------------------------------------
 
@@ -459,6 +463,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _gpsStatus = "Manual location selected.";
     [ObservableProperty] private string _gpsPortName = string.Empty;
     [ObservableProperty] private string _gpsBaudRateText = string.Empty;
+    [ObservableProperty] private string _selectedWaypointEmoji = "📍";
+    [ObservableProperty] private bool _useWaypointExpiry;
+    [ObservableProperty] private DateTime? _waypointExpiryDate = DateTime.Today;
+    [ObservableProperty] private string _waypointExpiryTimeText = "12:00:00";
+    [ObservableProperty] private string _waypointNameInput = string.Empty;
+    [ObservableProperty] private string _waypointDescriptionInput = string.Empty;
+
+    public IReadOnlyList<string> WaypointEmojiOptions { get; } = new[]
+    {
+        "📍", "📌", "🏠", "⛺", "⚠", "🚧", "🛰", "🏴",
+    };
 
     public IReadOnlyList<LocationSourceOption> LocationSourceOptions { get; } =
     [
@@ -482,7 +497,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>A point shown on the map: a node position or the home marker.</summary>
     public sealed record MapMarker(
-        double Lat, double Lon, string Label, string Title, bool IsHome, uint? NodeNum = null);
+        double Lat, double Lon, string Label, string Title,
+        bool IsHome, bool IsWaypoint = false, bool IsExpired = false,
+        uint? NodeNum = null, long? WaypointRowId = null);
 
     /// <summary>
     /// Markers for the map view: the home location (if set) plus every node
@@ -500,6 +517,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
             var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
             list.Add(new MapMarker(lat, lon, label, BuildNodeTooltip(n), IsHome: false, NodeNum: n.NodeNum));
+        }
+
+        foreach (var wp in Waypoints)
+        {
+            list.Add(new MapMarker(
+                wp.Latitude,
+                wp.Longitude,
+                string.IsNullOrWhiteSpace(wp.Name)
+                    ? (string.IsNullOrWhiteSpace(wp.IconText) ? "Waypoint" : wp.IconText)
+                    : $"{wp.IconText} {wp.Name}".Trim(),
+                BuildWaypointTooltip(wp),
+                IsHome: false,
+                IsWaypoint: true,
+                IsExpired: wp.IsExpired,
+                WaypointRowId: wp.Id));
         }
         return list;
     }
@@ -525,6 +557,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (removedPositioned)
             MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Remove persisted waypoints and refresh the map.</summary>
+    public void RemoveWaypoints(IEnumerable<WaypointRecord> waypoints)
+    {
+        var targets = waypoints?.Where(w => w is not null).ToList();
+        if (targets is null || targets.Count == 0) return;
+
+        _waypointStore.ForgetRange(targets.Select(w => w.Id));
+        foreach (var wp in targets)
+            Waypoints.Remove(wp);
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Forget the stored public key for the given node(s) and ask them
@@ -802,6 +846,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return sb.ToString();
     }
 
+    private static string BuildWaypointTooltip(WaypointRecord wp)
+    {
+        var sb = new System.Text.StringBuilder();
+                sb.Append(string.IsNullOrWhiteSpace(wp.IconText) ? wp.DisplayName : $"{wp.IconText} {wp.DisplayName}")
+          .Append("\nFrom ").Append(wp.FromId)
+          .Append("\n").Append(wp.Latitude.ToString("F5", CultureInfo.InvariantCulture))
+          .Append(", ").Append(wp.Longitude.ToString("F5", CultureInfo.InvariantCulture));
+        if (wp.AltitudeM is int alt) sb.Append("  ").Append(alt).Append(" m");
+        if (!string.IsNullOrWhiteSpace(wp.Description))
+            sb.Append("\n").Append(wp.Description);
+        if (wp.LockedTo != 0)
+            sb.Append("\nLocked to !").Append(wp.LockedTo.ToString("x8", CultureInfo.InvariantCulture));
+        if (wp.ExpireEpoch != 0)
+            sb.Append("\nExpires ").Append(DateTimeOffset.FromUnixTimeSeconds(wp.ExpireEpoch).LocalDateTime.ToString("g", CultureInfo.CurrentCulture))
+              .Append(wp.IsExpired ? "  [EXPIRED]" : string.Empty);
+        sb.Append("\nReceived ").Append(FormatAge(wp.RxEpoch));
+        return sb.ToString();
+    }
+
     /// <summary>Formats a unix epoch as a human "x ago" string.</summary>
     private static string FormatAge(long epoch)
     {
@@ -844,6 +907,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel()
     {
         _settings = AppSettings.Load();
+        var soon = DateTime.Now.AddHours(1);
+        WaypointExpiryTimeText = soon.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
         NodesView = CollectionViewSource.GetDefaultView(Nodes);
         NodesView.Filter = o => o is NodeRecord n && NodePassesFilter(n);
         _gpsService.StatusChanged += HandleGpsStatusChanged;
@@ -986,6 +1051,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ReloadChannels();
         UpsertSelf();
         ReloadNodes();
+        ReloadWaypoints();
         ReloadMessages();
         LoadChatHistory();
 
@@ -1011,6 +1077,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Keep any open DM tabs' telemetry panels in sync with the latest data.
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == convo.NodeNum);
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void ReloadWaypoints()
+    {
+        Waypoints.Clear();
+        foreach (var wp in _waypointStore.All())
+            Waypoints.Add(wp);
         MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -2492,6 +2566,121 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Send a waypoint to the mesh and persist it locally so it remains on the
+    /// map until explicitly deleted.
+    /// </summary>
+    public async Task SendWaypointFromMapAsync(double lat, double lon)
+    {
+        if (!CanTransmit || _myNodeNum == 0)
+        {
+            Status = "Set your node ID and a TX-capable device before sending waypoints.";
+            Log(Status);
+            return;
+        }
+
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null)
+        {
+            Status = "No primary channel to send waypoint on.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            uint waypointId = packetId;
+            string name = string.IsNullOrWhiteSpace(WaypointNameInput)
+                ? $"Waypoint {DateTime.Now:HHmmss}"
+                : WaypointNameInput.Trim();
+            string description = WaypointDescriptionInput?.Trim() ?? string.Empty;
+            uint? icon = EmojiToCodePoint(SelectedWaypointEmoji);
+            uint expireEpoch = BuildWaypointExpiryEpoch();
+            var frame = MeshEncoder.EncodeWaypoint(
+                primary.Config,
+                _myNodeNum,
+                packetId,
+                waypointId,
+                lat,
+                lon,
+                name: name,
+                description: description,
+                expireEpoch: expireEpoch,
+                icon: icon,
+                hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            if (!ok)
+            {
+                Status = "Transmit failed (device cannot transmit).";
+                Log(Status);
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            _waypointStore.Upsert(new WaypointRecord
+            {
+                FromNode = _myNodeNum,
+                WaypointId = waypointId,
+                PacketId = packetId,
+                Channel = primary.Config.Name,
+                Name = name,
+                Description = description,
+                Icon = icon,
+                Latitude = lat,
+                Longitude = lon,
+                ExpireEpoch = expireEpoch,
+                RxEpoch = now,
+            });
+            ReloadWaypoints();
+
+            Status = $"Sent waypoint ({frame.Length} B) on {primary.DisplayName}";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Waypoint error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    private static uint? EmojiToCodePoint(string? emoji)
+    {
+        if (string.IsNullOrWhiteSpace(emoji)) return null;
+        try
+        {
+            int cp = char.ConvertToUtf32(emoji.Trim(), 0);
+            return cp > 0 ? (uint)cp : null;
+        }
+        catch { return null; }
+    }
+
+    private uint BuildWaypointExpiryEpoch()
+    {
+        if (!UseWaypointExpiry || WaypointExpiryDate is not DateTime date)
+            return 0;
+
+        if (!TimeSpan.TryParseExact(
+                WaypointExpiryTimeText?.Trim() ?? string.Empty,
+                new[] { "hh\\:mm\\:ss", "hh\\:mm" },
+                CultureInfo.InvariantCulture,
+                out var tod))
+            return 0;
+
+        var local = new DateTime(
+            date.Year,
+            date.Month,
+            date.Day,
+            tod.Hours,
+            tod.Minutes,
+            tod.Seconds,
+            DateTimeKind.Local);
+        return (uint)new DateTimeOffset(local).ToUnixTimeSeconds();
+    }
+
+    /// <summary>
     /// Send our NodeInfo directed at <paramref name="to"/> with
     /// <c>want_response</c> set, prompting that node to reply with its own
     /// NodeInfo — the standard Meshtastic way to learn a peer's public key
@@ -3374,6 +3563,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     });
                     Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
                     break;
+                case PortNum.Waypoint when result.Waypoint is not null:
+                    {
+                        var wp = result.Waypoint;
+                        // Some senders omit waypoint id (0). Use packet id as
+                        // a stable fallback key per sender.
+                        uint waypointId = wp.Id != 0 ? wp.Id : header.PacketId;
+                        _waypointStore.Upsert(new WaypointRecord
+                        {
+                            FromNode = header.From,
+                            WaypointId = waypointId,
+                            PacketId = header.PacketId,
+                            Channel = result.ChannelName,
+                            Name = wp.Name,
+                            Description = wp.Description,
+                            Icon = wp.Icon,
+                            Latitude = wp.Latitude,
+                            Longitude = wp.Longitude,
+                            ExpireEpoch = wp.ExpireEpoch,
+                            LockedTo = wp.LockedTo,
+                            RxEpoch = rxEpoch,
+                        });
+                        _waypointsDirty = true;
+                        Log($"  waypoint {header.FromId}: {wp.Latitude:F5}, {wp.Longitude:F5}  {wp.Name}");
+                    }
+                    break;
                 case PortNum.Telemetry when result.Telemetry is not null:
                     nodeChanged = true;
                     var t = result.Telemetry;
@@ -3484,6 +3698,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ReloadNodes();
             _nodesDirty = false;
         }
+        if (_waypointsDirty)
+        {
+            ReloadWaypoints();
+            _waypointsDirty = false;
+        }
     }
 
     // True when the event line is a decoded payload whose CRC verified.
@@ -3542,6 +3761,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _gpsService.Dispose();
         _core.Dispose();
         _nodeStore.Dispose();
+        _waypointStore.Dispose();
         _channelStore.Dispose();
         _messageStore.Dispose();
         _ringtone.Dispose();

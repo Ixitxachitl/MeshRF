@@ -76,6 +76,19 @@ public partial class MainWindow : Window
                 cm.IsOpen = true;
             }
         };
+        Map.WaypointRightClicked += wp =>
+        {
+            if (DataContext is not MainViewModel vm) return;
+            var result = MessageBox.Show(
+                this,
+                $"Delete waypoint \"{wp.DisplayName}\"?",
+                "Delete waypoint",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning);
+            if (result != MessageBoxResult.OK) return;
+
+            vm.RemoveWaypoints(new[] { wp });
+        };
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -120,6 +133,17 @@ public partial class MainWindow : Window
 
     // Context-menu "Delete" removes the selected node(s).
     private void OnDeleteNodes(object sender, RoutedEventArgs e) => DeleteSelectedNodes();
+
+    private void WaypointsGrid_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Delete)
+        {
+            DeleteSelectedWaypoints();
+            e.Handled = true;
+        }
+    }
+
+    private void OnDeleteWaypoints(object sender, RoutedEventArgs e) => DeleteSelectedWaypoints();
 
     // Context-menu "Traceroute" sends a Meshtastic-style route-discovery request
     // to the selected node (rate-limited to one per cooldown by the view model).
@@ -189,6 +213,28 @@ public partial class MainWindow : Window
         if (result != MessageBoxResult.OK) return;
 
         vm.RemoveNodes(selected);
+    }
+
+    private void DeleteSelectedWaypoints()
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = WaypointsGrid.SelectedItems
+            .OfType<MeshRF.Waypoints.WaypointRecord>()
+            .ToList();
+        if (selected.Count == 0) return;
+
+        var label = selected.Count == 1
+            ? $"waypoint \"{selected[0].DisplayName}\""
+            : $"{selected.Count} waypoints";
+        var result = MessageBox.Show(
+            this,
+            $"Delete {label}? This removes them from the waypoint database.",
+            "Delete waypoints",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning);
+        if (result != MessageBoxResult.OK) return;
+
+        vm.RemoveWaypoints(selected);
     }
 
     private void OnTick(object? sender, EventArgs e)

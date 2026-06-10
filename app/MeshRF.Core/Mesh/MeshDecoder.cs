@@ -20,6 +20,9 @@ public sealed class MeshDecodeResult
     /// <summary>Parsed Position (POSITION_APP); null otherwise.</summary>
     public MeshPosition? Position { get; init; }
 
+    /// <summary>Parsed Waypoint (WAYPOINT_APP); null otherwise.</summary>
+    public MeshWaypoint? Waypoint { get; init; }
+
     /// <summary>Parsed Telemetry (TELEMETRY_APP); null otherwise.</summary>
     public MeshTelemetry? Telemetry { get; init; }
 
@@ -68,6 +71,19 @@ public sealed class MeshPosition
     public double Latitude { get; init; }
     public double Longitude { get; init; }
     public int? AltitudeM { get; init; }
+}
+
+/// <summary>Subset of the Meshtastic <c>Waypoint</c> protobuf.</summary>
+public sealed class MeshWaypoint
+{
+    public uint Id { get; init; }
+    public double Latitude { get; init; }
+    public double Longitude { get; init; }
+    public uint ExpireEpoch { get; init; }
+    public uint LockedTo { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public uint? Icon { get; init; }
 }
 
 /// <summary>
@@ -288,6 +304,7 @@ public static class MeshDecoder
         string? text = null;
         MeshUser? user = null;
         MeshPosition? pos = null;
+        MeshWaypoint? waypoint = null;
         MeshTelemetry? telem = null;
         MeshRouteDiscovery? route = null;
         MeshNeighborInfo? neighborInfo = null;
@@ -303,6 +320,9 @@ public static class MeshDecoder
                 break;
             case PortNum.Position:
                 pos = ParsePosition(payload);
+                break;
+            case PortNum.Waypoint:
+                waypoint = ParseWaypoint(payload);
                 break;
             case PortNum.Telemetry:
                 telem = ParseTelemetry(payload);
@@ -326,6 +346,7 @@ public static class MeshDecoder
             Text = text,
             User = user,
             Position = pos,
+            Waypoint = waypoint,
             Telemetry = telem,
             RouteDiscovery = route,
             NeighborInfo = neighborInfo,
@@ -483,6 +504,58 @@ public static class MeshDecoder
             }
         }
         return new MeshPosition { Latitude = lat, Longitude = lon, AltitudeM = alt };
+    }
+
+    // Waypoint: 1=id(varint) 2=latitude_i(sfixed32) 3=longitude_i(sfixed32)
+    //           4=expire(varint) 5=locked_to(varint) 6=name(string)
+    //           7=description(string) 8=icon(fixed32)
+    private static MeshWaypoint ParseWaypoint(byte[] data)
+    {
+        uint id = 0;
+        double lat = 0, lon = 0;
+        uint expire = 0;
+        uint lockedTo = 0;
+        string name = string.Empty;
+        string description = string.Empty;
+        uint? icon = null;
+
+        var rdr = new ProtoReader(data);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            switch (field)
+            {
+                case 1 when wt == ProtoReader.WireType.Varint:
+                    id = (uint)rdr.ReadVarint(); break;
+                case 2 when wt == ProtoReader.WireType.I32:
+                    lat = (int)rdr.ReadFixed32() * 1e-7; break;
+                case 3 when wt == ProtoReader.WireType.I32:
+                    lon = (int)rdr.ReadFixed32() * 1e-7; break;
+                case 4 when wt == ProtoReader.WireType.Varint:
+                    expire = (uint)rdr.ReadVarint(); break;
+                case 5 when wt == ProtoReader.WireType.Varint:
+                    lockedTo = (uint)rdr.ReadVarint(); break;
+                case 6 when wt == ProtoReader.WireType.Len:
+                    name = rdr.ReadString(); break;
+                case 7 when wt == ProtoReader.WireType.Len:
+                    description = rdr.ReadString(); break;
+                case 8 when wt == ProtoReader.WireType.I32:
+                    icon = rdr.ReadFixed32(); break;
+                default:
+                    rdr.SkipField(wt); break;
+            }
+        }
+
+        return new MeshWaypoint
+        {
+            Id = id,
+            Latitude = lat,
+            Longitude = lon,
+            ExpireEpoch = expire,
+            LockedTo = lockedTo,
+            Name = name,
+            Description = description,
+            Icon = icon,
+        };
     }
 
     // Telemetry: 1=time(varint) 2=device_metrics(msg) 3=environment_metrics(msg).

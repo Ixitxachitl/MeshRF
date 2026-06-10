@@ -39,13 +39,13 @@ public partial class MapView : UserControl
         "osm",
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         "abc",
-        "© OpenStreetMap contributors  ·  Ctrl+right-click to set home");
+        "© OpenStreetMap contributors  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set home");
 
     private static readonly TileProvider DarkTiles = new(
         "cartodark",
         "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
         "abcd",
-        "© OpenStreetMap · © CARTO  ·  Ctrl+right-click to set home",
+        "© OpenStreetMap · © CARTO  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set home",
         // CARTO dark_all renders roads/labels very dark; lift them so they read
         // against the dark theme.
         Brightness: 1.7);
@@ -86,6 +86,9 @@ public partial class MapView : UserControl
     /// <summary>Fired when the user right-clicks a node marker on the map.
     /// Passes the node so the caller can show a context menu.</summary>
     public event Action<MeshRF.Nodes.NodeRecord>? NodeRightClicked;
+
+    /// <summary>Fired when the user right-clicks a waypoint marker on the map.</summary>
+    public event Action<MeshRF.Waypoints.WaypointRecord>? WaypointRightClicked;
 
     public MapView()
     {
@@ -422,6 +425,11 @@ public partial class MapView : UserControl
                 MarkerCanvas.Children.Add(home);
                 AddNodeLabel(mk.Label, px, py);
             }
+            else if (mk.IsWaypoint)
+            {
+                AddNodeDot(mk, px, py);
+                AddNodeLabel(mk.Label, px, py);
+            }
             else
             {
                 nodes.Add((mk, px, py));
@@ -467,14 +475,19 @@ public partial class MapView : UserControl
             _activeSpiderClusterKey = null;
     }
 
-    /// <summary>Draws a single node marker (blue dot with a hover tooltip).</summary>
+    /// <summary>Draws a single marker dot with a hover tooltip.</summary>
     private void AddNodeDot(MainViewModel.MapMarker mk, double px, double py)
     {
+        var fill = mk.IsWaypoint
+            ? new SolidColorBrush(mk.IsExpired
+                ? Color.FromRgb(0xc6, 0x28, 0x28)
+                : Color.FromRgb(0x2e, 0x7d, 0x32))
+            : new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
         var dot = new Ellipse
         {
             Width = 12,
             Height = 12,
-            Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)),
+            Fill = fill,
             Stroke = Brushes.White,
             StrokeThickness = 1.5,
             ToolTip = BuildNodeToolTip(mk.Title),
@@ -694,9 +707,10 @@ public partial class MapView : UserControl
     /// so it behaves like a row in the node list.</summary>
     private void AttachNodeInteraction(FrameworkElement element, MainViewModel.MapMarker mk)
     {
-        if (mk.NodeNum is null) return;
+        if (mk.NodeNum is null && mk.WaypointRowId is null) return;
         element.MouseLeftButtonDown += (_, e) =>
         {
+            if (mk.NodeNum is null) return;
             if (e.ClickCount != 2) return;
             var node = _vm?.Nodes.FirstOrDefault(n => n.NodeNum == mk.NodeNum);
             if (node is not null) NodeDoubleClicked?.Invoke(node);
@@ -704,14 +718,37 @@ public partial class MapView : UserControl
         };
         element.MouseRightButtonUp += (_, e) =>
         {
-            var node = _vm?.Nodes.FirstOrDefault(n => n.NodeNum == mk.NodeNum);
-            if (node is not null) NodeRightClicked?.Invoke(node);
+            if (mk.NodeNum is not null)
+            {
+                var node = _vm?.Nodes.FirstOrDefault(n => n.NodeNum == mk.NodeNum);
+                if (node is not null) NodeRightClicked?.Invoke(node);
+            }
+            else if (mk.WaypointRowId is long waypointId)
+            {
+                var wp = _vm?.Waypoints.FirstOrDefault(w => w.Id == waypointId);
+                if (wp is not null) WaypointRightClicked?.Invoke(wp);
+            }
             e.Handled = true;
         };
     }
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (_vm is not null && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            var p = e.GetPosition(MarkerCanvas);
+            double w = MarkerCanvas.ActualWidth, h = MarkerCanvas.ActualHeight;
+            double originX = LonToX(_centerLon, _zoom) - w / 2.0;
+            double originY = LatToY(_centerLat, _zoom) - h / 2.0;
+            double lon = XToLon(originX + p.X, _zoom);
+            double lat = YToLat(originY + p.Y, _zoom);
+            lon = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+
+            _ = _vm.SendWaypointFromMapAsync(ClampLat(lat), lon);
+            e.Handled = true;
+            return;
+        }
+
         bool withinSpider = IsWithinSpider(e.OriginalSource as DependencyObject);
         if (_spiderElements.Count > 0)
         {

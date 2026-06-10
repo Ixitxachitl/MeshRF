@@ -667,7 +667,94 @@
                         </StackPanel>
                     </Border>
 
-                    <DataGrid x:Name="NodesGrid"
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="3*" MinHeight="140" />
+                            <RowDefinition Height="6" />
+                            <RowDefinition Height="2*" MinHeight="120" />
+                        </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Row="2">
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="Waypoints"
+                               FontWeight="SemiBold"
+                               Margin="2,6,0,2" />
+
+                    <DataGrid x:Name="WaypointsGrid"
+                              ItemsSource="{Binding Waypoints}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserSortColumns="True"
+                              CanUserAddRows="False"
+                              SelectionMode="Extended"
+                              GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              KeyDown="WaypointsGrid_KeyDown">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsExpired}" Value="True">
+                                        <Setter Property="Foreground" Value="#F57C00" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Delete"
+                                          Click="OnDeleteWaypoints"
+                                          InputGestureText="Del">
+                                    <MenuItem.Icon>
+                                        <TextBlock Text="&#xE74D;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Icon" Width="42"
+                                                SortMemberPath="Icon"
+                                                Binding="{Binding IconText}" />
+                            <DataGridTextColumn Header="Name" Width="2*"
+                                                SortMemberPath="Name"
+                                                Binding="{Binding DisplayName}" />
+                            <DataGridTextColumn Header="From" Width="96"
+                                                SortMemberPath="FromNode"
+                                                Binding="{Binding FromId}"
+                                                FontFamily="Consolas" />
+                            <DataGridTextColumn Header="Lat" Width="88"
+                                                SortMemberPath="Latitude"
+                                                Binding="{Binding Latitude, StringFormat={}{0:F5}}"
+                                                FontFamily="Consolas" />
+                            <DataGridTextColumn Header="Lon" Width="88"
+                                                SortMemberPath="Longitude"
+                                                Binding="{Binding Longitude, StringFormat={}{0:F5}}"
+                                                FontFamily="Consolas" />
+                            <DataGridTextColumn Header="Status" Width="74"
+                                                SortMemberPath="IsExpired"
+                                                Binding="{Binding ExpiryStatus}" />
+                            <DataGridTextColumn Header="Expires" Width="132"
+                                                SortMemberPath="ExpireEpoch"
+                                                Binding="{Binding ExpireTime, StringFormat=g}" />
+                            <DataGridTextColumn Header="Heard" Width="72"
+                                                SortMemberPath="RxEpoch"
+                                                Binding="{Binding RxTime, StringFormat=HH:mm:ss}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                                        </DockPanel>
+
+                                        <GridSplitter Grid.Row="1"
+                                                                    HorizontalAlignment="Stretch"
+                                                                    VerticalAlignment="Center"
+                                                                    Height="6"
+                                                                    ResizeDirection="Rows"
+                                                                    ResizeBehavior="PreviousAndNext"
+                                                                    Background="{DynamicResource BrushSplitter}"
+                                                                    ShowsPreview="True" />
+
+                                        <DataGrid x:Name="NodesGrid"
+                                                            Grid.Row="0"
                               ItemsSource="{Binding NodesView}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
@@ -813,6 +900,7 @@
                                                 Binding="{Binding HopsAway}" />
                         </DataGrid.Columns>
                     </DataGrid>
+                    </Grid>
                 </DockPanel>
 
                 <!-- Bottom-right quarter: channels / chats + log. -->
@@ -849,7 +937,7 @@
                         <TabControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center" />
+                                    <emoji:TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center" />
                                     <Button Content="&#xE711;"
                                             FontFamily="Segoe MDL2 Assets" FontSize="9"
                                             Margin="6,0,-4,0" Padding="3,0"
@@ -1014,8 +1102,8 @@
                                                             <ColumnDefinition Width="*" />
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
-                                                        <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
-                                                                   ToolTip="{Binding FromId}" />
+                                                        <emoji:TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
+                                                                         ToolTip="{Binding FromId}" />
                                                         <emoji:TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
                                                                          TextWrapping="Wrap" />
                                                     </Grid>
@@ -1051,11 +1139,11 @@
                                                       IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
                                                       ToolTip="Mute RTTTL ringtone for text messages from this node" />
                                             <StackPanel>
-                                                <TextBlock FontWeight="SemiBold"
-                                                           Text="{Binding PeerName}" />
-                                                <TextBlock Foreground="{DynamicResource BrushSubtle}"
-                                                           FontFamily="Consolas"
-                                                           Text="{Binding PeerId}" />
+                                                <emoji:TextBlock FontWeight="SemiBold"
+                                                                 Text="{Binding PeerName}" />
+                                                <emoji:TextBlock Foreground="{DynamicResource BrushSubtle}"
+                                                                 FontFamily="Consolas"
+                                                                 Text="{Binding PeerId}" />
                                             </StackPanel>
                                         </DockPanel>
                                     </Border>
@@ -1105,8 +1193,8 @@
                                                             <ColumnDefinition Width="*" />
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
-                                                        <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
-                                                                   ToolTip="{Binding FromId}" />
+                                                        <emoji:TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
+                                                                         ToolTip="{Binding FromId}" />
                                                         <emoji:TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
                                                                          TextWrapping="Wrap" />
                                                     </Grid>
