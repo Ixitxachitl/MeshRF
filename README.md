@@ -60,11 +60,11 @@ the host CPU.
 
 ```
 +-----------------------------+
-|  MeshRF.App (WPF)     |   .NET 8, MVVM (CommunityToolkit.Mvvm)
+|  MeshRF.App (WPF)           |   .NET 8, MVVM (CommunityToolkit.Mvvm)
 +--------------+--------------+
                | P/Invoke (C ABI)
 +--------------v--------------+
-|  MeshRF.Native (DLL)  |   C++20
+|  MeshRF.Native (DLL)        |   C++20
 |  - HAL (HackRF, RTL-SDR)    |
 |  - DSP / LoRa demod         |   (port of gr-lora_sdr)
 |  - Spectrum / waterfall     |
