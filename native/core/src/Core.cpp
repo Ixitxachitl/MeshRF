@@ -554,11 +554,19 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         const std::size_t exact_end = static_cast<std::size_t>(
             std::min<std::uint64_t>(packet_end - history_begin, filled));
         const std::size_t exact_len = exact_end > exact_start ? exact_end - exact_start : window;
-        const std::size_t lead_margin = 0u;
-        const std::size_t tail_margin = std::max<std::size_t>(1u, sym_samples / 8u);
+        // Keep the full packet visible start-to-finish instead of clipping to
+        // the decoded interior. Add generous pre-roll (preamble + sync) and a
+        // little post-roll so the burst clearly tails out.
+        const std::size_t lead_syms = static_cast<std::size_t>(preamble) + 4u;
+        const std::size_t lead_margin = std::max<std::size_t>(
+            sym_samples,
+            std::min<std::size_t>(filled / 3u, lead_syms * sym_samples));
+        const std::size_t tail_margin = std::max<std::size_t>(
+            sym_samples / 2u,
+            std::min<std::size_t>(filled / 8u, 2u * sym_samples));
         window = std::min<std::size_t>(filled, exact_len + lead_margin + tail_margin);
         if (window < kFft) window = kFft;
-        off0 = exact_start;
+        off0 = (exact_start > lead_margin) ? (exact_start - lead_margin) : 0u;
         if (off0 + window > filled) off0 = filled - window;
     } else if (filled > window && filled >= kBlk) {
         const std::size_t nblk = filled / kBlk;
@@ -710,31 +718,6 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         }
     }
 
-    // Light separable smoothing so frozen chirps read as continuous sweeps
-    // rather than jagged bin stair-steps. Keep it gentle to avoid smearing
-    // short packets into static.
-    if (n_time >= 3u && n_freq >= 3u) {
-        std::vector<float> tmp(static_cast<std::size_t>(n_time) * n_freq);
-        for (std::uint32_t t = 0; t < n_time; ++t) {
-            const float* src = &out[static_cast<std::size_t>(t) * n_freq];
-            float* dst = &tmp[static_cast<std::size_t>(t) * n_freq];
-            dst[0] = src[0];
-            for (std::uint32_t f = 1; f + 1 < n_freq; ++f)
-                dst[f] = 0.25f * src[f - 1] + 0.5f * src[f] + 0.25f * src[f + 1];
-            dst[n_freq - 1] = src[n_freq - 1];
-        }
-        for (std::uint32_t f = 0; f < n_freq; ++f) {
-            out[f] = tmp[f];
-            for (std::uint32_t t = 1; t + 1 < n_time; ++t) {
-                out[static_cast<std::size_t>(t) * n_freq + f] =
-                    0.25f * tmp[static_cast<std::size_t>(t - 1) * n_freq + f] +
-                    0.5f * tmp[static_cast<std::size_t>(t) * n_freq + f] +
-                    0.25f * tmp[static_cast<std::size_t>(t + 1) * n_freq + f];
-            }
-            out[static_cast<std::size_t>(n_time - 1) * n_freq + f] =
-                tmp[static_cast<std::size_t>(n_time - 1) * n_freq + f];
-        }
-    }
     return n_time;
 }
 

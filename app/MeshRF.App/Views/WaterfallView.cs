@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Collections.Generic;
 
 namespace MeshRF.App.Views;
 
@@ -136,7 +137,10 @@ public sealed class WaterfallView : Image
         int keep = Math.Min(newCapacity, _filled);
         for (int i = 0; i < keep; i++)
         {
-            int oldRow = (_head - 1 - i + _capacity) % _capacity;
+            // Preserve chronological order (oldest -> newest) across resizes.
+            // Rendering assumes newest is at (_head - 1), so reversing here can
+            // make the waterfall appear mirrored after width/height changes.
+            int oldRow = (_head - keep + i + _capacity) % _capacity;
             int newRow = i;
             Array.Copy(_ring!, (long)oldRow * _binCount,
                        fresh, (long)newRow * _binCount, _binCount);
@@ -193,6 +197,51 @@ public sealed class WaterfallView : Image
         _autoCeil = CeilDb;
         _autoFrameCounter = 0;
         if (_bmp is not null) Render();
+    }
+
+    /// <summary>
+    /// Replaces the ring-buffer contents with a chronological snapshot
+    /// (oldest -> newest) and renders once. Intended for frozen packet views.
+    /// </summary>
+    public void ReplaceFrames(IReadOnlyList<float[]> frames)
+    {
+        if (frames.Count == 0)
+        {
+            Clear();
+            return;
+        }
+
+        if (_bmp is null) EnsureBitmap();
+
+        int bins = frames[0]?.Length ?? 0;
+        if (bins <= 0) return;
+
+        if (bins != _binCount)
+        {
+            _binCount = bins;
+            _ring = new float[(long)_capacity * _binCount];
+            _head = 0;
+            _filled = 0;
+        }
+        if (_ring is null || _capacity == 0) return;
+
+        int take = Math.Min(frames.Count, _capacity);
+        int start = frames.Count - take;
+        _head = 0;
+        _filled = 0;
+
+        for (int i = 0; i < take; i++)
+        {
+            var src = frames[start + i];
+            if (src is null || src.Length != _binCount) continue;
+
+            long offset = (long)_head * _binCount;
+            src.AsSpan().CopyTo(_ring.AsSpan((int)offset, _binCount));
+            _head = (_head + 1) % _capacity;
+            if (_filled < _capacity) _filled++;
+        }
+
+        Render();
     }
 
     private void UpdateAutoLevels(ReadOnlySpan<float> latest)

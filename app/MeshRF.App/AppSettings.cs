@@ -143,11 +143,26 @@ public sealed class AppSettings
     /// <summary>Main 2x2 shell bottom-pane star height.</summary>
     public double? MainBottomPaneStar { get; set; }
 
+    /// <summary>Left pane top star height (map).</summary>
+    public double? MainLeftTopPaneStar { get; set; }
+
+    /// <summary>Left pane bottom star height (identity + nodes).</summary>
+    public double? MainLeftBottomPaneStar { get; set; }
+
+    /// <summary>Right pane top star height (spectrum/waterfall).</summary>
+    public double? MainRightTopPaneStar { get; set; }
+
+    /// <summary>Right pane bottom star height (channels/messages/log).</summary>
+    public double? MainRightBottomPaneStar { get; set; }
+
     /// <summary>Spectrum panel top star height.</summary>
     public double? SpectrumTopPaneStar { get; set; }
 
     /// <summary>Waterfall panel bottom star height.</summary>
     public double? SpectrumBottomPaneStar { get; set; }
+
+    /// <summary>Width of the frozen last-packet popup in device-independent pixels.</summary>
+    public double? LastPacketPanelWidth { get; set; }
 
     /// <summary>Messages panel star height above the log.</summary>
     public double? MessagesTopPaneStar { get; set; }
@@ -216,6 +231,9 @@ public sealed class AppSettings
 
     /// <summary>Persisted max-age filter in minutes (empty = off).</summary>
     public string NodeFilterMaxAgeMinutes { get; set; } = string.Empty;
+
+    /// <summary>Persisted display widths (in DIP) for the Waypoints grid columns.</summary>
+    public List<double> WaypointColumnWidths { get; set; } = new();
 
     private static readonly JsonSerializerOptions s_opts = new()
     {

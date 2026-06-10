@@ -341,90 +341,27 @@
                 <ColumnDefinition Width="5" />
                 <ColumnDefinition Width="*" MinWidth="260" />
             </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" MinHeight="120" />
-                <RowDefinition Height="5" />
-                <RowDefinition Height="*" MinHeight="120" />
-            </Grid.RowDefinitions>
 
-            <!-- Top-left quarter: map. -->
-            <views:MapView Grid.Row="0" Grid.Column="0" x:Name="Map" Margin="4" />
-
-            <!-- Top-right quarter: spectrum (top) over waterfall (bottom). -->
-            <Grid x:Name="SpectrumLayoutGrid" Grid.Row="0" Grid.Column="2" Margin="4">
+            <!-- Left side: map (top) over nodes/identity (bottom). -->
+            <Grid x:Name="LeftPaneGrid" Grid.Column="0">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="1*" MinHeight="50" />
+                    <RowDefinition Height="*" MinHeight="120" />
                     <RowDefinition Height="5" />
-                    <RowDefinition Height="2*" MinHeight="60" />
+                    <RowDefinition Height="*" MinHeight="120" />
                 </Grid.RowDefinitions>
 
-                <views:SpectrumView x:Name="Spectrum"
-                                    Grid.Row="0"
-                                    FloorDb="{Binding WaterfallFloorDb}"
-                                    CeilDb="{Binding WaterfallCeilDb}" />
+                <views:MapView Grid.Row="0" x:Name="Map" Margin="4" />
 
                 <GridSplitter Grid.Row="1"
                               Height="5"
                               HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
                               Background="{DynamicResource BrushSplitter}"
                               ShowsPreview="False"
                               ResizeBehavior="PreviousAndNext" />
 
-                <Grid Grid.Row="2">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="22" />
-                    </Grid.RowDefinitions>
-
-                    <views:WaterfallView x:Name="Waterfall"
-                                         Grid.Row="0"
-                                         FloorDb="{Binding WaterfallFloorDb, Mode=TwoWay}"
-                                         CeilDb="{Binding WaterfallCeilDb, Mode=TwoWay}"
-                                         AutoLevels="{Binding WaterfallAutoLevels, Mode=TwoWay}" />
-
-                    <!-- Frozen spectrogram of the most recently detected packet.
-                         Hidden until the first packet is captured. -->
-                    <Border x:Name="LastPacketPanel"
-                            Grid.Row="0"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Top"
-                            Width="540" Height="170"
-                            Margin="0,6,6,0"
-                            Background="#DD101418"
-                            BorderBrush="{DynamicResource BrushPanelBorder}"
-                            BorderThickness="1"
-                            Visibility="Collapsed">
-                        <DockPanel>
-                            <DockPanel DockPanel.Dock="Top" Margin="4,2,2,2">
-                                <Button DockPanel.Dock="Right"
-                                        Width="18" Height="18" Padding="0"
-                                        Click="OnCloseLastPacket"
-                                        ToolTip="Hide"
-                                        Content="&#xE711;"
-                                        FontFamily="Segoe MDL2 Assets" FontSize="9" />
-                                <TextBlock x:Name="LastPacketTitle"
-                                           Text="Last packet"
-                                           Foreground="#F0F0F0"
-                                           FontWeight="SemiBold" FontSize="11"
-                                           VerticalAlignment="Center" />
-                            </DockPanel>
-                            <views:WaterfallView x:Name="LastPacket"
-                                                 AutoLevels="True"
-                                                 SmoothPixels="True"
-                                                 TimeHorizontal="True"
-                                                 Margin="2" />
-                        </DockPanel>
-                    </Border>
-
-                    <views:FrequencyAxis Grid.Row="1"
-                                         CenterFreqHz="{Binding SpectrumCenterHz}"
-                                         SpanHz="{Binding SpectrumSpanHz}"
-                                         Foreground="{DynamicResource BrushAppForeground}" />
-                </Grid>
-            </Grid>
-
-            <!-- Bottom-left quarter: node list + identity. -->
-                <DockPanel Grid.Row="2" Grid.Column="0" Margin="4">
+                <!-- Bottom-left quarter: node list + identity. -->
+                <DockPanel Grid.Row="2" Margin="4">
                     <Expander x:Name="IdentityExpander" DockPanel.Dock="Top" Header="My node (identity)"
                               IsExpanded="False" Margin="0,0,0,4">
                         <Border Padding="8"
@@ -674,249 +611,353 @@
                             <RowDefinition Height="2*" MinHeight="120" />
                         </Grid.RowDefinitions>
 
-                    <DockPanel Grid.Row="2">
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="Waypoints"
-                               FontWeight="SemiBold"
-                               Margin="2,6,0,2" />
+                        <DockPanel Grid.Row="2">
+                            <TextBlock DockPanel.Dock="Top"
+                                       Text="Waypoints"
+                                       FontWeight="SemiBold"
+                                       Margin="2,6,0,2" />
 
-                    <DataGrid x:Name="WaypointsGrid"
-                              ItemsSource="{Binding Waypoints}"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              CanUserSortColumns="True"
-                              CanUserAddRows="False"
-                              SelectionMode="Extended"
-                              GridLinesVisibility="Horizontal"
-                              HeadersVisibility="Column"
-                              KeyDown="WaypointsGrid_KeyDown">
-                        <DataGrid.RowStyle>
-                            <Style TargetType="DataGridRow">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsExpired}" Value="True">
-                                        <Setter Property="Foreground" Value="#F57C00" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </DataGrid.RowStyle>
-                        <DataGrid.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="Delete"
-                                          Click="OnDeleteWaypoints"
-                                          InputGestureText="Del">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE74D;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                            </ContextMenu>
-                        </DataGrid.ContextMenu>
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Icon" Width="42"
-                                                SortMemberPath="Icon"
-                                                Binding="{Binding IconText}" />
-                            <DataGridTextColumn Header="Name" Width="2*"
-                                                SortMemberPath="Name"
-                                                Binding="{Binding DisplayName}" />
-                            <DataGridTextColumn Header="From" Width="96"
-                                                SortMemberPath="FromNode"
-                                                Binding="{Binding FromId}"
-                                                FontFamily="Consolas" />
-                            <DataGridTextColumn Header="Lat" Width="88"
-                                                SortMemberPath="Latitude"
-                                                Binding="{Binding Latitude, StringFormat={}{0:F5}}"
-                                                FontFamily="Consolas" />
-                            <DataGridTextColumn Header="Lon" Width="88"
-                                                SortMemberPath="Longitude"
-                                                Binding="{Binding Longitude, StringFormat={}{0:F5}}"
-                                                FontFamily="Consolas" />
-                            <DataGridTextColumn Header="Status" Width="74"
-                                                SortMemberPath="IsExpired"
-                                                Binding="{Binding ExpiryStatus}" />
-                            <DataGridTextColumn Header="Expires" Width="132"
-                                                SortMemberPath="ExpireEpoch"
-                                                Binding="{Binding ExpireTime, StringFormat=g}" />
-                            <DataGridTextColumn Header="Heard" Width="72"
-                                                SortMemberPath="RxEpoch"
-                                                Binding="{Binding RxTime, StringFormat=HH:mm:ss}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                                        </DockPanel>
+                            <DataGrid x:Name="WaypointsGrid"
+                                      ItemsSource="{Binding Waypoints}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserSortColumns="True"
+                                      CanUserAddRows="False"
+                                      SelectionMode="Extended"
+                                      GridLinesVisibility="Horizontal"
+                                      HeadersVisibility="Column"
+                                      KeyDown="WaypointsGrid_KeyDown">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsExpired}" Value="True">
+                                                <Setter Property="Foreground" Value="#F57C00" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Delete"
+                                                  Click="OnDeleteWaypoints"
+                                                  InputGestureText="Del">
+                                            <MenuItem.Icon>
+                                                <TextBlock Text="&#xE74D;"
+                                                           FontFamily="Segoe MDL2 Assets"
+                                                           FontSize="12" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Icon" Width="42"
+                                                        SortMemberPath="Icon"
+                                                        Binding="{Binding IconText}" />
+                                    <DataGridTextColumn Header="Name" Width="2*"
+                                                        SortMemberPath="Name"
+                                                        Binding="{Binding DisplayName}" />
+                                    <DataGridTextColumn Header="From" Width="96"
+                                                        SortMemberPath="FromNode"
+                                                        Binding="{Binding FromId}"
+                                                        FontFamily="Consolas" />
+                                    <DataGridTextColumn Header="Lat" Width="88"
+                                                        SortMemberPath="Latitude"
+                                                        Binding="{Binding Latitude, StringFormat={}{0:F5}}"
+                                                        FontFamily="Consolas" />
+                                    <DataGridTextColumn Header="Lon" Width="88"
+                                                        SortMemberPath="Longitude"
+                                                        Binding="{Binding Longitude, StringFormat={}{0:F5}}"
+                                                        FontFamily="Consolas" />
+                                    <DataGridTextColumn Header="Status" Width="74"
+                                                        SortMemberPath="IsExpired"
+                                                        Binding="{Binding ExpiryStatus}" />
+                                    <DataGridTextColumn Header="Expires" Width="132"
+                                                        SortMemberPath="ExpireEpoch"
+                                                        Binding="{Binding ExpireTime, StringFormat=g}" />
+                                    <DataGridTextColumn Header="Heard" Width="72"
+                                                        SortMemberPath="RxEpoch"
+                                                        Binding="{Binding RxTime, StringFormat=HH:mm:ss}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
 
-                                        <GridSplitter Grid.Row="1"
-                                                                    HorizontalAlignment="Stretch"
-                                                                    VerticalAlignment="Center"
-                                                                    Height="6"
-                                                                    ResizeDirection="Rows"
-                                                                    ResizeBehavior="PreviousAndNext"
-                                                                    Background="{DynamicResource BrushSplitter}"
-                                                                    ShowsPreview="True" />
+                        <GridSplitter Grid.Row="1"
+                                      HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Center"
+                                      Height="6"
+                                      ResizeDirection="Rows"
+                                      ResizeBehavior="PreviousAndNext"
+                                      Background="{DynamicResource BrushSplitter}"
+                                      ShowsPreview="True" />
 
-                                        <DataGrid x:Name="NodesGrid"
-                                                            Grid.Row="0"
-                              ItemsSource="{Binding NodesView}"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              CanUserSortColumns="True"
-                              CanUserAddRows="False"
-                              SelectionMode="Extended"
-                              GridLinesVisibility="Horizontal"
-                              HeadersVisibility="Column"
-                              MouseDoubleClick="NodesGrid_MouseDoubleClick"
-                              KeyDown="NodesGrid_KeyDown">
-                        <DataGrid.RowStyle>
-                            <Style TargetType="DataGridRow">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Ignored}" Value="True">
-                                        <Setter Property="Foreground" Value="#E57373" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </DataGrid.RowStyle>
-                        <DataGrid.CellStyle>
-                            <Style TargetType="DataGridCell">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Ignored}" Value="True">
-                                        <Setter Property="Foreground" Value="#E57373" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </DataGrid.CellStyle>
-                        <DataGrid.ContextMenu>
-                            <ContextMenu Opened="OnNodesContextMenuOpened">
-                                <MenuItem Header="Traceroute"
-                                          Click="OnTraceroute">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE968;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="Request position"
-                                          Click="OnRequestPosition">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE707;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="Exchange node info"
-                                          Click="OnExchangeNodeInfo">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE8BD;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="Request new keys"
-                                          Click="OnRequestKeys">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE192;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem x:Name="ToggleNodeIgnoredMenuItem"
-                                          Header="Ignore node"
-                                          Click="OnToggleNodeIgnored">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE767;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem x:Name="CopyNodesMenuItem"
-                                          Header="Copy"
-                                          Click="OnCopyNodes"
-                                          InputGestureText="Ctrl+C">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE8C8;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="Delete"
-                                          Click="OnDeleteNodes"
-                                          InputGestureText="Del">
-                                    <MenuItem.Icon>
-                                        <TextBlock Text="&#xE74D;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                            </ContextMenu>
-                        </DataGrid.ContextMenu>
-                        <DataGrid.Columns>
-                            <DataGridTemplateColumn Header="" Width="Auto"
-                                                    SortMemberPath="HasPublicKey"
-                                                    CanUserResize="False">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="&#xE192;"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="12"
-                                                   HorizontalAlignment="Center"
-                                                   Visibility="{Binding HasPublicKey, Converter={StaticResource BoolToVis}}">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="ToolTip" Value="Has encryption key (PKC direct messages enabled)" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding HasKeyMismatch}" Value="True">
-                                                            <Setter Property="Foreground" Value="#E53935" />
-                                                            <Setter Property="ToolTip" Value="Key mismatch — this node's public key changed. Right-click → Request new keys to accept it." />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Short" Width="Auto"
-                                                    SortMemberPath="ShortName"
-                                                    ClipboardContentBinding="{Binding ShortName}">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <emoji:TextBlock Text="{Binding ShortName}" FontFamily="Consolas" />
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Node name" Width="*"
-                                                    SortMemberPath="LongName"
-                                                    ClipboardContentBinding="{Binding LongName}">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <emoji:TextBlock Text="{Binding LongName}" />
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Role" Width="Auto"
-                                                SortMemberPath="Role"
-                                                Binding="{Binding Role}" />
-                            <DataGridTextColumn Header="Node ID" Width="Auto"
-                                                SortMemberPath="DisplayId"
-                                                Binding="{Binding DisplayId}"
-                                                FontFamily="Consolas" />
-                            <DataGridTextColumn Header="Last heard" Width="Auto"
-                                                SortMemberPath="LastHeardEpoch"
-                                                Binding="{Binding LastHeard, StringFormat=HH:mm:ss}" />
-                            <DataGridTextColumn Header="RSSI" Width="Auto"
-                                                SortMemberPath="RssiDbm"
-                                                Binding="{Binding RssiDbm, StringFormat={}{0:F0} dBm}" />
-                            <DataGridTextColumn Header="SNR" Width="Auto"
-                                                SortMemberPath="SnrDb"
-                                                Binding="{Binding SnrDb, StringFormat={}{0:F1}}" />
-                            <DataGridTextColumn Header="Hops" Width="Auto"
-                                                SortMemberPath="HopsAway"
-                                                Binding="{Binding HopsAway}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
+                        <DataGrid x:Name="NodesGrid"
+                                  Grid.Row="0"
+                                  ItemsSource="{Binding NodesView}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserSortColumns="True"
+                                  CanUserAddRows="False"
+                                  SelectionMode="Extended"
+                                  GridLinesVisibility="Horizontal"
+                                  HeadersVisibility="Column"
+                                  MouseDoubleClick="NodesGrid_MouseDoubleClick"
+                                  KeyDown="NodesGrid_KeyDown">
+                            <DataGrid.RowStyle>
+                                <Style TargetType="DataGridRow">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Ignored}" Value="True">
+                                            <Setter Property="Foreground" Value="#E57373" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.RowStyle>
+                            <DataGrid.CellStyle>
+                                <Style TargetType="DataGridCell">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Ignored}" Value="True">
+                                            <Setter Property="Foreground" Value="#E57373" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.CellStyle>
+                            <DataGrid.ContextMenu>
+                                <ContextMenu Opened="OnNodesContextMenuOpened">
+                                    <MenuItem Header="Traceroute"
+                                              Click="OnTraceroute">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE968;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Request position"
+                                              Click="OnRequestPosition">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE707;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Exchange node info"
+                                              Click="OnExchangeNodeInfo">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE8BD;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Request new keys"
+                                              Click="OnRequestKeys">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE192;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="ToggleNodeIgnoredMenuItem"
+                                              Header="Ignore node"
+                                              Click="OnToggleNodeIgnored">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE767;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="CopyNodesMenuItem"
+                                              Header="Copy"
+                                              Click="OnCopyNodes"
+                                              InputGestureText="Ctrl+C">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE8C8;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Delete"
+                                              Click="OnDeleteNodes"
+                                              InputGestureText="Del">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE74D;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </DataGrid.ContextMenu>
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="" Width="Auto"
+                                                        SortMemberPath="HasPublicKey"
+                                                        CanUserResize="False">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="&#xE192;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12"
+                                                       HorizontalAlignment="Center"
+                                                       Visibility="{Binding HasPublicKey, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="ToolTip" Value="Has encryption key (PKC direct messages enabled)" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasKeyMismatch}" Value="True">
+                                                                <Setter Property="Foreground" Value="#E53935" />
+                                                                <Setter Property="ToolTip" Value="Key mismatch — this node's public key changed. Right-click → Request new keys to accept it." />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="Short" Width="Auto"
+                                                        SortMemberPath="ShortName"
+                                                        ClipboardContentBinding="{Binding ShortName}">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <emoji:TextBlock Text="{Binding ShortName}" FontFamily="Consolas" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="Node name" Width="*"
+                                                        SortMemberPath="LongName"
+                                                        ClipboardContentBinding="{Binding LongName}">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <emoji:TextBlock Text="{Binding LongName}" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Role" Width="Auto"
+                                                    SortMemberPath="Role"
+                                                    Binding="{Binding Role}" />
+                                <DataGridTextColumn Header="Node ID" Width="Auto"
+                                                    SortMemberPath="DisplayId"
+                                                    Binding="{Binding DisplayId}"
+                                                    FontFamily="Consolas" />
+                                <DataGridTextColumn Header="Last heard" Width="Auto"
+                                                    SortMemberPath="LastHeardEpoch"
+                                                    Binding="{Binding LastHeard, StringFormat=HH:mm:ss}" />
+                                <DataGridTextColumn Header="RSSI" Width="Auto"
+                                                    SortMemberPath="RssiDbm"
+                                                    Binding="{Binding RssiDbm, StringFormat={}{0:F0} dBm}" />
+                                <DataGridTextColumn Header="SNR" Width="Auto"
+                                                    SortMemberPath="SnrDb"
+                                                    Binding="{Binding SnrDb, StringFormat={}{0:F1}}" />
+                                <DataGridTextColumn Header="Hops" Width="Auto"
+                                                    SortMemberPath="HopsAway"
+                                                    Binding="{Binding HopsAway}" />
+                            </DataGrid.Columns>
+                        </DataGrid>
                     </Grid>
                 </DockPanel>
+            </Grid>
 
-                <!-- Bottom-right quarter: channels / chats + log. -->
-                <DockPanel Grid.Row="2" Grid.Column="2" Margin="4">
+            <!-- Right side: spectrum/waterfall (top) over channels/messages/log (bottom). -->
+            <Grid x:Name="RightPaneGrid" Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" MinHeight="120" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="*" MinHeight="120" />
+                </Grid.RowDefinitions>
+
+                <!-- Top-right quarter: spectrum (top) over waterfall (bottom). -->
+                <Grid x:Name="SpectrumLayoutGrid" Grid.Row="0" Margin="4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="1*" MinHeight="50" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="2*" MinHeight="60" />
+                </Grid.RowDefinitions>
+
+                <views:SpectrumView x:Name="Spectrum"
+                                    Grid.Row="0"
+                                    FloorDb="{Binding WaterfallFloorDb}"
+                                    CeilDb="{Binding WaterfallCeilDb}" />
+
+                <GridSplitter Grid.Row="1"
+                              Height="5"
+                              HorizontalAlignment="Stretch"
+                              Background="{DynamicResource BrushSplitter}"
+                              ShowsPreview="False"
+                              ResizeBehavior="PreviousAndNext" />
+
+                <Grid Grid.Row="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="22" />
+                    </Grid.RowDefinitions>
+
+                    <views:WaterfallView x:Name="Waterfall"
+                                         Grid.Row="0"
+                                         FloorDb="{Binding WaterfallFloorDb, Mode=TwoWay}"
+                                         CeilDb="{Binding WaterfallCeilDb, Mode=TwoWay}"
+                                         AutoLevels="{Binding WaterfallAutoLevels, Mode=TwoWay}" />
+
+                    <!-- Frozen spectrogram of the most recently detected packet.
+                         Hidden until the first packet is captured. -->
+                    <Border x:Name="LastPacketPanel"
+                            Grid.Row="0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Width="540" Height="170"
+                            Margin="0,6,6,0"
+                            Background="#DD101418"
+                            BorderBrush="{DynamicResource BrushPanelBorder}"
+                            BorderThickness="1"
+                            Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="6" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Thumb Grid.Column="0"
+                                   HorizontalAlignment="Stretch"
+                                   Cursor="SizeWE"
+                                   Background="#20FFFFFF"
+                                   DragDelta="OnLastPacketResizeDelta"
+                                   ToolTip="Drag to resize" />
+
+                            <DockPanel Grid.Column="1">
+                                <DockPanel DockPanel.Dock="Top" Margin="4,2,2,2">
+                                    <Button DockPanel.Dock="Right"
+                                            Width="18" Height="18" Padding="0"
+                                            Click="OnCloseLastPacket"
+                                            ToolTip="Hide"
+                                            Content="&#xE711;"
+                                            FontFamily="Segoe MDL2 Assets" FontSize="9" />
+                                    <TextBlock x:Name="LastPacketTitle"
+                                               Text="Last packet"
+                                               Foreground="#F0F0F0"
+                                               FontWeight="SemiBold" FontSize="11"
+                                               VerticalAlignment="Center" />
+                                </DockPanel>
+                                <views:WaterfallView x:Name="LastPacket"
+                                                     AutoLevels="True"
+                                                     SmoothPixels="False"
+                                                     TimeHorizontal="True"
+                                                     Margin="2" />
+                            </DockPanel>
+                        </Grid>
+                    </Border>
+
+                    <views:FrequencyAxis Grid.Row="1"
+                                         CenterFreqHz="{Binding SpectrumCenterHz}"
+                                         SpanHz="{Binding SpectrumSpanHz}"
+                                         Foreground="{DynamicResource BrushAppForeground}" />
+                    </Grid>
+                </Grid>
+
+                    <GridSplitter Grid.Row="1"
+                                  Height="5"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Center"
+                                  Background="{DynamicResource BrushSplitter}"
+                                  ShowsPreview="False"
+                                  ResizeBehavior="PreviousAndNext" />
+
+                    <!-- Bottom-right quarter: channels / chats + log. -->
+                    <DockPanel Grid.Row="2" Margin="4">
                     <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,2">
                         <Button DockPanel.Dock="Right"
                                 Width="22" Height="22"
@@ -1309,13 +1350,10 @@
                     </DockPanel>
                     </Grid>
                 </DockPanel>
+            </Grid>
 
-            <!-- Cross splitters dividing the four quarters. -->
-            <GridSplitter Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
-                          Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                          Background="{DynamicResource BrushSplitter}"
-                          ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
-            <GridSplitter Grid.Column="1" Grid.Row="0" Grid.RowSpan="3"
+            <!-- Keep the middle splitter for left/right width. -->
+            <GridSplitter Grid.Column="1"
                           Width="5" VerticalAlignment="Stretch" HorizontalAlignment="Center"
                           Background="{DynamicResource BrushSplitter}"
                           ShowsPreview="False" ResizeBehavior="PreviousAndNext" />

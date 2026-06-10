@@ -9,9 +9,13 @@ namespace MeshRF.App;
 
 public partial class MainWindow : Window
 {
+    private const double LastPacketMinWidth = 280.0;
+    private const double LastPacketMaxWidth = 1400.0;
+
     private readonly DispatcherTimer _timer;
     private float[] _spectrumBuffer = Array.Empty<float>();
     private bool _layoutApplied;
+    private int _snapshotInFlight;
 
     // Rolling history of recent spectrum frames, used to freeze a spectrogram
     // of the last detected packet. Holds the most recent HistoryFrames frames.
@@ -104,11 +108,21 @@ public partial class MainWindow : Window
     // far end of the ring and risks the preamble scrolling out.
     private void OnPacketDecoded()
     {
+        if (System.Threading.Interlocked.Exchange(ref _snapshotInFlight, 1) != 0)
+            return;
         _ = FreezeLastPacketAsync();
     }
 
     private void OnCloseLastPacket(object sender, RoutedEventArgs e)
         => LastPacketPanel.Visibility = Visibility.Collapsed;
+
+    private void OnLastPacketResizeDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+    {
+        // The grip is on the panel's left edge while the panel is right-aligned,
+        // so moving left should increase width and moving right should decrease.
+        double target = LastPacketPanel.Width - e.HorizontalChange;
+        LastPacketPanel.Width = Math.Clamp(target, LastPacketMinWidth, LastPacketMaxWidth);
+    }
 
     // Double-clicking a node row opens (or focuses) a DM conversation tab.
     private void NodesGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -291,35 +305,45 @@ public partial class MainWindow : Window
     // push and visibility update are marshalled back to the UI thread.
     private async Task FreezeLastPacketAsync()
     {
-        if (DataContext is not MainViewModel vm) return;
-
-        const int nTime = 512;
-        const int nFreq = 256;
-        var grid = new float[nTime * nFreq];
-
-        // Capture locals the background lambda can close over safely.
-        var core = vm.Core;
-        var specHistory = _specHistory;
-        double spectrumSpanHz = vm.SpectrumSpanHz;
-
-        int rows = await Task.Run(() => core.PullPacketSpectrogram(grid, nTime, nFreq))
-                              .ConfigureAwait(true); // resume on UI thread
-
-        if (rows <= 0)
+        try
         {
-            FreezeLastPacketFromHistory(vm);
-            return;
-        }
+            if (DataContext is not MainViewModel vm) return;
 
-        LastPacket.Clear();
-        for (int t = 0; t < rows; t++)
-        {
-            var row = new float[nFreq];
-            Array.Copy(grid, t * nFreq, row, 0, nFreq);
-            LastPacket.Push(row);
+            const int nTime = 512;
+            const int nFreq = 256;
+
+            // Pull + row extraction off the UI thread; commit to the control once.
+            var (rows, frames) = await Task.Run(() =>
+            {
+                var grid = new float[nTime * nFreq];
+                int written = vm.Core.PullPacketSpectrogram(grid, nTime, nFreq);
+                if (written <= 0) return (0, new List<float[]>());
+
+                var local = new List<float[]>(written);
+                for (int t = 0; t < written; t++)
+                {
+                    var row = new float[nFreq];
+                    Array.Copy(grid, t * nFreq, row, 0, nFreq);
+                    local.Add(row);
+                }
+                return (written, local);
+            }).ConfigureAwait(true);
+
+            if (rows <= 0)
+            {
+                FreezeLastPacketFromHistory(vm);
+                return;
+            }
+
+            ApplySnapshotContrast(frames);
+            LastPacket.ReplaceFrames(frames);
+            LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
+            LastPacketPanel.Visibility = Visibility.Visible;
         }
-        LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
-        LastPacketPanel.Visibility = Visibility.Visible;
+        finally
+        {
+            System.Threading.Interlocked.Exchange(ref _snapshotInFlight, 0);
+        }
     }
 
     // Fallback: replays the rolling history into the frozen last-packet
@@ -345,15 +369,53 @@ public partial class MainWindow : Window
         int lo = center - half;
         int width = half * 2;
 
-        LastPacket.Clear();
+        var frames = new List<float[]>(_specHistory.Count);
         var slice = new float[width];
         foreach (var f in _specHistory)
         {
             Array.Copy(f, lo, slice, 0, width);
-            LastPacket.Push((float[])slice.Clone());
+            frames.Add((float[])slice.Clone());
         }
+        ApplySnapshotContrast(frames);
+        LastPacket.ReplaceFrames(frames);
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
         LastPacketPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ApplySnapshotContrast(IReadOnlyList<float[]> frames)
+    {
+        // Derive robust display levels from this specific snapshot so frozen
+        // packets stay high-contrast regardless of the live waterfall levels.
+        int count = 0;
+        for (int i = 0; i < frames.Count; i++)
+            count += frames[i]?.Length ?? 0;
+        if (count < 16) return;
+
+        var vals = new float[count];
+        int p = 0;
+        for (int i = 0; i < frames.Count; i++)
+        {
+            var row = frames[i];
+            if (row is null) continue;
+            for (int j = 0; j < row.Length; j++)
+            {
+                float v = row[j];
+                if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+                vals[p++] = v;
+            }
+        }
+        if (p < 16) return;
+
+        Array.Sort(vals, 0, p);
+        float p05 = vals[(int)Math.Clamp(Math.Round((p - 1) * 0.05), 0, p - 1)];
+        float p995 = vals[(int)Math.Clamp(Math.Round((p - 1) * 0.995), 0, p - 1)];
+
+        double floor = p05 - 2.0;
+        double ceil = p995 + 2.0;
+        if (ceil - floor < 24.0) ceil = floor + 24.0;
+
+        LastPacket.FloorDb = floor;
+        LastPacket.CeilDb = ceil;
     }
 
     private void ApplySavedLayout()
@@ -363,12 +425,28 @@ public partial class MainWindow : Window
         ApplyWindowBounds(settings);
         ApplyStarPair(MainLayoutGrid.ColumnDefinitions[0], settings.MainLeftPaneStar,
                       MainLayoutGrid.ColumnDefinitions[2], settings.MainRightPaneStar);
-        ApplyStarPair(MainLayoutGrid.RowDefinitions[0], settings.MainTopPaneStar,
-                      MainLayoutGrid.RowDefinitions[2], settings.MainBottomPaneStar);
+
+        var leftTop = settings.MainLeftTopPaneStar ?? settings.MainTopPaneStar;
+        var leftBottom = settings.MainLeftBottomPaneStar ?? settings.MainBottomPaneStar;
+        ApplyStarPair(LeftPaneGrid.RowDefinitions[0], leftTop,
+                  LeftPaneGrid.RowDefinitions[2], leftBottom);
+
+        var rightTop = settings.MainRightTopPaneStar ?? settings.MainTopPaneStar;
+        var rightBottom = settings.MainRightBottomPaneStar ?? settings.MainBottomPaneStar;
+        ApplyStarPair(RightPaneGrid.RowDefinitions[0], rightTop,
+                  RightPaneGrid.RowDefinitions[2], rightBottom);
+
         ApplyStarPair(SpectrumLayoutGrid.RowDefinitions[0], settings.SpectrumTopPaneStar,
                       SpectrumLayoutGrid.RowDefinitions[2], settings.SpectrumBottomPaneStar);
         ApplyStarPair(MessagesLayoutGrid.RowDefinitions[0], settings.MessagesTopPaneStar,
                       MessagesLayoutGrid.RowDefinitions[2], settings.MessagesBottomPaneStar);
+
+        LastPacketPanel.Width = Math.Clamp(
+            settings.LastPacketPanelWidth ?? LastPacketPanel.Width,
+            LastPacketMinWidth,
+            LastPacketMaxWidth);
+
+        ApplyWaypointsColumnWidths(settings.WaypointColumnWidths);
 
         IdentityExpander.IsExpanded = settings.IdentityExpanded;
         RestoreSelectedTab(settings);
@@ -475,10 +553,19 @@ public partial class MainWindow : Window
         settings.MainLeftPaneStar = mainLeft;
         settings.MainRightPaneStar = mainRight;
 
-        SaveStarPair(MainLayoutGrid.RowDefinitions[0], MainLayoutGrid.RowDefinitions[2],
-                     out var mainTop, out var mainBottom);
-        settings.MainTopPaneStar = mainTop;
-        settings.MainBottomPaneStar = mainBottom;
+        SaveStarPair(LeftPaneGrid.RowDefinitions[0], LeftPaneGrid.RowDefinitions[2],
+                 out var leftTop, out var leftBottom);
+        settings.MainLeftTopPaneStar = leftTop;
+        settings.MainLeftBottomPaneStar = leftBottom;
+
+        SaveStarPair(RightPaneGrid.RowDefinitions[0], RightPaneGrid.RowDefinitions[2],
+                 out var rightTop, out var rightBottom);
+        settings.MainRightTopPaneStar = rightTop;
+        settings.MainRightBottomPaneStar = rightBottom;
+
+        // Keep legacy shared stars updated for backward compatibility with older builds.
+        settings.MainTopPaneStar = rightTop ?? leftTop;
+        settings.MainBottomPaneStar = rightBottom ?? leftBottom;
 
         SaveStarPair(SpectrumLayoutGrid.RowDefinitions[0], SpectrumLayoutGrid.RowDefinitions[2],
                      out var spectrumTop, out var spectrumBottom);
@@ -489,6 +576,12 @@ public partial class MainWindow : Window
                      out var messagesTop, out var messagesBottom);
         settings.MessagesTopPaneStar = messagesTop;
         settings.MessagesBottomPaneStar = messagesBottom;
+
+        settings.LastPacketPanelWidth = Math.Clamp(LastPacketPanel.Width,
+            LastPacketMinWidth,
+            LastPacketMaxWidth);
+
+        settings.WaypointColumnWidths = SaveWaypointsColumnWidths();
 
         settings.IdentityExpanded = IdentityExpander.IsExpanded;
 
@@ -535,5 +628,35 @@ public partial class MainWindow : Window
     {
         firstStar = firstRow.Height.IsStar ? firstRow.Height.Value : null;
         secondStar = secondRow.Height.IsStar ? secondRow.Height.Value : null;
+    }
+
+    private void ApplyWaypointsColumnWidths(IReadOnlyList<double>? widths)
+    {
+        if (widths is null || widths.Count == 0) return;
+        var cols = WaypointsGrid.Columns;
+        int n = Math.Min(widths.Count, cols.Count);
+        for (int i = 0; i < n; i++)
+        {
+            double w = widths[i];
+            if (double.IsNaN(w) || double.IsInfinity(w) || w < 24.0) continue;
+            cols[i].Width = new System.Windows.Controls.DataGridLength(
+                w,
+                System.Windows.Controls.DataGridLengthUnitType.Pixel);
+        }
+    }
+
+    private List<double> SaveWaypointsColumnWidths()
+    {
+        var cols = WaypointsGrid.Columns;
+        var widths = new List<double>(cols.Count);
+        for (int i = 0; i < cols.Count; i++)
+        {
+            var col = cols[i];
+            double w = col.ActualWidth;
+            if (double.IsNaN(w) || double.IsInfinity(w) || w < 24.0)
+                w = 24.0;
+            widths.Add(w);
+        }
+        return widths;
     }
 }
