@@ -826,6 +826,16 @@
                                                    FontSize="12" />
                                     </MenuItem.Icon>
                                 </MenuItem>
+                                <MenuItem x:Name="CopyNodesMenuItem"
+                                          Header="Copy"
+                                          Click="OnCopyNodes"
+                                          InputGestureText="Ctrl+C">
+                                    <MenuItem.Icon>
+                                        <TextBlock Text="&#xE8C8;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
                                 <MenuItem Header="Delete"
                                           Click="OnDeleteNodes"
                                           InputGestureText="Del">
@@ -864,7 +874,8 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Header="Short" Width="Auto"
-                                                    SortMemberPath="ShortName">
+                                                    SortMemberPath="ShortName"
+                                                    ClipboardContentBinding="{Binding ShortName}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <emoji:TextBlock Text="{Binding ShortName}" FontFamily="Consolas" />
@@ -872,7 +883,8 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Header="Node name" Width="*"
-                                                    SortMemberPath="LongName">
+                                                    SortMemberPath="LongName"
+                                                    ClipboardContentBinding="{Binding LongName}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <emoji:TextBlock Text="{Binding LongName}" />
@@ -1049,6 +1061,12 @@
                                             <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
                                                     Command="{Binding CopyMessagesCommand}" />
                                                 <CheckBox DockPanel.Dock="Right"
+                                                    Content="Auto-scroll"
+                                                    Margin="0,0,8,0"
+                                                    VerticalAlignment="Center"
+                                                    IsChecked="{Binding AutoScroll, Mode=TwoWay}"
+                                                    ToolTip="Automatically follow new messages in this channel" />
+                                                <CheckBox DockPanel.Dock="Right"
                                                       Content="Mute RTTTL"
                                                       Margin="0,0,8,0"
                                                       VerticalAlignment="Center"
@@ -1092,7 +1110,7 @@
                                                  FontFamily="Consolas"
                                                  HorizontalContentAlignment="Stretch"
                                                  Grid.IsSharedSizeScope="True"
-                                                 beh:AutoScroll.IsEnabled="True">
+                                                 beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <Grid>
@@ -1132,6 +1150,12 @@
                                                     VerticalAlignment="Center"
                                                     ToolTip="Copy this conversation to the clipboard"
                                                     Command="{Binding CopyMessagesCommand}" />
+                                                <CheckBox DockPanel.Dock="Right"
+                                                    Content="Auto-scroll"
+                                                    Margin="0,0,8,0"
+                                                    VerticalAlignment="Center"
+                                                    IsChecked="{Binding AutoScroll, Mode=TwoWay}"
+                                                    ToolTip="Automatically follow new messages in this conversation" />
                                                 <CheckBox DockPanel.Dock="Right"
                                                       Content="Mute RTTTL"
                                                       Margin="0,0,8,0"
@@ -1183,7 +1207,7 @@
                                                  FontFamily="Consolas"
                                                  HorizontalContentAlignment="Stretch"
                                                  Grid.IsSharedSizeScope="True"
-                                                 beh:AutoScroll.IsEnabled="True">
+                                                 beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <Grid>

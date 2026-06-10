@@ -2,6 +2,7 @@
 using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -35,6 +36,12 @@ public static class AutoScroll
         DependencyProperty.RegisterAttached(
             "Handler", typeof(NotifyCollectionChangedEventHandler), typeof(AutoScroll));
 
+    // UI-level item changes from the generator (fires when containers are
+    // materialized), which is a reliable point to force tailing.
+    private static readonly DependencyProperty ItemsChangedHandlerProperty =
+        DependencyProperty.RegisterAttached(
+            "ItemsChangedHandler", typeof(ItemsChangedEventHandler), typeof(AutoScroll));
+
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is not ListBox lb) return;
@@ -42,12 +49,49 @@ public static class AutoScroll
         {
             lb.Loaded += OnLoaded;
             lb.DataContextChanged += OnDataContextChanged;
+            lb.IsVisibleChanged += OnIsVisibleChanged;
+
+            if (lb.GetValue(ItemsChangedHandlerProperty) is not ItemsChangedEventHandler)
+            {
+                ItemsChangedEventHandler itemsChanged = (_, ev) =>
+                {
+                    if (ev.Action is NotifyCollectionChangedAction.Add
+                                  or NotifyCollectionChangedAction.Reset
+                                  or NotifyCollectionChangedAction.Replace)
+                    {
+                        ScrollToBottom(lb);
+                    }
+                };
+                lb.ItemContainerGenerator.ItemsChanged += itemsChanged;
+                lb.SetValue(ItemsChangedHandlerProperty, itemsChanged);
+            }
         }
         else
         {
             lb.Loaded -= OnLoaded;
             lb.DataContextChanged -= OnDataContextChanged;
+            lb.IsVisibleChanged -= OnIsVisibleChanged;
+
+            if (lb.GetValue(ItemsChangedHandlerProperty) is ItemsChangedEventHandler itemsChanged)
+            {
+                lb.ItemContainerGenerator.ItemsChanged -= itemsChanged;
+                lb.ClearValue(ItemsChangedHandlerProperty);
+            }
+
+            if (lb.GetValue(SourceProperty) is INotifyCollectionChanged tracked &&
+                lb.GetValue(HandlerProperty) is NotifyCollectionChangedEventHandler oldHandler)
+            {
+                tracked.CollectionChanged -= oldHandler;
+            }
+            lb.ClearValue(SourceProperty);
+            lb.ClearValue(HandlerProperty);
         }
+    }
+
+    private static void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is ListBox lb && lb.IsVisible)
+            ScrollToBottom(lb);
     }
 
     private static void OnLoaded(object? sender, RoutedEventArgs e)
@@ -107,13 +151,14 @@ public static class AutoScroll
         // items that were just added; otherwise the scroll lands short.
         lb.Dispatcher.BeginInvoke(new Action(() =>
         {
+            if (lb.Items.Count > 0)
+            {
+                lb.ScrollIntoView(lb.Items[lb.Items.Count - 1]);
+            }
+
             if (FindScrollViewer(lb) is { } sv)
             {
                 sv.ScrollToBottom();
-            }
-            else if (lb.Items.Count > 0)
-            {
-                lb.ScrollIntoView(lb.Items[lb.Items.Count - 1]);
             }
         }), DispatcherPriority.ContextIdle);
     }

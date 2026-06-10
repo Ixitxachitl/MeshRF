@@ -134,6 +134,14 @@ public partial class MainWindow : Window
     // Context-menu "Delete" removes the selected node(s).
     private void OnDeleteNodes(object sender, RoutedEventArgs e) => DeleteSelectedNodes();
 
+    // Context-menu "Copy" uses DataGrid clipboard export (tab-separated rows).
+    private void OnCopyNodes(object sender, RoutedEventArgs e)
+    {
+        NodesGrid.Focus();
+        if (System.Windows.Input.ApplicationCommands.Copy.CanExecute(null, NodesGrid))
+            System.Windows.Input.ApplicationCommands.Copy.Execute(null, NodesGrid);
+    }
+
     private void WaypointsGrid_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == System.Windows.Input.Key.Delete)

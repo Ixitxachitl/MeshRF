@@ -16,6 +16,7 @@ public partial class MainWindow
     private void OnNodesContextMenuOpened(object sender, RoutedEventArgs e)
     {
         var selected = SelectedNodes();
+        CopyNodesMenuItem.IsEnabled = selected.Length > 0;
         ToggleNodeIgnoredMenuItem.IsEnabled = selected.Length > 0;
         bool allIgnored = selected.Length > 0 && selected.All(n => n.Ignored);
         ToggleNodeIgnoredMenuItem.Header = allIgnored ? "Unignore node" : "Ignore node";

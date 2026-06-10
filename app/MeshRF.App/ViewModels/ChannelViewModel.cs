@@ -49,6 +49,10 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private bool _muteRtttl;
 
+    /// <summary>When true, keep this chat tailed to the newest message.</summary>
+    [ObservableProperty]
+    private bool _autoScroll = true;
+
     partial void OnMuteRtttlChanged(bool value) => _onMuteRtttlChanged?.Invoke(this, value);
 
     // -- Editable fields (two-way bound to the settings panel) ---------------

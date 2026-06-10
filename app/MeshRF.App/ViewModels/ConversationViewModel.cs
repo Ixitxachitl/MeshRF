@@ -60,6 +60,10 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private bool _muteRtttl;
 
+    /// <summary>When true, keep this conversation tailed to the newest message.</summary>
+    [ObservableProperty]
+    private bool _autoScroll = true;
+
     public string TabHeader =>
         string.IsNullOrEmpty(PeerName) ? PeerId : PeerName;
 
