@@ -3537,6 +3537,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     }
                     break;
                 case PortNum.Position when result.Position is not null:
+                    bool directedPositionResponseRequest = result.WantResponse
+                        && _myNodeNum != 0
+                        && header.To == _myNodeNum
+                        && !header.IsBroadcast;
                     // A position *request* carries want_response=true and has no
                     // real coordinates (lat/lon both 0 — the payload only contains
                     // a timestamp field). Distinguish it from a real position report
@@ -3545,10 +3549,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     if (result.WantResponse &&
                         result.Position.Latitude == 0 && result.Position.Longitude == 0)
                     {
-                        if (_myNodeNum != 0 && header.To == _myNodeNum && !header.IsBroadcast)
+                        if (directedPositionResponseRequest)
                         {
                             Log($"  position requested by {senderName} — replying");
-                            ReplyWithPosition(header.From, requestId: header.PacketId);
+                            ReplyWithPosition(header.From,
+                                requestId: result.RequestId != 0 ? result.RequestId : header.PacketId);
                         }
                         break;
                     }
@@ -3562,6 +3567,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         LastHeardEpoch = rxEpoch,
                     });
                     Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
+                    // Android's "exchange position" can include coordinates while
+                    // still setting want_response on a directed packet.
+                    if (directedPositionResponseRequest)
+                    {
+                        Log($"  position exchange requested by {senderName} — replying");
+                        ReplyWithPosition(header.From,
+                            requestId: result.RequestId != 0 ? result.RequestId : header.PacketId);
+                    }
                     break;
                 case PortNum.Waypoint when result.Waypoint is not null:
                     {
