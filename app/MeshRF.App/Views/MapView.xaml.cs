@@ -90,12 +90,17 @@ public partial class MapView : UserControl
     private readonly HashSet<uint> _pendingNodeMarkerNums = new();
     private readonly DispatcherTimer _nodeMarkerUpdateTimer;
     private readonly DispatcherTimer _fullMarkerRefreshTimer;
+    private readonly DispatcherTimer _renderThrottleTimer;
     private bool _fullMarkerRefreshPending;
     private const int MaxNodeMarkerUpdatesPerTick = 32;
+    private static readonly long MapRenderMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
     private static readonly long DragPreviewMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
     private const double ClusterRadiusPx = 14;
     private const double ClusterBucketSizePx = 48;
     private long _lastDragPreviewTick;
+    private long _lastMapRenderTick;
+    private bool _mapRenderQueued;
+    private bool _mapFullRenderQueued;
 
     private static readonly SolidColorBrush NodeFillBrush = CreateFrozenBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
 
@@ -128,6 +133,11 @@ public partial class MapView : UserControl
             Interval = TimeSpan.FromMilliseconds(200),
         };
         _fullMarkerRefreshTimer.Tick += OnFullMarkerRefreshTimerTick;
+        _renderThrottleTimer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromMilliseconds(1),
+        };
+        _renderThrottleTimer.Tick += OnRenderThrottleTimerTick;
         Directory.CreateDirectory(s_cacheDir);
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -183,7 +193,63 @@ public partial class MapView : UserControl
         Render();
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs e) => Unsubscribe();
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        _renderThrottleTimer.Stop();
+        _mapRenderQueued = false;
+        _mapFullRenderQueued = false;
+        Unsubscribe();
+    }
+
+    private void OnRenderThrottleTimerTick(object? sender, EventArgs e)
+    {
+        _renderThrottleTimer.Stop();
+        if (!_mapRenderQueued && !_mapFullRenderQueued)
+            return;
+
+        _mapRenderQueued = false;
+        bool fullRender = _mapFullRenderQueued;
+        _mapFullRenderQueued = false;
+        _lastMapRenderTick = Stopwatch.GetTimestamp();
+
+        if (fullRender)
+            RenderNow();
+        else
+            RenderMarkersOnlyNow();
+    }
+
+    private void RequestRender(bool fullRender)
+    {
+        _mapFullRenderQueued |= fullRender;
+
+        long nowTicks = Stopwatch.GetTimestamp();
+        long elapsedTicks = nowTicks - _lastMapRenderTick;
+        if (elapsedTicks >= MapRenderMinIntervalTicks)
+        {
+            _renderThrottleTimer.Stop();
+            _mapRenderQueued = false;
+
+            bool doFullRender = _mapFullRenderQueued;
+            _mapFullRenderQueued = false;
+            _lastMapRenderTick = nowTicks;
+
+            if (doFullRender)
+                RenderNow();
+            else
+                RenderMarkersOnlyNow();
+            return;
+        }
+
+        if (_mapRenderQueued)
+            return;
+
+        _mapRenderQueued = true;
+        long remainingTicks = MapRenderMinIntervalTicks - elapsedTicks;
+        int remainingMs = Math.Max(1, (int)Math.Ceiling(remainingTicks * 1000.0 / Stopwatch.Frequency));
+        _renderThrottleTimer.Interval = TimeSpan.FromMilliseconds(remainingMs);
+        if (!_renderThrottleTimer.IsEnabled)
+            _renderThrottleTimer.Start();
+    }
 
     private void OnNodeMarkerUpdateTimerTick(object? sender, EventArgs e)
     {
@@ -376,7 +442,9 @@ public partial class MapView : UserControl
 
     // -- Rendering ----------------------------------------------------------
 
-    private void Render()
+    private void Render() => RequestRender(fullRender: true);
+
+    private void RenderNow()
     {
         var w = MarkerCanvas.ActualWidth;
         var h = MarkerCanvas.ActualHeight;
@@ -422,7 +490,9 @@ public partial class MapView : UserControl
     /// <summary>Redraws only the marker layer without touching the tile layer.
     /// Called when node data changes but the viewport (center/zoom) is unchanged
     /// so the tile canvas is left in place and no blink occurs.</summary>
-    private void RenderMarkersOnly()
+    private void RenderMarkersOnly() => RequestRender(fullRender: false);
+
+    private void RenderMarkersOnlyNow()
     {
         var w = MarkerCanvas.ActualWidth;
         var h = MarkerCanvas.ActualHeight;
