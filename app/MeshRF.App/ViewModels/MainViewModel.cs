@@ -2324,7 +2324,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (string.IsNullOrEmpty(msg.Text)) continue;
                 var cm = BuildHistoryMessage(msg);
                 System.Windows.Application.Current?.Dispatcher.InvokeAsync(
-                    () => convo.Add(cm));
+                    () =>
+                    {
+                        // History replay can race with a live append (for example
+                        // request-note echoes), so suppress packet-identical rows.
+                        bool duplicate = cm.PacketId != 0 &&
+                            convo.Messages.Any(existing =>
+                                existing.PacketId == cm.PacketId &&
+                                existing.IsOutgoing == cm.IsOutgoing &&
+                                string.Equals(existing.FromId, cm.FromId, StringComparison.Ordinal) &&
+                                string.Equals(existing.Text, cm.Text, StringComparison.Ordinal));
+                        if (!duplicate)
+                            convo.Add(cm);
+                    });
             }
         });
         return convo;
