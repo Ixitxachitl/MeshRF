@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -91,8 +92,10 @@ public partial class MapView : UserControl
     private readonly DispatcherTimer _fullMarkerRefreshTimer;
     private bool _fullMarkerRefreshPending;
     private const int MaxNodeMarkerUpdatesPerTick = 32;
+    private static readonly long DragPreviewMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
     private const double ClusterRadiusPx = 14;
     private const double ClusterBucketSizePx = 48;
+    private long _lastDragPreviewTick;
 
     private static readonly SolidColorBrush NodeFillBrush = CreateFrozenBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
 
@@ -1266,6 +1269,7 @@ public partial class MapView : UserControl
         _tileDragTransform.Y = 0;
         _markerDragTransform.X = 0;
         _markerDragTransform.Y = 0;
+        _lastDragPreviewTick = 0;
         MarkerCanvas.CaptureMouse();
     }
 
@@ -1324,6 +1328,10 @@ public partial class MapView : UserControl
         // Preview drag using a cheap transform; commit center + one render on mouse-up.
         _dragOffset.X += dx;
         _dragOffset.Y += dy;
+        var nowTicks = Stopwatch.GetTimestamp();
+        if (nowTicks - _lastDragPreviewTick < DragPreviewMinIntervalTicks)
+            return;
+        _lastDragPreviewTick = nowTicks;
         _tileDragTransform.X = _dragOffset.X;
         _tileDragTransform.Y = _dragOffset.Y;
         _markerDragTransform.X = _dragOffset.X;
