@@ -2326,16 +2326,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 System.Windows.Application.Current?.Dispatcher.InvokeAsync(
                     () =>
                     {
-                        // History replay can race with a live append (for example
-                        // request-note echoes), so suppress packet-identical rows.
-                        bool duplicate = cm.PacketId != 0 &&
-                            convo.Messages.Any(existing =>
-                                existing.PacketId == cm.PacketId &&
+                        // History replay can race with live appends (for example
+                        // request-note echoes). Dedup and insert chronologically
+                        // so old history does not appear after new live rows.
+                        bool duplicate = cm.PacketId != 0
+                            ? convo.Messages.Any(existing => existing.PacketId == cm.PacketId)
+                            : convo.Messages.Any(existing =>
                                 existing.IsOutgoing == cm.IsOutgoing &&
                                 string.Equals(existing.FromId, cm.FromId, StringComparison.Ordinal) &&
-                                string.Equals(existing.Text, cm.Text, StringComparison.Ordinal));
-                        if (!duplicate)
-                            convo.Add(cm);
+                                string.Equals(existing.Text, cm.Text, StringComparison.Ordinal) &&
+                                existing.Timestamp == cm.Timestamp);
+                        if (duplicate)
+                            return;
+
+                        int insertAt = convo.Messages.Count;
+                        while (insertAt > 0 && convo.Messages[insertAt - 1].Timestamp > cm.Timestamp)
+                            insertAt--;
+
+                        convo.Messages.Insert(insertAt, cm);
+                        if (convo.Messages.Count > 1000)
+                            convo.Messages.RemoveAt(0);
                     });
             }
         });
