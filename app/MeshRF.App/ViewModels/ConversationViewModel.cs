@@ -12,6 +12,15 @@ namespace MeshRF.App.ViewModels;
 /// <summary>A single label/value row of node telemetry shown in a DM tab.</summary>
 public sealed record TelemetryItem(string Label, string Value);
 
+/// <summary>A single historical position sample for a conversation peer.</summary>
+public sealed record LocationHistoryPoint(double Latitude, double Longitude, DateTime TimestampUtc)
+{
+    public DateTime TimestampLocal => TimestampUtc.ToLocalTime();
+
+    public string Display =>
+        $"{TimestampLocal:g}  {Latitude:0.#####}, {Longitude:0.#####}";
+}
+
 /// <summary>
 /// A direct-message conversation with a single peer node. Shown as a closable
 /// tab alongside the channel tabs.
@@ -19,14 +28,17 @@ public sealed record TelemetryItem(string Label, string Value);
 public partial class ConversationViewModel : ObservableObject, ITabItem
 {
     private readonly Action<ConversationViewModel, bool>? _onMuteRtttlChanged;
+    private readonly Action<ConversationViewModel>? _onLocationHistoryChanged;
     private bool _syncingNodeMute;
 
     public ConversationViewModel(uint nodeNum, string? peerName = null,
-                                 Action<ConversationViewModel, bool>? onMuteRtttlChanged = null)
+                                 Action<ConversationViewModel, bool>? onMuteRtttlChanged = null,
+                                 Action<ConversationViewModel>? onLocationHistoryChanged = null)
     {
         NodeNum = nodeNum;
         _peerName = string.IsNullOrWhiteSpace(peerName) ? string.Empty : peerName!;
         _onMuteRtttlChanged = onMuteRtttlChanged;
+        _onLocationHistoryChanged = onLocationHistoryChanged;
     }
 
     /// <summary>32-bit node number of the conversation peer.</summary>
@@ -46,8 +58,14 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     /// <summary>Formatted telemetry rows for the peer node; empty when unknown.</summary>
     public ObservableCollection<TelemetryItem> Telemetry { get; } = new();
 
+    /// <summary>Recent historical peer positions collected while this tab is open.</summary>
+    public ObservableCollection<LocationHistoryPoint> LocationHistory { get; } = new();
+
     /// <summary>True when at least one telemetry value is available.</summary>
     public bool HasTelemetry => Telemetry.Count > 0;
+
+    /// <summary>True when at least one location sample exists.</summary>
+    public bool HasLocationHistory => LocationHistory.Count > 0;
 
     /// <summary>Direct messages exchanged with this peer, newest last.</summary>
     public ObservableCollection<ChannelMessage> Messages { get; } = new();
@@ -64,6 +82,14 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private bool _autoScroll = true;
 
+    /// <summary>True when this tab has unseen incoming activity.</summary>
+    [ObservableProperty]
+    private bool _tabNeedsAttention;
+
+    /// <summary>When true, draw this peer's history as line segments on the map.</summary>
+    [ObservableProperty]
+    private bool _showLocationHistoryOnMap;
+
     public string TabHeader =>
         string.IsNullOrEmpty(PeerName) ? PeerId : PeerName;
 
@@ -77,6 +103,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         MuteRtttl = value?.MuteRtttl == true;
         _syncingNodeMute = false;
         RebuildTelemetry();
+        AppendLocationHistory(value);
     }
 
     partial void OnMuteRtttlChanged(bool value)
@@ -84,6 +111,9 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         if (!_syncingNodeMute)
             _onMuteRtttlChanged?.Invoke(this, value);
     }
+
+    partial void OnShowLocationHistoryOnMapChanged(bool value) =>
+        _onLocationHistoryChanged?.Invoke(this);
 
     private void RebuildTelemetry()
     {
@@ -138,10 +168,54 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     }
 
     [RelayCommand]
+    private void ClearLocationHistory()
+    {
+        if (LocationHistory.Count == 0) return;
+        LocationHistory.Clear();
+        OnPropertyChanged(nameof(HasLocationHistory));
+        _onLocationHistoryChanged?.Invoke(this);
+    }
+
+    [RelayCommand]
+    private void DeleteLocationHistoryPoint(LocationHistoryPoint? point)
+    {
+        if (point is null) return;
+        if (!LocationHistory.Remove(point)) return;
+        OnPropertyChanged(nameof(HasLocationHistory));
+        _onLocationHistoryChanged?.Invoke(this);
+    }
+
+    [RelayCommand]
     private void CopyMessages()
     {
         if (Messages.Count == 0) return;
         try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, Messages.Select(m => m.Display))); }
         catch { }
+    }
+
+    private void AppendLocationHistory(NodeRecord? node)
+    {
+        if (node?.Latitude is not double lat || node.Longitude is not double lon)
+            return;
+
+        var sampleTimeUtc = node.LastHeardEpoch > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(node.LastHeardEpoch).UtcDateTime
+            : DateTime.UtcNow;
+
+        var last = LocationHistory.LastOrDefault();
+        if (last is not null)
+        {
+            bool sameCoord = Math.Abs(last.Latitude - lat) < 1e-7
+                && Math.Abs(last.Longitude - lon) < 1e-7;
+            if (sameCoord)
+                return;
+        }
+
+        LocationHistory.Add(new LocationHistoryPoint(lat, lon, sampleTimeUtc));
+        if (LocationHistory.Count > 500)
+            LocationHistory.RemoveAt(0);
+
+        OnPropertyChanged(nameof(HasLocationHistory));
+        _onLocationHistoryChanged?.Invoke(this);
     }
 }

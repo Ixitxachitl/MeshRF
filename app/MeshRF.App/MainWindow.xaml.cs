@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using System.Windows.Threading;
 using MeshRF.App.ViewModels;
 using MeshRF.App.Views;
@@ -16,6 +19,10 @@ public partial class MainWindow : Window
     private float[] _spectrumBuffer = Array.Empty<float>();
     private bool _layoutApplied;
     private int _snapshotInFlight;
+    private double? _conversationMessagesPaneStar;
+    private double? _conversationRightPaneStar;
+    private double? _conversationTelemetryPaneStar;
+    private double? _conversationLocationHistoryPaneStar;
 
     // Rolling history of recent spectrum frames, used to freeze a spectrogram
     // of the last detected packet. Holds the most recent HistoryFrames frames.
@@ -35,6 +42,7 @@ public partial class MainWindow : Window
         Loaded   += OnLoaded;
         Closing  += OnClosing;
         Unloaded += (_, _) => _timer.Stop();
+        MainTabs.SelectionChanged += (_, _) => ApplyConversationPaneLayoutToCurrentTab();
     }
 
     private void OnAboutClick(object sender, RoutedEventArgs e)
@@ -191,6 +199,18 @@ public partial class MainWindow : Window
         await vm.RequestPositionAsync(node);
     }
 
+    // Context-menu "Request node info" asks the selected node(s) to reply
+    // with NodeInfo without resetting stored keys.
+    private void OnRequestNodeInfo(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = NodesGrid.SelectedItems
+            .OfType<MeshRF.Nodes.NodeRecord>()
+            .ToList();
+        if (selected.Count == 0) return;
+        vm.RequestNodeInfoOnly(selected);
+    }
+
     // Context-menu "Exchange node info" asks the selected node(s) to reply
     // with NodeInfo without clearing any stored keys.
     private void OnExchangeNodeInfo(object sender, RoutedEventArgs e)
@@ -200,7 +220,19 @@ public partial class MainWindow : Window
             .OfType<MeshRF.Nodes.NodeRecord>()
             .ToList();
         if (selected.Count == 0) return;
-        vm.RequestNodeInfo(selected);
+        vm.ExchangeNodeInfo(selected);
+    }
+
+    // Context-menu "Exchange location" asks for the node's location and also
+    // sends our current location directly to that node.
+    private async void OnExchangeLocation(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var node = NodesGrid.SelectedItems
+            .OfType<MeshRF.Nodes.NodeRecord>()
+            .FirstOrDefault();
+        if (node is null) return;
+        await vm.ExchangeLocationAsync(node);
     }
 
     // Context-menu "Request new keys" forgets the stored key(s) and asks the
@@ -312,8 +344,7 @@ public partial class MainWindow : Window
             const int nTime = 512;
             const int nFreq = 256;
 
-            // Pull + row extraction off the UI thread; commit to the control once.
-            var (rows, frames) = await Task.Run(() =>
+            (int rows, List<float[]> frames) PullFrames(int nTime, int nFreq)
             {
                 var grid = new float[nTime * nFreq];
                 int written = vm.Core.PullPacketSpectrogram(grid, nTime, nFreq);
@@ -327,7 +358,34 @@ public partial class MainWindow : Window
                     local.Add(row);
                 }
                 return (written, local);
-            }).ConfigureAwait(true);
+            }
+
+            static int ComputeRetryDelayMs(MainViewModel vm)
+            {
+                // Base retry on LoRa symbol time so slow modes (high SF / low BW)
+                // wait longer to accumulate enough history for the first packet.
+                int sf = Math.Clamp(vm.OverrideSf, (byte)5, (byte)12);
+                double bwHz = Math.Max(7_800.0, vm.OverrideBwKhz * 1000.0);
+                double symbolMs = ((1 << sf) / bwHz) * 1000.0;
+
+                // Roughly preamble-scale wait with hard bounds for UI responsiveness.
+                int delayMs = (int)Math.Round(symbolMs * 24.0);
+                return Math.Clamp(delayMs, 80, 900);
+            }
+
+            // Pull + row extraction off the UI thread; commit to the control once.
+            var (rows, frames) = await Task.Run(() => PullFrames(nTime, nFreq))
+                                    .ConfigureAwait(true);
+
+            // The very first packet after RX start can arrive before enough
+            // IQ history has accumulated for a robust native snapshot. Retry
+            // once shortly after decode before falling back.
+            if (rows <= 0)
+            {
+                await Task.Delay(ComputeRetryDelayMs(vm)).ConfigureAwait(true);
+                (rows, frames) = await Task.Run(() => PullFrames(nTime, nFreq))
+                                      .ConfigureAwait(true);
+            }
 
             if (rows <= 0)
             {
@@ -441,6 +499,11 @@ public partial class MainWindow : Window
         ApplyStarPair(MessagesLayoutGrid.RowDefinitions[0], settings.MessagesTopPaneStar,
                       MessagesLayoutGrid.RowDefinitions[2], settings.MessagesBottomPaneStar);
 
+        _conversationMessagesPaneStar = settings.ConversationMessagesPaneStar;
+        _conversationRightPaneStar = settings.ConversationRightPaneStar;
+        _conversationTelemetryPaneStar = settings.ConversationTelemetryPaneStar;
+        _conversationLocationHistoryPaneStar = settings.ConversationLocationHistoryPaneStar;
+
         LastPacketPanel.Width = Math.Clamp(
             settings.LastPacketPanelWidth ?? LastPacketPanel.Width,
             LastPacketMinWidth,
@@ -451,6 +514,7 @@ public partial class MainWindow : Window
         IdentityExpander.IsExpanded = settings.IdentityExpanded;
         RestoreSelectedTab(settings);
         Map.LoadFromSettings(settings);
+        ApplyConversationPaneLayoutToCurrentTab();
         _layoutApplied = true;
     }
 
@@ -577,6 +641,12 @@ public partial class MainWindow : Window
         settings.MessagesTopPaneStar = messagesTop;
         settings.MessagesBottomPaneStar = messagesBottom;
 
+        CaptureConversationPaneLayout();
+        settings.ConversationMessagesPaneStar = _conversationMessagesPaneStar;
+        settings.ConversationRightPaneStar = _conversationRightPaneStar;
+        settings.ConversationTelemetryPaneStar = _conversationTelemetryPaneStar;
+        settings.ConversationLocationHistoryPaneStar = _conversationLocationHistoryPaneStar;
+
         settings.LastPacketPanelWidth = Math.Clamp(LastPacketPanel.Width,
             LastPacketMinWidth,
             LastPacketMaxWidth);
@@ -610,6 +680,138 @@ public partial class MainWindow : Window
 
         Map.SaveToSettings(settings);
         settings.Save();
+    }
+
+    private void ConversationLayoutGrid_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Grid root) return;
+        ApplyConversationPaneLayout(root);
+    }
+
+    private void ConversationMainSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (sender is not DependencyObject d) return;
+        var layout = FindAncestorByName<Grid>(d, "ConversationLayoutGrid");
+        if (layout is null || layout.ColumnDefinitions.Count < 3) return;
+        SaveProportionalPair(layout.ColumnDefinitions[0], layout.ColumnDefinitions[2],
+                             out _conversationMessagesPaneStar, out _conversationRightPaneStar);
+    }
+
+    private void ConversationTelemetrySplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (sender is not DependencyObject d) return;
+        var panel = FindAncestorByName<Grid>(d, "ConversationTelemetryGrid");
+        if (panel is null || panel.RowDefinitions.Count < 4) return;
+        SaveStarPair(panel.RowDefinitions[1], panel.RowDefinitions[3],
+                     out _conversationTelemetryPaneStar, out _conversationLocationHistoryPaneStar);
+    }
+
+    private void ApplyConversationPaneLayoutToCurrentTab()
+    {
+        if (MainTabs.SelectedItem is not ConversationViewModel) return;
+        var tabItem = MainTabs.ItemContainerGenerator.ContainerFromItem(MainTabs.SelectedItem) as TabItem;
+        if (tabItem is null) return;
+        var layout = FindVisualDescendantByName<Grid>(tabItem, "ConversationLayoutGrid");
+        if (layout is null) return;
+        ApplyConversationPaneLayout(layout);
+    }
+
+    private void ApplyConversationPaneLayout(Grid root)
+    {
+        if (root.ColumnDefinitions.Count >= 3)
+        {
+            ApplyStarPair(root.ColumnDefinitions[0], _conversationMessagesPaneStar,
+                          root.ColumnDefinitions[2], _conversationRightPaneStar);
+        }
+
+        var telemetry = FindVisualDescendantByName<Grid>(root, "ConversationTelemetryGrid");
+        if (telemetry is not null && telemetry.RowDefinitions.Count >= 4)
+        {
+            ApplyStarPair(telemetry.RowDefinitions[1], _conversationTelemetryPaneStar,
+                          telemetry.RowDefinitions[3], _conversationLocationHistoryPaneStar);
+        }
+    }
+
+    private void CaptureConversationPaneLayout()
+    {
+        foreach (var item in MainTabs.Items)
+        {
+            if (item is not ConversationViewModel) continue;
+            var tabItem = MainTabs.ItemContainerGenerator.ContainerFromItem(item) as TabItem;
+            if (tabItem is null) continue;
+
+            var layout = FindVisualDescendantByName<Grid>(tabItem, "ConversationLayoutGrid");
+            if (layout is not null && layout.ColumnDefinitions.Count >= 3)
+            {
+                SaveProportionalPair(layout.ColumnDefinitions[0], layout.ColumnDefinitions[2],
+                                     out _conversationMessagesPaneStar, out _conversationRightPaneStar);
+            }
+
+            var telemetry = FindVisualDescendantByName<Grid>(tabItem, "ConversationTelemetryGrid");
+            if (telemetry is not null && telemetry.RowDefinitions.Count >= 4)
+            {
+                SaveStarPair(telemetry.RowDefinitions[1], telemetry.RowDefinitions[3],
+                             out _conversationTelemetryPaneStar, out _conversationLocationHistoryPaneStar);
+            }
+
+            if (layout is not null || telemetry is not null)
+                return;
+        }
+    }
+
+    private static T? FindAncestorByName<T>(DependencyObject? start, string name)
+        where T : FrameworkElement
+    {
+        var current = start;
+        while (current is not null)
+        {
+            if (current is T typed && string.Equals(typed.Name, name, StringComparison.Ordinal))
+                return typed;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
+    private static void SaveProportionalPair(ColumnDefinition firstColumn,
+                                             ColumnDefinition secondColumn,
+                                             out double? firstStar,
+                                             out double? secondStar)
+    {
+        if (firstColumn.Width.IsStar && secondColumn.Width.IsStar)
+        {
+            firstStar = firstColumn.Width.Value;
+            secondStar = secondColumn.Width.Value;
+            return;
+        }
+
+        double first = firstColumn.ActualWidth;
+        double second = secondColumn.ActualWidth;
+        if (first > 0 && second > 0)
+        {
+            firstStar = first;
+            secondStar = second;
+            return;
+        }
+
+        firstStar = null;
+        secondStar = null;
+    }
+
+    private static T? FindVisualDescendantByName<T>(DependencyObject? root, string name)
+        where T : FrameworkElement
+    {
+        if (root is null) return null;
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T typed && string.Equals(typed.Name, name, StringComparison.Ordinal))
+                return typed;
+
+            var nested = FindVisualDescendantByName<T>(child, name);
+            if (nested is not null) return nested;
+        }
+        return null;
     }
 
     private static void SaveStarPair(System.Windows.Controls.ColumnDefinition firstColumn,

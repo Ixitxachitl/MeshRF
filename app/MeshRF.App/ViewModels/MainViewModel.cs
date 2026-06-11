@@ -278,7 +278,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<string> NodeHopsFilterOptions     { get; } = ["Any", "Direct", "≤1 hop", "≤2 hops", "≤3 hops", "≤4 hops"];
     public IReadOnlyList<string> NodeKeyFilterOptions      { get; } = ["Any", "Good key", "Mismatch", "No key"];
-    public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "No position"];
+    public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "No position", "Invalid"];
     public IReadOnlyList<string> NodeIgnoredFilterOptions  { get; } = ["Show all", "Hide ignored", "Only ignored"];
 
     /// <summary>True when a home location is set (enables the distance filter).</summary>
@@ -346,11 +346,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         // Location filter.
-        bool hasPos = n.Latitude.HasValue && n.Longitude.HasValue;
+        bool hasPos = n.HasLocation;
         switch (NodeLocationFilter)
         {
             case "Has position": if (!hasPos) return false; break;
             case "No position":  if (hasPos)  return false; break;
+            case "Invalid":      if (!n.HasInvalidLocation) return false; break;
         }
 
         // Ignored filter.
@@ -410,10 +411,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedTabChanged(object? value)
     {
+        if (value is ITabItem tab)
+            tab.TabNeedsAttention = false;
+
         OnPropertyChanged(nameof(SelectedChannel));
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
+    }
+
+    private void MarkTabNeedsAttention(ITabItem? tab)
+    {
+        if (tab is null) return;
+        if (ReferenceEquals(SelectedTab, tab)) return;
+        tab.TabNeedsAttention = true;
     }
 
     // -- Local node identity -------------------------------------------------
@@ -501,6 +512,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         bool IsHome, bool IsWaypoint = false, bool IsExpired = false,
         uint? NodeNum = null, long? WaypointRowId = null);
 
+    /// <summary>A polyline on the map (used for per-node location history).</summary>
+    public sealed record MapPolyline(string Label, IReadOnlyList<(double Lat, double Lon)> Points);
+
     /// <summary>
     /// Markers for the map view: the home location (if set) plus every node
     /// that has a known position.
@@ -533,6 +547,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 IsExpired: wp.IsExpired,
                 WaypointRowId: wp.Id));
         }
+        return list;
+    }
+
+    /// <summary>Location history paths requested by open conversation tabs.</summary>
+    public IReadOnlyList<MapPolyline> GetMapPolylines()
+    {
+        var list = new List<MapPolyline>();
+
+        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+        {
+            if (!convo.ShowLocationHistoryOnMap || convo.LocationHistory.Count < 2)
+                continue;
+
+            var points = convo.LocationHistory
+                .Select(p => (p.Latitude, p.Longitude))
+                .ToList();
+            if (points.Count < 2)
+                continue;
+
+            list.Add(new MapPolyline(
+                string.IsNullOrWhiteSpace(convo.PeerName) ? convo.PeerId : convo.PeerName,
+                points));
+        }
+
         return list;
     }
 
@@ -584,7 +622,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             _nodeStore.ClearPublicKey(n.NodeNum);
             uint packetId = NextPacketId();
-            RequestNodeInfo(n.NodeNum, packetId);
+            SendNodeInfoExchangeRequest(n.NodeNum, packetId);
             var name = NodeDisplayName(n.NodeNum);
             Log($"  requested new keys from {name}");
             // Surface the request in the node's DM tab (and persist it) so the
@@ -604,11 +642,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ReloadNodes();
     }
 
-    /// <summary>Ask the given node(s) to exchange NodeInfo with us without
-    /// clearing any stored keys. This uses a directed NodeInfo request so the
-    /// peer replies with its own NodeInfo while our existing trust state stays
-    /// intact.</summary>
-    public void RequestNodeInfo(IEnumerable<MeshRF.Nodes.NodeRecord> nodes)
+    /// <summary>Ask the given node(s) for NodeInfo using a custom request-only
+    /// packet (empty NODEINFO payload + want_response), so we do not advertise
+    /// our own NodeInfo in the request packet.</summary>
+    public void RequestNodeInfoOnly(IEnumerable<MeshRF.Nodes.NodeRecord> nodes)
     {
         var targets = nodes?.Where(n => n is not null).ToList();
         if (targets is null || targets.Count == 0) return;
@@ -617,11 +654,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             uint packetId = NextPacketId();
-            RequestNodeInfo(n.NodeNum, packetId);
+            SendNodeInfoRequestOnly(n.NodeNum, packetId);
             var name = NodeDisplayName(n.NodeNum);
-            Log($"  requested NodeInfo from {name}");
+            Log($"  requested NodeInfo from {name} (request-only)");
             var convo = OpenConversation(n.NodeNum, name, focus: false);
-            var noteText = $"Requested NodeInfo from {name}\u2026";
+            var noteText = $"Requested NodeInfo from {name} (request-only)\u2026";
+            convo.Add(new ChannelMessage
+            {
+                FromId = "nodeinfo",
+                Text = noteText,
+                IsOutgoing = true,
+            });
+            PersistConversationNote(n.NodeNum, outgoing: true, packetId,
+                                    "nodeinfo", noteText);
+        }
+    }
+
+    /// <summary>Ask the given node(s) to exchange NodeInfo with us without
+    /// clearing any stored keys. This sends our NodeInfo directed at the peer
+    /// with want_response set so it replies with its own NodeInfo.</summary>
+    public void ExchangeNodeInfo(IEnumerable<MeshRF.Nodes.NodeRecord> nodes)
+    {
+        var targets = nodes?.Where(n => n is not null).ToList();
+        if (targets is null || targets.Count == 0) return;
+
+        foreach (var n in targets)
+        {
+            if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
+            uint packetId = NextPacketId();
+            SendNodeInfoExchangeRequest(n.NodeNum, packetId);
+            var name = NodeDisplayName(n.NodeNum);
+            Log($"  exchanged NodeInfo with {name}");
+            var convo = OpenConversation(n.NodeNum, name, focus: false);
+            var noteText = $"Exchanged NodeInfo with {name}\u2026";
             convo.Add(new ChannelMessage
             {
                 FromId = "nodeinfo",
@@ -789,6 +854,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Status = $"Position request error: {ex.Message}";
             Log("  " + Status);
         }
+    }
+
+    /// <summary>
+    /// Exchange location with <paramref name="node"/> by requesting its
+    /// position and also sending our current position directly to it.
+    /// </summary>
+    public async Task ExchangeLocationAsync(MeshRF.Nodes.NodeRecord? node)
+    {
+        if (node is null) return;
+        await RequestPositionAsync(node);
+        ReplyWithPosition(node.NodeNum);
     }
 
     /// <summary>Builds the multi-line tooltip shown when hovering a node on the
@@ -1411,6 +1487,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SetNodeRtttlMuted(node, muted);
     }
 
+    private void OnConversationLocationHistoryChanged(ConversationViewModel convo) =>
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
+
     /// <summary>
     /// Keep the default Primary channel's tab name in sync with the active
     /// modem preset. Only auto-named default channels are renamed (name empty
@@ -1940,7 +2019,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var convo = new ConversationViewModel(nodeNum, name ?? NodeDisplayName(nodeNum),
-            OnConversationMuteRtttlChanged);
+            OnConversationMuteRtttlChanged,
+            OnConversationLocationHistoryChanged);
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
         // Add the tab immediately so the UI is responsive while history loads.
         Tabs.Add(convo);
@@ -1992,6 +2072,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (tab is ConversationViewModel convo)
         {
+            bool affectedMap = convo.ShowLocationHistoryOnMap && convo.LocationHistory.Count > 1;
             int idx = Tabs.IndexOf(convo);
             Tabs.Remove(convo);
             if (ReferenceEquals(SelectedTab, convo))
@@ -2000,6 +2081,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     : null;
             // Closing a DM tab means it should not reopen next launch.
             SaveSettings();
+            if (affectedMap)
+                MapDataChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -2387,9 +2470,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Log($"  DM: no public key known for {convo.TabHeader} yet — "
                   + "requesting their NodeInfo so the next DM can use PKC. "
                   + "Modern nodes reject legacy DMs; retry once their key arrives.");
-                // Proactively pull the peer's key by sending our NodeInfo with
-                // want_response directed at them (firmware replies with theirs).
-                RequestNodeInfo(convo.NodeNum);
+                                // Proactively pull the peer's key using the same NODEINFO_APP
+                                // request style as official Meshtastic apps.
+                                SendNodeInfoExchangeRequest(convo.NodeNum);
             }
         }
 
@@ -2681,15 +2764,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Send our NodeInfo directed at <paramref name="to"/> with
-    /// <c>want_response</c> set, prompting that node to reply with its own
-    /// NodeInfo — the standard Meshtastic way to learn a peer's public key
-    /// before a PKC direct message. No-op when we can't transmit. When
+    /// Send a request-only NodeInfo packet to <paramref name="to"/>: empty
+    /// NODEINFO payload + <c>want_response</c> set, prompting that node to
+    /// reply with its own NodeInfo without us advertising ours in the request.
+    /// No-op when we can't transmit. When
     /// <paramref name="packetId"/> is 0 a fresh id is allocated; callers that
     /// need to reference the sent packet (e.g. to log a conversation note) can
     /// pass one in.
     /// </summary>
-    private void RequestNodeInfo(uint to, uint packetId = 0)
+    private void SendNodeInfoRequestOnly(uint to, uint packetId = 0)
+    {
+        if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null) return;
+
+        try
+        {
+            if (packetId == 0) packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeNodeInfoRequest(
+                primary.Config, _myNodeNum, to, packetId,
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            var preset = SelectedPreset; var gain = TxGainDb; var amp = AmpEnable;
+            TransmitBackground(preset, hz, frame, gain, amp);
+        }
+        catch (Exception ex)
+        {
+            Log($"  NodeInfo request failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Send our NodeInfo directed at <paramref name="to"/> with
+    /// <c>want_response</c> set, prompting that node to reply with its own
+    /// NodeInfo. This is the exchange flow.
+    /// </summary>
+    private void SendNodeInfoExchangeRequest(uint to, uint packetId = 0)
     {
         if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
         var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
@@ -2708,11 +2818,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var preset = SelectedPreset; var gain = TxGainDb; var amp = AmpEnable;
             TransmitBackground(preset, hz, frame, gain, amp);
-            Log($"  requested NodeInfo from !{to:x8}");
         }
         catch (Exception ex)
         {
-            Log($"  NodeInfo request failed: {ex.Message}");
+            Log($"  NodeInfo exchange failed: {ex.Message}");
         }
     }
 
@@ -3436,6 +3545,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 SnrDb = record.SnrDb,
                                 PacketId = header.PacketId,
                             });
+                        MarkTabNeedsAttention(convo);
                         Log($"  DM from {senderName}: {record.Text}");
                         // Acknowledge if the sender asked for one (firmware does
                         // this for any unicast packet addressed to it).
@@ -3457,6 +3567,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             RssiDbm = record.RssiDbfs,
                             SnrDb = record.SnrDb,
                         });
+                        MarkTabNeedsAttention(chanVm);
                         if (chanVm is not null && chanVm.Messages.Count > 1000)
                             chanVm.Messages.RemoveAt(0);
                         Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
@@ -3558,6 +3669,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         break;
                     }
                     nodeChanged = true;
+                    var existingPositionNode = _nodeStore.Get(header.From);
+                    bool positionChanged = existingPositionNode?.Latitude is not double oldLat
+                        || existingPositionNode.Longitude is not double oldLon
+                        || Math.Abs(oldLat - result.Position.Latitude) > 1e-7
+                        || Math.Abs(oldLon - result.Position.Longitude) > 1e-7
+                        || existingPositionNode.AltitudeM != result.Position.AltitudeM;
                     _nodeStore.Upsert(new NodeRecord
                     {
                         NodeNum = header.From,
@@ -3566,7 +3683,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         AltitudeM = result.Position.AltitudeM,
                         LastHeardEpoch = rxEpoch,
                     });
-                    Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
+                    if (positionChanged)
+                        Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
                     // Android's "exchange position" can include coordinates while
                     // still setting want_response on a directed packet.
                     if (directedPositionResponseRequest)

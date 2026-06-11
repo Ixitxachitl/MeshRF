@@ -230,6 +230,21 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// Encode a request-only NODEINFO_APP packet directed at <paramref name="to"/>:
+    /// empty payload + <c>want_response</c> set, prompting the peer to send its
+    /// NodeInfo without us advertising ours in the same packet.
+    /// </summary>
+    public static byte[] EncodeNodeInfoRequest(ChannelConfig channel,
+                                               uint from,
+                                               uint to,
+                                               uint packetId,
+                                               byte hopLimit = 3,
+                                               bool okToMqtt = false)
+        => Encode(channel, from, to, packetId, PortNum.NodeInfo,
+                  ReadOnlySpan<byte>.Empty, hopLimit, wantAck: false,
+                  wantResponse: true, okToMqtt: okToMqtt);
+
+    /// <summary>
     /// Broadcast our location (POSITION_APP <c>Position</c> protobuf). The
     /// channel's <paramref name="precisionBits"/> fuzzes the transmitted
     /// coordinates exactly like firmware <c>applyPositionPrecision</c>: keep the

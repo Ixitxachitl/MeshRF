@@ -11,6 +11,9 @@ public interface ITabItem
     /// <summary>Text shown on the tab header.</summary>
     string TabHeader { get; }
 
+    /// <summary>When true, the tab header should draw attention to unseen activity.</summary>
+    bool TabNeedsAttention { get; set; }
+
     /// <summary>True if the user may close this tab (DM conversations); channels
     /// are permanent and return false.</summary>
     bool CanClose { get; }

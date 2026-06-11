@@ -396,6 +396,8 @@ public partial class MapView : UserControl
         // Keep a small margin so edge markers/labels do not pop in late.
         const double cullMarginPx = 48;
 
+        DrawLocationHistory(originX, originY, viewportW, viewportH);
+
         // Node markers are collected and clustered; the home marker is drawn
         // immediately since it never stacks with nodes.
         var nodes = new List<(MainViewModel.MapMarker mk, double px, double py)>();
@@ -473,6 +475,72 @@ public partial class MapView : UserControl
 
         if (!restoredActiveSpider)
             _activeSpiderClusterKey = null;
+    }
+
+    private void DrawLocationHistory(double originX, double originY, double viewportW, double viewportH)
+    {
+        if (_vm is null) return;
+
+        const double cullMarginPx = 96;
+        foreach (var polyline in _vm.GetMapPolylines())
+        {
+            if (polyline.Points.Count < 2)
+                continue;
+
+            Point? prev = null;
+            bool anyVisible = false;
+            var segment = new Polyline
+            {
+                Stroke = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0x8C, 0x2D)),
+                StrokeThickness = 2.0,
+                StrokeLineJoin = PenLineJoin.Round,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                IsHitTestVisible = false,
+                ToolTip = $"Location history: {polyline.Label}",
+            };
+
+            foreach (var point in polyline.Points)
+            {
+                double px = LonToX(point.Lon, _zoom) - originX;
+                double py = LatToY(point.Lat, _zoom) - originY;
+                var current = new Point(px, py);
+
+                bool currentVisible =
+                    px >= -cullMarginPx && px <= viewportW + cullMarginPx &&
+                    py >= -cullMarginPx && py <= viewportH + cullMarginPx;
+                anyVisible |= currentVisible;
+
+                if (prev is Point prior)
+                {
+                    // If points are far apart in pixel space, split to avoid
+                    // drawing a wrap-around jump across the whole world.
+                    if (Math.Abs(current.X - prior.X) > 2048 || Math.Abs(current.Y - prior.Y) > 2048)
+                    {
+                        if (segment.Points.Count >= 2 && anyVisible)
+                            MarkerCanvas.Children.Add(segment);
+
+                        segment = new Polyline
+                        {
+                            Stroke = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0x8C, 0x2D)),
+                            StrokeThickness = 2.0,
+                            StrokeLineJoin = PenLineJoin.Round,
+                            StrokeStartLineCap = PenLineCap.Round,
+                            StrokeEndLineCap = PenLineCap.Round,
+                            IsHitTestVisible = false,
+                            ToolTip = $"Location history: {polyline.Label}",
+                        };
+                        anyVisible = currentVisible;
+                    }
+                }
+
+                segment.Points.Add(current);
+                prev = current;
+            }
+
+            if (segment.Points.Count >= 2 && anyVisible)
+                MarkerCanvas.Children.Add(segment);
+        }
     }
 
     /// <summary>Draws a single marker dot with a hover tooltip.</summary>
@@ -631,7 +699,7 @@ public partial class MapView : UserControl
             AttachNodeInteraction(dot, members[i].mk);
             spider.Children.Add(dot);
 
-            var label = new TextBlock
+            var label = new Emoji.Wpf.TextBlock
             {
                 Text = members[i].mk.Label,
                 FontSize = 11,
@@ -677,7 +745,7 @@ public partial class MapView : UserControl
     {
         var toolTip = new ToolTip
         {
-            Content = new TextBlock
+            Content = new Emoji.Wpf.TextBlock
             {
                 Text = text,
                 FontSize = 11,

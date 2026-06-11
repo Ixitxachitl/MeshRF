@@ -722,18 +722,10 @@
                             </DataGrid.CellStyle>
                             <DataGrid.ContextMenu>
                                 <ContextMenu Opened="OnNodesContextMenuOpened">
-                                    <MenuItem Header="Traceroute"
-                                              Click="OnTraceroute">
+                                    <MenuItem Header="Request node info"
+                                              Click="OnRequestNodeInfo">
                                         <MenuItem.Icon>
                                             <TextBlock Text="&#xE968;"
-                                                       FontFamily="Segoe MDL2 Assets"
-                                                       FontSize="12" />
-                                        </MenuItem.Icon>
-                                    </MenuItem>
-                                    <MenuItem Header="Request position"
-                                              Click="OnRequestPosition">
-                                        <MenuItem.Icon>
-                                            <TextBlock Text="&#xE707;"
                                                        FontFamily="Segoe MDL2 Assets"
                                                        FontSize="12" />
                                         </MenuItem.Icon>
@@ -742,6 +734,30 @@
                                               Click="OnExchangeNodeInfo">
                                         <MenuItem.Icon>
                                             <TextBlock Text="&#xE8BD;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Request location"
+                                              Click="OnRequestPosition">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE707;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Exchange location"
+                                              Click="OnExchangeLocation">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE707;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Traceroute"
+                                              Click="OnTraceroute">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE968;"
                                                        FontFamily="Segoe MDL2 Assets"
                                                        FontSize="12" />
                                         </MenuItem.Icon>
@@ -802,6 +818,31 @@
                                                             <DataTrigger Binding="{Binding HasKeyMismatch}" Value="True">
                                                                 <Setter Property="Foreground" Value="#E53935" />
                                                                 <Setter Property="ToolTip" Value="Key mismatch — this node's public key changed. Right-click → Request new keys to accept it." />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="" Width="Auto"
+                                                        SortMemberPath="HasLocation"
+                                                        CanUserResize="False">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="&#xE707;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12"
+                                                       HorizontalAlignment="Center"
+                                                       Visibility="{Binding HasLocation, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="ToolTip" Value="Has position" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasInvalidLocation}" Value="True">
+                                                                <Setter Property="Foreground" Value="#E53935" />
+                                                                <Setter Property="ToolTip" Value="Invalid position (0,0 or out of bounds)" />
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -987,10 +1028,56 @@
                     <TabControl x:Name="MainTabs" Grid.Row="0"
                                 ItemsSource="{Binding Tabs}"
                                 SelectedItem="{Binding SelectedTab, Mode=TwoWay}">
+                        <TabControl.ItemContainerStyle>
+                            <Style TargetType="TabItem" BasedOn="{StaticResource {x:Type TabItem}}">
+                                <Setter Property="FontWeight" Value="Normal" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding TabNeedsAttention}" Value="True">
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <DataTrigger.EnterActions>
+                                            <BeginStoryboard x:Name="TabItemFlashStoryboard">
+                                                <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                     From="1"
+                                                                     To="0.55"
+                                                                     Duration="0:0:0.35" />
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </DataTrigger.EnterActions>
+                                        <DataTrigger.ExitActions>
+                                            <StopStoryboard BeginStoryboardName="TabItemFlashStoryboard" />
+                                        </DataTrigger.ExitActions>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TabControl.ItemContainerStyle>
+
                         <TabControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
-                                    <emoji:TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center" />
+                                    <emoji:TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center">
+                                        <emoji:TextBlock.Style>
+                                            <Style TargetType="emoji:TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding TabNeedsAttention}" Value="True">
+                                                        <DataTrigger.EnterActions>
+                                                            <BeginStoryboard x:Name="TabFlashStoryboard">
+                                                                <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                                     From="1"
+                                                                                     To="0.35"
+                                                                                     Duration="0:0:0.45" />
+                                                                </Storyboard>
+                                                            </BeginStoryboard>
+                                                        </DataTrigger.EnterActions>
+                                                        <DataTrigger.ExitActions>
+                                                            <StopStoryboard BeginStoryboardName="TabFlashStoryboard" />
+                                                        </DataTrigger.ExitActions>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </emoji:TextBlock.Style>
+                                    </emoji:TextBlock>
                                     <Button Content="&#xE711;"
                                             FontFamily="Segoe MDL2 Assets" FontSize="9"
                                             Margin="6,0,-4,0" Padding="3,0"
@@ -1135,7 +1222,8 @@
                                                     ToolTip="Broadcast your position on the primary channel (uses the channel's position precision and your home location)"
                                                     Command="{Binding DataContext.SendPositionCommand,
                                                               RelativeSource={RelativeSource AncestorType=TabControl}}" />
-                                            <TextBox VerticalContentAlignment="Center"
+                                              <TextBox VerticalContentAlignment="Center"
+                                                    FontFamily="Segoe UI, Segoe UI Emoji"
                                                      ToolTip="Type a message and press Enter or Send (HackRF only)"
                                                      Text="{Binding DataContext.ComposeText,
                                                             RelativeSource={RelativeSource AncestorType=TabControl},
@@ -1223,7 +1311,8 @@
                                                 Command="{Binding DataContext.SendDirectMessageCommand,
                                                           RelativeSource={RelativeSource AncestorType=TabControl}}"
                                                 CommandParameter="{Binding}" />
-                                        <TextBox VerticalContentAlignment="Center"
+                                                 <TextBox VerticalContentAlignment="Center"
+                                                    FontFamily="Segoe UI, Segoe UI Emoji"
                                                  ToolTip="Type a direct message and press Enter or Send"
                                                  Text="{Binding ComposeText,
                                                         Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
@@ -1236,7 +1325,8 @@
                                         </TextBox>
                                     </DockPanel>
                                     <!-- Messages (left) + resizable telemetry panel (right). -->
-                                    <Grid>
+                                    <Grid x:Name="ConversationLayoutGrid"
+                                          Loaded="ConversationLayoutGrid_Loaded">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" MinWidth="120" />
                                             <ColumnDefinition Width="Auto" />
@@ -1271,6 +1361,7 @@
                                                       HorizontalAlignment="Center"
                                                       VerticalAlignment="Stretch"
                                                       Background="{DynamicResource BrushSplitter}"
+                                                      DragCompleted="ConversationMainSplitter_DragCompleted"
                                                       ShowsPreview="False"
                                                       ResizeBehavior="PreviousAndNext" />
 
@@ -1280,47 +1371,150 @@
                                                 Background="{DynamicResource BrushPanelBackground}"
                                                 BorderBrush="{DynamicResource BrushPanelBorder}"
                                             BorderThickness="1">
-                                        <DockPanel LastChildFill="True">
-                                            <TextBlock DockPanel.Dock="Top" Text="Telemetry"
-                                                       FontWeight="SemiBold" Margin="0,0,0,6" />
-                                            <TextBlock DockPanel.Dock="Top"
-                                                       Foreground="{DynamicResource BrushSubtle}"
-                                                       FontSize="11" TextWrapping="Wrap"
-                                                       Text="No telemetry received yet.">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="TextBlock">
-                                                        <Setter Property="Visibility" Value="Collapsed" />
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding HasTelemetry}" Value="False">
-                                                                <Setter Property="Visibility" Value="Visible" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
-                                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                        <Grid x:Name="ConversationTelemetryGrid">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" MinHeight="80" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" MinHeight="80" />
+                                            </Grid.RowDefinitions>
+
+                                            <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,6">
+                                                <TextBlock Text="Telemetry"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center" />
+                                            </DockPanel>
+
+                                            <ScrollViewer Grid.Row="1"
+                                                          VerticalScrollBarVisibility="Auto"
                                                           HorizontalScrollBarVisibility="Disabled">
-                                                <ItemsControl ItemsSource="{Binding Telemetry}">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Grid Margin="0,1">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="Auto" MinWidth="92" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Grid.Column="0"
-                                                                           Foreground="{DynamicResource BrushSubtle}"
-                                                                           Text="{Binding Label}" />
-                                                                <TextBlock Grid.Column="1"
-                                                                           FontFamily="Consolas"
-                                                                           TextWrapping="Wrap"
-                                                                           Text="{Binding Value}" />
-                                                            </Grid>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
+                                                <StackPanel>
+                                                    <TextBlock Foreground="{DynamicResource BrushSubtle}"
+                                                               FontSize="11" TextWrapping="Wrap"
+                                                               Text="No telemetry received yet.">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding HasTelemetry}" Value="False">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+
+                                                    <ItemsControl ItemsSource="{Binding Telemetry}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid Margin="0,1">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="Auto" MinWidth="92" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Foreground="{DynamicResource BrushSubtle}"
+                                                                               Text="{Binding Label}" />
+                                                                    <TextBlock Grid.Column="1"
+                                                                               FontFamily="Consolas"
+                                                                               TextWrapping="Wrap"
+                                                                               Text="{Binding Value}" />
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
                                             </ScrollViewer>
-                                        </DockPanel>
+
+                                            <GridSplitter Grid.Row="2"
+                                                          Height="5"
+                                                          HorizontalAlignment="Stretch"
+                                                          VerticalAlignment="Center"
+                                                          Background="{DynamicResource BrushSplitter}"
+                                                          DragCompleted="ConversationTelemetrySplitter_DragCompleted"
+                                                          ShowsPreview="False"
+                                                          ResizeBehavior="PreviousAndNext" />
+
+                                            <Grid Grid.Row="3">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="*" />
+                                                </Grid.RowDefinitions>
+
+                                                <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,6,0,4">
+                                                    <Button DockPanel.Dock="Right"
+                                                            Content="Clear"
+                                                            Padding="8,2"
+                                                            Command="{Binding ClearLocationHistoryCommand}" />
+                                                    <CheckBox DockPanel.Dock="Right"
+                                                              Content="Show on map"
+                                                              Margin="0,0,8,0"
+                                                              VerticalAlignment="Center"
+                                                              IsChecked="{Binding ShowLocationHistoryOnMap, Mode=TwoWay}" />
+                                                    <TextBlock Text="Location history"
+                                                               FontWeight="SemiBold"
+                                                               VerticalAlignment="Center" />
+                                                </DockPanel>
+
+                                                <TextBlock Grid.Row="1"
+                                                           Foreground="{DynamicResource BrushSubtle}"
+                                                           FontSize="11"
+                                                           Margin="0,0,0,4"
+                                                           Text="No location samples yet.">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasLocationHistory}" Value="False">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+
+                                                <DataGrid Grid.Row="2"
+                                                          ItemsSource="{Binding LocationHistory}"
+                                                          AutoGenerateColumns="False"
+                                                          HeadersVisibility="Column"
+                                                          CanUserAddRows="False"
+                                                          CanUserDeleteRows="False"
+                                                          CanUserResizeRows="False"
+                                                          IsReadOnly="True"
+                                                          SelectionMode="Single"
+                                                          SelectionUnit="FullRow"
+                                                          Margin="0,0,0,0"
+                                                          MinHeight="80"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Auto"
+                                                          Visibility="{Binding HasLocationHistory, Converter={StaticResource BoolToVis}}">
+                                                    <DataGrid.InputBindings>
+                                                        <KeyBinding Key="Delete"
+                                                                    Command="{Binding DeleteLocationHistoryPointCommand}"
+                                                                    CommandParameter="{Binding SelectedItem, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
+                                                    </DataGrid.InputBindings>
+                                                    <DataGrid.ContextMenu>
+                                                        <ContextMenu>
+                                                            <MenuItem Header="Delete"
+                                                                      Command="{Binding PlacementTarget.DataContext.DeleteLocationHistoryPointCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                      CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                        </ContextMenu>
+                                                    </DataGrid.ContextMenu>
+                                                    <DataGrid.Columns>
+                                                        <DataGridTextColumn Header="Time"
+                                                                            Width="*"
+                                                                            Binding="{Binding TimestampLocal, StringFormat={}{0:g}}" />
+                                                        <DataGridTextColumn Header="Lat"
+                                                                            Width="Auto"
+                                                                            Binding="{Binding Latitude, StringFormat={}{0:0.#####}}" />
+                                                        <DataGridTextColumn Header="Lon"
+                                                                            Width="Auto"
+                                                                            Binding="{Binding Longitude, StringFormat={}{0:0.#####}}" />
+                                                    </DataGrid.Columns>
+                                                </DataGrid>
+                                            </Grid>
+                                        </Grid>
                                     </Border>
                                     </Grid>
                                 </DockPanel>
@@ -1346,7 +1540,13 @@
                         </DockPanel>
                         <ListBox ItemsSource="{Binding LogLines}"
                                  FontFamily="Consolas"
-                                 beh:AutoScroll.IsEnabled="True" />
+                                 beh:AutoScroll.IsEnabled="True">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <emoji:TextBlock Text="{Binding}" FontFamily="Consolas" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </DockPanel>
                     </Grid>
                 </DockPanel>

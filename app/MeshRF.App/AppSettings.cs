@@ -170,6 +170,18 @@ public sealed class AppSettings
     /// <summary>Log panel star height below the tabs/messages.</summary>
     public double? MessagesBottomPaneStar { get; set; }
 
+    /// <summary>Conversation tab messages pane star width.</summary>
+    public double? ConversationMessagesPaneStar { get; set; }
+
+    /// <summary>Conversation tab right panel (telemetry/history) star width.</summary>
+    public double? ConversationRightPaneStar { get; set; }
+
+    /// <summary>Conversation tab telemetry pane star height.</summary>
+    public double? ConversationTelemetryPaneStar { get; set; }
+
+    /// <summary>Conversation tab location-history pane star height.</summary>
+    public double? ConversationLocationHistoryPaneStar { get; set; }
+
     /// <summary>Whether the identity expander is open.</summary>
     public bool IdentityExpanded { get; set; } = false;
 
