@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Data;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.App.Audio;
@@ -44,6 +45,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _waypointsDirty;
     private bool _suspendNodeReload;
     private readonly HashSet<uint> _dirtyNodeNums = new();
+    private readonly Dictionary<uint, NodeRecord> _nodesByNum = new();
+    private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
+    private readonly Dictionary<uint, string> _nodeTooltipCache = new();
+    private DateTime _lastNodesViewRefreshUtc = DateTime.MinValue;
+    private static readonly TimeSpan NodesViewRefreshInterval = TimeSpan.FromMilliseconds(250);
+    private const int MaxDirtyNodeUpdatesPerTick = 64;
+    private const int MaxRxEventsPerTick = 8;
+    private bool _nodesViewRefreshPending;
+    private readonly DispatcherTimer _nodesViewRefreshTimer;
 
     private const string ManualLocationSourceValue = "Manual";
     private const string UsbSerialLocationSourceValue = "UsbSerial";
@@ -536,7 +546,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
             var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
             var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
-            list.Add(new MapMarker(lat, lon, label, BuildNodeTooltip(n), IsHome: false, NodeNum: n.NodeNum));
+            list.Add(new MapMarker(lat, lon, label, GetNodeTooltipCached(n), IsHome: false, NodeNum: n.NodeNum));
         }
 
         foreach (var wp in Waypoints)
@@ -596,6 +606,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             _nodeStore.Forget(n.NodeNum);
             Nodes.Remove(n);
+            _nodesByNum.Remove(n.NodeNum);
+            _nodeTooltipSignatures.Remove(n.NodeNum);
+            _nodeTooltipCache.Remove(n.NodeNum);
             if (n.Latitude is not null && n.Longitude is not null) removedPositioned = true;
         }
 
@@ -988,6 +1001,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public MainViewModel()
     {
+        _nodesViewRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = NodesViewRefreshInterval,
+        };
+        _nodesViewRefreshTimer.Tick += OnNodesViewRefreshTimerTick;
+
         _settings = AppSettings.Load();
         var soon = DateTime.Now.AddHours(1);
         WaypointExpiryTimeText = soon.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
@@ -1151,15 +1170,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void ReloadNodes()
     {
         _dirtyNodeNums.Clear();
+        _nodesByNum.Clear();
+        _nodeTooltipSignatures.Clear();
+        _nodeTooltipCache.Clear();
         Nodes.Clear();
         // Our own node lives in the database so chats can show our name, but we
         // don't list ourselves among the discovered peers.
         foreach (var n in _nodeStore.All())
             if (_myNodeNum == 0 || n.NodeNum != _myNodeNum)
+            {
                 Nodes.Add(n);
+                _nodesByNum[n.NodeNum] = n;
+            }
         // Keep any open DM tabs' telemetry panels in sync with the latest data.
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
-            convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == convo.NodeNum);
+            convo.Node = _nodesByNum.GetValueOrDefault(convo.NodeNum);
+        NodesView?.Refresh();
         MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -1173,20 +1199,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void RefreshConversationNode(uint nodeNum)
     {
-        var node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
+        var node = _nodesByNum.GetValueOrDefault(nodeNum);
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             if (convo.NodeNum == nodeNum)
                 convo.Node = node;
     }
 
     /// <summary>Apply database-backed updates for only the node ids that changed.</summary>
-    private void ApplyDirtyNodeUpdates()
+    private bool ApplyDirtyNodeUpdates()
     {
-        if (_dirtyNodeNums.Count == 0) return;
+        if (_dirtyNodeNums.Count == 0)
+        {
+            ReloadNodes();
+            return false;
+        }
 
-        var changedNodeNums = _dirtyNodeNums.ToArray();
+        // The first on-air discovery after startup is safest as a full reload,
+        // which avoids grid view state lagging behind until user interaction.
+        if (Nodes.Count == 0)
+        {
+            ReloadNodes();
+            return false;
+        }
 
-        foreach (var nodeNum in _dirtyNodeNums.ToArray())
+        var changedNodeNums = _dirtyNodeNums
+            .Take(MaxDirtyNodeUpdatesPerTick)
+            .ToArray();
+
+        foreach (var nodeNum in changedNodeNums)
         {
             var latest = _nodeStore.Get(nodeNum);
             var existing = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
@@ -1195,27 +1235,124 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (existing is not null)
                     Nodes.Remove(existing);
+                _nodesByNum.Remove(nodeNum);
+                _nodeTooltipSignatures.Remove(nodeNum);
+                _nodeTooltipCache.Remove(nodeNum);
                 RefreshConversationNode(nodeNum);
                 continue;
             }
 
+            bool keepDefaultOrder = ShouldKeepDefaultNodeOrder();
             if (existing is null)
             {
-                Nodes.Add(latest);
+                if (keepDefaultOrder)
+                    InsertNodeByDefaultOrder(latest);
+                else
+                    Nodes.Add(latest);
             }
             else
             {
-                int index = Nodes.IndexOf(existing);
-                if (index >= 0)
-                    Nodes[index] = latest;
+                if (keepDefaultOrder)
+                {
+                    Nodes.Remove(existing);
+                    InsertNodeByDefaultOrder(latest);
+                }
+                else
+                {
+                    int index = Nodes.IndexOf(existing);
+                    if (index >= 0)
+                        Nodes[index] = latest;
+                }
             }
+
+            _nodesByNum[nodeNum] = latest;
 
             RefreshConversationNode(nodeNum);
         }
 
-        _dirtyNodeNums.Clear();
-        NodesView?.Refresh();
+        foreach (var nodeNum in changedNodeNums)
+            _dirtyNodeNums.Remove(nodeNum);
+        RefreshNodesViewIfNeeded();
         NodeMarkersChanged?.Invoke(changedNodeNums);
+        return _dirtyNodeNums.Count > 0;
+    }
+
+    private bool ShouldKeepDefaultNodeOrder()
+    {
+        var view = NodesView;
+        if (view is null) return true;
+        bool hasSort = view.SortDescriptions.Count > 0;
+        bool hasGroup = view.GroupDescriptions?.Count > 0;
+        return !hasSort && !hasGroup;
+    }
+
+    private void InsertNodeByDefaultOrder(NodeRecord node)
+    {
+        int insertAt = 0;
+        while (insertAt < Nodes.Count)
+        {
+            var current = Nodes[insertAt];
+            if (node.LastHeardEpoch > current.LastHeardEpoch) break;
+            if (node.LastHeardEpoch == current.LastHeardEpoch && node.NodeNum < current.NodeNum) break;
+            insertAt++;
+        }
+        Nodes.Insert(insertAt, node);
+    }
+
+    private void RefreshNodesViewIfNeeded()
+    {
+        var view = NodesView;
+        if (view is null) return;
+
+        bool hasActiveFilter =
+            !string.IsNullOrWhiteSpace(NodeSearchText) ||
+            !string.Equals(NodeHopsFilter, "Any", StringComparison.Ordinal) ||
+            !string.Equals(NodeKeyFilter, "Any", StringComparison.Ordinal) ||
+            !string.Equals(NodeLocationFilter, "Any", StringComparison.Ordinal) ||
+            !string.Equals(NodeIgnoredFilter, "Show all", StringComparison.Ordinal) ||
+            !string.IsNullOrWhiteSpace(NodeDistanceKmText) ||
+            !string.IsNullOrWhiteSpace(NodeMaxAgeMinutesText);
+
+        bool hasSortOrGroup = view.SortDescriptions.Count > 0 || view.GroupDescriptions?.Count > 0;
+
+        if (!hasActiveFilter && !hasSortOrGroup)
+        {
+            _nodesViewRefreshPending = false;
+            if (_nodesViewRefreshTimer.IsEnabled)
+                _nodesViewRefreshTimer.Stop();
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var elapsed = now - _lastNodesViewRefreshUtc;
+        if (elapsed < NodesViewRefreshInterval)
+        {
+            _nodesViewRefreshPending = true;
+            var remaining = NodesViewRefreshInterval - elapsed;
+            _nodesViewRefreshTimer.Interval = remaining <= TimeSpan.Zero
+                ? TimeSpan.FromMilliseconds(1)
+                : remaining;
+            if (!_nodesViewRefreshTimer.IsEnabled)
+                _nodesViewRefreshTimer.Start();
+            return;
+        }
+
+        _lastNodesViewRefreshUtc = now;
+        _nodesViewRefreshPending = false;
+        if (_nodesViewRefreshTimer.IsEnabled)
+            _nodesViewRefreshTimer.Stop();
+        view.Refresh();
+    }
+
+    private void OnNodesViewRefreshTimerTick(object? sender, EventArgs e)
+    {
+        _nodesViewRefreshTimer.Stop();
+        if (!_nodesViewRefreshPending)
+            return;
+
+        _nodesViewRefreshPending = false;
+        _lastNodesViewRefreshUtc = DateTime.UtcNow;
+        NodesView?.Refresh();
     }
 
     /// <summary>Temporarily pause node list reloads (for example while the
@@ -1225,9 +1362,77 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _suspendNodeReload = suspended;
         if (!suspended && _nodesDirty)
         {
-            ApplyDirtyNodeUpdates();
-            _nodesDirty = false;
+            if (_dirtyNodeNums.Count == 0)
+            {
+                ReloadNodes();
+                _nodesDirty = false;
+            }
+            else
+                _nodesDirty = ApplyDirtyNodeUpdates();
         }
+    }
+
+    /// <summary>Returns map markers for only the specified node ids.
+    /// Used by incremental map updates so large node lists do not require
+    /// rebuilding marker data for every node on each change.</summary>
+    public IReadOnlyDictionary<uint, MapMarker> GetNodeMapMarkers(IReadOnlyCollection<uint> nodeNums)
+    {
+        if (nodeNums.Count == 0)
+            return new Dictionary<uint, MapMarker>();
+
+        var markers = new Dictionary<uint, MapMarker>(nodeNums.Count);
+
+        foreach (var nodeNum in nodeNums)
+        {
+            if (!_nodesByNum.TryGetValue(nodeNum, out var n)) continue;
+            if (!NodePassesFilter(n)) continue;
+            if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
+
+            var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
+            var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
+            markers[nodeNum] = new MapMarker(lat, lon, label, GetNodeTooltipCached(n), IsHome: false, NodeNum: nodeNum);
+        }
+
+        return markers;
+    }
+
+    private string GetNodeTooltipCached(MeshRF.Nodes.NodeRecord n)
+    {
+        int sig = ComputeNodeTooltipSignature(n);
+        if (_nodeTooltipSignatures.TryGetValue(n.NodeNum, out int oldSig) &&
+            oldSig == sig &&
+            _nodeTooltipCache.TryGetValue(n.NodeNum, out var cached))
+            return cached;
+
+        var fresh = BuildNodeTooltip(n);
+        _nodeTooltipSignatures[n.NodeNum] = sig;
+        _nodeTooltipCache[n.NodeNum] = fresh;
+        return fresh;
+    }
+
+    private static int ComputeNodeTooltipSignature(MeshRF.Nodes.NodeRecord n)
+    {
+        var h = new HashCode();
+        h.Add(n.LongName, StringComparer.Ordinal);
+        h.Add(n.ShortName, StringComparer.Ordinal);
+        h.Add(n.DisplayId, StringComparer.Ordinal);
+        h.Add(n.Role, StringComparer.Ordinal);
+        h.Add(n.HwModel, StringComparer.Ordinal);
+        h.Add(n.Latitude);
+        h.Add(n.Longitude);
+        h.Add(n.AltitudeM);
+        h.Add(n.RssiDbm);
+        h.Add(n.SnrDb);
+        h.Add(n.HopsAway);
+        h.Add(n.BatteryPct);
+        h.Add(n.VoltageV);
+        h.Add(n.ChannelUtilPct);
+        h.Add(n.AirUtilTxPct);
+        h.Add(n.TemperatureC);
+        h.Add(n.RelativeHumidityPct);
+        h.Add(n.BarometricPressureHpa);
+        h.Add(n.LastHeardEpoch);
+        return h.ToHashCode();
     }
 
     public void ReloadWaypoints()
@@ -1540,10 +1745,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _nodeStore.SetIgnored(node.NodeNum, ignored);
         MarkNodeDirty(node.NodeNum);
         if (!_suspendNodeReload)
-        {
-            ApplyDirtyNodeUpdates();
-            _nodesDirty = false;
-        }
+            _nodesDirty = ApplyDirtyNodeUpdates();
     }
 
     public void SetNodesIgnored(IEnumerable<NodeRecord> nodes, bool ignored)
@@ -1555,10 +1757,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             MarkNodeDirty(node.NodeNum);
         }
         if (!_suspendNodeReload)
-        {
-            ApplyDirtyNodeUpdates();
-            _nodesDirty = false;
-        }
+            _nodesDirty = ApplyDirtyNodeUpdates();
     }
 
     private bool IsNodeIgnored(uint nodeNum) =>
@@ -3878,7 +4077,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Drain any queued demodulator events into the log. Cap per tick so a
         // burst can't lock up the UI thread.
-        for (int i = 0; i < 16; i++)
+        for (int i = 0; i < MaxRxEventsPerTick; i++)
         {
             var ev = _core.PullEvent();
             if (ev is null) break;
@@ -3910,8 +4109,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // rebind stutter on every received frame).
         if (_nodesDirty && !_suspendNodeReload)
         {
-            ApplyDirtyNodeUpdates();
-            _nodesDirty = false;
+            // Fallback: if we somehow flagged node dirtiness without tracking
+            // specific node ids, do a full sync so the grid can't get stale.
+            if (_dirtyNodeNums.Count == 0)
+            {
+                ReloadNodes();
+                _nodesDirty = false;
+            }
+            else
+                _nodesDirty = ApplyDirtyNodeUpdates();
         }
         if (_waypointsDirty)
         {

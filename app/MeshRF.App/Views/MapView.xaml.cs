@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using MeshRF.App;
 using MeshRF.App.ViewModels;
 using Path = System.IO.Path;
@@ -68,7 +69,9 @@ public partial class MapView : UserControl
 
     private bool _dragging;
     private Point _lastMouse;
-    private long _lastDragRenderTick;
+    private Vector _dragOffset;
+    private readonly TranslateTransform _tileDragTransform = new();
+    private readonly TranslateTransform _markerDragTransform = new();
     private bool _userMovedView;
 
     // Temporary elements added when a cluster of stacked nodes is "spidered"
@@ -78,7 +81,20 @@ public partial class MapView : UserControl
     private bool _pendingMarkerRefresh;
     private int _openNodeToolTips;
     private bool _followHome;
-    private bool _hasNodeClusters;
+    private bool _clusterNodes = true;
+    private readonly HashSet<uint> _clusteredNodeNums = new();
+    private readonly Dictionary<uint, (double Lat, double Lon)> _lastNodeMarkerCoords = new();
+    private readonly Dictionary<uint, (double X, double Y, int BucketX, int BucketY)> _nodeVisualLayout = new();
+    private readonly Dictionary<long, HashSet<uint>> _nodeVisualBuckets = new();
+    private readonly HashSet<uint> _pendingNodeMarkerNums = new();
+    private readonly DispatcherTimer _nodeMarkerUpdateTimer;
+    private readonly DispatcherTimer _fullMarkerRefreshTimer;
+    private bool _fullMarkerRefreshPending;
+    private const int MaxNodeMarkerUpdatesPerTick = 32;
+    private const double ClusterRadiusPx = 14;
+    private const double ClusterBucketSizePx = 48;
+
+    private static readonly SolidColorBrush NodeFillBrush = CreateFrozenBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
 
     private sealed record NodeVisual(Ellipse Dot, FrameworkElement Label);
     private readonly Dictionary<uint, NodeVisual> _nodeVisuals = new();
@@ -97,6 +113,18 @@ public partial class MapView : UserControl
     public MapView()
     {
         InitializeComponent();
+        TileCanvas.RenderTransform = _tileDragTransform;
+        MarkerCanvas.RenderTransform = _markerDragTransform;
+        _nodeMarkerUpdateTimer = new DispatcherTimer(DispatcherPriority.ContextIdle)
+        {
+            Interval = TimeSpan.FromMilliseconds(33),
+        };
+        _nodeMarkerUpdateTimer.Tick += OnNodeMarkerUpdateTimerTick;
+        _fullMarkerRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(200),
+        };
+        _fullMarkerRefreshTimer.Tick += OnFullMarkerRefreshTimerTick;
         Directory.CreateDirectory(s_cacheDir);
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -124,6 +152,13 @@ public partial class MapView : UserControl
         return c;
     }
 
+    private static SolidColorBrush CreateFrozenBrush(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         Unsubscribe();
@@ -147,6 +182,50 @@ public partial class MapView : UserControl
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => Unsubscribe();
 
+    private void OnNodeMarkerUpdateTimerTick(object? sender, EventArgs e)
+    {
+        if (_pendingNodeMarkerNums.Count == 0)
+        {
+            _nodeMarkerUpdateTimer.Stop();
+            return;
+        }
+
+        // Process marker updates in bounded chunks so large telemetry bursts
+        // don't monopolize the UI thread and stutter spectrum/waterfall draws.
+        var changed = _pendingNodeMarkerNums
+            .Take(MaxNodeMarkerUpdatesPerTick)
+            .ToArray();
+        foreach (var nodeNum in changed)
+            _pendingNodeMarkerNums.Remove(nodeNum);
+
+        OnNodeMarkersChangedCore(changed);
+
+        if (_pendingNodeMarkerNums.Count == 0)
+        {
+            _nodeMarkerUpdateTimer.Stop();
+            return;
+        }
+
+        if (!_nodeMarkerUpdateTimer.IsEnabled)
+            _nodeMarkerUpdateTimer.Start();
+    }
+
+    private void OnFullMarkerRefreshTimerTick(object? sender, EventArgs e)
+    {
+        _fullMarkerRefreshTimer.Stop();
+        if (!_fullMarkerRefreshPending) return;
+
+        if (_activeSpiderClusterKey is not null || _openNodeToolTips > 0)
+        {
+            _pendingMarkerRefresh = true;
+            _fullMarkerRefreshTimer.Start();
+            return;
+        }
+
+        _fullMarkerRefreshPending = false;
+        RenderMarkersOnly();
+    }
+
     private void Subscribe()
     {
         if (_vm is null) return;
@@ -167,8 +246,17 @@ public partial class MapView : UserControl
 
     private void OnNodeMarkersChanged(IReadOnlyCollection<uint> nodeNums)
     {
-        if (Dispatcher.CheckAccess()) OnNodeMarkersChangedCore(nodeNums);
-        else Dispatcher.BeginInvoke(new Action(() => OnNodeMarkersChangedCore(nodeNums)));
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(() => OnNodeMarkersChanged(nodeNums)));
+            return;
+        }
+
+        foreach (var nodeNum in nodeNums)
+            _pendingNodeMarkerNums.Add(nodeNum);
+
+        if (!_nodeMarkerUpdateTimer.IsEnabled)
+            _nodeMarkerUpdateTimer.Start();
     }
 
     private void OnNodeMarkersChangedCore(IReadOnlyCollection<uint> nodeNums)
@@ -180,11 +268,16 @@ public partial class MapView : UserControl
             return;
         }
 
-        // Any auto-viewport behavior or clustered marker layout needs a full
-        // marker pass to stay consistent.
-        if (_followHome || !_userMovedView || _hasNodeClusters)
+        // Any auto-viewport behavior needs a full marker pass.
+        if (_followHome || !_userMovedView)
         {
             OnMarkersChanged();
+            return;
+        }
+
+        if (!_clusterNodes)
+        {
+            UpdateNodeMarkers(nodeNums);
             return;
         }
 
@@ -199,6 +292,16 @@ public partial class MapView : UserControl
 
     private void OnMarkersChanged()
     {
+        if (_dragging)
+        {
+            _pendingMarkerRefresh = true;
+            return;
+        }
+
+        _fullMarkerRefreshPending = false;
+        if (_fullMarkerRefreshTimer.IsEnabled)
+            _fullMarkerRefreshTimer.Stop();
+
         if (_activeSpiderClusterKey is not null || _openNodeToolTips > 0)
         {
             _pendingMarkerRefresh = true;
@@ -235,8 +338,7 @@ public partial class MapView : UserControl
             }
             else
             {
-                FitToMarkers(markers);
-                viewportChanged = true;
+                viewportChanged = FitToMarkers(markers);
             }
         }
 
@@ -280,7 +382,10 @@ public partial class MapView : UserControl
         TileCanvas.Children.Clear();
         MarkerCanvas.Children.Clear();
         _nodeVisuals.Clear();
-        _hasNodeClusters = false;
+        _nodeVisualLayout.Clear();
+        _nodeVisualBuckets.Clear();
+        _clusteredNodeNums.Clear();
+        _lastNodeMarkerCoords.Clear();
 
         // World-pixel coordinate of the viewport center.
         double cx = LonToX(_centerLon, _zoom);
@@ -323,7 +428,10 @@ public partial class MapView : UserControl
         double originY = LatToY(_centerLat, _zoom) - h / 2.0;
         MarkerCanvas.Children.Clear();
         _nodeVisuals.Clear();
-        _hasNodeClusters = false;
+        _nodeVisualLayout.Clear();
+        _nodeVisualBuckets.Clear();
+        _clusteredNodeNums.Clear();
+        _lastNodeMarkerCoords.Clear();
         DrawMarkers(originX, originY);
     }
 
@@ -338,16 +446,57 @@ public partial class MapView : UserControl
         double originX = LonToX(_centerLon, _zoom) - w / 2.0;
         double originY = LatToY(_centerLat, _zoom) - h / 2.0;
         const double cullMarginPx = 48;
-        const double clusterRadiusPx = 14;
-        double clusterRadiusSq = clusterRadiusPx * clusterRadiusPx;
+        double clusterRadiusSq = ClusterRadiusPx * ClusterRadiusPx;
 
-        var nodesById = _vm.GetMapMarkers()
-            .Where(m => !m.IsHome && !m.IsWaypoint && m.NodeNum is not null)
-            .ToDictionary(m => m.NodeNum!.Value, m => m);
+        var changedMarkers = _vm.GetNodeMapMarkers(nodeNums);
+
+        if (!_clusterNodes)
+        {
+            foreach (var nodeNum in nodeNums)
+            {
+                if (!changedMarkers.TryGetValue(nodeNum, out var mk))
+                {
+                    RemoveNodeVisual(nodeNum);
+                    continue;
+                }
+
+                double px = LonToX(mk.Lon, _zoom) - originX;
+                double py = LatToY(mk.Lat, _zoom) - originY;
+                bool isOnScreen =
+                    px >= -cullMarginPx && px <= w + cullMarginPx &&
+                    py >= -cullMarginPx && py <= h + cullMarginPx;
+
+                if (!isOnScreen)
+                {
+                    RemoveNodeVisual(nodeNum);
+                    continue;
+                }
+
+                AddOrUpdateNodeVisual(mk, px, py);
+            }
+            return;
+        }
 
         foreach (var nodeNum in nodeNums)
         {
-            if (!nodesById.TryGetValue(nodeNum, out var mk))
+            // If this node was or is part of a cluster, cluster badge geometry
+            // may change, so rebuild markers via the normal cluster path.
+            if (_clusteredNodeNums.Contains(nodeNum))
+            {
+                if (changedMarkers.TryGetValue(nodeNum, out var clusteredMk) &&
+                    _lastNodeMarkerCoords.TryGetValue(nodeNum, out var prevCoords) &&
+                    AreCoordsEquivalent(prevCoords, clusteredMk))
+                {
+                    // Telemetry-only update while node stays clustered:
+                    // no geometry change, so avoid a full marker rebuild.
+                    continue;
+                }
+
+                QueueFullMarkerRefresh();
+                return;
+            }
+
+            if (!changedMarkers.TryGetValue(nodeNum, out var mk))
             {
                 RemoveNodeVisual(nodeNum);
                 continue;
@@ -367,23 +516,106 @@ public partial class MapView : UserControl
 
             // If this update would create a stacked-node cluster, rebuild via
             // the normal cluster path so expansion badges stay correct.
-            foreach (var kvp in _nodeVisuals)
+            if (HasNearbyVisibleNode(nodeNum, px, py, clusterRadiusSq))
             {
-                if (kvp.Key == nodeNum) continue;
-                var other = kvp.Value.Dot;
-                double ox = Canvas.GetLeft(other) + other.Width / 2.0;
-                double oy = Canvas.GetTop(other) + other.Height / 2.0;
-                double dx = px - ox;
-                double dy = py - oy;
-                if (dx * dx + dy * dy <= clusterRadiusSq)
-                {
-                    RenderMarkersOnly();
-                    return;
-                }
+                QueueFullMarkerRefresh();
+                return;
             }
 
             AddOrUpdateNodeVisual(mk, px, py);
         }
+    }
+
+    private static long GetBucketKey(int bucketX, int bucketY) =>
+        ((long)bucketX << 32) | (uint)bucketY;
+
+    private static (int BucketX, int BucketY) GetBucket(double px, double py) =>
+        ((int)Math.Floor(px / ClusterBucketSizePx), (int)Math.Floor(py / ClusterBucketSizePx));
+
+    private void AddToBucket(int bucketX, int bucketY, uint nodeNum)
+    {
+        long key = GetBucketKey(bucketX, bucketY);
+        if (!_nodeVisualBuckets.TryGetValue(key, out var members))
+        {
+            members = new HashSet<uint>();
+            _nodeVisualBuckets[key] = members;
+        }
+        members.Add(nodeNum);
+    }
+
+    private void RemoveFromBucket(int bucketX, int bucketY, uint nodeNum)
+    {
+        long key = GetBucketKey(bucketX, bucketY);
+        if (!_nodeVisualBuckets.TryGetValue(key, out var members))
+            return;
+
+        members.Remove(nodeNum);
+        if (members.Count == 0)
+            _nodeVisualBuckets.Remove(key);
+    }
+
+    private void UpdateNodeVisualSpatialIndex(uint nodeNum, double px, double py)
+    {
+        var (bucketX, bucketY) = GetBucket(px, py);
+        if (_nodeVisualLayout.TryGetValue(nodeNum, out var old))
+        {
+            if (old.BucketX != bucketX || old.BucketY != bucketY)
+            {
+                RemoveFromBucket(old.BucketX, old.BucketY, nodeNum);
+                AddToBucket(bucketX, bucketY, nodeNum);
+            }
+        }
+        else
+        {
+            AddToBucket(bucketX, bucketY, nodeNum);
+        }
+
+        _nodeVisualLayout[nodeNum] = (px, py, bucketX, bucketY);
+    }
+
+    private void RemoveNodeVisualSpatialIndex(uint nodeNum)
+    {
+        if (!_nodeVisualLayout.Remove(nodeNum, out var old))
+            return;
+
+        RemoveFromBucket(old.BucketX, old.BucketY, nodeNum);
+    }
+
+    private bool HasNearbyVisibleNode(uint nodeNum, double px, double py, double clusterRadiusSq)
+    {
+        var (bucketX, bucketY) = GetBucket(px, py);
+        for (int bx = bucketX - 1; bx <= bucketX + 1; bx++)
+        {
+            for (int by = bucketY - 1; by <= bucketY + 1; by++)
+            {
+                long key = GetBucketKey(bx, by);
+                if (!_nodeVisualBuckets.TryGetValue(key, out var members))
+                    continue;
+
+                foreach (var otherNodeNum in members)
+                {
+                    if (otherNodeNum == nodeNum) continue;
+                    if (!_nodeVisualLayout.TryGetValue(otherNodeNum, out var other)) continue;
+
+                    double dx = px - other.X;
+                    double dy = py - other.Y;
+                    if (dx * dx + dy * dy <= clusterRadiusSq)
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool AreCoordsEquivalent((double Lat, double Lon) a, MainViewModel.MapMarker b) =>
+        Math.Abs(a.Lat - b.Lat) < 1e-7 && Math.Abs(a.Lon - b.Lon) < 1e-7;
+
+    private void QueueFullMarkerRefresh()
+    {
+        _fullMarkerRefreshPending = true;
+        if (!_fullMarkerRefreshTimer.IsEnabled)
+            _fullMarkerRefreshTimer.Start();
     }
 
     private void PlaceTile(int x, int y, int zoom, double left, double top)
@@ -490,7 +722,9 @@ public partial class MapView : UserControl
         if (_vm is null) return;
         SpiderCollapseImmediate();
         _nodeVisuals.Clear();
-        _hasNodeClusters = false;
+        _nodeVisualLayout.Clear();
+        _nodeVisualBuckets.Clear();
+        _clusteredNodeNums.Clear();
         bool restoredActiveSpider = false;
         double viewportW = MarkerCanvas.ActualWidth;
         double viewportH = MarkerCanvas.ActualHeight;
@@ -535,13 +769,23 @@ public partial class MapView : UserControl
             }
             else
             {
+                if (mk.NodeNum is uint nodeNum)
+                    _lastNodeMarkerCoords[nodeNum] = (mk.Lat, mk.Lon);
                 nodes.Add((mk, px, py));
             }
         }
 
+        if (!_clusterNodes)
+        {
+            foreach (var n in nodes)
+                AddOrUpdateNodeVisual(n.mk, n.px, n.py);
+            _activeSpiderClusterKey = null;
+            return;
+        }
+
         // Group node markers that land on (nearly) the same screen pixel so
         // stacked nodes don't hide each other's dot and tooltip.
-        const double clusterRadiusPx = 14;
+        const double clusterRadiusPx = ClusterRadiusPx;
         var clusters = new List<List<(MainViewModel.MapMarker mk, double px, double py)>>();
         foreach (var nm in nodes)
         {
@@ -556,15 +800,18 @@ public partial class MapView : UserControl
             hit.Add(nm);
         }
 
+        var singletons = new List<(MainViewModel.MapMarker mk, double px, double py)>();
         foreach (var c in clusters)
         {
             if (c.Count == 1)
             {
-                AddOrUpdateNodeVisual(c[0].mk, c[0].px, c[0].py);
+                singletons.Add(c[0]);
             }
             else
             {
-                _hasNodeClusters = true;
+                foreach (var member in c)
+                    if (member.mk.NodeNum is uint clustered)
+                        _clusteredNodeNums.Add(clustered);
                 AddCluster(c);
                 if (string.Equals(_activeSpiderClusterKey, GetClusterKey(c), StringComparison.Ordinal))
                 {
@@ -573,6 +820,10 @@ public partial class MapView : UserControl
                 }
             }
         }
+
+        // Keep individual node markers above cluster badges.
+        foreach (var s in singletons)
+            AddOrUpdateNodeVisual(s.mk, s.px, s.py);
 
         if (!restoredActiveSpider)
             _activeSpiderClusterKey = null;
@@ -650,6 +901,7 @@ public partial class MapView : UserControl
         var dot = CreateNodeDot(mk);
         Canvas.SetLeft(dot, px - 6);
         Canvas.SetTop(dot, py - 6);
+        Panel.SetZIndex(dot, 20);
         AttachNodeInteraction(dot, mk);
         MarkerCanvas.Children.Add(dot);
     }
@@ -660,7 +912,7 @@ public partial class MapView : UserControl
             ? new SolidColorBrush(mk.IsExpired
                 ? Color.FromRgb(0xc6, 0x28, 0x28)
                 : Color.FromRgb(0x2e, 0x7d, 0x32))
-            : new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
+            : NodeFillBrush;
         var dot = new Ellipse
         {
             Width = 12,
@@ -681,6 +933,7 @@ public partial class MapView : UserControl
         var label = CreateNodeLabel(text);
         Canvas.SetLeft(label, px + 8);
         Canvas.SetTop(label, py - 8);
+        Panel.SetZIndex(label, 21);
         MarkerCanvas.Children.Add(label);
     }
 
@@ -701,17 +954,21 @@ public partial class MapView : UserControl
     private void AddOrUpdateNodeVisual(MainViewModel.MapMarker mk, double px, double py)
     {
         if (mk.NodeNum is not uint nodeNum) return;
+        _lastNodeMarkerCoords[nodeNum] = (mk.Lat, mk.Lon);
 
         if (_nodeVisuals.TryGetValue(nodeNum, out var existing))
         {
-            existing.Dot.Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
-            existing.Dot.ToolTip = BuildNodeToolTip(mk.Title);
-            if (existing.Label is Emoji.Wpf.TextBlock tb)
+            if (!ReferenceEquals(existing.Dot.Fill, NodeFillBrush))
+                existing.Dot.Fill = NodeFillBrush;
+            UpdateNodeToolTip(existing.Dot, mk.Title);
+            if (existing.Label is Emoji.Wpf.TextBlock tb &&
+                !string.Equals(tb.Text, mk.Label, StringComparison.Ordinal))
                 tb.Text = mk.Label;
             Canvas.SetLeft(existing.Dot, px - 6);
             Canvas.SetTop(existing.Dot, py - 6);
             Canvas.SetLeft(existing.Label, px + 8);
             Canvas.SetTop(existing.Label, py - 8);
+            UpdateNodeVisualSpatialIndex(nodeNum, px, py);
             return;
         }
 
@@ -721,10 +978,24 @@ public partial class MapView : UserControl
         Canvas.SetTop(dot, py - 6);
         Canvas.SetLeft(label, px + 8);
         Canvas.SetTop(label, py - 8);
+        Panel.SetZIndex(dot, 20);
+        Panel.SetZIndex(label, 21);
         AttachNodeInteraction(dot, mk);
         MarkerCanvas.Children.Add(dot);
         MarkerCanvas.Children.Add(label);
         _nodeVisuals[nodeNum] = new NodeVisual(dot, label);
+        UpdateNodeVisualSpatialIndex(nodeNum, px, py);
+    }
+
+    private void UpdateNodeToolTip(FrameworkElement element, string text)
+    {
+        if (element.ToolTip is ToolTip tip && tip.Content is Emoji.Wpf.TextBlock tb)
+        {
+            if (!string.Equals(tb.Text, text, StringComparison.Ordinal))
+                tb.Text = text;
+            return;
+        }
+        element.ToolTip = BuildNodeToolTip(text);
     }
 
     private void RemoveNodeVisual(uint nodeNum)
@@ -733,6 +1004,8 @@ public partial class MapView : UserControl
         MarkerCanvas.Children.Remove(visual.Dot);
         MarkerCanvas.Children.Remove(visual.Label);
         _nodeVisuals.Remove(nodeNum);
+        RemoveNodeVisualSpatialIndex(nodeNum);
+        _lastNodeMarkerCoords.Remove(nodeNum);
     }
 
     /// <summary>Draws a count badge for a group of overlapping nodes. Hovering
@@ -764,7 +1037,7 @@ public partial class MapView : UserControl
         badge.ToolTip = $"{members.Count} nodes here \u2014 click to expand";
         Canvas.SetLeft(badge, cx - 12);
         Canvas.SetTop(badge, cy - 12);
-        Panel.SetZIndex(badge, 10);
+        Panel.SetZIndex(badge, 5);
 
         badge.MouseLeftButtonDown += (_, e) =>
         {
@@ -785,6 +1058,7 @@ public partial class MapView : UserControl
         List<(MainViewModel.MapMarker mk, double px, double py)> members, double cx, double cy,
         bool persistSelection = true)
     {
+        if (!_clusterNodes) return;
         SpiderCollapseImmediate();
         if (persistSelection)
             _activeSpiderClusterKey = GetClusterKey(members);
@@ -984,8 +1258,14 @@ public partial class MapView : UserControl
         }
 
         _dragging = true;
-        _lastDragRenderTick = 0;
-        _lastMouse = e.GetPosition(MarkerCanvas);
+        // Measure drag in control-space (not MarkerCanvas-space) so the
+        // RenderTransform preview doesn't move the coordinate frame itself.
+        _lastMouse = e.GetPosition(this);
+        _dragOffset = default;
+        _tileDragTransform.X = 0;
+        _tileDragTransform.Y = 0;
+        _markerDragTransform.X = 0;
+        _markerDragTransform.Y = 0;
         MarkerCanvas.CaptureMouse();
     }
 
@@ -1005,32 +1285,49 @@ public partial class MapView : UserControl
         if (!_dragging) return;
         _dragging = false;
         MarkerCanvas.ReleaseMouseCapture();
-        Render();
+
+        if (_dragOffset.X != 0 || _dragOffset.Y != 0)
+        {
+            double cx = LonToX(_centerLon, _zoom) - _dragOffset.X;
+            double cy = LatToY(_centerLat, _zoom) - _dragOffset.Y;
+            _centerLon = XToLon(cx, _zoom);
+            _centerLat = ClampLat(YToLat(cy, _zoom));
+            _userMovedView = true;
+        }
+
+        _tileDragTransform.X = 0;
+        _tileDragTransform.Y = 0;
+        _markerDragTransform.X = 0;
+        _markerDragTransform.Y = 0;
+
+        if (_dragOffset.X != 0 || _dragOffset.Y != 0)
+            Render();
+
+        _dragOffset = default;
+
+        if (_pendingMarkerRefresh)
+        {
+            _pendingMarkerRefresh = false;
+            OnMarkersChanged();
+        }
     }
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
         if (!_dragging) return;
-        var p = e.GetPosition(MarkerCanvas);
+        var p = e.GetPosition(this);
         double dx = p.X - _lastMouse.X;
         double dy = p.Y - _lastMouse.Y;
         _lastMouse = p;
         if (dx == 0 && dy == 0) return;
 
-        // Shift the center by the dragged pixel delta.
-        double cx = LonToX(_centerLon, _zoom) - dx;
-        double cy = LatToY(_centerLat, _zoom) - dy;
-        _centerLon = XToLon(cx, _zoom);
-        _centerLat = ClampLat(YToLat(cy, _zoom));
-        _userMovedView = true;
-
-        // Throttle full renders while dragging to keep interaction responsive.
-        long nowTick = Environment.TickCount64;
-        if (nowTick - _lastDragRenderTick >= 16)
-        {
-            _lastDragRenderTick = nowTick;
-            Render();
-        }
+        // Preview drag using a cheap transform; commit center + one render on mouse-up.
+        _dragOffset.X += dx;
+        _dragOffset.Y += dy;
+        _tileDragTransform.X = _dragOffset.X;
+        _tileDragTransform.Y = _dragOffset.Y;
+        _markerDragTransform.X = _dragOffset.X;
+        _markerDragTransform.Y = _dragOffset.Y;
     }
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
@@ -1095,6 +1392,14 @@ public partial class MapView : UserControl
         if (_followHome) OnMarkersChanged();
     }
 
+    private void OnClusterToggle(object sender, RoutedEventArgs e)
+    {
+        _clusterNodes = ClusterNodesButton.IsChecked == true;
+        if (!_clusterNodes)
+            SpiderCollapse();
+        RenderMarkersOnly();
+    }
+
     private void ZoomAt(Point anchor, int delta)
     {
         int newZoom = Math.Clamp(_zoom + delta, MinZoom, MaxZoom);
@@ -1147,18 +1452,24 @@ public partial class MapView : UserControl
 
     /// <summary>Center / zoom so all markers fit, or default if there are none.</summary>
     /// <summary>Fits all visible markers into the viewport. Does not special-case home.</summary>
-    private void FitToMarkers() => FitToMarkers(_vm?.GetMapMarkers());
+    private bool FitToMarkers() => FitToMarkers(_vm?.GetMapMarkers());
 
-    private void FitToMarkers(IReadOnlyList<MainViewModel.MapMarker>? markers)
+    private bool FitToMarkers(IReadOnlyList<MainViewModel.MapMarker>? markers)
     {
-        if (markers is null || markers.Count == 0) return;
+        if (markers is null || markers.Count == 0) return false;
+
+        double oldLat = _centerLat;
+        double oldLon = _centerLon;
+        int oldZoom = _zoom;
 
         if (markers.Count == 1)
         {
             _centerLat = ClampLat(markers[0].Lat);
             _centerLon = markers[0].Lon;
             _zoom = 13;
-            return;
+            return Math.Abs(oldLat - _centerLat) > 1e-9
+                || Math.Abs(oldLon - _centerLon) > 1e-9
+                || oldZoom != _zoom;
         }
 
         double minLat = double.MaxValue, maxLat = double.MinValue;
@@ -1183,5 +1494,9 @@ public partial class MapView : UserControl
             if (spanX <= w * 0.85 && spanY <= h * 0.85) { best = z; break; }
         }
         _zoom = best;
+
+        return Math.Abs(oldLat - _centerLat) > 1e-9
+            || Math.Abs(oldLon - _centerLon) > 1e-9
+            || oldZoom != _zoom;
     }
 }

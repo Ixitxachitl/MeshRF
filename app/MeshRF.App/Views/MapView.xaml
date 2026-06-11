@@ -91,6 +91,14 @@
                               FontFamily="Segoe MDL2 Assets"
                               Click="OnFollowHomeToggle"
                               ToolTip="Follow GPS / home location" />
+                                <ToggleButton x:Name="ClusterNodesButton"
+                                                          Width="28" Height="28" FontSize="11"
+                                                          Margin="0,2,0,0"
+                                                          IsChecked="True"
+                                                          Content="&#xE81E;"
+                                                          FontFamily="Segoe MDL2 Assets"
+                                                          Click="OnClusterToggle"
+                                                          ToolTip="Cluster overlapping nodes" />
             </StackPanel>
         </Border>
 
