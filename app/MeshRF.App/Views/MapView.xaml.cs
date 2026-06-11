@@ -78,6 +78,10 @@ public partial class MapView : UserControl
     private bool _pendingMarkerRefresh;
     private int _openNodeToolTips;
     private bool _followHome;
+    private bool _hasNodeClusters;
+
+    private sealed record NodeVisual(Ellipse Dot, FrameworkElement Label);
+    private readonly Dictionary<uint, NodeVisual> _nodeVisuals = new();
 
     /// <summary>Fired when the user double-clicks a node marker on the map.
     /// Opens the same conversation tab as double-clicking the node list.</summary>
@@ -148,11 +152,43 @@ public partial class MapView : UserControl
         if (_vm is null) return;
         _vm.MapDataChanged -= OnMapDataChanged; // avoid double subscription
         _vm.MapDataChanged += OnMapDataChanged;
+        _vm.NodeMarkersChanged -= OnNodeMarkersChanged;
+        _vm.NodeMarkersChanged += OnNodeMarkersChanged;
     }
 
     private void Unsubscribe()
     {
-        if (_vm is not null) _vm.MapDataChanged -= OnMapDataChanged;
+        if (_vm is not null)
+        {
+            _vm.MapDataChanged -= OnMapDataChanged;
+            _vm.NodeMarkersChanged -= OnNodeMarkersChanged;
+        }
+    }
+
+    private void OnNodeMarkersChanged(IReadOnlyCollection<uint> nodeNums)
+    {
+        if (Dispatcher.CheckAccess()) OnNodeMarkersChangedCore(nodeNums);
+        else Dispatcher.BeginInvoke(new Action(() => OnNodeMarkersChangedCore(nodeNums)));
+    }
+
+    private void OnNodeMarkersChangedCore(IReadOnlyCollection<uint> nodeNums)
+    {
+        if (nodeNums.Count == 0) return;
+        if (_activeSpiderClusterKey is not null || _openNodeToolTips > 0)
+        {
+            _pendingMarkerRefresh = true;
+            return;
+        }
+
+        // Any auto-viewport behavior or clustered marker layout needs a full
+        // marker pass to stay consistent.
+        if (_followHome || !_userMovedView || _hasNodeClusters)
+        {
+            OnMarkersChanged();
+            return;
+        }
+
+        UpdateNodeMarkers(nodeNums);
     }
 
     private void OnMapDataChanged(object? sender, EventArgs e)
@@ -243,6 +279,8 @@ public partial class MapView : UserControl
 
         TileCanvas.Children.Clear();
         MarkerCanvas.Children.Clear();
+        _nodeVisuals.Clear();
+        _hasNodeClusters = false;
 
         // World-pixel coordinate of the viewport center.
         double cx = LonToX(_centerLon, _zoom);
@@ -284,7 +322,68 @@ public partial class MapView : UserControl
         double originX = LonToX(_centerLon, _zoom) - w / 2.0;
         double originY = LatToY(_centerLat, _zoom) - h / 2.0;
         MarkerCanvas.Children.Clear();
+        _nodeVisuals.Clear();
+        _hasNodeClusters = false;
         DrawMarkers(originX, originY);
+    }
+
+    private void UpdateNodeMarkers(IReadOnlyCollection<uint> nodeNums)
+    {
+        if (_vm is null) return;
+
+        double w = MarkerCanvas.ActualWidth;
+        double h = MarkerCanvas.ActualHeight;
+        if (w <= 0 || h <= 0) return;
+
+        double originX = LonToX(_centerLon, _zoom) - w / 2.0;
+        double originY = LatToY(_centerLat, _zoom) - h / 2.0;
+        const double cullMarginPx = 48;
+        const double clusterRadiusPx = 14;
+        double clusterRadiusSq = clusterRadiusPx * clusterRadiusPx;
+
+        var nodesById = _vm.GetMapMarkers()
+            .Where(m => !m.IsHome && !m.IsWaypoint && m.NodeNum is not null)
+            .ToDictionary(m => m.NodeNum!.Value, m => m);
+
+        foreach (var nodeNum in nodeNums)
+        {
+            if (!nodesById.TryGetValue(nodeNum, out var mk))
+            {
+                RemoveNodeVisual(nodeNum);
+                continue;
+            }
+
+            double px = LonToX(mk.Lon, _zoom) - originX;
+            double py = LatToY(mk.Lat, _zoom) - originY;
+            bool isOnScreen =
+                px >= -cullMarginPx && px <= w + cullMarginPx &&
+                py >= -cullMarginPx && py <= h + cullMarginPx;
+
+            if (!isOnScreen)
+            {
+                RemoveNodeVisual(nodeNum);
+                continue;
+            }
+
+            // If this update would create a stacked-node cluster, rebuild via
+            // the normal cluster path so expansion badges stay correct.
+            foreach (var kvp in _nodeVisuals)
+            {
+                if (kvp.Key == nodeNum) continue;
+                var other = kvp.Value.Dot;
+                double ox = Canvas.GetLeft(other) + other.Width / 2.0;
+                double oy = Canvas.GetTop(other) + other.Height / 2.0;
+                double dx = px - ox;
+                double dy = py - oy;
+                if (dx * dx + dy * dy <= clusterRadiusSq)
+                {
+                    RenderMarkersOnly();
+                    return;
+                }
+            }
+
+            AddOrUpdateNodeVisual(mk, px, py);
+        }
     }
 
     private void PlaceTile(int x, int y, int zoom, double left, double top)
@@ -390,6 +489,8 @@ public partial class MapView : UserControl
     {
         if (_vm is null) return;
         SpiderCollapseImmediate();
+        _nodeVisuals.Clear();
+        _hasNodeClusters = false;
         bool restoredActiveSpider = false;
         double viewportW = MarkerCanvas.ActualWidth;
         double viewportH = MarkerCanvas.ActualHeight;
@@ -459,11 +560,11 @@ public partial class MapView : UserControl
         {
             if (c.Count == 1)
             {
-                AddNodeDot(c[0].mk, c[0].px, c[0].py);
-                AddNodeLabel(c[0].mk.Label, c[0].px, c[0].py);
+                AddOrUpdateNodeVisual(c[0].mk, c[0].px, c[0].py);
             }
             else
             {
+                _hasNodeClusters = true;
                 AddCluster(c);
                 if (string.Equals(_activeSpiderClusterKey, GetClusterKey(c), StringComparison.Ordinal))
                 {
@@ -546,6 +647,15 @@ public partial class MapView : UserControl
     /// <summary>Draws a single marker dot with a hover tooltip.</summary>
     private void AddNodeDot(MainViewModel.MapMarker mk, double px, double py)
     {
+        var dot = CreateNodeDot(mk);
+        Canvas.SetLeft(dot, px - 6);
+        Canvas.SetTop(dot, py - 6);
+        AttachNodeInteraction(dot, mk);
+        MarkerCanvas.Children.Add(dot);
+    }
+
+    private Ellipse CreateNodeDot(MainViewModel.MapMarker mk)
+    {
         var fill = mk.IsWaypoint
             ? new SolidColorBrush(mk.IsExpired
                 ? Color.FromRgb(0xc6, 0x28, 0x28)
@@ -562,14 +672,19 @@ public partial class MapView : UserControl
         };
         ToolTipService.SetInitialShowDelay(dot, 250);
         ToolTipService.SetShowDuration(dot, 60000);
-        Canvas.SetLeft(dot, px - 6);
-        Canvas.SetTop(dot, py - 6);
-        AttachNodeInteraction(dot, mk);
-        MarkerCanvas.Children.Add(dot);
+        return dot;
     }
 
     /// <summary>Draws a small caption to the right of a marker.</summary>
     private void AddNodeLabel(string text, double px, double py)
+    {
+        var label = CreateNodeLabel(text);
+        Canvas.SetLeft(label, px + 8);
+        Canvas.SetTop(label, py - 8);
+        MarkerCanvas.Children.Add(label);
+    }
+
+    private FrameworkElement CreateNodeLabel(string text)
     {
         var label = new Emoji.Wpf.TextBlock
         {
@@ -580,9 +695,44 @@ public partial class MapView : UserControl
             Padding = new Thickness(2, 0, 2, 0),
             IsHitTestVisible = false,
         };
+        return label;
+    }
+
+    private void AddOrUpdateNodeVisual(MainViewModel.MapMarker mk, double px, double py)
+    {
+        if (mk.NodeNum is not uint nodeNum) return;
+
+        if (_nodeVisuals.TryGetValue(nodeNum, out var existing))
+        {
+            existing.Dot.Fill = new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
+            existing.Dot.ToolTip = BuildNodeToolTip(mk.Title);
+            if (existing.Label is Emoji.Wpf.TextBlock tb)
+                tb.Text = mk.Label;
+            Canvas.SetLeft(existing.Dot, px - 6);
+            Canvas.SetTop(existing.Dot, py - 6);
+            Canvas.SetLeft(existing.Label, px + 8);
+            Canvas.SetTop(existing.Label, py - 8);
+            return;
+        }
+
+        var dot = CreateNodeDot(mk);
+        var label = CreateNodeLabel(mk.Label);
+        Canvas.SetLeft(dot, px - 6);
+        Canvas.SetTop(dot, py - 6);
         Canvas.SetLeft(label, px + 8);
         Canvas.SetTop(label, py - 8);
+        AttachNodeInteraction(dot, mk);
+        MarkerCanvas.Children.Add(dot);
         MarkerCanvas.Children.Add(label);
+        _nodeVisuals[nodeNum] = new NodeVisual(dot, label);
+    }
+
+    private void RemoveNodeVisual(uint nodeNum)
+    {
+        if (!_nodeVisuals.TryGetValue(nodeNum, out var visual)) return;
+        MarkerCanvas.Children.Remove(visual.Dot);
+        MarkerCanvas.Children.Remove(visual.Label);
+        _nodeVisuals.Remove(nodeNum);
     }
 
     /// <summary>Draws a count badge for a group of overlapping nodes. Hovering

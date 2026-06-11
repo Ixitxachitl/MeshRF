@@ -721,7 +721,8 @@
                                 </Style>
                             </DataGrid.CellStyle>
                             <DataGrid.ContextMenu>
-                                <ContextMenu Opened="OnNodesContextMenuOpened">
+                                <ContextMenu Opened="OnNodesContextMenuOpened"
+                                             Closed="OnNodesContextMenuClosed">
                                     <MenuItem Header="Request node info"
                                               Click="OnRequestNodeInfo">
                                         <MenuItem.Icon>

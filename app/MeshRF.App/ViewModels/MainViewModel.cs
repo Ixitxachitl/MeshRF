@@ -42,6 +42,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // per received packet (avoids stutter from Nodes.Clear + full rebind).
     private bool _nodesDirty;
     private bool _waypointsDirty;
+    private bool _suspendNodeReload;
+    private readonly HashSet<uint> _dirtyNodeNums = new();
 
     private const string ManualLocationSourceValue = "Manual";
     private const string UsbSerialLocationSourceValue = "UsbSerial";
@@ -506,6 +508,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// map view can refresh its markers.</summary>
     public event EventHandler? MapDataChanged;
 
+    /// <summary>Raised when only specific node rows changed and the map can
+    /// update those node markers without rebuilding the full marker layer.</summary>
+    public event Action<IReadOnlyCollection<uint>>? NodeMarkersChanged;
+
     /// <summary>A point shown on the map: a node position or the home marker.</summary>
     public sealed record MapMarker(
         double Lat, double Lon, string Label, string Title,
@@ -656,9 +662,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             SendNodeInfoRequestOnly(n.NodeNum, packetId);
             var name = NodeDisplayName(n.NodeNum);
-            Log($"  requested NodeInfo from {name} (request-only)");
+            Log($"  requested NodeInfo from {name}");
             var convo = OpenConversation(n.NodeNum, name, focus: false);
-            var noteText = $"Requested NodeInfo from {name} (request-only)\u2026";
+            var noteText = $"Requested NodeInfo from {name}\u2026";
             convo.Add(new ChannelMessage
             {
                 FromId = "nodeinfo",
@@ -1144,6 +1150,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Refresh the in-memory <see cref="Nodes"/> collection from disk.</summary>
     public void ReloadNodes()
     {
+        _dirtyNodeNums.Clear();
         Nodes.Clear();
         // Our own node lives in the database so chats can show our name, but we
         // don't list ourselves among the discovered peers.
@@ -1154,6 +1161,73 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == convo.NodeNum);
         MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void MarkNodeDirty(uint nodeNum)
+    {
+        if (nodeNum == 0) return;
+        if (_myNodeNum != 0 && nodeNum == _myNodeNum) return;
+        _dirtyNodeNums.Add(nodeNum);
+        _nodesDirty = true;
+    }
+
+    private void RefreshConversationNode(uint nodeNum)
+    {
+        var node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
+        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+            if (convo.NodeNum == nodeNum)
+                convo.Node = node;
+    }
+
+    /// <summary>Apply database-backed updates for only the node ids that changed.</summary>
+    private void ApplyDirtyNodeUpdates()
+    {
+        if (_dirtyNodeNums.Count == 0) return;
+
+        var changedNodeNums = _dirtyNodeNums.ToArray();
+
+        foreach (var nodeNum in _dirtyNodeNums.ToArray())
+        {
+            var latest = _nodeStore.Get(nodeNum);
+            var existing = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
+
+            if (latest is null)
+            {
+                if (existing is not null)
+                    Nodes.Remove(existing);
+                RefreshConversationNode(nodeNum);
+                continue;
+            }
+
+            if (existing is null)
+            {
+                Nodes.Add(latest);
+            }
+            else
+            {
+                int index = Nodes.IndexOf(existing);
+                if (index >= 0)
+                    Nodes[index] = latest;
+            }
+
+            RefreshConversationNode(nodeNum);
+        }
+
+        _dirtyNodeNums.Clear();
+        NodesView?.Refresh();
+        NodeMarkersChanged?.Invoke(changedNodeNums);
+    }
+
+    /// <summary>Temporarily pause node list reloads (for example while the
+    /// node context menu is open), then flush one pending reload on resume.</summary>
+    public void SetNodeReloadSuspended(bool suspended)
+    {
+        _suspendNodeReload = suspended;
+        if (!suspended && _nodesDirty)
+        {
+            ApplyDirtyNodeUpdates();
+            _nodesDirty = false;
+        }
     }
 
     public void ReloadWaypoints()
@@ -1464,7 +1538,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         node.Ignored = ignored;
         _nodeStore.SetIgnored(node.NodeNum, ignored);
-        ReloadNodes();
+        MarkNodeDirty(node.NodeNum);
+        if (!_suspendNodeReload)
+        {
+            ApplyDirtyNodeUpdates();
+            _nodesDirty = false;
+        }
     }
 
     public void SetNodesIgnored(IEnumerable<NodeRecord> nodes, bool ignored)
@@ -1473,8 +1552,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             node.Ignored = ignored;
             _nodeStore.SetIgnored(node.NodeNum, ignored);
+            MarkNodeDirty(node.NodeNum);
         }
-        ReloadNodes();
+        if (!_suspendNodeReload)
+        {
+            ApplyDirtyNodeUpdates();
+            _nodesDirty = false;
+        }
     }
 
     private bool IsNodeIgnored(uint nodeNum) =>
@@ -3508,7 +3592,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!isNew)
         {
             // Still refresh the sighting timestamp (done above), but don't echo.
-            _nodesDirty = true;
+            MarkNodeDirty(header.From);
             return;
         }
 
@@ -3754,8 +3838,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        _nodesDirty = true;
-        if (nodeChanged) { /* names already refreshed by ReloadNodes */ }
+        MarkNodeDirty(header.From);
+        if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
     }
 
     private static byte[] HexToBytes(string hex)
@@ -3824,9 +3908,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Flush any node-list changes accumulated during the event drain in one
         // pass rather than once per packet (avoids Nodes.Clear + full DataGrid
         // rebind stutter on every received frame).
-        if (_nodesDirty)
+        if (_nodesDirty && !_suspendNodeReload)
         {
-            ReloadNodes();
+            ApplyDirtyNodeUpdates();
             _nodesDirty = false;
         }
         if (_waypointsDirty)
