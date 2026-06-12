@@ -221,6 +221,9 @@ public sealed class AppSettings
     /// <summary>Map zoom level (2–19) when the app was last closed. 0 = unset.</summary>
     public int MapZoom { get; set; } = 0;
 
+    /// <summary>Whether map markers are clustered (true) or always expanded (false).</summary>
+    public bool MapClusterNodes { get; set; } = true;
+
     // -- Node list filters -------------------------------------------------
 
     /// <summary>Persisted node text search filter.</summary>

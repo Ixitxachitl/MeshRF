@@ -46,6 +46,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _suspendNodeReload;
     private readonly HashSet<uint> _dirtyNodeNums = new();
     private readonly Dictionary<uint, NodeRecord> _nodesByNum = new();
+    private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
     private readonly Dictionary<uint, string> _nodeTooltipCache = new();
     private DateTime _lastNodesViewRefreshUtc = DateTime.MinValue;
@@ -57,6 +58,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private const string ManualLocationSourceValue = "Manual";
     private const string UsbSerialLocationSourceValue = "UsbSerial";
+    private const double HomeMapUpdateThresholdKm = 0.02; // 20 m
 
     // Plays the RTTTL ringtone when a text message arrives.
     private readonly RtttlPlayer _ringtone = new();
@@ -299,6 +301,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void RefreshNodesFilter()
     {
         NodesView?.Refresh();
+        RebuildNodeMapStateSignatures();
         MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
     partial void OnNodeSearchTextChanged(string value)          => RefreshNodesFilter();
@@ -607,6 +610,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _nodeStore.Forget(n.NodeNum);
             Nodes.Remove(n);
             _nodesByNum.Remove(n.NodeNum);
+            _nodeMapStateSignatures.Remove(n.NodeNum);
             _nodeTooltipSignatures.Remove(n.NodeNum);
             _nodeTooltipCache.Remove(n.NodeNum);
             if (n.Latitude is not null && n.Longitude is not null) removedPositioned = true;
@@ -1163,7 +1167,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
-        if (!string.IsNullOrEmpty(_core.DeviceStatus))
+        if (ShouldLogDeviceStatus(_core.DeviceStatus))
             Log(_core.DeviceStatus);
 
         _settingsLoaded = true;
@@ -1176,6 +1180,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _dirtyNodeNums.Clear();
         _nodesByNum.Clear();
+        _nodeMapStateSignatures.Clear();
         _nodeTooltipSignatures.Clear();
         _nodeTooltipCache.Clear();
         Nodes.Clear();
@@ -1190,6 +1195,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Keep any open DM tabs' telemetry panels in sync with the latest data.
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             convo.Node = _nodesByNum.GetValueOrDefault(convo.NodeNum);
+        RebuildNodeMapStateSignatures();
         NodesView?.Refresh();
         MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -1230,6 +1236,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var changedNodeNums = _dirtyNodeNums
             .Take(MaxDirtyNodeUpdatesPerTick)
             .ToArray();
+        var mapChangedNodeNums = new List<uint>(changedNodeNums.Length);
 
         foreach (var nodeNum in changedNodeNums)
         {
@@ -1241,6 +1248,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (existing is not null)
                     Nodes.Remove(existing);
                 _nodesByNum.Remove(nodeNum);
+                if (UpdateNodeMapStateSignature(nodeNum, null))
+                    mapChangedNodeNums.Add(nodeNum);
                 _nodeTooltipSignatures.Remove(nodeNum);
                 _nodeTooltipCache.Remove(nodeNum);
                 RefreshConversationNode(nodeNum);
@@ -1271,6 +1280,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             _nodesByNum[nodeNum] = latest;
+            if (UpdateNodeMapStateSignature(nodeNum, latest))
+                mapChangedNodeNums.Add(nodeNum);
 
             RefreshConversationNode(nodeNum);
         }
@@ -1278,8 +1289,53 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var nodeNum in changedNodeNums)
             _dirtyNodeNums.Remove(nodeNum);
         RefreshNodesViewIfNeeded();
-        NodeMarkersChanged?.Invoke(changedNodeNums);
+        if (mapChangedNodeNums.Count > 0)
+            NodeMarkersChanged?.Invoke(mapChangedNodeNums);
         return _dirtyNodeNums.Count > 0;
+    }
+
+    private void RebuildNodeMapStateSignatures()
+    {
+        _nodeMapStateSignatures.Clear();
+        foreach (var n in _nodesByNum.Values)
+            _nodeMapStateSignatures[n.NodeNum] = ComputeNodeMapStateSignature(n);
+    }
+
+    private bool UpdateNodeMapStateSignature(uint nodeNum, NodeRecord? node)
+    {
+        if (node is null)
+            return _nodeMapStateSignatures.Remove(nodeNum);
+
+        int sig = ComputeNodeMapStateSignature(node);
+        if (_nodeMapStateSignatures.TryGetValue(nodeNum, out int oldSig) && oldSig == sig)
+            return false;
+
+        _nodeMapStateSignatures[nodeNum] = sig;
+        return true;
+    }
+
+    private int ComputeNodeMapStateSignature(NodeRecord n)
+    {
+        var h = new HashCode();
+        var latOpt = n.Latitude;
+        var lonOpt = n.Longitude;
+        if (!NodePassesFilter(n) || latOpt is null || lonOpt is null)
+        {
+            h.Add(false);
+            return h.ToHashCode();
+        }
+
+        bool visible = true;
+        h.Add(visible);
+
+        double lat = latOpt.Value;
+        double lon = lonOpt.Value;
+        var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
+        var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
+        h.Add(lat);
+        h.Add(lon);
+        h.Add(label, StringComparer.Ordinal);
+        return h.ToHashCode();
     }
 
     private bool ShouldKeepDefaultNodeOrder()
@@ -1775,8 +1831,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SetNodeRtttlMuted(node, muted);
     }
 
-    private void OnConversationLocationHistoryChanged(ConversationViewModel convo) =>
+    private void OnConversationLocationHistoryChanged(ConversationViewModel convo)
+    {
+        if (!convo.ShowLocationHistoryOnMap)
+            return;
+
         MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>
     /// Keep the default Primary channel's tab name in sync with the active
@@ -1882,6 +1943,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var line = $"[{DateTime.Now:HH:mm:ss}] {text}";
         LogLines.Add(line);
         if (LogLines.Count > 500) LogLines.RemoveAt(0);
+    }
+
+    private static bool ShouldLogDeviceStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status)) return false;
+        return !status.StartsWith("HackRF open OK", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Copy the entire global log to the clipboard.</summary>
@@ -2178,13 +2245,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyResolvedHomeLocation(double? latitude, double? longitude)
     {
-        bool changed = HomeLatitude != latitude || HomeLongitude != longitude;
+        bool hadHome = HomeLatitude.HasValue && HomeLongitude.HasValue;
+        bool hasHome = latitude.HasValue && longitude.HasValue;
+        bool mapChanged = !AreHomeCoordsEquivalentForMap(HomeLatitude, HomeLongitude, latitude, longitude);
+
         HomeLatitude = latitude;
         HomeLongitude = longitude;
-        if (!changed) return;
-        OnPropertyChanged(nameof(HasHomeLocation));
-        SendPositionCommand.NotifyCanExecuteChanged();
+
+        if (hadHome != hasHome)
+        {
+            OnPropertyChanged(nameof(HasHomeLocation));
+            SendPositionCommand.NotifyCanExecuteChanged();
+        }
+
+        if (!mapChanged) return;
         MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static bool AreHomeCoordsEquivalentForMap(
+        double? oldLat,
+        double? oldLon,
+        double? newLat,
+        double? newLon)
+    {
+        if (oldLat is null || oldLon is null || newLat is null || newLon is null)
+            return oldLat == newLat && oldLon == newLon;
+
+        return HaversineKm(oldLat.Value, oldLon.Value, newLat.Value, newLon.Value)
+            <= HomeMapUpdateThresholdKm;
     }
 
     private void HandleGpsStatusChanged(string status)
@@ -2459,7 +2547,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendPositionCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
-        if (!string.IsNullOrEmpty(_core.DeviceStatus))
+        if (ShouldLogDeviceStatus(_core.DeviceStatus))
             Log(_core.DeviceStatus);
         SaveSettings();
     }
@@ -2482,7 +2570,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Log(DeviceBadge);
         if (!_core.CanTransmit)
             Log("TX device cannot transmit; choose HackRF for transmit.");
-        if (!string.IsNullOrEmpty(_core.DeviceStatus))
+        if (ShouldLogDeviceStatus(_core.DeviceStatus))
             Log(_core.DeviceStatus);
         SaveSettings();
     }

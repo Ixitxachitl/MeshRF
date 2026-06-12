@@ -95,17 +95,55 @@ public partial class MapView : UserControl
     private const int MaxNodeMarkerUpdatesPerTick = 32;
     private static readonly long MapRenderMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
     private static readonly long DragPreviewMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
+    private static readonly long DragCommitMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 8.0);
+    private const double DragCommitMinPixels = 48.0;
     private const double ClusterRadiusPx = 14;
     private const double ClusterBucketSizePx = 48;
     private long _lastDragPreviewTick;
+    private long _lastDragCommitTick;
     private long _lastMapRenderTick;
     private bool _mapRenderQueued;
     private bool _mapFullRenderQueued;
 
     private static readonly SolidColorBrush NodeFillBrush = CreateFrozenBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
+    private static readonly SolidColorBrush WaypointFillBrush = CreateFrozenBrush(Color.FromRgb(0x2e, 0x7d, 0x32));
+    private static readonly SolidColorBrush WaypointExpiredFillBrush = CreateFrozenBrush(Color.FromRgb(0xc6, 0x28, 0x28));
+    private static readonly SolidColorBrush ClusterBadgeFillBrush = CreateFrozenBrush(Color.FromRgb(0xff, 0x8c, 0x2d));
+    private static readonly SolidColorBrush LocationHistoryStrokeBrush =
+        CreateFrozenBrush(Color.FromArgb(0xC0, 0xFF, 0x8C, 0x2D));
 
     private sealed record NodeVisual(Ellipse Dot, FrameworkElement Label);
     private readonly Dictionary<uint, NodeVisual> _nodeVisuals = new();
+    private readonly List<MainViewModel.MapMarker> _cachedMapMarkers = new();
+    private readonly Dictionary<uint, int> _cachedNodeMarkerIndices = new();
+    private readonly List<MainViewModel.MapPolyline> _cachedPolylines = new();
+    private bool _mapMarkerCacheValid;
+    private bool _mapPolylineCacheValid;
+
+    private static readonly bool MapPerfLoggingEnabled = false;
+    private readonly Stopwatch _perfStopwatch = Stopwatch.StartNew();
+    private TimeSpan _perfWindowStart = TimeSpan.Zero;
+    private int _perfMapDataChangedEvents;
+    private int _perfNodeMarkersChangedEvents;
+    private int _perfNodeMarkersChangedNodes;
+    private int _perfOnMarkersChangedCalls;
+    private int _perfRenderRequests;
+    private int _perfRenderRequestsFull;
+    private int _perfRenderRequestsMarkersOnly;
+    private int _perfRenderNowCalls;
+    private int _perfRenderMarkersOnlyNowCalls;
+    private long _perfRenderNowTicks;
+    private long _perfRenderMarkersOnlyNowTicks;
+    private int _perfUpdateNodeMarkersCalls;
+    private int _perfUpdateNodeMarkersNodes;
+    private int _perfNodeMarkerTimerTicks;
+    private int _perfNodeMarkerTimerBatches;
+    private int _perfNodeMarkerTimerNodesProcessed;
+    private int _perfFullMarkerRefreshTimerTicks;
+    private int _perfQueueFullRefreshCalls;
+    private int _perfPendingNodeMax;
+    private readonly Dictionary<string, int> _perfQueueFullRefreshReasons =
+        new(StringComparer.Ordinal);
 
     /// <summary>Fired when the user double-clicks a node marker on the map.
     /// Opens the same conversation tab as double-clicking the node list.</summary>
@@ -123,7 +161,10 @@ public partial class MapView : UserControl
         InitializeComponent();
         TileCanvas.RenderTransform = _tileDragTransform;
         MarkerCanvas.RenderTransform = _markerDragTransform;
-        _nodeMarkerUpdateTimer = new DispatcherTimer(DispatcherPriority.ContextIdle)
+        // ContextIdle can starve while the user is actively dragging (many
+        // MouseMove events), which makes marker updates appear deferred until
+        // mouse-up. Background keeps updates flowing during interaction.
+        _nodeMarkerUpdateTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(33),
         };
@@ -176,6 +217,7 @@ public partial class MapView : UserControl
     {
         Unsubscribe();
         _vm = DataContext as MainViewModel;
+        InvalidateMapDataCache();
         Subscribe();
         FitToMarkers();
     }
@@ -189,7 +231,8 @@ public partial class MapView : UserControl
         // (home/node markers wouldn't refresh until a manual pan/zoom).
         if (_vm is null) _vm = DataContext as MainViewModel;
         Subscribe();
-        FitToMarkers();
+        if (FitToMarkers())
+            _userMovedView = true;
         Render();
     }
 
@@ -199,6 +242,7 @@ public partial class MapView : UserControl
         _mapRenderQueued = false;
         _mapFullRenderQueued = false;
         Unsubscribe();
+        PerfMaybeLog("unloaded");
     }
 
     private void OnRenderThrottleTimerTick(object? sender, EventArgs e)
@@ -220,6 +264,13 @@ public partial class MapView : UserControl
 
     private void RequestRender(bool fullRender)
     {
+        if (MapPerfLoggingEnabled)
+        {
+            _perfRenderRequests++;
+            if (fullRender) _perfRenderRequestsFull++;
+            else _perfRenderRequestsMarkersOnly++;
+        }
+
         _mapFullRenderQueued |= fullRender;
 
         long nowTicks = Stopwatch.GetTimestamp();
@@ -253,9 +304,13 @@ public partial class MapView : UserControl
 
     private void OnNodeMarkerUpdateTimerTick(object? sender, EventArgs e)
     {
+        if (MapPerfLoggingEnabled)
+            _perfNodeMarkerTimerTicks++;
+
         if (_pendingNodeMarkerNums.Count == 0)
         {
             _nodeMarkerUpdateTimer.Stop();
+            PerfMaybeLog("node-timer-empty");
             return;
         }
 
@@ -267,32 +322,38 @@ public partial class MapView : UserControl
         foreach (var nodeNum in changed)
             _pendingNodeMarkerNums.Remove(nodeNum);
 
+        if (MapPerfLoggingEnabled)
+        {
+            _perfNodeMarkerTimerBatches++;
+            _perfNodeMarkerTimerNodesProcessed += changed.Length;
+        }
+
         OnNodeMarkersChangedCore(changed);
 
         if (_pendingNodeMarkerNums.Count == 0)
         {
             _nodeMarkerUpdateTimer.Stop();
+            PerfMaybeLog("node-timer-drained");
             return;
         }
 
         if (!_nodeMarkerUpdateTimer.IsEnabled)
             _nodeMarkerUpdateTimer.Start();
+
+        PerfMaybeLog("node-timer");
     }
 
     private void OnFullMarkerRefreshTimerTick(object? sender, EventArgs e)
     {
+        if (MapPerfLoggingEnabled)
+            _perfFullMarkerRefreshTimerTicks++;
+
         _fullMarkerRefreshTimer.Stop();
         if (!_fullMarkerRefreshPending) return;
 
-        if (_activeSpiderClusterKey is not null || _openNodeToolTips > 0)
-        {
-            _pendingMarkerRefresh = true;
-            _fullMarkerRefreshTimer.Start();
-            return;
-        }
-
         _fullMarkerRefreshPending = false;
         RenderMarkersOnly();
+        PerfMaybeLog("full-refresh-applied");
     }
 
     private void Subscribe()
@@ -321,21 +382,43 @@ public partial class MapView : UserControl
             return;
         }
 
+        // During drag, don't wait for the batching timer; process immediately
+        // (render path is still throttled) so updates don't appear deferred.
+        if (_dragging)
+        {
+            if (MapPerfLoggingEnabled)
+            {
+                _perfNodeMarkersChangedEvents++;
+                _perfNodeMarkersChangedNodes += nodeNums.Count;
+            }
+            OnNodeMarkersChangedCore(nodeNums);
+            PerfMaybeLog("node-event-drag-live");
+            return;
+        }
+
         foreach (var nodeNum in nodeNums)
             _pendingNodeMarkerNums.Add(nodeNum);
 
+        if (MapPerfLoggingEnabled)
+        {
+            _perfNodeMarkersChangedEvents++;
+            _perfNodeMarkersChangedNodes += nodeNums.Count;
+            if (_pendingNodeMarkerNums.Count > _perfPendingNodeMax)
+                _perfPendingNodeMax = _pendingNodeMarkerNums.Count;
+        }
+
         if (!_nodeMarkerUpdateTimer.IsEnabled)
             _nodeMarkerUpdateTimer.Start();
+
+        PerfMaybeLog("node-event");
     }
 
     private void OnNodeMarkersChangedCore(IReadOnlyCollection<uint> nodeNums)
     {
         if (nodeNums.Count == 0) return;
-        if (_activeSpiderClusterKey is not null || _openNodeToolTips > 0)
-        {
-            _pendingMarkerRefresh = true;
-            return;
-        }
+        var changedMarkers = _vm?.GetNodeMapMarkers(nodeNums)
+            ?? new Dictionary<uint, MainViewModel.MapMarker>();
+        UpdateCachedNodeMarkers(nodeNums, changedMarkers);
 
         // Any auto-viewport behavior needs a full marker pass.
         if (_followHome || !_userMovedView)
@@ -346,36 +429,43 @@ public partial class MapView : UserControl
 
         if (!_clusterNodes)
         {
-            UpdateNodeMarkers(nodeNums);
+            UpdateNodeMarkers(nodeNums, changedMarkers);
             return;
         }
 
-        UpdateNodeMarkers(nodeNums);
+        UpdateNodeMarkers(nodeNums, changedMarkers);
     }
 
     private void OnMapDataChanged(object? sender, EventArgs e)
     {
+        if (MapPerfLoggingEnabled)
+            _perfMapDataChangedEvents++;
+
+        InvalidateMapDataCache();
         if (Dispatcher.CheckAccess()) OnMarkersChanged();
         else Dispatcher.BeginInvoke(new Action(OnMarkersChanged));
+
+        PerfMaybeLog("map-data");
     }
 
     private void OnMarkersChanged()
     {
+        if (MapPerfLoggingEnabled)
+            _perfOnMarkersChangedCalls++;
+
         if (_dragging)
         {
-            _pendingMarkerRefresh = true;
+            // Keep markers live while panning. The canvases are still moved by
+            // drag transforms, so a marker-only redraw updates positions/data
+            // without forcing an expensive full tile render mid-drag.
+            RenderMarkersOnly();
+            PerfMaybeLog("markers-dragging-live");
             return;
         }
 
         _fullMarkerRefreshPending = false;
         if (_fullMarkerRefreshTimer.IsEnabled)
             _fullMarkerRefreshTimer.Stop();
-
-        if (_activeSpiderClusterKey is not null || _openNodeToolTips > 0)
-        {
-            _pendingMarkerRefresh = true;
-            return;
-        }
 
         bool viewportChanged = false;
 
@@ -392,7 +482,8 @@ public partial class MapView : UserControl
         else if (!_userMovedView)
         {
             // Auto-center: prefer home if available, otherwise fit all.
-            var markers = _vm?.GetMapMarkers();
+            var markers = GetCachedMapMarkers();
+            bool hasMarkers = markers is { Count: > 0 };
             var home = markers?.FirstOrDefault(m => m.IsHome);
             if (home is not null)
             {
@@ -409,12 +500,20 @@ public partial class MapView : UserControl
             {
                 viewportChanged = FitToMarkers(markers);
             }
+
+            // Treat auto-viewport as a one-time startup/default behavior.
+            // Continuous recentering/refitting under high update rate causes
+            // visible stutter when many nodes are on screen.
+            if (hasMarkers)
+                _userMovedView = true;
         }
 
         if (viewportChanged)
             Render();
         else
             RenderMarkersOnly();
+
+        PerfMaybeLog(viewportChanged ? "markers-full" : "markers-only");
     }
 
     // -- Web-Mercator projection helpers ------------------------------------
@@ -446,6 +545,7 @@ public partial class MapView : UserControl
 
     private void RenderNow()
     {
+        long startTicks = MapPerfLoggingEnabled ? Stopwatch.GetTimestamp() : 0;
         var w = MarkerCanvas.ActualWidth;
         var h = MarkerCanvas.ActualHeight;
         if (w <= 0 || h <= 0) return;
@@ -485,6 +585,13 @@ public partial class MapView : UserControl
         }
 
         DrawMarkers(originX, originY);
+
+        if (MapPerfLoggingEnabled)
+        {
+            _perfRenderNowCalls++;
+            _perfRenderNowTicks += Stopwatch.GetTimestamp() - startTicks;
+            PerfMaybeLog("render-now");
+        }
     }
 
     /// <summary>Redraws only the marker layer without touching the tile layer.
@@ -494,6 +601,7 @@ public partial class MapView : UserControl
 
     private void RenderMarkersOnlyNow()
     {
+        long startTicks = MapPerfLoggingEnabled ? Stopwatch.GetTimestamp() : 0;
         var w = MarkerCanvas.ActualWidth;
         var h = MarkerCanvas.ActualHeight;
         if (w <= 0 || h <= 0) return;
@@ -506,10 +614,25 @@ public partial class MapView : UserControl
         _clusteredNodeNums.Clear();
         _lastNodeMarkerCoords.Clear();
         DrawMarkers(originX, originY);
+
+        if (MapPerfLoggingEnabled)
+        {
+            _perfRenderMarkersOnlyNowCalls++;
+            _perfRenderMarkersOnlyNowTicks += Stopwatch.GetTimestamp() - startTicks;
+            PerfMaybeLog("render-markers");
+        }
     }
 
-    private void UpdateNodeMarkers(IReadOnlyCollection<uint> nodeNums)
+    private void UpdateNodeMarkers(
+        IReadOnlyCollection<uint> nodeNums,
+        IReadOnlyDictionary<uint, MainViewModel.MapMarker>? markerUpdates = null)
     {
+        if (MapPerfLoggingEnabled)
+        {
+            _perfUpdateNodeMarkersCalls++;
+            _perfUpdateNodeMarkersNodes += nodeNums.Count;
+        }
+
         if (_vm is null) return;
 
         double w = MarkerCanvas.ActualWidth;
@@ -521,7 +644,7 @@ public partial class MapView : UserControl
         const double cullMarginPx = 48;
         double clusterRadiusSq = ClusterRadiusPx * ClusterRadiusPx;
 
-        var changedMarkers = _vm.GetNodeMapMarkers(nodeNums);
+        var changedMarkers = markerUpdates ?? _vm.GetNodeMapMarkers(nodeNums);
 
         if (!_clusterNodes)
         {
@@ -545,7 +668,7 @@ public partial class MapView : UserControl
                     continue;
                 }
 
-                AddOrUpdateNodeVisual(mk, px, py);
+                AddOrUpdateNodeVisual(mk, px, py, updateTooltip: false);
             }
             return;
         }
@@ -558,14 +681,15 @@ public partial class MapView : UserControl
             {
                 if (changedMarkers.TryGetValue(nodeNum, out var clusteredMk) &&
                     _lastNodeMarkerCoords.TryGetValue(nodeNum, out var prevCoords) &&
-                    AreCoordsEquivalent(prevCoords, clusteredMk))
+                    (AreCoordsEquivalent(prevCoords, clusteredMk) ||
+                     IsSmallScreenMotion(prevCoords, clusteredMk, maxPixels: 1.5)))
                 {
                     // Telemetry-only update while node stays clustered:
                     // no geometry change, so avoid a full marker rebuild.
                     continue;
                 }
 
-                QueueFullMarkerRefresh();
+                QueueFullMarkerRefresh("clustered-node-motion");
                 return;
             }
 
@@ -587,15 +711,26 @@ public partial class MapView : UserControl
                 continue;
             }
 
+            bool geometryUnchanged =
+                _lastNodeMarkerCoords.TryGetValue(nodeNum, out var existingCoords)
+                && AreCoordsEquivalent(existingCoords, mk);
+            if (geometryUnchanged)
+            {
+                // Telemetry-only updates are common; avoid forcing cluster
+                // geometry checks/rebuilds when marker position is unchanged.
+                AddOrUpdateNodeVisual(mk, px, py, updateTooltip: false);
+                continue;
+            }
+
             // If this update would create a stacked-node cluster, rebuild via
             // the normal cluster path so expansion badges stay correct.
             if (HasNearbyVisibleNode(nodeNum, px, py, clusterRadiusSq))
             {
-                QueueFullMarkerRefresh();
+                QueueFullMarkerRefresh("nearby-node-would-cluster");
                 return;
             }
 
-            AddOrUpdateNodeVisual(mk, px, py);
+            AddOrUpdateNodeVisual(mk, px, py, updateTooltip: false);
         }
     }
 
@@ -684,11 +819,188 @@ public partial class MapView : UserControl
     private static bool AreCoordsEquivalent((double Lat, double Lon) a, MainViewModel.MapMarker b) =>
         Math.Abs(a.Lat - b.Lat) < 1e-7 && Math.Abs(a.Lon - b.Lon) < 1e-7;
 
-    private void QueueFullMarkerRefresh()
+    private bool IsSmallScreenMotion((double Lat, double Lon) a, MainViewModel.MapMarker b, double maxPixels)
     {
+        double ax = LonToX(a.Lon, _zoom);
+        double ay = LatToY(a.Lat, _zoom);
+        double bx = LonToX(b.Lon, _zoom);
+        double by = LatToY(b.Lat, _zoom);
+        double dx = bx - ax;
+        double dy = by - ay;
+        return dx * dx + dy * dy <= maxPixels * maxPixels;
+    }
+
+    private void InvalidateMapDataCache(bool markers = true, bool polylines = true)
+    {
+        if (markers)
+            _mapMarkerCacheValid = false;
+        if (polylines)
+            _mapPolylineCacheValid = false;
+    }
+
+    private IReadOnlyList<MainViewModel.MapMarker> GetCachedMapMarkers()
+    {
+        EnsureMapDataCache();
+        return _cachedMapMarkers;
+    }
+
+    private IReadOnlyList<MainViewModel.MapPolyline> GetCachedPolylines()
+    {
+        EnsureMapDataCache();
+        return _cachedPolylines;
+    }
+
+    private void EnsureMapDataCache()
+    {
+        if (_vm is null)
+        {
+            _cachedMapMarkers.Clear();
+            _cachedNodeMarkerIndices.Clear();
+            _cachedPolylines.Clear();
+            _mapMarkerCacheValid = true;
+            _mapPolylineCacheValid = true;
+            return;
+        }
+
+        if (!_mapMarkerCacheValid)
+        {
+            _cachedMapMarkers.Clear();
+            _cachedMapMarkers.AddRange(_vm.GetMapMarkers());
+            RebuildCachedNodeMarkerIndex();
+            _mapMarkerCacheValid = true;
+        }
+
+        if (!_mapPolylineCacheValid)
+        {
+            _cachedPolylines.Clear();
+            _cachedPolylines.AddRange(_vm.GetMapPolylines());
+            _mapPolylineCacheValid = true;
+        }
+    }
+
+    private void RebuildCachedNodeMarkerIndex()
+    {
+        _cachedNodeMarkerIndices.Clear();
+        for (int i = 0; i < _cachedMapMarkers.Count; i++)
+            if (_cachedMapMarkers[i].NodeNum is uint nodeNum)
+                _cachedNodeMarkerIndices[nodeNum] = i;
+    }
+
+    private void UpdateCachedNodeMarkers(
+        IReadOnlyCollection<uint> nodeNums,
+        IReadOnlyDictionary<uint, MainViewModel.MapMarker> changedMarkers)
+    {
+        if (!_mapMarkerCacheValid)
+            return;
+
+        foreach (var nodeNum in nodeNums)
+        {
+            bool hadExisting = _cachedNodeMarkerIndices.TryGetValue(nodeNum, out int existingIndex);
+
+            if (changedMarkers.TryGetValue(nodeNum, out var updated))
+            {
+                if (hadExisting)
+                {
+                    _cachedMapMarkers[existingIndex] = updated;
+                }
+                else
+                {
+                    _cachedNodeMarkerIndices[nodeNum] = _cachedMapMarkers.Count;
+                    _cachedMapMarkers.Add(updated);
+                }
+
+                continue;
+            }
+
+            if (!hadExisting)
+                continue;
+
+            int lastIndex = _cachedMapMarkers.Count - 1;
+            var swappedMarker = _cachedMapMarkers[lastIndex];
+            _cachedMapMarkers[existingIndex] = swappedMarker;
+            _cachedMapMarkers.RemoveAt(lastIndex);
+            _cachedNodeMarkerIndices.Remove(nodeNum);
+
+            if (existingIndex < _cachedMapMarkers.Count && swappedMarker.NodeNum is uint swappedNodeNum)
+                _cachedNodeMarkerIndices[swappedNodeNum] = existingIndex;
+        }
+    }
+
+    private void QueueFullMarkerRefresh(string reason = "unknown")
+    {
+        if (MapPerfLoggingEnabled)
+        {
+            _perfQueueFullRefreshCalls++;
+            _perfQueueFullRefreshReasons[reason] =
+                _perfQueueFullRefreshReasons.GetValueOrDefault(reason) + 1;
+        }
+
         _fullMarkerRefreshPending = true;
+
         if (!_fullMarkerRefreshTimer.IsEnabled)
             _fullMarkerRefreshTimer.Start();
+
+        PerfMaybeLog("queue-full");
+    }
+
+    private void PerfMaybeLog(string source)
+    {
+        if (!MapPerfLoggingEnabled)
+            return;
+
+        var now = _perfStopwatch.Elapsed;
+        var window = now - _perfWindowStart;
+        if (window < TimeSpan.FromSeconds(1))
+            return;
+
+        double windowSec = Math.Max(window.TotalSeconds, 0.001);
+        double renderNowAvgMs = _perfRenderNowCalls == 0
+            ? 0
+            : (_perfRenderNowTicks * 1000.0 / Stopwatch.Frequency) / _perfRenderNowCalls;
+        double renderMarkersAvgMs = _perfRenderMarkersOnlyNowCalls == 0
+            ? 0
+            : (_perfRenderMarkersOnlyNowTicks * 1000.0 / Stopwatch.Frequency) / _perfRenderMarkersOnlyNowCalls;
+
+        string queueReasons = _perfQueueFullRefreshReasons.Count == 0
+            ? "-"
+            : string.Join(",", _perfQueueFullRefreshReasons
+                .OrderBy(kvp => kvp.Key, StringComparer.Ordinal)
+                .Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+
+        string perfLine =
+            $"[MapPerf] src={source} dt={windowSec:0.00}s " +
+            $"mapData={_perfMapDataChangedEvents} nodeEvt={_perfNodeMarkersChangedEvents}/{_perfNodeMarkersChangedNodes} " +
+            $"onMarkers={_perfOnMarkersChangedCalls} updMarkers={_perfUpdateNodeMarkersCalls}/{_perfUpdateNodeMarkersNodes} " +
+            $"req={_perfRenderRequests} fullReq={_perfRenderRequestsFull} markerReq={_perfRenderRequestsMarkersOnly} " +
+            $"fullNow={_perfRenderNowCalls}@{renderNowAvgMs:0.00}ms markerNow={_perfRenderMarkersOnlyNowCalls}@{renderMarkersAvgMs:0.00}ms " +
+            $"nodeTimer={_perfNodeMarkerTimerTicks}/{_perfNodeMarkerTimerBatches}/{_perfNodeMarkerTimerNodesProcessed} " +
+            $"fullTimer={_perfFullMarkerRefreshTimerTicks} queueFull={_perfQueueFullRefreshCalls} reasons={queueReasons} " +
+            $"pendingMax={_perfPendingNodeMax}";
+
+        Debug.WriteLine(perfLine);
+        Trace.WriteLine(perfLine);
+
+        _perfWindowStart = now;
+        _perfMapDataChangedEvents = 0;
+        _perfNodeMarkersChangedEvents = 0;
+        _perfNodeMarkersChangedNodes = 0;
+        _perfOnMarkersChangedCalls = 0;
+        _perfRenderRequests = 0;
+        _perfRenderRequestsFull = 0;
+        _perfRenderRequestsMarkersOnly = 0;
+        _perfRenderNowCalls = 0;
+        _perfRenderMarkersOnlyNowCalls = 0;
+        _perfRenderNowTicks = 0;
+        _perfRenderMarkersOnlyNowTicks = 0;
+        _perfUpdateNodeMarkersCalls = 0;
+        _perfUpdateNodeMarkersNodes = 0;
+        _perfNodeMarkerTimerTicks = 0;
+        _perfNodeMarkerTimerBatches = 0;
+        _perfNodeMarkerTimerNodesProcessed = 0;
+        _perfFullMarkerRefreshTimerTicks = 0;
+        _perfQueueFullRefreshCalls = 0;
+        _perfPendingNodeMax = 0;
+        _perfQueueFullRefreshReasons.Clear();
     }
 
     private void PlaceTile(int x, int y, int zoom, double left, double top)
@@ -793,6 +1105,7 @@ public partial class MapView : UserControl
     private void DrawMarkers(double originX, double originY)
     {
         if (_vm is null) return;
+        EnsureMapDataCache();
         SpiderCollapseImmediate();
         _nodeVisuals.Clear();
         _nodeVisualLayout.Clear();
@@ -810,7 +1123,7 @@ public partial class MapView : UserControl
         // immediately since it never stacks with nodes.
         var nodes = new List<(MainViewModel.MapMarker mk, double px, double py)>();
 
-        foreach (var mk in _vm.GetMapMarkers())
+        foreach (var mk in _cachedMapMarkers)
         {
             double px = LonToX(mk.Lon, _zoom) - originX;
             double py = LatToY(mk.Lat, _zoom) - originY;
@@ -859,19 +1172,7 @@ public partial class MapView : UserControl
         // Group node markers that land on (nearly) the same screen pixel so
         // stacked nodes don't hide each other's dot and tooltip.
         const double clusterRadiusPx = ClusterRadiusPx;
-        var clusters = new List<List<(MainViewModel.MapMarker mk, double px, double py)>>();
-        foreach (var nm in nodes)
-        {
-            List<(MainViewModel.MapMarker mk, double px, double py)>? hit = null;
-            foreach (var c in clusters)
-            {
-                double dx = nm.px - c[0].px;
-                double dy = nm.py - c[0].py;
-                if (dx * dx + dy * dy <= clusterRadiusPx * clusterRadiusPx) { hit = c; break; }
-            }
-            if (hit is null) { hit = new(); clusters.Add(hit); }
-            hit.Add(nm);
-        }
+        var clusters = BuildMarkerClusters(nodes, clusterRadiusPx);
 
         var singletons = new List<(MainViewModel.MapMarker mk, double px, double py)>();
         foreach (var c in clusters)
@@ -905,9 +1206,10 @@ public partial class MapView : UserControl
     private void DrawLocationHistory(double originX, double originY, double viewportW, double viewportH)
     {
         if (_vm is null) return;
+        EnsureMapDataCache();
 
         const double cullMarginPx = 96;
-        foreach (var polyline in _vm.GetMapPolylines())
+        foreach (var polyline in _cachedPolylines)
         {
             if (polyline.Points.Count < 2)
                 continue;
@@ -916,7 +1218,7 @@ public partial class MapView : UserControl
             bool anyVisible = false;
             var segment = new Polyline
             {
-                Stroke = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0x8C, 0x2D)),
+                Stroke = LocationHistoryStrokeBrush,
                 StrokeThickness = 2.0,
                 StrokeLineJoin = PenLineJoin.Round,
                 StrokeStartLineCap = PenLineCap.Round,
@@ -947,7 +1249,7 @@ public partial class MapView : UserControl
 
                         segment = new Polyline
                         {
-                            Stroke = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0x8C, 0x2D)),
+                            Stroke = LocationHistoryStrokeBrush,
                             StrokeThickness = 2.0,
                             StrokeLineJoin = PenLineJoin.Round,
                             StrokeStartLineCap = PenLineCap.Round,
@@ -982,9 +1284,7 @@ public partial class MapView : UserControl
     private Ellipse CreateNodeDot(MainViewModel.MapMarker mk)
     {
         var fill = mk.IsWaypoint
-            ? new SolidColorBrush(mk.IsExpired
-                ? Color.FromRgb(0xc6, 0x28, 0x28)
-                : Color.FromRgb(0x2e, 0x7d, 0x32))
+            ? (mk.IsExpired ? WaypointExpiredFillBrush : WaypointFillBrush)
             : NodeFillBrush;
         var dot = new Ellipse
         {
@@ -1024,7 +1324,11 @@ public partial class MapView : UserControl
         return label;
     }
 
-    private void AddOrUpdateNodeVisual(MainViewModel.MapMarker mk, double px, double py)
+    private void AddOrUpdateNodeVisual(
+        MainViewModel.MapMarker mk,
+        double px,
+        double py,
+        bool updateTooltip = true)
     {
         if (mk.NodeNum is not uint nodeNum) return;
         _lastNodeMarkerCoords[nodeNum] = (mk.Lat, mk.Lon);
@@ -1033,7 +1337,8 @@ public partial class MapView : UserControl
         {
             if (!ReferenceEquals(existing.Dot.Fill, NodeFillBrush))
                 existing.Dot.Fill = NodeFillBrush;
-            UpdateNodeToolTip(existing.Dot, mk.Title);
+            if (updateTooltip)
+                UpdateNodeToolTip(existing.Dot, mk.Title);
             if (existing.Label is Emoji.Wpf.TextBlock tb &&
                 !string.Equals(tb.Text, mk.Label, StringComparison.Ordinal))
                 tb.Text = mk.Label;
@@ -1094,7 +1399,7 @@ public partial class MapView : UserControl
         {
             Width = 24,
             Height = 24,
-            Fill = new SolidColorBrush(Color.FromRgb(0xff, 0x8c, 0x2d)),
+            Fill = ClusterBadgeFillBrush,
             Stroke = Brushes.White,
             StrokeThickness = 1.5,
         });
@@ -1124,6 +1429,69 @@ public partial class MapView : UserControl
         string.Join("\n", members
             .Select(m => $"{m.mk.Label}|{m.mk.Lat:F6}|{m.mk.Lon:F6}")
             .OrderBy(text => text, StringComparer.Ordinal));
+
+    private static List<List<(MainViewModel.MapMarker mk, double px, double py)>> BuildMarkerClusters(
+        IReadOnlyList<(MainViewModel.MapMarker mk, double px, double py)> nodes,
+        double clusterRadiusPx)
+    {
+        var clusters = new List<List<(MainViewModel.MapMarker mk, double px, double py)>>();
+        if (nodes.Count == 0)
+            return clusters;
+
+        double radiusSq = clusterRadiusPx * clusterRadiusPx;
+        double cellSize = clusterRadiusPx;
+        var clusterAnchors = new List<(double Px, double Py)>();
+        var clusterBuckets = new Dictionary<long, List<int>>();
+
+        foreach (var node in nodes)
+        {
+            int bucketX = (int)Math.Floor(node.px / cellSize);
+            int bucketY = (int)Math.Floor(node.py / cellSize);
+            int hitClusterIndex = -1;
+
+            for (int bx = bucketX - 1; bx <= bucketX + 1 && hitClusterIndex < 0; bx++)
+            {
+                for (int by = bucketY - 1; by <= bucketY + 1 && hitClusterIndex < 0; by++)
+                {
+                    if (!clusterBuckets.TryGetValue(GetBucketKey(bx, by), out var candidateClusters))
+                        continue;
+
+                    foreach (var clusterIndex in candidateClusters)
+                    {
+                        var anchor = clusterAnchors[clusterIndex];
+                        double dx = node.px - anchor.Px;
+                        double dy = node.py - anchor.Py;
+                        if (dx * dx + dy * dy <= radiusSq)
+                        {
+                            hitClusterIndex = clusterIndex;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (hitClusterIndex >= 0)
+            {
+                clusters[hitClusterIndex].Add(node);
+                continue;
+            }
+
+            int newClusterIndex = clusters.Count;
+            clusters.Add(new List<(MainViewModel.MapMarker mk, double px, double py)> { node });
+            clusterAnchors.Add((node.px, node.py));
+
+            long bucketKey = GetBucketKey(bucketX, bucketY);
+            if (!clusterBuckets.TryGetValue(bucketKey, out var bucketMembers))
+            {
+                bucketMembers = new List<int>();
+                clusterBuckets[bucketKey] = bucketMembers;
+            }
+
+            bucketMembers.Add(newClusterIndex);
+        }
+
+        return clusters;
+    }
 
     /// <summary>Fans a stacked group of nodes out around their shared point and
     /// keeps them open via a transparent hover hull.</summary>
@@ -1340,6 +1708,7 @@ public partial class MapView : UserControl
         _markerDragTransform.X = 0;
         _markerDragTransform.Y = 0;
         _lastDragPreviewTick = 0;
+        _lastDragCommitTick = 0;
         MarkerCanvas.CaptureMouse();
     }
 
@@ -1360,24 +1729,18 @@ public partial class MapView : UserControl
         _dragging = false;
         MarkerCanvas.ReleaseMouseCapture();
 
-        if (_dragOffset.X != 0 || _dragOffset.Y != 0)
-        {
-            double cx = LonToX(_centerLon, _zoom) - _dragOffset.X;
-            double cy = LatToY(_centerLat, _zoom) - _dragOffset.Y;
-            _centerLon = XToLon(cx, _zoom);
-            _centerLat = ClampLat(YToLat(cy, _zoom));
-            _userMovedView = true;
-        }
+        bool committed = CommitDragOffsetToCenter();
 
         _tileDragTransform.X = 0;
         _tileDragTransform.Y = 0;
         _markerDragTransform.X = 0;
         _markerDragTransform.Y = 0;
 
-        if (_dragOffset.X != 0 || _dragOffset.Y != 0)
+        if (committed)
             Render();
 
         _dragOffset = default;
+        _lastDragCommitTick = 0;
 
         if (_pendingMarkerRefresh)
         {
@@ -1406,6 +1769,36 @@ public partial class MapView : UserControl
         _tileDragTransform.Y = _dragOffset.Y;
         _markerDragTransform.X = _dragOffset.X;
         _markerDragTransform.Y = _dragOffset.Y;
+
+        // Commit drag in coarse steps so viewport-dependent updates (tiles,
+        // marker culling/reclustering) continue while dragging.
+        if (_dragOffset.LengthSquared >= DragCommitMinPixels * DragCommitMinPixels &&
+            (nowTicks - _lastDragCommitTick) >= DragCommitMinIntervalTicks)
+        {
+            if (CommitDragOffsetToCenter())
+            {
+                _tileDragTransform.X = 0;
+                _tileDragTransform.Y = 0;
+                _markerDragTransform.X = 0;
+                _markerDragTransform.Y = 0;
+                _dragOffset = default;
+                _lastDragCommitTick = nowTicks;
+                Render();
+            }
+        }
+    }
+
+    private bool CommitDragOffsetToCenter()
+    {
+        if (_dragOffset.X == 0 && _dragOffset.Y == 0)
+            return false;
+
+        double cx = LonToX(_centerLon, _zoom) - _dragOffset.X;
+        double cy = LatToY(_centerLat, _zoom) - _dragOffset.Y;
+        _centerLon = XToLon(cx, _zoom);
+        _centerLat = ClampLat(YToLat(cy, _zoom));
+        _userMovedView = true;
+        return true;
     }
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
@@ -1449,8 +1842,9 @@ public partial class MapView : UserControl
         }
         else
         {
-            _userMovedView = false;
-            FitToMarkers();
+            // No home marker: perform a one-time fit to currently visible
+            // markers without keeping auto-fit active for future updates.
+            _userMovedView = FitToMarkers();
             Render();
         }
     }
@@ -1510,6 +1904,9 @@ public partial class MapView : UserControl
     /// override the restored position on the first <see cref="OnMarkersChanged"/> call.</summary>
     public void LoadFromSettings(AppSettings settings)
     {
+        _clusterNodes = settings.MapClusterNodes;
+        ClusterNodesButton.IsChecked = _clusterNodes;
+
         if (settings.MapCenterLat is double lat && settings.MapCenterLon is double lon
             && settings.MapZoom >= MinZoom && settings.MapZoom <= MaxZoom)
         {
@@ -1526,6 +1923,7 @@ public partial class MapView : UserControl
         settings.MapCenterLat = _centerLat;
         settings.MapCenterLon = _centerLon;
         settings.MapZoom = _zoom;
+        settings.MapClusterNodes = _clusterNodes;
     }
 
     /// <summary>Center / zoom so all markers fit, or default if there are none.</summary>

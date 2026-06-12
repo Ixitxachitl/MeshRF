@@ -1239,6 +1239,8 @@
                                         <ListBox ItemsSource="{Binding Messages}"
                                                  FontFamily="Consolas"
                                                  HorizontalContentAlignment="Stretch"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 VirtualizingPanel.ScrollUnit="Pixel"
                                                  Grid.IsSharedSizeScope="True"
                                                  beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
@@ -1338,6 +1340,8 @@
                                                  ItemsSource="{Binding Messages}"
                                                  FontFamily="Consolas"
                                                  HorizontalContentAlignment="Stretch"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 VirtualizingPanel.ScrollUnit="Pixel"
                                                  Grid.IsSharedSizeScope="True"
                                                  beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
