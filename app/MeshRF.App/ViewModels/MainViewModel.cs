@@ -653,6 +653,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 FromId = "keys",
                 Text = noteText,
                 IsOutgoing = true,
+                PacketId = packetId,
             });
             PersistConversationNote(n.NodeNum, outgoing: true, packetId,
                                     "keys", noteText);
@@ -683,6 +684,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 FromId = "nodeinfo",
                 Text = noteText,
                 IsOutgoing = true,
+                PacketId = packetId,
             });
             PersistConversationNote(n.NodeNum, outgoing: true, packetId,
                                     "nodeinfo", noteText);
@@ -711,6 +713,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 FromId = "nodeinfo",
                 Text = noteText,
                 IsOutgoing = true,
+                PacketId = packetId,
             });
             PersistConversationNote(n.NodeNum, outgoing: true, packetId,
                                     "nodeinfo", noteText);
@@ -779,6 +782,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     FromId = "traceroute",
                     Text = noteText,
                     IsOutgoing = true,
+                    PacketId = packetId,
                 });
                 PersistConversationNote(node.NodeNum, outgoing: true, packetId,
                                         "traceroute", noteText);
@@ -858,6 +862,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     FromId = "position",
                     Text = noteText,
                     IsOutgoing = true,
+                    PacketId = packetId,
                 });
                 PersistConversationNote(node.NodeNum, outgoing: true, packetId,
                                         "position", noteText);
@@ -3322,6 +3327,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Text = noteText,
                 RssiDbm = rssi,
                 SnrDb = snrDb,
+                PacketId = header.PacketId,
             });
             PersistConversationNote(header.From, outgoing: false, header.PacketId,
                                     "traceroute", noteText, rssi, snrDb);
