@@ -34,6 +34,12 @@ public sealed class MeshDecodeResult
     /// to. For a ROUTING ack/nak it identifies the original packet.</summary>
     public uint RequestId { get; init; }
 
+    /// <summary>Data.reply_id (field 7): packet id this message is reacting or replying to.</summary>
+    public uint ReplyId { get; init; }
+
+    /// <summary>Data.emoji (field 8): Unicode code point for emoji reactions.</summary>
+    public uint Emoji { get; init; }
+
     /// <summary>Data.bitfield (field 9) bit 0 (ok_to_mqtt): the sender permits
     /// gateways to uplink this packet to public MQTT.</summary>
     public bool OkToMqtt { get; init; }
@@ -194,10 +200,12 @@ public static class MeshDecoder
             catch { continue; }
 
             if (TryParseData(plain, out var port, out var appPayload,
-                             out var wantResp, out var reqId, out var okMqtt) &&
-                IsPlausible(port, appPayload))
+                             out var wantResp, out var reqId, out var replyId,
+                             out var emoji, out var okMqtt) &&
+                IsPlausible(port, appPayload, replyId, emoji))
             {
-                return Build(header, ch.Name, port, appPayload, wantResp, reqId, okMqtt);
+                return Build(header, ch.Name, port, appPayload, wantResp,
+                             reqId, replyId, emoji, okMqtt);
             }
         }
         return null;
@@ -234,25 +242,31 @@ public static class MeshDecoder
         if (plain is null) return null; // auth tag mismatch
 
         if (TryParseData(plain, out var port, out var appPayload,
-                         out var wantResp, out var reqId, out var okMqtt) &&
-            IsPlausible(port, appPayload))
+                         out var wantResp, out var reqId, out var replyId,
+                         out var emoji, out var okMqtt) &&
+            IsPlausible(port, appPayload, replyId, emoji))
         {
-            return Build(header, "PKC", port, appPayload, wantResp, reqId, okMqtt);
+            return Build(header, "PKC", port, appPayload, wantResp,
+                         reqId, replyId, emoji, okMqtt);
         }
         return null;
     }
 
     // -- Data protobuf: 1 = portnum (varint), 2 = payload (bytes),
-    //    3 = want_response (varint bool), 6 = request_id (fixed32),
+    //    3 = want_response (varint bool), 6 = request_id (uint32),
+    //    7 = reply_id (uint32), 8 = emoji (uint32/varint),
     //    9 = bitfield (varint, bit 0 = ok_to_mqtt) --
     private static bool TryParseData(byte[] data, out PortNum port, out byte[] payload,
                                      out bool wantResponse, out uint requestId,
+                                     out uint replyId, out uint emoji,
                                      out bool okToMqtt)
     {
         port = PortNum.Unknown;
         payload = Array.Empty<byte>();
         wantResponse = false;
         requestId = 0;
+        replyId = 0;
+        emoji = 0;
         okToMqtt = false;
         var rdr = new ProtoReader(data);
         bool sawPort = false;
@@ -273,6 +287,21 @@ public static class MeshDecoder
                 case 6 when wt == ProtoReader.WireType.I32:
                     requestId = rdr.ReadFixed32();
                     break;
+                case 6 when wt == ProtoReader.WireType.Varint:
+                    requestId = (uint)rdr.ReadVarint();
+                    break;
+                case 7 when wt == ProtoReader.WireType.I32:
+                    replyId = rdr.ReadFixed32();
+                    break;
+                case 7 when wt == ProtoReader.WireType.Varint:
+                    replyId = (uint)rdr.ReadVarint();
+                    break;
+                case 8 when wt == ProtoReader.WireType.Varint:
+                    emoji = (uint)rdr.ReadVarint();
+                    break;
+                case 8 when wt == ProtoReader.WireType.I32:
+                    emoji = rdr.ReadFixed32();
+                    break;
                 case 9 when wt == ProtoReader.WireType.Varint:
                     { var bf = rdr.ReadVarint();
                       okToMqtt     = (bf & 0x01) != 0;  // bit 0
@@ -288,17 +317,23 @@ public static class MeshDecoder
     }
 
     // Reject obviously-wrong decrypts (wrong key -> garbage portnum / payload).
-    private static bool IsPlausible(PortNum port, byte[] payload)
+    private static bool IsPlausible(PortNum port, byte[] payload,
+                                    uint replyId = 0, uint emoji = 0)
     {
         if (!Enum.IsDefined(typeof(PortNum), port)) return false;
         if (port == PortNum.TextMessage)
-            return payload.Length > 0 && IsValidUtf8(payload);
+        {
+            if (payload.Length == 0)
+                return replyId != 0 && emoji != 0; // per-message reaction packet
+            return IsValidUtf8(payload);
+        }
         return true;
     }
 
     private static MeshDecodeResult Build(MeshHeader header, string channel,
                                           PortNum port, byte[] payload,
                                           bool wantResponse = false, uint requestId = 0,
+                                          uint replyId = 0, uint emoji = 0,
                                           bool okToMqtt = false)
     {
         string? text = null;
@@ -352,6 +387,8 @@ public static class MeshDecoder
             NeighborInfo = neighborInfo,
             WantResponse = wantResponse,
             RequestId = requestId,
+            ReplyId = replyId,
+            Emoji = emoji,
             OkToMqtt = okToMqtt,
             RoutingError = routingError,
             AppPayload = payload,

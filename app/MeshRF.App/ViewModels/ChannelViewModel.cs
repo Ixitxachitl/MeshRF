@@ -183,6 +183,14 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>True for messages we transmitted (so delivery status applies).</summary>
     public bool IsOutgoing { get; init; }
 
+    /// <summary>Aggregated reactions attached to this message.</summary>
+    public ObservableCollection<MessageReaction> Reactions { get; } = new();
+
+    private readonly Dictionary<string, MessageReaction> _reactionsByEmoji = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> _reactorsByEmoji = new(StringComparer.Ordinal);
+
+    public bool HasReactions => Reactions.Count > 0;
+
     /// <summary>Delivery state for outgoing messages, updated when an ACK/NAK
     /// arrives. Always <see cref="MessageDelivery.None"/> for received messages.</summary>
     [ObservableProperty]
@@ -211,6 +219,55 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>Single-line rendering used for clipboard copy.</summary>
     public string Display =>
         $"[{Timestamp:HH:mm:ss}] {FromId,-12}  {Text}{DeliverySuffix}";
+
+    /// <summary>Add or update one reaction for this message. A sender only
+    /// counts once per emoji.</summary>
+    public void AddReaction(string emoji, string fromId)
+    {
+        var emojiKey = (emoji ?? string.Empty).Trim();
+        if (emojiKey.Length == 0) return;
+
+        var sender = string.IsNullOrWhiteSpace(fromId) ? "unknown" : fromId.Trim();
+        if (!_reactorsByEmoji.TryGetValue(emojiKey, out var reactors))
+        {
+            reactors = new HashSet<string>(StringComparer.Ordinal);
+            _reactorsByEmoji[emojiKey] = reactors;
+        }
+
+        if (!reactors.Add(sender)) return;
+
+        if (!_reactionsByEmoji.TryGetValue(emojiKey, out var reaction))
+        {
+            reaction = new MessageReaction
+            {
+                Emoji = emojiKey,
+                Count = reactors.Count,
+                Reactors = string.Join(", ", reactors.OrderBy(x => x, StringComparer.Ordinal)),
+            };
+            _reactionsByEmoji[emojiKey] = reaction;
+            Reactions.Add(reaction);
+            OnPropertyChanged(nameof(HasReactions));
+            return;
+        }
+
+        reaction.Count = reactors.Count;
+        reaction.Reactors = string.Join(", ", reactors.OrderBy(x => x, StringComparer.Ordinal));
+    }
+}
+
+public partial class MessageReaction : ObservableObject
+{
+    public string Emoji { get; init; } = string.Empty;
+
+    [ObservableProperty]
+    private int _count;
+
+    [ObservableProperty]
+    private string _reactors = string.Empty;
+
+    public string Display => $"{Emoji} {Count}";
+
+    partial void OnCountChanged(int value) => OnPropertyChanged(nameof(Display));
 }
 
 /// <summary>Delivery state of an outgoing message based on Meshtastic ACKs.</summary>

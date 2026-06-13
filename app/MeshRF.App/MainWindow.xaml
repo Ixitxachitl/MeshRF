@@ -1245,7 +1245,20 @@
                                                  beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Grid>
+                                                    <Grid Tag="{Binding DataContext.SendReactionCommand, RelativeSource={RelativeSource AncestorType=TabControl}}">
+                                                        <Grid.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="React..."
+                                                                          Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                          CommandParameter="{Binding}">
+                                                                    <MenuItem.Icon>
+                                                                        <TextBlock Text="&#xE11D;"
+                                                                                   FontFamily="Segoe MDL2 Assets"
+                                                                                   FontSize="12" />
+                                                                    </MenuItem.Icon>
+                                                                </MenuItem>
+                                                            </ContextMenu>
+                                                        </Grid.ContextMenu>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="Auto" SharedSizeGroup="NodeName" />
@@ -1254,8 +1267,32 @@
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
                                                         <emoji:TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
-                                                        <emoji:TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                         TextWrapping="Wrap" />
+                                                        <StackPanel Grid.Column="2" Margin="0,0,0,2">
+                                                            <emoji:TextBlock beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                             TextWrapping="Wrap" />
+                                                            <ItemsControl ItemsSource="{Binding Reactions}"
+                                                                          Margin="0,3,0,0"
+                                                                          Visibility="{Binding HasReactions, Converter={StaticResource BoolToVis}}">
+                                                                <ItemsControl.ItemsPanel>
+                                                                    <ItemsPanelTemplate>
+                                                                        <WrapPanel />
+                                                                    </ItemsPanelTemplate>
+                                                                </ItemsControl.ItemsPanel>
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Border Margin="0,0,4,0"
+                                                                                Padding="6,1"
+                                                                                CornerRadius="8"
+                                                                                Background="{DynamicResource BrushPanelBackground}"
+                                                                                BorderBrush="{DynamicResource BrushPanelBorder}"
+                                                                                BorderThickness="1"
+                                                                                ToolTip="{Binding Reactors}">
+                                                                            <emoji:TextBlock Text="{Binding Display}" />
+                                                                        </Border>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
@@ -1346,7 +1383,20 @@
                                                  beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Grid>
+                                                    <Grid Tag="{Binding DataContext.SendReactionCommand, RelativeSource={RelativeSource AncestorType=TabControl}}">
+                                                        <Grid.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="React..."
+                                                                          Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                          CommandParameter="{Binding}">
+                                                                    <MenuItem.Icon>
+                                                                        <TextBlock Text="&#xE11D;"
+                                                                                   FontFamily="Segoe MDL2 Assets"
+                                                                                   FontSize="12" />
+                                                                    </MenuItem.Icon>
+                                                                </MenuItem>
+                                                            </ContextMenu>
+                                                        </Grid.ContextMenu>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="Auto" SharedSizeGroup="NodeName" />
@@ -1355,8 +1405,32 @@
                                                         <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
                                                         <emoji:TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
-                                                        <emoji:TextBlock Grid.Column="2" beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                         TextWrapping="Wrap" />
+                                                        <StackPanel Grid.Column="2" Margin="0,0,0,2">
+                                                            <emoji:TextBlock beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                             TextWrapping="Wrap" />
+                                                            <ItemsControl ItemsSource="{Binding Reactions}"
+                                                                          Margin="0,3,0,0"
+                                                                          Visibility="{Binding HasReactions, Converter={StaticResource BoolToVis}}">
+                                                                <ItemsControl.ItemsPanel>
+                                                                    <ItemsPanelTemplate>
+                                                                        <WrapPanel />
+                                                                    </ItemsPanelTemplate>
+                                                                </ItemsControl.ItemsPanel>
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Border Margin="0,0,4,0"
+                                                                                Padding="6,1"
+                                                                                CornerRadius="8"
+                                                                                Background="{DynamicResource BrushPanelBackground}"
+                                                                                BorderBrush="{DynamicResource BrushPanelBorder}"
+                                                                                BorderThickness="1"
+                                                                                ToolTip="{Binding Reactors}">
+                                                                            <emoji:TextBlock Text="{Binding Display}" />
+                                                                        </Border>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>

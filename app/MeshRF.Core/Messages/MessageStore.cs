@@ -58,6 +58,8 @@ public sealed class MessageStore : IDisposable
                 to_node     INTEGER NOT NULL,
                 channel     TEXT    NOT NULL DEFAULT '',
                 portnum     INTEGER NOT NULL DEFAULT 0,
+                reply_id    INTEGER NOT NULL DEFAULT 0,
+                emoji       INTEGER NOT NULL DEFAULT 0,
                 text        TEXT    NOT NULL DEFAULT '',
                 payload_hex TEXT    NOT NULL DEFAULT '',
                 decrypted   INTEGER NOT NULL DEFAULT 0,
@@ -74,6 +76,24 @@ public sealed class MessageStore : IDisposable
 
         // Additive migration: delivery state for sent messages (ACK/NAK).
         AddColumnIfMissing("delivery", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("reply_id", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("emoji", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("is_reaction", "INTEGER NOT NULL DEFAULT 0");
+
+        // Backfill obvious historical reaction rows for older DBs that predate
+        // the explicit is_reaction flag.
+        using (var backfill = _conn.CreateCommand())
+        {
+            backfill.CommandText = """
+                UPDATE messages
+                SET is_reaction = 1
+                WHERE is_reaction = 0
+                  AND portnum = 1
+                  AND emoji != 0
+                  AND reply_id != 0;
+                """;
+            backfill.ExecuteNonQuery();
+        }
     }
 
     private void AddColumnIfMissing(string name, string sqlType)
@@ -97,9 +117,10 @@ public sealed class MessageStore : IDisposable
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR IGNORE INTO messages
-                (packet_id, from_node, to_node, channel, portnum, text,
+                (packet_id, from_node, to_node, channel, portnum, reply_id,
+                 emoji, is_reaction, text,
                  payload_hex, decrypted, rx_epoch, rssi_dbfs, snr_db, delivery)
-            VALUES ($pid, $from, $to, $chan, $port, $text,
+                VALUES ($pid, $from, $to, $chan, $port, $reply, $emoji, $isReaction, $text,
                     $hex, $dec, $rx, $rssi, $snr, $del);
             """;
         cmd.Parameters.AddWithValue("$pid",  m.PacketId);
@@ -107,6 +128,9 @@ public sealed class MessageStore : IDisposable
         cmd.Parameters.AddWithValue("$to",   m.ToNode);
         cmd.Parameters.AddWithValue("$chan", m.Channel ?? string.Empty);
         cmd.Parameters.AddWithValue("$port", m.PortNum);
+        cmd.Parameters.AddWithValue("$reply", m.ReplyId);
+        cmd.Parameters.AddWithValue("$emoji", m.Emoji);
+        cmd.Parameters.AddWithValue("$isReaction", m.IsReaction ? 1 : 0);
         cmd.Parameters.AddWithValue("$text", m.Text ?? string.Empty);
         cmd.Parameters.AddWithValue("$hex",  m.PayloadHex ?? string.Empty);
         cmd.Parameters.AddWithValue("$dec",  m.Decrypted ? 1 : 0);
@@ -286,6 +310,9 @@ public sealed class MessageStore : IDisposable
             ToNode     = (uint)r.GetInt64(r.GetOrdinal("to_node")),
             Channel    = r.GetString(r.GetOrdinal("channel")),
             PortNum    = r.GetInt32(r.GetOrdinal("portnum")),
+            ReplyId    = (uint)r.GetInt64(r.GetOrdinal("reply_id")),
+            Emoji      = (uint)r.GetInt64(r.GetOrdinal("emoji")),
+            IsReaction = r.GetInt64(r.GetOrdinal("is_reaction")) != 0,
             Text       = r.GetString(r.GetOrdinal("text")),
             PayloadHex = r.GetString(r.GetOrdinal("payload_hex")),
             Decrypted  = r.GetInt64(r.GetOrdinal("decrypted")) != 0,

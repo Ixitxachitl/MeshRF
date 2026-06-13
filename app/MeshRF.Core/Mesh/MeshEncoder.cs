@@ -46,12 +46,15 @@ public static class MeshEncoder
                                 bool wantAck = false,
                                 bool wantResponse = false,
                                 uint requestId = 0,
+                                uint replyId = 0,
+                                uint emoji = 0,
                                 bool okToMqtt = false)
     {
         ArgumentNullException.ThrowIfNull(channel);
 
         // 1. Build the Data sub-message: field 1 = portnum, field 2 = payload,
         //    field 3 = want_response, field 6 = request_id (fixed32),
+        //    field 7 = reply_id (fixed32), field 8 = emoji (fixed32),
         //    field 9 = bitfield (bit 0 = ok_to_mqtt).
         var data = new ProtoWriter();
         data.WriteVarintField(1, (ulong)port);
@@ -61,6 +64,10 @@ public static class MeshEncoder
             data.WriteVarintField(3, 1);
         if (requestId != 0)
             data.WriteFixed32Field(6, requestId);
+        if (replyId != 0)
+            data.WriteFixed32Field(7, replyId);
+        if (emoji != 0)
+            data.WriteFixed32Field(8, emoji);
         ulong bitfield = (okToMqtt ? BitfieldOkToMqtt : 0) | (wantResponse ? BitfieldWantResponse : 0);
         if (bitfield != 0)
             data.WriteVarintField(9, bitfield);
@@ -94,9 +101,12 @@ public static class MeshEncoder
                                            uint to = 0xFFFFFFFFu,
                                            byte hopLimit = 3,
                                            bool wantAck = false,
-                                           bool okToMqtt = false)
+                                           bool okToMqtt = false,
+                                           uint replyId = 0,
+                                           uint emoji = 0)
         => Encode(channel, from, to, packetId, PortNum.TextMessage,
-                  Encoding.UTF8.GetBytes(text), hopLimit, wantAck,
+                  Encoding.UTF8.GetBytes(text ?? string.Empty), hopLimit, wantAck,
+                  replyId: replyId, emoji: emoji,
                   okToMqtt: okToMqtt);
     /// <summary>
     /// Encode a PKC (public-key) direct message addressed to a single peer,
@@ -126,6 +136,8 @@ public static class MeshEncoder
                                    bool wantAck = false,
                                    bool wantResponse = false,
                                    uint requestId = 0,
+                                   uint replyId = 0,
+                                   uint emoji = 0,
                                    bool okToMqtt = false)
     {
         ArgumentNullException.ThrowIfNull(myPrivateKey);
@@ -135,6 +147,7 @@ public static class MeshEncoder
 
         // 1. Build the Data sub-message: field 1 = portnum, field 2 = payload,
         //    field 3 = want_response, field 6 = request_id (fixed32),
+        //    field 7 = reply_id (fixed32), field 8 = emoji (fixed32),
         //    field 9 = bitfield (bit 0 = ok_to_mqtt).
         var data = new ProtoWriter();
         data.WriteVarintField(1, (ulong)port);
@@ -144,6 +157,10 @@ public static class MeshEncoder
             data.WriteVarintField(3, 1);
         if (requestId != 0)
             data.WriteFixed32Field(6, requestId);
+        if (replyId != 0)
+            data.WriteFixed32Field(7, replyId);
+        if (emoji != 0)
+            data.WriteFixed32Field(8, emoji);
         ulong bitfieldPkc = (okToMqtt ? BitfieldOkToMqtt : 0) | (wantResponse ? BitfieldWantResponse : 0);
         if (bitfieldPkc != 0)
             data.WriteVarintField(9, bitfieldPkc);
@@ -175,10 +192,13 @@ public static class MeshEncoder
                                               byte[] peerPublicKey,
                                               byte hopLimit = 3,
                                               bool wantAck = false,
-                                              bool okToMqtt = false)
+                                              bool okToMqtt = false,
+                                              uint replyId = 0,
+                                              uint emoji = 0)
         => EncodePkc(from, to, packetId, PortNum.TextMessage,
-                     Encoding.UTF8.GetBytes(text), myPrivateKey, peerPublicKey,
-                     hopLimit, wantAck, okToMqtt: okToMqtt);
+                     Encoding.UTF8.GetBytes(text ?? string.Empty), myPrivateKey, peerPublicKey,
+                     hopLimit, wantAck, replyId: replyId, emoji: emoji,
+                     okToMqtt: okToMqtt);
 
     /// <summary>
     /// Encode a NODEINFO_APP frame carrying our <c>User</c> protobuf — the

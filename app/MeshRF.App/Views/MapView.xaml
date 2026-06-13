@@ -119,25 +119,14 @@
                                    Foreground="{DynamicResource BrushAppForeground}"
                                    VerticalAlignment="Center"
                                    Margin="0,0,6,0" />
-                        <ComboBox Width="62"
-                                  Height="24"
-                                  ItemsSource="{Binding WaypointEmojiOptions}"
-                                  SelectedItem="{Binding SelectedWaypointEmoji, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  ToolTip="Waypoint emoji preset.">
-                            <ComboBox.ItemTemplate>
-                                <DataTemplate>
-                                    <emoji:TextBlock Text="{Binding}" />
-                                </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
-
-                        <TextBox Width="58"
-                                 Height="24"
-                                 Margin="4,0,0,0"
-                                 FontFamily="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=FontFamily}"
-                                 FontSize="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=FontSize}"
-                                 Text="{Binding SelectedWaypointEmoji, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="Custom emoji (paste/type any emoji, e.g. Win + .)" />
+                                                <Button Width="62"
+                                                                Height="24"
+                                                                Command="{Binding PickWaypointEmojiCommand}"
+                                                                ToolTip="Click to pick waypoint emoji">
+                                                        <emoji:TextBlock Text="{Binding SelectedWaypointEmoji}"
+                                                                                         VerticalAlignment="Center"
+                                                                                         HorizontalAlignment="Center" />
+                                                </Button>
                     </StackPanel>
 
                     <TextBlock Text="Name" Foreground="{DynamicResource BrushAppForeground}" Margin="0,6,0,0" />

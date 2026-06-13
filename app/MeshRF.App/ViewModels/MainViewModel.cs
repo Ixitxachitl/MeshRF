@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.App.Audio;
 using MeshRF.App.Location;
+using MeshRF.App.Views;
 using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
@@ -500,6 +501,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         "📍", "📌", "🏠", "⛺", "⚠", "🚧", "🛰", "🏴",
     };
+
+    [RelayCommand]
+    private void PickWaypointEmoji()
+    {
+        string? picked = EmojiPickerWindow.PickEmoji(Application.Current?.MainWindow);
+        if (!string.IsNullOrWhiteSpace(picked))
+            SelectedWaypointEmoji = picked.Trim();
+    }
 
     public IReadOnlyList<LocationSourceOption> LocationSourceOptions { get; } =
     [
@@ -1594,21 +1603,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var convo in Tabs.OfType<ConversationViewModel>().ToList())
             Tabs.Remove(convo);
 
+        var pendingChannelReactions = new List<MessageRecord>();
+
         // Rebuild channel (broadcast) chat rooms from history.
         foreach (var msg in _messageStore.TextHistory())
         {
-            if (string.IsNullOrEmpty(msg.Text)) continue;
-
             bool isDm = msg.ToNode != 0xFFFFFFFFu &&
                         (msg.FromNode == _myNodeNum || msg.ToNode == _myNodeNum);
             if (isDm) continue; // DMs are restored per-conversation below.
 
             var chanVm = ResolveChannelTab(msg.Channel);
-            if (chanVm is not null)
+            if (chanVm is null) continue;
+
+            if (IsReactionRecord(msg))
             {
-                chanVm.Messages.Add(BuildHistoryMessage(msg));
-                if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
+                pendingChannelReactions.Add(msg);
+                continue;
             }
+
+            if (IsOrphanReactionRow(msg))
+                continue;
+
+            if (IsNonStandaloneReplyRecord(msg))
+                continue;
+
+            if (string.IsNullOrEmpty(msg.Text)) continue;
+            chanVm.Messages.Add(BuildHistoryMessage(msg));
+            if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
+        }
+
+        foreach (var reaction in pendingChannelReactions)
+        {
+            var chanVm = ResolveChannelTab(reaction.Channel);
+            if (chanVm is null) continue;
+            TryApplyReaction(chanVm.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode);
         }
 
         // Reopen only the DM tabs that were left open last session (not every
@@ -1636,11 +1664,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         convo.Messages.Clear();
         if (_myNodeNum == 0) return;
+
+        var pendingReactions = new List<MessageRecord>();
         foreach (var msg in _messageStore.Conversation(convo.NodeNum, _myNodeNum))
         {
+            if (IsReactionRecord(msg))
+            {
+                pendingReactions.Add(msg);
+                continue;
+            }
+
+            if (IsOrphanReactionRow(msg))
+                continue;
+
+            if (IsNonStandaloneReplyRecord(msg))
+                continue;
+
             if (string.IsNullOrEmpty(msg.Text)) continue;
             convo.Add(BuildHistoryMessage(msg));
         }
+
+        foreach (var reaction in pendingReactions)
+            TryApplyReaction(convo.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode);
     }
 
     /// <summary>Turn a stored record into a <see cref="ChannelMessage"/>,
@@ -1683,6 +1728,63 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ? (MessageDelivery)msg.Delivery
                 : MessageDelivery.None,
         };
+    }
+
+    private static bool IsReactionRecord(MessageRecord msg) =>
+        msg.IsReaction ||
+        (msg.PortNum == (int)PortNum.TextMessage
+         && msg.ReplyId != 0
+         && msg.Emoji != 0);
+
+    private static bool IsOrphanReactionRow(MessageRecord msg) =>
+        msg.PortNum == (int)PortNum.TextMessage
+        && msg.ReplyId == 0
+        && msg.Emoji != 0;
+
+    private static bool IsNonStandaloneReplyRecord(MessageRecord msg) =>
+        msg.PortNum == (int)PortNum.TextMessage
+        && msg.ReplyId != 0
+        && msg.Emoji == 0;
+
+    private bool TryApplyReaction(IList<ChannelMessage> messages, uint replyId,
+                                  string? reactionText, uint emoji, uint fromNode)
+    {
+        if (replyId == 0 || emoji == 0 || messages.Count == 0) return false;
+        var glyph = ResolveReactionGlyph(reactionText, emoji);
+        if (glyph.Length == 0) return false;
+
+        for (int i = messages.Count - 1; i >= 0; i--)
+        {
+            var msg = messages[i];
+            if (msg.PacketId != replyId) continue;
+            msg.AddReaction(glyph, NodeDisplayName(fromNode));
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string ResolveReactionGlyph(string? reactionText, uint emoji)
+    {
+        var text = (reactionText ?? string.Empty).Trim();
+        if (text.Length > 0) return text;
+        return CodePointToEmoji(emoji);
+    }
+
+    private static uint ResolveReactionTargetId(MeshDecodeResult result)
+    {
+        if (result.ReplyId != 0) return result.ReplyId;
+        // Some firmware paths reuse request_id for reply-linked packets.
+        if (result.RequestId != 0)
+            return result.RequestId;
+        return 0;
+    }
+
+    private static string CodePointToEmoji(uint codePoint)
+    {
+        if (codePoint is 0 or > 0x10FFFFu) return string.Empty;
+        try { return char.ConvertFromUtf32((int)codePoint); }
+        catch { return string.Empty; }
     }
 
     /// <summary>
@@ -2403,45 +2505,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (focus) SelectedTab = convo;
         // Remember that this tab is open so it (and only it) reopens next launch.
         SaveSettings();
-        // Restore persisted history on a background thread so the UI thread is
-        // never blocked by the SQLite read + repeated ObservableCollection.Add.
-        // All convo.Add calls are marshalled back to the UI thread via
-        // Dispatcher.InvokeAsync so WPF binding sees them on the right thread.
-        var myNodeNum = _myNodeNum;
-        _ = Task.Run(() =>
-        {
-            if (myNodeNum == 0) return;
-            var history = _messageStore.Conversation(convo.NodeNum, myNodeNum).ToList();
-            foreach (var msg in history)
-            {
-                if (string.IsNullOrEmpty(msg.Text)) continue;
-                var cm = BuildHistoryMessage(msg);
-                System.Windows.Application.Current?.Dispatcher.InvokeAsync(
-                    () =>
-                    {
-                        // History replay can race with live appends (for example
-                        // request-note echoes). Dedup and insert chronologically
-                        // so old history does not appear after new live rows.
-                        bool duplicate = cm.PacketId != 0
-                            ? convo.Messages.Any(existing => existing.PacketId == cm.PacketId)
-                            : convo.Messages.Any(existing =>
-                                existing.IsOutgoing == cm.IsOutgoing &&
-                                string.Equals(existing.FromId, cm.FromId, StringComparison.Ordinal) &&
-                                string.Equals(existing.Text, cm.Text, StringComparison.Ordinal) &&
-                                existing.Timestamp == cm.Timestamp);
-                        if (duplicate)
-                            return;
-
-                        int insertAt = convo.Messages.Count;
-                        while (insertAt > 0 && convo.Messages[insertAt - 1].Timestamp > cm.Timestamp)
-                            insertAt--;
-
-                        convo.Messages.Insert(insertAt, cm);
-                        if (convo.Messages.Count > 1000)
-                            convo.Messages.RemoveAt(0);
-                    });
-            }
-        });
+        // Restore persisted DM history (including per-message reactions) using
+        // the same replay path used during startup.
+        LoadConversationHistory(convo);
         return convo;
     }
 
@@ -2804,6 +2870,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     FromId = NodeDisplayName(_myNodeNum),
                     Text = text,
+                    PacketId = packetId,
+                    IsOutgoing = true,
                 });
                 if (ch.Messages.Count > 1000) ch.Messages.RemoveAt(0);
                 PersistOutgoingText(0xFFFFFFFFu, packetId, text, ch.Config.Name,
@@ -2927,6 +2995,106 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Status = $"DM send error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    /// <summary>
+    /// Send a Meshtastic per-message emoji reaction (Data.reply_id + Data.emoji)
+    /// targeting the selected message in the active chat tab.
+    /// </summary>
+    [RelayCommand]
+    private async Task SendReactionAsync(ChannelMessage? target)
+    {
+        if (target is null || target.PacketId == 0) return;
+        if (!CanTransmit) return;
+
+        if (_myNodeNum == 0)
+        {
+            Status = "Set your node ID (Identity) before sending reactions.";
+            Log(Status);
+            return;
+        }
+
+        string? emoji = EmojiPickerWindow.PickEmoji(Application.Current?.MainWindow);
+        if (string.IsNullOrWhiteSpace(emoji)) return;
+        uint? emojiCodePoint = EmojiToCodePoint(emoji);
+        if (emojiCodePoint is null || emojiCodePoint.Value == 0)
+        {
+            Status = "Selected emoji is not valid.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok;
+            uint to;
+            string channelTag;
+
+            if (SelectedTab is ConversationViewModel convo)
+            {
+                to = convo.NodeNum;
+                var myPriv = TryParseKeyBase64(MyPrivateKey);
+                var peerPub = TryParseHex(_nodeStore.Get(convo.NodeNum)?.PublicKey);
+                bool usePkc = myPriv.Length == 32 && peerPub.Length == 32;
+
+                var primary = Channels.FirstOrDefault();
+                if (!usePkc && primary is null)
+                {
+                    Status = "No channel configured to carry this reaction.";
+                    Log(Status);
+                    return;
+                }
+
+                byte[] frame = usePkc
+                    ? MeshEncoder.EncodePkcTextMessage(
+                        _myNodeNum, convo.NodeNum, packetId, emoji,
+                        myPriv, peerPub, hopLimit: (byte)HopLimit, wantAck: true,
+                        replyId: target.PacketId, emoji: 1,
+                        okToMqtt: OkToMqtt)
+                    : MeshEncoder.EncodeTextMessage(
+                        primary!.Config, _myNodeNum, packetId, emoji,
+                        to: convo.NodeNum, hopLimit: (byte)HopLimit, wantAck: true,
+                        replyId: target.PacketId, emoji: 1,
+                        okToMqtt: OkToMqtt);
+
+                ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+                channelTag = usePkc ? "PKC" : primary?.Config.Name ?? string.Empty;
+            }
+            else if (SelectedTab is ChannelViewModel ch)
+            {
+                to = 0xFFFFFFFFu;
+                var frame = MeshEncoder.EncodeTextMessage(
+                    ch.Config, _myNodeNum, packetId, emoji,
+                    hopLimit: (byte)HopLimit,
+                    replyId: target.PacketId, emoji: 1,
+                    okToMqtt: OkToMqtt);
+                ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+                channelTag = ch.Config.Name;
+            }
+            else
+            {
+                return;
+            }
+
+            if (!ok)
+            {
+                Status = "Transmit failed (device cannot transmit).";
+                Log(Status);
+                return;
+            }
+
+            target.AddReaction(emoji, NodeDisplayName(_myNodeNum));
+            PersistOutgoingReaction(to, packetId, target.PacketId, emoji, channelTag);
+            Status = $"Reaction {emoji} sent.";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Reaction send error: {ex.Message}";
             Log(Status);
         }
     }
@@ -3320,6 +3488,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
             });
         }
         catch (Exception ex) { Log($"message store failed: {ex.Message}"); }
+    }
+
+    private void PersistOutgoingReaction(uint to, uint packetId, uint replyId,
+                                         string emojiText, string channel)
+    {
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = packetId,
+                FromNode = _myNodeNum,
+                ToNode = to,
+                Channel = channel ?? string.Empty,
+                PortNum = (int)PortNum.TextMessage,
+                Text = emojiText ?? string.Empty,
+                ReplyId = replyId,
+                Emoji = 1,
+                IsReaction = true,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Delivery = (int)MessageDelivery.None,
+            });
+        }
+        catch (Exception ex) { Log($"reaction store failed: {ex.Message}"); }
     }
 
     /// <summary>Persist an app-generated conversation note (a traceroute result
@@ -3871,6 +4063,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         catch { /* DB best-effort */ }
 
+        uint normalizedReplyId = 0;
+        if (result is not null && result.Port == PortNum.TextMessage)
+            normalizedReplyId = ResolveReactionTargetId(result);
+
+        bool isReactionRecord = false;
+        if (result is not null && result.Port == PortNum.TextMessage)
+            isReactionRecord = normalizedReplyId != 0
+                && result.Emoji != 0;
+
         var record = new MessageRecord
         {
             PacketId = header.PacketId,
@@ -3878,6 +4079,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ToNode = header.To,
             PortNum = (int)(result?.Port ?? PortNum.Unknown),
             Channel = result?.ChannelName ?? string.Empty,
+            ReplyId = normalizedReplyId,
+            Emoji = result?.Emoji ?? 0,
+            IsReaction = isReactionRecord,
             Decrypted = result is not null,
             RxEpoch = rxEpoch,
             RssiDbfs = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs,
@@ -3924,6 +4128,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             switch (result.Port)
             {
                 case PortNum.TextMessage:
+                    uint reactionTargetId = ResolveReactionTargetId(result);
+                    bool isReaction = reactionTargetId != 0
+                        && result.Emoji != 0;
+                    bool isReplyLinkedNonReaction = reactionTargetId != 0 && !isReaction;
                     // Direct message addressed to us → route to a conversation tab.
                     if (_myNodeNum != 0 && !header.IsBroadcast && header.To == _myNodeNum)
                     {
@@ -3935,7 +4143,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         bool existed = Tabs.OfType<ConversationViewModel>()
                                            .Any(c => c.NodeNum == header.From);
                         var convo = OpenConversation(header.From, senderName, focus: false);
-                        if (existed)
+                        if (isReaction)
+                        {
+                            bool applied = TryApplyReaction(convo.Messages, reactionTargetId, result.Text, result.Emoji, header.From);
+                            if (applied) MarkTabNeedsAttention(convo);
+                            Log(applied
+                                ? $"  DM reaction from {senderName}: {ResolveReactionGlyph(result.Text, result.Emoji)}"
+                                : $"  DM reaction from {senderName}: target id {reactionTargetId:x8} not found");
+                        }
+                        else if (isReplyLinkedNonReaction)
+                        {
+                            Log($"  DM reply-linked packet from {senderName} ignored (target {reactionTargetId:x8})");
+                        }
+                        else if (existed)
                             convo.Add(new ChannelMessage
                             {
                                 FromId = senderName,
@@ -3944,12 +4164,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 SnrDb = record.SnrDb,
                                 PacketId = header.PacketId,
                             });
-                        MarkTabNeedsAttention(convo);
-                        Log($"  DM from {senderName}: {record.Text}");
+                        if (!isReaction && !isReplyLinkedNonReaction)
+                        {
+                            MarkTabNeedsAttention(convo);
+                            Log($"  DM from {senderName}: {record.Text}");
+                        }
                         // Acknowledge if the sender asked for one (firmware does
                         // this for any unicast packet addressed to it).
                         if (header.WantAck) SendAck(header, result);
-                        if (!IsNodeRtttlMuted(header.From))
+                        if (!isReplyLinkedNonReaction && !IsNodeRtttlMuted(header.From))
                         {
                             var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
                             Task.Run(() => _ringtone.Play(rtttl, mode, vol));
@@ -3959,18 +4182,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     {
                         // Broadcast text → populate the owning channel tab like a chat room.
                         var chanVm = ResolveChannelTab(result.ChannelName);
-                        chanVm?.Messages.Add(new ChannelMessage
+                        bool shouldRing = false;
+                        if (isReaction)
                         {
-                            FromId = senderName,
-                            Text = record.Text,
-                            RssiDbm = record.RssiDbfs,
-                            SnrDb = record.SnrDb,
-                        });
-                        MarkTabNeedsAttention(chanVm);
-                        if (chanVm is not null && chanVm.Messages.Count > 1000)
-                            chanVm.Messages.RemoveAt(0);
-                        Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
-                        if (chanVm?.MuteRtttl != true && !IsNodeRtttlMuted(header.From))
+                            bool applied = chanVm is not null
+                                && TryApplyReaction(chanVm.Messages, reactionTargetId, result.Text, result.Emoji, header.From);
+                            if (applied) MarkTabNeedsAttention(chanVm);
+                            Log(applied
+                                ? $"  [{result.ChannelName}] {senderName} reacted {ResolveReactionGlyph(result.Text, result.Emoji)}"
+                                : $"  [{result.ChannelName}] {senderName} reaction target {reactionTargetId:x8} not found");
+                            shouldRing = chanVm?.MuteRtttl != true;
+                        }
+                        else if (isReplyLinkedNonReaction)
+                        {
+                            Log($"  [{result.ChannelName}] {senderName} reply-linked packet ignored (target {reactionTargetId:x8})");
+                        }
+                        else
+                        {
+                            chanVm?.Messages.Add(new ChannelMessage
+                            {
+                                FromId = senderName,
+                                Text = record.Text,
+                                RssiDbm = record.RssiDbfs,
+                                SnrDb = record.SnrDb,
+                                PacketId = header.PacketId,
+                            });
+                            MarkTabNeedsAttention(chanVm);
+                            if (chanVm is not null && chanVm.Messages.Count > 1000)
+                                chanVm.Messages.RemoveAt(0);
+                            Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
+                            shouldRing = chanVm?.MuteRtttl != true;
+                        }
+
+                        if (shouldRing && !IsNodeRtttlMuted(header.From))
                         {
                             var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
                             Task.Run(() => _ringtone.Play(rtttl, mode, vol));

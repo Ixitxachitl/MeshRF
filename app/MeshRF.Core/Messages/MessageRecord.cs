@@ -9,6 +9,17 @@ public sealed class MessageRecord
     /// <summary>32-bit Meshtastic packet id (from the header).</summary>
     public uint PacketId { get; set; }
 
+    /// <summary>Data.reply_id for replies/reactions (0 when not set).</summary>
+    public uint ReplyId { get; set; }
+
+    /// <summary>Data.emoji Unicode codepoint for reactions (0 when not set).</summary>
+    public uint Emoji { get; set; }
+
+    /// <summary>True when this row represents a per-message reaction packet.
+    /// Persisted explicitly so history replay does not rely on protocol-field
+    /// heuristics that vary across firmware versions.</summary>
+    public bool IsReaction { get; set; }
+
     public uint FromNode { get; set; }
     public uint ToNode { get; set; }
 
