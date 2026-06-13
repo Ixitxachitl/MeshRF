@@ -1636,7 +1636,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             var chanVm = ResolveChannelTab(reaction.Channel);
             if (chanVm is null) continue;
-            TryApplyReaction(chanVm.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode);
+            if (!TryApplyReaction(chanVm.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode))
+            {
+                chanVm.Messages.Add(BuildStandaloneReactionMessage(reaction));
+                if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
+            }
         }
 
         // Reopen only the DM tabs that were left open last session (not every
@@ -1685,7 +1689,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         foreach (var reaction in pendingReactions)
-            TryApplyReaction(convo.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode);
+        {
+            if (!TryApplyReaction(convo.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode))
+                convo.Add(BuildStandaloneReactionMessage(reaction));
+        }
     }
 
     /// <summary>Turn a stored record into a <see cref="ChannelMessage"/>,
@@ -1769,6 +1776,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var text = (reactionText ?? string.Empty).Trim();
         if (text.Length > 0) return text;
         return CodePointToEmoji(emoji);
+    }
+
+    private ChannelMessage BuildStandaloneReactionMessage(MessageRecord reaction)
+    {
+        bool outgoing = _myNodeNum != 0 && reaction.FromNode == _myNodeNum;
+        bool isBroadcast = reaction.ToNode == 0xFFFFFFFFu;
+        var glyph = ResolveReactionGlyph(reaction.Text, reaction.Emoji);
+        if (glyph.Length == 0) glyph = "(reaction)";
+        var targetText = reaction.ReplyId != 0
+            ? $"{reaction.ReplyId:x8}"
+            : "unknown";
+
+        return new ChannelMessage
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(reaction.RxEpoch).LocalDateTime,
+            FromId = NodeDisplayName(reaction.FromNode),
+            Text = $"reacted {glyph} (original message {targetText} not found)",
+            RssiDbm = reaction.RssiDbfs,
+            SnrDb = reaction.SnrDb,
+            PacketId = reaction.PacketId,
+            IsOutgoing = outgoing,
+            Delivery = outgoing && !isBroadcast
+                ? (MessageDelivery)reaction.Delivery
+                : MessageDelivery.None,
+        };
     }
 
     private static uint ResolveReactionTargetId(MeshDecodeResult result)
@@ -4146,7 +4178,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         if (isReaction)
                         {
                             bool applied = TryApplyReaction(convo.Messages, reactionTargetId, result.Text, result.Emoji, header.From);
-                            if (applied) MarkTabNeedsAttention(convo);
+                            if (applied)
+                            {
+                                MarkTabNeedsAttention(convo);
+                            }
+                            else
+                            {
+                                convo.Add(BuildStandaloneReactionMessage(record));
+                                MarkTabNeedsAttention(convo);
+                            }
                             Log(applied
                                 ? $"  DM reaction from {senderName}: {ResolveReactionGlyph(result.Text, result.Emoji)}"
                                 : $"  DM reaction from {senderName}: target id {reactionTargetId:x8} not found");
@@ -4187,7 +4227,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         {
                             bool applied = chanVm is not null
                                 && TryApplyReaction(chanVm.Messages, reactionTargetId, result.Text, result.Emoji, header.From);
-                            if (applied) MarkTabNeedsAttention(chanVm);
+                            if (applied)
+                            {
+                                MarkTabNeedsAttention(chanVm);
+                            }
+                            else if (chanVm is not null)
+                            {
+                                chanVm.Messages.Add(BuildStandaloneReactionMessage(record));
+                                if (chanVm.Messages.Count > 1000)
+                                    chanVm.Messages.RemoveAt(0);
+                                MarkTabNeedsAttention(chanVm);
+                            }
                             Log(applied
                                 ? $"  [{result.ChannelName}] {senderName} reacted {ResolveReactionGlyph(result.Text, result.Emoji)}"
                                 : $"  [{result.ChannelName}] {senderName} reaction target {reactionTargetId:x8} not found");
