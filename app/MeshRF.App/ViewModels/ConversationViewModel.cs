@@ -29,16 +29,19 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 {
     private readonly Action<ConversationViewModel, bool>? _onMuteRtttlChanged;
     private readonly Action<ConversationViewModel>? _onLocationHistoryChanged;
+    private readonly Func<float, string>? _formatTemperature;
     private bool _syncingNodeMute;
 
     public ConversationViewModel(uint nodeNum, string? peerName = null,
                                  Action<ConversationViewModel, bool>? onMuteRtttlChanged = null,
-                                 Action<ConversationViewModel>? onLocationHistoryChanged = null)
+                                 Action<ConversationViewModel>? onLocationHistoryChanged = null,
+                                 Func<float, string>? formatTemperature = null)
     {
         NodeNum = nodeNum;
         _peerName = string.IsNullOrWhiteSpace(peerName) ? string.Empty : peerName!;
         _onMuteRtttlChanged = onMuteRtttlChanged;
         _onLocationHistoryChanged = onLocationHistoryChanged;
+        _formatTemperature = formatTemperature;
     }
 
     /// <summary>32-bit node number of the conversation peer.</summary>
@@ -136,7 +139,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             if (n.ChannelUtilPct is float chUtil) Add("Channel util", $"{chUtil:0.0}%");
             if (n.AirUtilTxPct is float airUtil) Add("Air util TX", $"{airUtil:0.0}%");
             if (n.UptimeSeconds is uint up) Add("Uptime", FormatUptime(up));
-            if (n.TemperatureC is float temp) Add("Temperature", $"{temp:0.0} \u00B0C");
+            if (n.TemperatureC is float temp)
+                Add("Temperature", _formatTemperature?.Invoke(temp) ?? $"{temp:0.0} \u00B0C");
             if (n.RelativeHumidityPct is float hum) Add("Humidity", $"{hum:0.0}%");
             if (n.BarometricPressureHpa is float pres) Add("Pressure", $"{pres:0.0} hPa");
             if (n.GasResistanceMohm is float gas) Add("Gas resistance", $"{gas:0.0} M\u03A9");
@@ -152,6 +156,9 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 
         OnPropertyChanged(nameof(HasTelemetry));
     }
+
+    /// <summary>Rebuild telemetry labels/values after a formatting preference change.</summary>
+    public void RefreshTelemetryFormatting() => RebuildTelemetry();
 
     private static string FormatUptime(uint seconds)
     {

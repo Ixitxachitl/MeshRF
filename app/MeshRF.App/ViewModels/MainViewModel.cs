@@ -135,6 +135,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _theme = "System";
 
+    [ObservableProperty]
+    private bool _useFahrenheit;
+
+    [ObservableProperty]
+    private bool _useMiles;
+
     public IReadOnlyList<string> Themes { get; } = new[] { "System", "Light", "Dark" };
 
     /// <summary>Incoming-message ringtone duration.</summary>
@@ -288,6 +294,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _nodeKeyFilter         = "Any";
     [ObservableProperty] private string _nodeLocationFilter    = "Any";
     [ObservableProperty] private string _nodeIgnoredFilter     = "Show all";
+    [ObservableProperty] private string _nodeTemperatureFilter = "Any";
+    [ObservableProperty] private string _nodeHumidityFilter    = "Any";
+    [ObservableProperty] private string _nodePressureFilter    = "Any";
+    [ObservableProperty] private string _mapNodeLabelMode      = "Short name";
     [ObservableProperty] private string _nodeDistanceKmText    = string.Empty;
     [ObservableProperty] private string _nodeMaxAgeMinutesText = string.Empty;
 
@@ -295,9 +305,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<string> NodeKeyFilterOptions      { get; } = ["Any", "Good key", "Mismatch", "No key"];
     public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "No position", "Invalid"];
     public IReadOnlyList<string> NodeIgnoredFilterOptions  { get; } = ["Show all", "Hide ignored", "Only ignored"];
+    public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
+    public IReadOnlyList<string> MapNodeLabelModeOptions   { get; } =
+        ["Node Number", "Long Name", "Short Name", "Temperature", "Humidity", "Pressure"];
 
     /// <summary>True when a home location is set (enables the distance filter).</summary>
     public bool HasHomeLocation => HomeLatitude.HasValue && HomeLongitude.HasValue;
+
+    public string DistanceUnitShort => UseMiles ? "mi" : "km";
+    public string DistanceUnitLong => UseMiles ? "miles" : "km";
+    public string MaxDistanceFilterToolTip =>
+        UseMiles
+            ? "Max distance from location in miles (blank = any; requires location to be set)"
+            : "Max distance from location in km (blank = any; requires location to be set)";
 
     private void RefreshNodesFilter()
     {
@@ -310,6 +330,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnNodeKeyFilterChanged(string value)           => RefreshNodesFilter();
     partial void OnNodeLocationFilterChanged(string value)      => RefreshNodesFilter();
     partial void OnNodeIgnoredFilterChanged(string value)       => RefreshNodesFilter();
+    partial void OnNodeTemperatureFilterChanged(string value)   => RefreshNodesFilter();
+    partial void OnNodeHumidityFilterChanged(string value)      => RefreshNodesFilter();
+    partial void OnNodePressureFilterChanged(string value)      => RefreshNodesFilter();
+    partial void OnMapNodeLabelModeChanged(string value)        => RefreshNodesFilter();
     partial void OnNodeDistanceKmTextChanged(string value)      => RefreshNodesFilter();
     partial void OnNodeMaxAgeMinutesTextChanged(string value)   => RefreshNodesFilter();
 
@@ -321,6 +345,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeKeyFilter         = "Any";
         NodeLocationFilter    = "Any";
         NodeIgnoredFilter     = "Show all";
+        NodeTemperatureFilter = "Any";
+        NodeHumidityFilter    = "Any";
+        NodePressureFilter    = "Any";
         NodeDistanceKmText    = string.Empty;
         NodeMaxAgeMinutesText = string.Empty;
     }
@@ -377,12 +404,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
             case "Only ignored": if (!n.Ignored) return false; break;
         }
 
-        // Distance from home (km).
+        // Telemetry presence filters.
+        switch (NodeTemperatureFilter)
+        {
+            case "Has value": if (n.TemperatureC is null) return false; break;
+            case "No value":  if (n.TemperatureC is not null) return false; break;
+        }
+        switch (NodeHumidityFilter)
+        {
+            case "Has value": if (n.RelativeHumidityPct is null) return false; break;
+            case "No value":  if (n.RelativeHumidityPct is not null) return false; break;
+        }
+        switch (NodePressureFilter)
+        {
+            case "Has value": if (n.BarometricPressureHpa is null) return false; break;
+            case "No value":  if (n.BarometricPressureHpa is not null) return false; break;
+        }
+
+        // Distance from home (entered in km or miles based on user preference).
         if (!string.IsNullOrWhiteSpace(NodeDistanceKmText)
-            && double.TryParse(NodeDistanceKmText, NumberStyles.Float, CultureInfo.CurrentCulture, out double maxKm)
-            && maxKm > 0
+            && double.TryParse(NodeDistanceKmText, NumberStyles.Float, CultureInfo.CurrentCulture, out double maxDistance)
+            && maxDistance > 0
             && HomeLatitude is double hlat && HomeLongitude is double hlon)
         {
+            double maxKm = UseMiles ? maxDistance * 1.609344 : maxDistance;
             if (n.Latitude is not double nlat || n.Longitude is not double nlon) return false;
             if (HaversineKm(hlat, hlon, nlat, nlon) > maxKm) return false;
         }
@@ -551,13 +596,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var list = new List<MapMarker>();
         if (HomeLatitude is double hlat && HomeLongitude is double hlon)
-            list.Add(new MapMarker(hlat, hlon, "Home", "Home", IsHome: true));
+        {
+            var label = GetLocationMarkerLabel();
+            list.Add(new MapMarker(hlat, hlon, label, "Location", IsHome: true));
+        }
 
         foreach (var n in Nodes.Where(NodePassesFilter))
         {
             if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
-            var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
-            var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
+            var label = GetMapNodeLabel(n);
             list.Add(new MapMarker(lat, lon, label, GetNodeTooltipCached(n), IsHome: false, NodeNum: n.NodeNum));
         }
 
@@ -906,7 +953,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>Builds the multi-line tooltip shown when hovering a node on the
     /// map: identity, telemetry, and how long ago it was last heard.</summary>
-    private static string BuildNodeTooltip(MeshRF.Nodes.NodeRecord n)
+    private string BuildNodeTooltip(MeshRF.Nodes.NodeRecord n)
     {
         var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
         var sb = new System.Text.StringBuilder();
@@ -949,7 +996,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Environment telemetry.
         var env = new List<string>();
-        if (n.TemperatureC is float t) env.Add($"{t:F1} °C");
+        if (n.TemperatureC is float t) env.Add(FormatTemperature(t));
         if (n.RelativeHumidityPct is float h) env.Add($"{h:F0}% RH");
         if (n.BarometricPressureHpa is float p) env.Add($"{p:F0} hPa");
         if (env.Count > 0) sb.Append('\n').Append(string.Join("  ", env));
@@ -976,6 +1023,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
               .Append(wp.IsExpired ? "  [EXPIRED]" : string.Empty);
         sb.Append("\nReceived ").Append(FormatAge(wp.RxEpoch));
         return sb.ToString();
+    }
+
+    private static float CelsiusToFahrenheit(float celsius) => (celsius * 9f / 5f) + 32f;
+
+    private string FormatTemperature(float temperatureC) =>
+        UseFahrenheit
+            ? $"{CelsiusToFahrenheit(temperatureC):F1} °F"
+            : $"{temperatureC:F1} °C";
+
+    private string GetMapNodeLabel(NodeRecord n) => MapNodeLabelMode switch
+    {
+        "Node Number" => n.DisplayId,
+        "Long Name" => !string.IsNullOrWhiteSpace(n.LongName) ? n.LongName : n.DisplayId,
+        "Short Name" => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
+        "Temperature" => n.TemperatureC is float t ? FormatTemperature(t) : n.DisplayId,
+        "Humidity" => n.RelativeHumidityPct is float h ? $"{h:F0}%" : n.DisplayId,
+        "Pressure" => n.BarometricPressureHpa is float p ? $"{p:F0} hPa" : n.DisplayId,
+        _ => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
+    };
+
+    private string GetLocationMarkerLabel()
+    {
+        if (_myNodeNum == 0)
+            return "Location";
+
+        var self = new NodeRecord
+        {
+            NodeNum = _myNodeNum,
+            UserId = $"!{_myNodeNum:x8}",
+            LongName = MyLongName ?? string.Empty,
+            ShortName = MyShortName ?? string.Empty,
+        };
+
+        return GetMapNodeLabel(self);
     }
 
     /// <summary>Formats a unix epoch as a human "x ago" string.</summary>
@@ -1060,6 +1141,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         BiasTee = _settings.BiasTee;
         DcBlockEnable = _settings.DcBlockEnable;
         Theme = _settings.Theme;
+        UseFahrenheit = _settings.UseFahrenheit;
+        UseMiles = _settings.UseMiles;
         WaterfallColormap = _settings.WaterfallColormap;
         RingtoneMode = _settings.RingtoneMode;
         RingtoneVolume = _settings.RingtoneVolume;
@@ -1118,6 +1201,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeKeyFilter         = _settings.NodeFilterKey;
         NodeLocationFilter    = _settings.NodeFilterLocation;
         NodeIgnoredFilter     = _settings.NodeFilterIgnored;
+        NodeTemperatureFilter = _settings.NodeFilterTemperature;
+        NodeHumidityFilter    = _settings.NodeFilterHumidity;
+        NodePressureFilter    = _settings.NodeFilterPressure;
+        MapNodeLabelMode      = string.IsNullOrWhiteSpace(_settings.MapNodeLabelMode)
+            ? "Short name"
+            : _settings.MapNodeLabelMode;
         NodeDistanceKmText    = _settings.NodeFilterDistanceKm;
         NodeMaxAgeMinutesText = _settings.NodeFilterMaxAgeMinutes;
 
@@ -1339,8 +1428,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         double lat = latOpt.Value;
         double lon = lonOpt.Value;
-        var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
-        var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
+        var label = GetMapNodeLabel(n);
         h.Add(lat);
         h.Add(lon);
         h.Add(label, StringComparer.Ordinal);
@@ -1458,8 +1546,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!NodePassesFilter(n)) continue;
             if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
 
-            var name = string.IsNullOrWhiteSpace(n.LongName) ? n.DisplayId : n.LongName;
-            var label = string.IsNullOrWhiteSpace(n.ShortName) ? name : n.ShortName;
+            var label = GetMapNodeLabel(n);
             markers[nodeNum] = new MapMarker(lat, lon, label, GetNodeTooltipCached(n), IsHome: false, NodeNum: nodeNum);
         }
 
@@ -2174,6 +2261,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
     }
     partial void OnThemeChanged(string value) { ThemeManager.Apply(value); SaveSettings(); }
+    partial void OnUseFahrenheitChanged(bool value)
+    {
+        SaveSettings();
+        if (!_settingsLoaded) return;
+
+        _nodeTooltipSignatures.Clear();
+        _nodeTooltipCache.Clear();
+        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+            convo.RefreshTelemetryFormatting();
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+    partial void OnUseMilesChanged(bool value)
+    {
+        SaveSettings();
+        OnPropertyChanged(nameof(DistanceUnitShort));
+        OnPropertyChanged(nameof(DistanceUnitLong));
+        OnPropertyChanged(nameof(MaxDistanceFilterToolTip));
+        if (!_settingsLoaded) return;
+        RefreshNodesFilter();
+    }
     partial void OnWaterfallColormapChanged(string value) { SaveSettings(); }
     partial void OnWaterfallAutoLevelsChanged(bool value) { SaveSettings(); }
     partial void OnWaterfallFloorDbChanged(double value) { SaveSettings(); }
@@ -2201,6 +2308,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.BiasTee = BiasTee;
         _settings.DcBlockEnable = DcBlockEnable;
         _settings.Theme = Theme;
+        _settings.UseFahrenheit = UseFahrenheit;
+        _settings.UseMiles = UseMiles;
         _settings.WaterfallColormap = WaterfallColormap;
         _settings.MutedRingtoneChannels = Channels
             .Where(c => c.MuteRtttl)
@@ -2552,7 +2661,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var convo = new ConversationViewModel(nodeNum, name ?? NodeDisplayName(nodeNum),
             OnConversationMuteRtttlChanged,
-            OnConversationLocationHistoryChanged);
+            OnConversationLocationHistoryChanged,
+            FormatTemperature);
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
         // Add the tab immediately so the UI is responsive while history loads.
         Tabs.Add(convo);
@@ -3224,7 +3334,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (HomeLatitude is not double lat || HomeLongitude is not double lon)
         {
-            Status = "Set your home latitude/longitude (Identity) before sending position.";
+            Status = "Set your location latitude/longitude (Identity) before sending position.";
             Log(Status);
             return;
         }
@@ -4453,7 +4563,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         Iaq = t.Iaq,
                     });
                     if (t.HasEnvironmentMetrics)
-                        Log($"  telemetry {header.FromId}: {t.TemperatureC:F1}\u00B0C {t.RelativeHumidityPct:F0}% {t.BarometricPressureHpa:F0}hPa");
+                    {
+                        var temp = t.TemperatureC is float tempC ? FormatTemperature(tempC) : "n/a";
+                        Log($"  telemetry {header.FromId}: {temp} {t.RelativeHumidityPct:F0}% {t.BarometricPressureHpa:F0}hPa");
+                    }
                     else
                         Log($"  telemetry {header.FromId}: batt {t.BatteryLevel}% {t.Voltage:F2}V");
                     break;

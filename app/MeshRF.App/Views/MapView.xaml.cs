@@ -41,13 +41,13 @@ public partial class MapView : UserControl
         "osm",
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         "abc",
-        "© OpenStreetMap contributors  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set home");
+        "© OpenStreetMap contributors  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location");
 
     private static readonly TileProvider DarkTiles = new(
         "cartodark",
         "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
         "abcd",
-        "© OpenStreetMap · © CARTO  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set home",
+        "© OpenStreetMap · © CARTO  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location",
         // CARTO dark_all renders roads/labels very dark; lift them so they read
         // against the dark theme.
         Brightness: 1.7);
@@ -1141,7 +1141,7 @@ public partial class MapView : UserControl
                     Text = "\u2302",
                     FontSize = 20,
                     Foreground = Brushes.Gold,
-                    ToolTip = "Home",
+                    ToolTip = mk.Title,
                 };
                 Canvas.SetLeft(home, px - 8);
                 Canvas.SetTop(home, py - 12);

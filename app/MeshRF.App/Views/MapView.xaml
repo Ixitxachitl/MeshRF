@@ -57,7 +57,7 @@
                 MouseRightButtonUp="OnRightClick" />
 
         <TextBlock x:Name="AttributionText"
-                   Text="© OpenStreetMap contributors  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set home"
+                   Text="© OpenStreetMap contributors  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location"
                    IsHitTestVisible="False"
                    HorizontalAlignment="Right"
                    VerticalAlignment="Bottom"
@@ -78,7 +78,7 @@
                         Margin="0,2,0,0"
                         Content="&#xE80F;"
                         FontFamily="Segoe MDL2 Assets"
-                        Click="OnGoHome" ToolTip="Go to home location" />
+                        Click="OnGoHome" ToolTip="Go to location" />
                 <Button Width="28" Height="28" FontSize="11"
                         Margin="0,2,0,0"
                         Content="&#xE740;"
@@ -90,7 +90,7 @@
                               Content="&#xE707;"
                               FontFamily="Segoe MDL2 Assets"
                               Click="OnFollowHomeToggle"
-                              ToolTip="Follow GPS / home location" />
+                              ToolTip="Follow GPS / location" />
                                 <ToggleButton x:Name="ClusterNodesButton"
                                                           Width="28" Height="28" FontSize="11"
                                                           Margin="0,2,0,0"

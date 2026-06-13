@@ -61,6 +61,12 @@ public sealed class AppSettings
     /// <summary>UI theme: "Light", "Dark", or "System".</summary>
     public string Theme { get; set; } = "System";
 
+    /// <summary>When true, display temperatures in Fahrenheit; otherwise Celsius.</summary>
+    public bool UseFahrenheit { get; set; } = false;
+
+    /// <summary>When true, display and parse distance filters in miles; otherwise km.</summary>
+    public bool UseMiles { get; set; } = false;
+
     // -- Local node identity (used to recognise / display direct messages) ----
 
     /// <summary>Our 32-bit node number. 0 = unset (DMs to us can't be matched).</summary>
@@ -240,6 +246,18 @@ public sealed class AppSettings
 
     /// <summary>Persisted node ignored filter.</summary>
     public string NodeFilterIgnored { get; set; } = "Show all";
+
+    /// <summary>Persisted node temperature filter.</summary>
+    public string NodeFilterTemperature { get; set; } = "Any";
+
+    /// <summary>Persisted node humidity filter.</summary>
+    public string NodeFilterHumidity { get; set; } = "Any";
+
+    /// <summary>Persisted node pressure filter.</summary>
+    public string NodeFilterPressure { get; set; } = "Any";
+
+    /// <summary>Persisted map node label mode.</summary>
+    public string MapNodeLabelMode { get; set; } = "Short name";
 
     /// <summary>Persisted max-distance filter in km (empty = off).</summary>
     public string NodeFilterDistanceKm { get; set; } = string.Empty;

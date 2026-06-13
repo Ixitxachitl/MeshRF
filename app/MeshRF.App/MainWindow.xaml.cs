@@ -667,6 +667,10 @@ public partial class MainWindow : Window
             settings.NodeFilterKey           = vm.NodeKeyFilter;
             settings.NodeFilterLocation      = vm.NodeLocationFilter;
             settings.NodeFilterIgnored       = vm.NodeIgnoredFilter;
+            settings.NodeFilterTemperature   = vm.NodeTemperatureFilter;
+            settings.NodeFilterHumidity      = vm.NodeHumidityFilter;
+            settings.NodeFilterPressure      = vm.NodePressureFilter;
+            settings.MapNodeLabelMode        = vm.MapNodeLabelMode;
             settings.NodeFilterDistanceKm    = vm.NodeDistanceKmText;
             settings.NodeFilterMaxAgeMinutes = vm.NodeMaxAgeMinutesText;
         }
