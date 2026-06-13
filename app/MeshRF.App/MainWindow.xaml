@@ -598,7 +598,6 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Hops" />
@@ -643,26 +642,20 @@
                                         <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Text="{Binding DistanceUnitShort}" />
                                     </DockPanel>
 
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Map label" />
+                                    <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has temperature" />
                                     <ComboBox Grid.Row="6" Grid.Column="1" Height="22" FontSize="11"
-                                              ItemsSource="{Binding MapNodeLabelModeOptions}"
-                                              SelectedItem="{Binding MapNodeLabelMode, Mode=TwoWay}"
-                                              ToolTip="Label shown on map markers; falls back to node number when data is unavailable" />
-
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has temperature" />
-                                    <ComboBox Grid.Row="7" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodeTemperatureFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether temperature telemetry is present" />
 
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has humidity" />
-                                    <ComboBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has humidity" />
+                                    <ComboBox Grid.Row="7" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodeHumidityFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether humidity telemetry is present" />
 
-                                    <TextBlock Grid.Row="9" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has pressure" />
-                                    <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="8" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has pressure" />
+                                    <ComboBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodePressureFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether pressure telemetry is present" />
@@ -740,10 +733,10 @@
                                                         Binding="{Binding ExpiryStatus}" />
                                     <DataGridTextColumn Header="Expires" Width="132"
                                                         SortMemberPath="ExpireEpoch"
-                                                        Binding="{Binding ExpireTime, StringFormat=g}" />
-                                    <DataGridTextColumn Header="Heard" Width="72"
+                                                        Binding="{Binding ExpireTime, StringFormat={}{0:M/d/yyyy h:mm:ss tt}}" />
+                                    <DataGridTextColumn Header="Heard" Width="156"
                                                         SortMemberPath="RxEpoch"
-                                                        Binding="{Binding RxTime, StringFormat=HH:mm:ss}" />
+                                                        Binding="{Binding RxTime, StringFormat={}{0:M/d/yyyy h:mm:ss tt}}" />
                                 </DataGrid.Columns>
                             </DataGrid>
                         </DockPanel>
@@ -946,7 +939,7 @@
                                                     FontFamily="Consolas" />
                                 <DataGridTextColumn Header="Last heard" Width="Auto"
                                                     SortMemberPath="LastHeardEpoch"
-                                                    Binding="{Binding LastHeard, StringFormat=HH:mm:ss}" />
+                                                    Binding="{Binding LastHeard, StringFormat={}{0:M/d/yyyy h:mm:ss tt}}" />
                                 <DataGridTextColumn Header="RSSI" Width="Auto"
                                                     SortMemberPath="RssiDbm"
                                                     Binding="{Binding RssiDbm, StringFormat={}{0:F0} dBm}" />
@@ -1627,7 +1620,7 @@
                                                     <DataGrid.Columns>
                                                         <DataGridTextColumn Header="Time"
                                                                             Width="*"
-                                                                            Binding="{Binding TimestampLocal, StringFormat={}{0:g}}" />
+                                                                            Binding="{Binding TimestampLocal, StringFormat={}{0:M/d/yyyy h:mm:ss tt}}" />
                                                         <DataGridTextColumn Header="Lat"
                                                                             Width="Auto"
                                                                             Binding="{Binding Latitude, StringFormat={}{0:0.#####}}" />

@@ -373,7 +373,7 @@ public partial class MainWindow : Window
             int sampleCount = rows * nFreq;
             ApplySnapshotContrast(grid.AsSpan(0, sampleCount));
             LastPacket.ReplaceFrames(grid.AsSpan(0, sampleCount), rows, nFreq);
-            LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
+            LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
         }
         finally
         {
@@ -413,7 +413,7 @@ public partial class MainWindow : Window
         }
         ApplySnapshotContrast(frames);
         LastPacket.ReplaceFrames(frames);
-        LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
+        LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
     }
 
     private void ApplySnapshotContrast(IReadOnlyList<float[]> frames)

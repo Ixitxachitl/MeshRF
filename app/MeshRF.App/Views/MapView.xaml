@@ -102,6 +102,26 @@
             </StackPanel>
         </Border>
 
+                <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                                Margin="44,8,0,0"
+                                Padding="6,5"
+                                Background="#CC202020"
+                                CornerRadius="3"
+                                BorderBrush="#553A3A3A"
+                                BorderThickness="1">
+                        <StackPanel Orientation="Vertical" Width="160">
+                                <TextBlock Text="Map label"
+                                                   FontSize="11"
+                                                   Margin="0,0,0,3"
+                                                   Foreground="{DynamicResource BrushAppForeground}" />
+                                <ComboBox Height="24"
+                                                  FontSize="11"
+                                                  ItemsSource="{Binding MapNodeLabelModeOptions}"
+                                                  SelectedItem="{Binding MapNodeLabelMode, Mode=TwoWay}"
+                                                  ToolTip="Label shown on map markers; falls back to node number when data is unavailable" />
+                        </StackPanel>
+                </Border>
+
         <Expander HorizontalAlignment="Right" VerticalAlignment="Top"
                   Margin="8"
                   Header="Waypoint"
@@ -113,14 +133,14 @@
                     Background="{DynamicResource BrushPanelBackground}"
                     BorderBrush="{DynamicResource BrushPanelBorder}"
                     BorderThickness="1">
-                <StackPanel Orientation="Vertical" Width="176">
+                <StackPanel Orientation="Vertical" Width="196">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="WP"
                                    Foreground="{DynamicResource BrushAppForeground}"
                                    VerticalAlignment="Center"
                                    Margin="0,0,6,0" />
-                                                <Button Width="62"
-                                                                Height="24"
+                                                <Button Width="28"
+                                                                Height="28"
                                                                 Command="{Binding PickWaypointEmojiCommand}"
                                                                 ToolTip="Click to pick waypoint emoji">
                                                         <emoji:TextBlock Text="{Binding SelectedWaypointEmoji}"
@@ -146,7 +166,7 @@
                               Foreground="{DynamicResource BrushAppForeground}"
                               IsChecked="{Binding UseWaypointExpiry, Mode=TwoWay}" />
                     <TextBlock Text="Expiration" Foreground="{DynamicResource BrushAppForeground}" Margin="0,2,0,0" />
-                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                        <StackPanel Orientation="Vertical" Margin="0,2,0,0">
                         <DatePicker Width="106"
                                     SelectedDate="{Binding WaypointExpiryDate, Mode=TwoWay}"
                                     CalendarStyle="{StaticResource MapCalendarStyle}"
@@ -161,11 +181,37 @@
                                                                 </Style>
                                                         </DatePicker.Resources>
                                                 </DatePicker>
-                        <TextBox Width="58"
-                                 Margin="4,0,0,0"
-                                 IsEnabled="{Binding UseWaypointExpiry}"
-                                 Text="{Binding WaypointExpiryTimeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="Time in HH:mm:ss (local time)" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                                                                        IsEnabled="{Binding UseWaypointExpiry}">
+                                                        <ComboBox Width="42"
+                                                                          IsEditable="True"
+                                                                          StaysOpenOnEdit="True"
+                                                                          ItemsSource="{Binding WaypointExpiryHourOptions}"
+                                                                          Text="{Binding WaypointExpiryHour12, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                          ToolTip="Hour (01-12)" />
+                                                        <TextBlock Text=":" Margin="3,0" VerticalAlignment="Center"
+                                                                           Foreground="{DynamicResource BrushAppForeground}" />
+                                                        <ComboBox Width="42"
+                                                                          IsEditable="True"
+                                                                          StaysOpenOnEdit="True"
+                                                                          ItemsSource="{Binding WaypointExpiryMinuteOptions}"
+                                                                          Text="{Binding WaypointExpiryMinute, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                          ToolTip="Minute (00-59)" />
+                                                        <TextBlock Text=":" Margin="3,0" VerticalAlignment="Center"
+                                                                           Foreground="{DynamicResource BrushAppForeground}" />
+                                                        <ComboBox Width="42"
+                                                                          IsEditable="True"
+                                                                          StaysOpenOnEdit="True"
+                                                                          ItemsSource="{Binding WaypointExpirySecondOptions}"
+                                                                          Text="{Binding WaypointExpirySecond, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                          ToolTip="Second (00-59)" />
+                                                        <ComboBox Width="50"
+                                                                          Margin="4,0,0,0"
+                                                                          IsEditable="False"
+                                                                          ItemsSource="{Binding WaypointExpiryMeridiemOptions}"
+                                                                          SelectedItem="{Binding WaypointExpiryMeridiem, Mode=TwoWay}"
+                                                                          ToolTip="AM or PM" />
+                                                </StackPanel>
                     </StackPanel>
                 </StackPanel>
             </Border>

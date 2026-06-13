@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System;
 using System.Linq;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -15,10 +16,12 @@ public sealed record TelemetryItem(string Label, string Value);
 /// <summary>A single historical position sample for a conversation peer.</summary>
 public sealed record LocationHistoryPoint(double Latitude, double Longitude, DateTime TimestampUtc)
 {
+    private const string UiDateTimeFormat = "M/d/yyyy h:mm:ss tt";
+
     public DateTime TimestampLocal => TimestampUtc.ToLocalTime();
 
     public string Display =>
-        $"{TimestampLocal:g}  {Latitude:0.#####}, {Longitude:0.#####}";
+        $"{TimestampLocal.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}  {Latitude:0.#####}, {Longitude:0.#####}";
 }
 
 /// <summary>
@@ -151,7 +154,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             if (n.Latitude is double lat && n.Longitude is double lon)
                 Add("Position", $"{lat:0.#####}, {lon:0.#####}");
             if (n.AltitudeM is int alt) Add("Altitude", $"{alt} m");
-            if (n.LastHeardEpoch != 0) Add("Last heard", n.LastHeard.ToString("g"));
+            if (n.LastHeardEpoch != 0)
+                Add("Last heard", n.LastHeard.ToString("M/d/yyyy h:mm:ss tt", CultureInfo.CurrentCulture));
         }
 
         OnPropertyChanged(nameof(HasTelemetry));

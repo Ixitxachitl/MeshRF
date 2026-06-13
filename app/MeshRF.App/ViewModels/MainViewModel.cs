@@ -60,6 +60,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private const string ManualLocationSourceValue = "Manual";
     private const string UsbSerialLocationSourceValue = "UsbSerial";
     private const double HomeMapUpdateThresholdKm = 0.02; // 20 m
+    private const string UiDateTimeFormat = "M/d/yyyy h:mm:ss tt";
 
     // Plays the RTTTL ringtone when a text message arrives.
     private readonly RtttlPlayer _ringtone = new();
@@ -538,9 +539,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _selectedWaypointEmoji = "📍";
     [ObservableProperty] private bool _useWaypointExpiry;
     [ObservableProperty] private DateTime? _waypointExpiryDate = DateTime.Today;
-    [ObservableProperty] private string _waypointExpiryTimeText = "12:00:00";
+    [ObservableProperty] private string _waypointExpiryHour12 = "12";
+    [ObservableProperty] private string _waypointExpiryMinute = "00";
+    [ObservableProperty] private string _waypointExpirySecond = "00";
+    [ObservableProperty] private string _waypointExpiryMeridiem = "PM";
     [ObservableProperty] private string _waypointNameInput = string.Empty;
     [ObservableProperty] private string _waypointDescriptionInput = string.Empty;
+
+    public IReadOnlyList<string> WaypointExpiryHourOptions { get; } =
+        Enumerable.Range(1, 12).Select(h => h.ToString("00", CultureInfo.InvariantCulture)).ToArray();
+
+    public IReadOnlyList<string> WaypointExpiryMinuteOptions { get; } =
+        Enumerable.Range(0, 60).Select(m => m.ToString("00", CultureInfo.InvariantCulture)).ToArray();
+
+    public IReadOnlyList<string> WaypointExpirySecondOptions { get; } =
+        Enumerable.Range(0, 60).Select(s => s.ToString("00", CultureInfo.InvariantCulture)).ToArray();
+
+    public IReadOnlyList<string> WaypointExpiryMeridiemOptions { get; } = new[] { "AM", "PM" };
 
     public IReadOnlyList<string> WaypointEmojiOptions { get; } = new[]
     {
@@ -1019,11 +1034,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (wp.LockedTo != 0)
             sb.Append("\nLocked to !").Append(wp.LockedTo.ToString("x8", CultureInfo.InvariantCulture));
         if (wp.ExpireEpoch != 0)
-            sb.Append("\nExpires ").Append(DateTimeOffset.FromUnixTimeSeconds(wp.ExpireEpoch).LocalDateTime.ToString("g", CultureInfo.CurrentCulture))
+            sb.Append("\nExpires ").Append(FormatLocalDateTime(DateTimeOffset.FromUnixTimeSeconds(wp.ExpireEpoch).LocalDateTime))
               .Append(wp.IsExpired ? "  [EXPIRED]" : string.Empty);
         sb.Append("\nReceived ").Append(FormatAge(wp.RxEpoch));
         return sb.ToString();
     }
+
+    private static string FormatLocalDateTime(DateTime localTime) =>
+        localTime.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture);
 
     private static float CelsiusToFahrenheit(float celsius) => (celsius * 9f / 5f) + 32f;
 
@@ -1108,7 +1126,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _settings = AppSettings.Load();
         var soon = DateTime.Now.AddHours(1);
-        WaypointExpiryTimeText = soon.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        WaypointExpiryHour12 = ((soon.Hour + 11) % 12 + 1).ToString("00", CultureInfo.InvariantCulture);
+        WaypointExpiryMinute = soon.Minute.ToString("00", CultureInfo.InvariantCulture);
+        WaypointExpirySecond = soon.Second.ToString("00", CultureInfo.InvariantCulture);
+        WaypointExpiryMeridiem = soon.Hour >= 12 ? "PM" : "AM";
         NodesView = CollectionViewSource.GetDefaultView(Nodes);
         NodesView.Filter = o => o is NodeRecord n && NodePassesFilter(n);
         _gpsService.StatusChanged += HandleGpsStatusChanged;
@@ -2183,7 +2204,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private void Log(string text)
     {
-        var line = $"[{DateTime.Now:HH:mm:ss}] {text}";
+        var line = $"[{DateTime.Now.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}] {text}";
         LogLines.Add(line);
         if (LogLines.Count > 500) LogLines.RemoveAt(0);
     }
@@ -3475,20 +3496,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!UseWaypointExpiry || WaypointExpiryDate is not DateTime date)
             return 0;
 
-        if (!TimeSpan.TryParseExact(
-                WaypointExpiryTimeText?.Trim() ?? string.Empty,
-                new[] { "hh\\:mm\\:ss", "hh\\:mm" },
-                CultureInfo.InvariantCulture,
-                out var tod))
+        if (!int.TryParse(WaypointExpiryHour12, NumberStyles.None, CultureInfo.InvariantCulture, out int hour12) ||
+            hour12 is < 1 or > 12)
             return 0;
+        if (!int.TryParse(WaypointExpiryMinute, NumberStyles.None, CultureInfo.InvariantCulture, out int minute) ||
+            minute is < 0 or > 59)
+            return 0;
+        if (!int.TryParse(WaypointExpirySecond, NumberStyles.None, CultureInfo.InvariantCulture, out int second) ||
+            second is < 0 or > 59)
+            return 0;
+
+        bool isPm;
+        if (string.Equals(WaypointExpiryMeridiem, "PM", StringComparison.OrdinalIgnoreCase))
+            isPm = true;
+        else if (string.Equals(WaypointExpiryMeridiem, "AM", StringComparison.OrdinalIgnoreCase))
+            isPm = false;
+        else
+            return 0;
+
+        int hour24 = hour12 % 12;
+        if (isPm) hour24 += 12;
 
         var local = new DateTime(
             date.Year,
             date.Month,
             date.Day,
-            tod.Hours,
-            tod.Minutes,
-            tod.Seconds,
+            hour24,
+            minute,
+            second,
             DateTimeKind.Local);
         return (uint)new DateTimeOffset(local).ToUnixTimeSeconds();
     }
