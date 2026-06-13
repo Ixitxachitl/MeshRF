@@ -487,28 +487,30 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     if (n_time == 0u || n_freq == 0u) return 0u;
     if (out.size() < static_cast<std::size_t>(n_time) * n_freq) return 0u;
 
-    // Snapshot the rolling IQ ring in chronological order.
+    // Snapshot metadata for the rolling IQ ring. The expensive data copy is
+    // deferred until we know how much history is actually needed.
     std::vector<std::complex<float>> snap;
-    std::size_t filled = 0;
+    std::size_t cap = 0;
+    std::size_t ring_start = 0;
+    std::size_t ring_filled = 0;
     std::uint64_t total_samples = 0;
     std::uint64_t packet_start = 0;
     std::uint64_t packet_end = 0;
     {
         std::lock_guard<std::mutex> lk(impl_->iq_mu);
-        const std::size_t cap = impl_->iq_ring.size();
-        filled = impl_->iq_filled;
-        if (cap == 0u || filled < 64u) return 0u;
+        cap = impl_->iq_ring.size();
+        ring_filled = impl_->iq_filled;
+        if (cap == 0u || ring_filled < 64u) return 0u;
         total_samples = impl_->iq_total_samples;
         packet_start = impl_->last_packet_start;
         packet_end = impl_->last_packet_end;
-        snap.resize(filled);
-        const std::size_t start = (impl_->iq_pos + cap - filled) % cap;
-        for (std::size_t i = 0; i < filled; ++i)
-            snap[i] = impl_->iq_ring[(start + i) % cap];
+        ring_start = (impl_->iq_pos + cap - ring_filled) % cap;
     }
 
-    const std::uint64_t history_begin = total_samples >= filled
-        ? total_samples - filled
+    std::size_t filled = ring_filled;
+
+    const std::uint64_t history_begin = total_samples >= ring_filled
+        ? total_samples - ring_filled
         : 0u;
 
     constexpr std::size_t kFft = 512u;
@@ -547,6 +549,7 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     // per-block FFT restricted to the channel bins fixes that.
     std::size_t off0 = filled - window; // default: newest window
     constexpr std::size_t kBlk = 2048u;
+    bool window_anchored = false;
     if (packet_end > packet_start && packet_end > history_begin) {
         const std::size_t exact_start = packet_start > history_begin
             ? static_cast<std::size_t>(packet_start - history_begin)
@@ -568,100 +571,141 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         if (window < kFft) window = kFft;
         off0 = (exact_start > lead_margin) ? (exact_start - lead_margin) : 0u;
         if (off0 + window > filled) off0 = filled - window;
-    } else if (filled > window && filled >= kBlk) {
-        const std::size_t nblk = filled / kBlk;
 
-        // Channel half-width in FFT bins: (bw/2) / rate of the kBlk spectrum.
-        const std::size_t chanHalf = std::clamp<std::size_t>(
-            static_cast<std::size_t>(
-                0.5 * static_cast<double>(bw) / static_cast<double>(rate) * kBlk),
-            1u, kBlk / 2u - 1u);
+        snap.resize(window);
+        {
+            std::lock_guard<std::mutex> lk(impl_->iq_mu);
+            if (impl_->iq_ring.size() != cap || impl_->iq_filled < ring_filled)
+                return 0u;
 
-        dsp::Fft locFft(kBlk);
-        std::vector<std::complex<float>> locBuf(kBlk);
+            const std::size_t src0 = (ring_start + off0) % cap;
+            const std::size_t first = std::min<std::size_t>(window, cap - src0);
+            std::copy_n(impl_->iq_ring.begin() + src0, first, snap.begin());
+            if (window > first) {
+                std::copy_n(impl_->iq_ring.begin(), window - first,
+                            snap.begin() + first);
+            }
+        }
 
-        std::size_t peak_blk = 0;
-        float peak_e = -1.0f;
-        // Track the channel-power distribution so we can reject the case where
-        // there is no real packet (every block is just noise) and so we can
-        // find the *onset* of the burst rather than its single hottest block.
-        std::vector<float> blk_e(nblk, 0.0f);
-        for (std::size_t b = 0; b < nblk; ++b) {
-            const std::size_t base = b * kBlk;
-            for (std::size_t i = 0; i < kBlk; ++i) locBuf[i] = snap[base + i];
-            locFft.forward(std::span<std::complex<float>>(locBuf.data(), kBlk));
-            // Sum power in bins [-chanHalf, +chanHalf] around DC (bin 0).
-            float e = 0.0f;
-            for (std::size_t k = 0; k <= chanHalf; ++k) {
-                const auto lo = locBuf[k];
-                e += lo.real() * lo.real() + lo.imag() * lo.imag();
-                if (k != 0) {
-                    const auto hi = locBuf[kBlk - k];
-                    e += hi.real() * hi.real() + hi.imag() * hi.imag();
+        filled = window;
+        off0 = 0u;
+        window_anchored = true;
+    }
+
+    if (!window_anchored) {
+        snap.resize(filled);
+        {
+            std::lock_guard<std::mutex> lk(impl_->iq_mu);
+            if (impl_->iq_ring.size() != cap || impl_->iq_filled < ring_filled)
+                return 0u;
+
+            const std::size_t first = std::min<std::size_t>(filled, cap - ring_start);
+            std::copy_n(impl_->iq_ring.begin() + ring_start, first, snap.begin());
+            if (filled > first) {
+                std::copy_n(impl_->iq_ring.begin(), filled - first,
+                            snap.begin() + first);
+            }
+        }
+
+        if (filled > window && filled >= kBlk) {
+            const std::size_t nblk = filled / kBlk;
+
+            // Channel half-width in FFT bins: (bw/2) / rate of the kBlk spectrum.
+            const std::size_t chanHalf = std::clamp<std::size_t>(
+                static_cast<std::size_t>(
+                    0.5 * static_cast<double>(bw) / static_cast<double>(rate) * kBlk),
+                1u, kBlk / 2u - 1u);
+
+            dsp::Fft locFft(kBlk);
+            std::vector<std::complex<float>> locBuf(kBlk);
+
+            std::size_t peak_blk = 0;
+            float peak_e = -1.0f;
+            // Track the channel-power distribution so we can reject the case where
+            // there is no real packet (every block is just noise) and so we can
+            // find the *onset* of the burst rather than its single hottest block.
+            std::vector<float> blk_e(nblk, 0.0f);
+            for (std::size_t b = 0; b < nblk; ++b) {
+                const std::size_t base = b * kBlk;
+                for (std::size_t i = 0; i < kBlk; ++i) locBuf[i] = snap[base + i];
+                locFft.forward(std::span<std::complex<float>>(locBuf.data(), kBlk));
+                // Sum power in bins [-chanHalf, +chanHalf] around DC (bin 0).
+                float e = 0.0f;
+                for (std::size_t k = 0; k <= chanHalf; ++k) {
+                    const auto lo = locBuf[k];
+                    e += lo.real() * lo.real() + lo.imag() * lo.imag();
+                    if (k != 0) {
+                        const auto hi = locBuf[kBlk - k];
+                        e += hi.real() * hi.real() + hi.imag() * hi.imag();
+                    }
+                }
+                blk_e[b] = e;
+                if (e > peak_e) { peak_e = e; peak_blk = b; }
+            }
+
+            // Channel noise floor (median of block energies).
+            float median = peak_e;
+            if (nblk >= 2u) {
+                std::vector<float> sorted = blk_e;
+                std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2,
+                                 sorted.end());
+                median = sorted[sorted.size() / 2];
+            }
+
+            // A block counts as "in a burst" when it rises above the channel
+            // noise floor. This function is called after CRC OK, so prefer
+            // showing the best available region over rejecting a weak packet.
+            const float burst_thr = std::max(
+                median * 1.8f, median + (peak_e - median) * 0.35f);
+
+            // Prefer the *most recent* burst, not the globally strongest one.
+            // The snapshot is triggered by the packet that just decoded, which
+            // sits at the newest end of the ring; another node's stronger packet
+            // earlier in the ring must not steal the view. Scan from newest
+            // block back to find the latest above threshold, then walk back to
+            // the burst onset so preamble timing is captured.
+            std::size_t burst_end = peak_blk;
+            for (std::size_t b = nblk; b-- > 0;) {
+                if (blk_e[b] >= burst_thr) { burst_end = b; break; }
+            }
+            std::size_t burst_start = burst_end;
+            std::size_t quiet = 0;
+            while (burst_start > 0) {
+                if (blk_e[burst_start - 1] >= burst_thr) {
+                    --burst_start;
+                    quiet = 0;
+                } else if (++quiet <= 2u) {
+                    --burst_start;
+                } else {
+                    break;
                 }
             }
-            blk_e[b] = e;
-            if (e > peak_e) { peak_e = e; peak_blk = b; }
-        }
 
-        // Channel noise floor (median of block energies).
-        float median = peak_e;
-        if (nblk >= 2u) {
-            std::vector<float> sorted = blk_e;
-            std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2,
-                             sorted.end());
-            median = sorted[sorted.size() / 2];
-        }
-
-        // A block counts as "in a burst" when it rises above the channel noise
-        // floor. This function is called after CRC OK, so prefer showing the
-        // best available region over rejecting a weak-but-real packet.
-        const float burst_thr = std::max(median * 1.8f,
-                          median + (peak_e - median) * 0.35f);
-
-        // Prefer the *most recent* burst, not the globally strongest one. The
-        // snapshot is triggered by the packet that just decoded, which sits at
-        // the newest end of the ring; another node's stronger packet earlier in
-        // the ring must not steal the view. Scan from the newest block back to
-        // find the latest block above threshold, then walk back to the burst's
-        // onset so the preamble (and any small timing offset) is captured.
-        std::size_t burst_end = peak_blk;
-        for (std::size_t b = nblk; b-- > 0;) {
-            if (blk_e[b] >= burst_thr) { burst_end = b; break; }
-        }
-        std::size_t burst_start = burst_end;
-        std::size_t quiet = 0;
-        while (burst_start > 0) {
-            if (blk_e[burst_start - 1] >= burst_thr) {
-                --burst_start;
-                quiet = 0;
-            } else if (++quiet <= 2u) {
-                --burst_start;
-            } else {
-                break;
+            std::size_t burst_stop = burst_end;
+            quiet = 0;
+            while (burst_stop + 1u < nblk) {
+                if (blk_e[burst_stop + 1u] >= burst_thr) {
+                    ++burst_stop;
+                    quiet = 0;
+                } else if (++quiet <= 2u) {
+                    ++burst_stop;
+                } else {
+                    break;
+                }
             }
-        }
 
-        std::size_t burst_stop = burst_end;
-        quiet = 0;
-        while (burst_stop + 1u < nblk) {
-            if (blk_e[burst_stop + 1u] >= burst_thr) {
-                ++burst_stop;
-                quiet = 0;
-            } else if (++quiet <= 2u) {
-                ++burst_stop;
-            } else {
-                break;
-            }
+            const std::size_t burst_first = burst_start * kBlk;
+            const std::size_t burst_last =
+                std::min<std::size_t>((burst_stop + 1u) * kBlk, filled);
+            const std::size_t burst_len =
+                burst_last > burst_first ? burst_last - burst_first : window;
+            const std::size_t margin =
+                std::max<std::size_t>(sym_samples / 2u, burst_len / 100u);
+            window = std::min<std::size_t>(filled,
+                                           std::max(window, burst_len + 2u * margin));
+            off0 = (burst_first > margin) ? burst_first - margin : 0u;
+            if (off0 + window > filled) off0 = filled - window;
         }
-
-        const std::size_t burst_first = burst_start * kBlk;
-        const std::size_t burst_last = std::min<std::size_t>((burst_stop + 1u) * kBlk, filled);
-        const std::size_t burst_len = burst_last > burst_first ? burst_last - burst_first : window;
-        const std::size_t margin = std::max<std::size_t>(sym_samples / 2u, burst_len / 100u);
-        window = std::min<std::size_t>(filled, std::max(window, burst_len + 2u * margin));
-        off0 = (burst_first > margin) ? burst_first - margin : 0u;
-        if (off0 + window > filled) off0 = filled - window;
     }
 
     const std::size_t hop = (n_time > 1u)

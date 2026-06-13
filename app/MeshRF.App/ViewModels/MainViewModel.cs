@@ -1638,7 +1638,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (chanVm is null) continue;
             if (!TryApplyReaction(chanVm.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode))
             {
-                chanVm.Messages.Add(BuildStandaloneReactionMessage(reaction));
+                InsertMessageChronologically(chanVm.Messages,
+                    BuildStandaloneReactionMessage(reaction));
                 if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
             }
         }
@@ -1691,7 +1692,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var reaction in pendingReactions)
         {
             if (!TryApplyReaction(convo.Messages, reaction.ReplyId, reaction.Text, reaction.Emoji, reaction.FromNode))
-                convo.Add(BuildStandaloneReactionMessage(reaction));
+            {
+                InsertMessageChronologically(convo.Messages,
+                    BuildStandaloneReactionMessage(reaction));
+                if (convo.Messages.Count > 1000) convo.Messages.RemoveAt(0);
+            }
         }
     }
 
@@ -1801,6 +1806,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ? (MessageDelivery)reaction.Delivery
                 : MessageDelivery.None,
         };
+    }
+
+    private static void InsertMessageChronologically(
+        IList<ChannelMessage> messages,
+        ChannelMessage message)
+    {
+        // History replay is chronological. Standalone reactions are resolved in
+        // a second pass; insert by timestamp so they keep the original ordering
+        // instead of bunching at the end.
+        int index = messages.Count;
+        while (index > 0)
+        {
+            if (messages[index - 1].Timestamp <= message.Timestamp) break;
+            index--;
+        }
+
+        messages.Insert(index, message);
     }
 
     private static uint ResolveReactionTargetId(MeshDecodeResult result)

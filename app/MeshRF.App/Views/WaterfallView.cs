@@ -35,7 +35,7 @@ public sealed class WaterfallView : Image
             new PropertyMetadata(true));
     public static readonly DependencyProperty TimeHorizontalProperty =
         DependencyProperty.Register(nameof(TimeHorizontal), typeof(bool), typeof(WaterfallView),
-            new PropertyMetadata(false, (d, _) => ((WaterfallView)d).Render()));
+            new PropertyMetadata(false, (d, _) => ((WaterfallView)d).OnTimeHorizontalChanged()));
     public static readonly DependencyProperty SmoothPixelsProperty =
         DependencyProperty.Register(nameof(SmoothPixels), typeof(bool), typeof(WaterfallView),
             new PropertyMetadata(false, (d, _) => ((WaterfallView)d).OnSmoothPixelsChanged()));
@@ -94,9 +94,28 @@ public sealed class WaterfallView : Image
 
     private void OnSmoothPixelsChanged() => ApplyBitmapScalingMode();
 
+    private void OnTimeHorizontalChanged()
+    {
+        if (_bmp is null)
+        {
+            EnsureBitmap();
+            Render();
+            return;
+        }
+
+        ResizeRing(GetDesiredCapacity(_w, _h));
+        Render();
+    }
+
     private void ApplyBitmapScalingMode() =>
         RenderOptions.SetBitmapScalingMode(this,
             SmoothPixels ? BitmapScalingMode.Fant : BitmapScalingMode.NearestNeighbor);
+
+    private int GetDesiredCapacity(int width, int height)
+    {
+        int axis = TimeHorizontal ? width : height;
+        return axis > 0 ? axis : 1;
+    }
 
     private void EnsureBitmap()
     {
@@ -117,7 +136,7 @@ public sealed class WaterfallView : Image
         _h = h;
         _bmp = new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgra32, null);
         Source = _bmp;
-        ResizeRing(h);
+        ResizeRing(GetDesiredCapacity(w, h));
     }
 
     private void ResizeRing(int newCapacity)
@@ -237,6 +256,50 @@ public sealed class WaterfallView : Image
 
             long offset = (long)_head * _binCount;
             src.AsSpan().CopyTo(_ring.AsSpan((int)offset, _binCount));
+            _head = (_head + 1) % _capacity;
+            if (_filled < _capacity) _filled++;
+        }
+
+        Render();
+    }
+
+    /// <summary>
+    /// Replaces the ring-buffer contents from a row-major frame grid
+    /// (<paramref name="frameCount"/> rows, <paramref name="bins"/> columns).
+    /// Intended for frozen packet views to avoid per-row allocations.
+    /// </summary>
+    public void ReplaceFrames(ReadOnlySpan<float> frames, int frameCount, int bins)
+    {
+        if (frameCount <= 0 || bins <= 0)
+        {
+            Clear();
+            return;
+        }
+
+        long required = (long)frameCount * bins;
+        if (required > frames.Length) return;
+
+        if (_bmp is null) EnsureBitmap();
+
+        if (bins != _binCount)
+        {
+            _binCount = bins;
+            _ring = new float[(long)_capacity * _binCount];
+            _head = 0;
+            _filled = 0;
+        }
+        if (_ring is null || _capacity == 0) return;
+
+        int take = Math.Min(frameCount, _capacity);
+        int start = frameCount - take;
+        _head = 0;
+        _filled = 0;
+
+        for (int i = 0; i < take; i++)
+        {
+            int srcOffset = (start + i) * bins;
+            long dstOffset = (long)_head * _binCount;
+            frames.Slice(srcOffset, bins).CopyTo(_ring.AsSpan((int)dstOffset, _binCount));
             _head = (_head + 1) % _capacity;
             if (_filled < _capacity) _filled++;
         }
@@ -425,19 +488,43 @@ public sealed class WaterfallView : Image
             my[y] = sy;
         }
 
+        Span<int> t0Stack = stackalloc int[Math.Min(w, 4096)];
+        Span<int> t1Stack = stackalloc int[Math.Min(w, 4096)];
+        int[]? t0Heap = w > t0Stack.Length ? new int[w] : null;
+        int[]? t1Heap = w > t1Stack.Length ? new int[w] : null;
+        Span<int> t0 = t0Heap ?? t0Stack;
+        Span<int> t1 = t1Heap ?? t1Stack;
+        for (int x = 0; x < w; x++)
+        {
+            int start = (int)((long)x * _filled / w);
+            int end = (int)(((long)(x + 1) * _filled + w - 1) / w);
+            if (start < 0) start = 0; else if (start >= _filled) start = _filled - 1;
+            if (end <= start) end = start + 1;
+            if (end > _filled) end = _filled;
+            t0[x] = start;
+            t1[x] = end;
+        }
+
         fixed (uint* lut = _lut)
         fixed (float* ring = _ring)
         {
             for (int x = 0; x < w; x++)
             {
-                int k = _filled > 0 ? (int)((long)x * _filled / w) : 0;
-                if (k < 0) k = 0; else if (k >= _filled) k = _filled - 1;
-                int srcRow = (oldestRow + k) % _capacity;
-                float* src = ring + (long)srcRow * n;
+                int start = t0[x];
+                int end = t1[x];
                 for (int y = 0; y < h; y++)
                 {
-                    float v = src[my[y]];
-                    if (float.IsNaN(v) || float.IsInfinity(v)) v = floorF;
+                    float v = float.NegativeInfinity;
+                    int bin = my[y];
+                    for (int t = start; t < end; t++)
+                    {
+                        int srcRow = (oldestRow + t) % _capacity;
+                        float candidate = ring[(long)srcRow * n + bin];
+                        if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) &&
+                            candidate > v)
+                            v = candidate;
+                    }
+                    if (float.IsNegativeInfinity(v)) v = floorF;
                     int idx = (int)((v - floorF) * invRange);
                     if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
                     ((uint*)(back + y * stride))[x] = lut[idx];

@@ -12,9 +12,6 @@ namespace MeshRF.App;
 
 public partial class MainWindow : Window
 {
-    private const double LastPacketMinWidth = 280.0;
-    private const double LastPacketMaxWidth = 1400.0;
-
     private readonly DispatcherTimer _timer;
     private float[] _spectrumBuffer = Array.Empty<float>();
     private bool _layoutApplied;
@@ -119,17 +116,6 @@ public partial class MainWindow : Window
         if (System.Threading.Interlocked.Exchange(ref _snapshotInFlight, 1) != 0)
             return;
         _ = FreezeLastPacketAsync();
-    }
-
-    private void OnCloseLastPacket(object sender, RoutedEventArgs e)
-        => LastPacketPanel.Visibility = Visibility.Collapsed;
-
-    private void OnLastPacketResizeDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
-    {
-        // The grip is on the panel's left edge while the panel is right-aligned,
-        // so moving left should increase width and moving right should decrease.
-        double target = LastPacketPanel.Width - e.HorizontalChange;
-        LastPacketPanel.Width = Math.Clamp(target, LastPacketMinWidth, LastPacketMaxWidth);
     }
 
     // Double-clicking a node row opens (or focuses) a DM conversation tab.
@@ -344,20 +330,11 @@ public partial class MainWindow : Window
             const int nTime = 512;
             const int nFreq = 256;
 
-            (int rows, List<float[]> frames) PullFrames(int nTime, int nFreq)
+            (int rows, float[] grid) PullFrames(int nTime, int nFreq)
             {
                 var grid = new float[nTime * nFreq];
                 int written = vm.Core.PullPacketSpectrogram(grid, nTime, nFreq);
-                if (written <= 0) return (0, new List<float[]>());
-
-                var local = new List<float[]>(written);
-                for (int t = 0; t < written; t++)
-                {
-                    var row = new float[nFreq];
-                    Array.Copy(grid, t * nFreq, row, 0, nFreq);
-                    local.Add(row);
-                }
-                return (written, local);
+                return written > 0 ? (written, grid) : (0, Array.Empty<float>());
             }
 
             static int ComputeRetryDelayMs(MainViewModel vm)
@@ -373,9 +350,9 @@ public partial class MainWindow : Window
                 return Math.Clamp(delayMs, 80, 900);
             }
 
-            // Pull + row extraction off the UI thread; commit to the control once.
-            var (rows, frames) = await Task.Run(() => PullFrames(nTime, nFreq))
-                                    .ConfigureAwait(true);
+            // Pull the packed spectrogram off the UI thread; commit once.
+            var (rows, grid) = await Task.Run(() => PullFrames(nTime, nFreq))
+                                  .ConfigureAwait(true);
 
             // The very first packet after RX start can arrive before enough
             // IQ history has accumulated for a robust native snapshot. Retry
@@ -383,8 +360,8 @@ public partial class MainWindow : Window
             if (rows <= 0)
             {
                 await Task.Delay(ComputeRetryDelayMs(vm)).ConfigureAwait(true);
-                (rows, frames) = await Task.Run(() => PullFrames(nTime, nFreq))
-                                      .ConfigureAwait(true);
+                (rows, grid) = await Task.Run(() => PullFrames(nTime, nFreq))
+                                    .ConfigureAwait(true);
             }
 
             if (rows <= 0)
@@ -393,10 +370,10 @@ public partial class MainWindow : Window
                 return;
             }
 
-            ApplySnapshotContrast(frames);
-            LastPacket.ReplaceFrames(frames);
+            int sampleCount = rows * nFreq;
+            ApplySnapshotContrast(grid.AsSpan(0, sampleCount));
+            LastPacket.ReplaceFrames(grid.AsSpan(0, sampleCount), rows, nFreq);
             LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
-            LastPacketPanel.Visibility = Visibility.Visible;
         }
         finally
         {
@@ -437,7 +414,6 @@ public partial class MainWindow : Window
         ApplySnapshotContrast(frames);
         LastPacket.ReplaceFrames(frames);
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:HH:mm:ss}";
-        LastPacketPanel.Visibility = Visibility.Visible;
     }
 
     private void ApplySnapshotContrast(IReadOnlyList<float[]> frames)
@@ -476,6 +452,32 @@ public partial class MainWindow : Window
         LastPacket.CeilDb = ceil;
     }
 
+    private void ApplySnapshotContrast(ReadOnlySpan<float> values)
+    {
+        if (values.Length < 16) return;
+
+        var vals = new float[values.Length];
+        int valid = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            float v = values[i];
+            if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+            vals[valid++] = v;
+        }
+        if (valid < 16) return;
+
+        Array.Sort(vals, 0, valid);
+        float p05 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.05), 0, valid - 1)];
+        float p995 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.995), 0, valid - 1)];
+
+        double floor = p05 - 2.0;
+        double ceil = p995 + 2.0;
+        if (ceil - floor < 24.0) ceil = floor + 24.0;
+
+        LastPacket.FloorDb = floor;
+        LastPacket.CeilDb = ceil;
+    }
+
     private void ApplySavedLayout()
     {
         var settings = AppSettings.Load();
@@ -503,11 +505,6 @@ public partial class MainWindow : Window
         _conversationRightPaneStar = settings.ConversationRightPaneStar;
         _conversationTelemetryPaneStar = settings.ConversationTelemetryPaneStar;
         _conversationLocationHistoryPaneStar = settings.ConversationLocationHistoryPaneStar;
-
-        LastPacketPanel.Width = Math.Clamp(
-            settings.LastPacketPanelWidth ?? LastPacketPanel.Width,
-            LastPacketMinWidth,
-            LastPacketMaxWidth);
 
         ApplyWaypointsColumnWidths(settings.WaypointColumnWidths);
 
@@ -646,10 +643,6 @@ public partial class MainWindow : Window
         settings.ConversationRightPaneStar = _conversationRightPaneStar;
         settings.ConversationTelemetryPaneStar = _conversationTelemetryPaneStar;
         settings.ConversationLocationHistoryPaneStar = _conversationLocationHistoryPaneStar;
-
-        settings.LastPacketPanelWidth = Math.Clamp(LastPacketPanel.Width,
-            LastPacketMinWidth,
-            LastPacketMaxWidth);
 
         settings.WaypointColumnWidths = SaveWaypointsColumnWidths();
 
