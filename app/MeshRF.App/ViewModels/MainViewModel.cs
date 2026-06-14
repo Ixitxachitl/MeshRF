@@ -1733,7 +1733,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
 
             if (IsNonStandaloneReplyRecord(msg))
+            {
+                chanVm.Messages.Add(BuildReplyLinkedMessage(msg, chanVm.Messages));
+                if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
                 continue;
+            }
 
             if (string.IsNullOrEmpty(msg.Text)) continue;
             chanVm.Messages.Add(BuildHistoryMessage(msg));
@@ -1791,7 +1795,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
 
             if (IsNonStandaloneReplyRecord(msg))
+            {
+                convo.Add(BuildReplyLinkedMessage(msg, convo.Messages));
                 continue;
+            }
 
             if (string.IsNullOrEmpty(msg.Text)) continue;
             convo.Add(BuildHistoryMessage(msg));
@@ -1914,6 +1921,93 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ? (MessageDelivery)reaction.Delivery
                 : MessageDelivery.None,
         };
+    }
+
+    private ChannelMessage BuildReplyLinkedMessage(
+        MessageRecord reply,
+        IList<ChannelMessage> messages)
+    {
+        bool outgoing = _myNodeNum != 0 && reply.FromNode == _myNodeNum;
+        bool isBroadcast = reply.ToNode == 0xFFFFFFFFu;
+        var body = string.IsNullOrWhiteSpace(reply.Text)
+            ? "(empty reply)"
+            : reply.Text;
+
+        ChannelMessage? target = null;
+        for (int i = messages.Count - 1; i >= 0; i--)
+        {
+            var candidate = messages[i];
+            if (candidate.PacketId != reply.ReplyId) continue;
+            target = candidate;
+            break;
+        }
+
+        string context = target is not null
+            ? BuildReplyContextText(target)
+            : $"replying to {reply.ReplyId:x8} (original message not found)";
+
+        return new ChannelMessage
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(reply.RxEpoch).LocalDateTime,
+            FromId = NodeDisplayName(reply.FromNode),
+            Text = $"{context}\n{body}",
+            RssiDbm = reply.RssiDbfs,
+            SnrDb = reply.SnrDb,
+            PacketId = reply.PacketId,
+            IsOutgoing = outgoing,
+            IsReplyLinked = true,
+            ReplyTargetFound = target is not null,
+            ReplyToPacketId = reply.ReplyId,
+            Delivery = outgoing && !isBroadcast
+                ? (MessageDelivery)reply.Delivery
+                : MessageDelivery.None,
+        };
+    }
+
+    private static string BuildReplyContextText(ChannelMessage message)
+    {
+        var from = string.IsNullOrWhiteSpace(message.FromId)
+            ? "unknown"
+            : message.FromId.Trim();
+        var original = TrimForReplyPreview(ExtractReplyLeafText(message.Text));
+        return $"replying to {from}: \"{original}\"";
+    }
+
+    private static string ExtractReplyLeafText(string? text)
+    {
+        var raw = text ?? string.Empty;
+        if (raw.Length == 0) return string.Empty;
+
+        var lines = raw.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length == 0) return string.Empty;
+
+        // Replies are rendered as "replying to ..." + newline + body. When
+        // replying to a reply, only carry forward the latest body line.
+        return lines[^1].Trim();
+    }
+
+    private static string TrimForReplyPreview(string? text)
+    {
+        var normalized = (text ?? string.Empty)
+            .Replace("\r", " ")
+            .Replace("\n", " ")
+            .Trim();
+        if (normalized.Length == 0) return "(empty)";
+        return normalized.Length <= 80 ? normalized : normalized[..80] + "...";
+    }
+
+    private string BuildOutgoingReplyDisplayText(string body, uint replyId)
+    {
+        var context = PendingReplyContext.Length > 0
+            ? PendingReplyContext
+            : $"replying to {replyId:x8} (original message not found)";
+        return $"{context}\n{body}";
+    }
+
+    private void ClearPendingReplyState()
+    {
+        PendingReplyPacketId = 0;
+        PendingReplyContext = string.Empty;
     }
 
     private static void InsertMessageChronologically(
@@ -2971,6 +3065,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(SendMessageCommand))]
     private string _composeText = string.Empty;
 
+    [ObservableProperty]
+    private uint _pendingReplyPacketId;
+
+    [ObservableProperty]
+    private string _pendingReplyContext = string.Empty;
+
+    public bool HasPendingReply => PendingReplyPacketId != 0;
+
+    partial void OnPendingReplyPacketIdChanged(uint value) =>
+        OnPropertyChanged(nameof(HasPendingReply));
+
     /// <summary>HackRF TX VGA gain in dB (0..47). Default to max for range.</summary>
     [ObservableProperty]
     private byte _txGainDb = 47;
@@ -3020,6 +3125,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedChannel is not null &&
         !string.IsNullOrWhiteSpace(ComposeText);
 
+    [RelayCommand]
+    private void ReplyToMessage(ChannelMessage? target)
+    {
+        if (target is null || target.PacketId == 0) return;
+        PendingReplyPacketId = target.PacketId;
+        PendingReplyContext = BuildReplyContextText(target);
+        Status = "Reply target selected for the next message.";
+        Log(Status);
+    }
+
+    [RelayCommand]
+    private void ClearPendingReply()
+    {
+        if (!HasPendingReply) return;
+        ClearPendingReplyState();
+        Status = "Reply target cleared.";
+        Log(Status);
+    }
+
     /// <summary>
     /// Encode the composed text as a Meshtastic TEXT_MESSAGE_APP frame on the
     /// selected channel and transmit it on the current preset/frequency. The
@@ -3032,6 +3156,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (ch is null) return;
         var text = (ComposeText ?? string.Empty).Trim();
         if (text.Length == 0) return;
+        uint replyId = PendingReplyPacketId;
 
         if (_myNodeNum == 0)
         {
@@ -3045,6 +3170,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodeTextMessage(
                 ch.Config, _myNodeNum, packetId, text, hopLimit: (byte)HopLimit,
+                replyId: replyId,
                 okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
@@ -3054,14 +3180,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ch.Messages.Add(new ChannelMessage
                 {
                     FromId = NodeDisplayName(_myNodeNum),
-                    Text = text,
+                    Text = replyId != 0
+                        ? BuildOutgoingReplyDisplayText(text, replyId)
+                        : text,
                     PacketId = packetId,
                     IsOutgoing = true,
+                    IsReplyLinked = replyId != 0,
+                    ReplyTargetFound = replyId != 0 && PendingReplyContext.Length > 0,
+                    ReplyToPacketId = replyId,
                 });
                 if (ch.Messages.Count > 1000) ch.Messages.RemoveAt(0);
                 PersistOutgoingText(0xFFFFFFFFu, packetId, text, ch.Config.Name,
-                                    MessageDelivery.None);
+                                    MessageDelivery.None, replyId);
                 ComposeText = string.Empty;
+                if (replyId != 0) ClearPendingReplyState();
                 Status = $"Sent {frame.Length} B on {ch.DisplayName}";
             }
             else
@@ -3095,6 +3227,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (convo is null) return;
         var text = (convo.ComposeText ?? string.Empty).Trim();
         if (text.Length == 0) return;
+        uint replyId = PendingReplyPacketId;
 
         if (_myNodeNum == 0)
         {
@@ -3144,10 +3277,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ? MeshEncoder.EncodePkcTextMessage(
                       _myNodeNum, convo.NodeNum, packetId, text,
                       myPriv, peerPub, hopLimit: (byte)HopLimit, wantAck: true,
+                    replyId: replyId,
                       okToMqtt: OkToMqtt)
                 : MeshEncoder.EncodeTextMessage(
                       ch!.Config, _myNodeNum, packetId, text,
                       to: convo.NodeNum, hopLimit: (byte)HopLimit, wantAck: true,
+                    replyId: replyId,
                       okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
@@ -3157,16 +3292,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var sent = new ChannelMessage
                 {
                     FromId = NodeDisplayName(_myNodeNum),
-                    Text = text,
+                    Text = replyId != 0
+                        ? BuildOutgoingReplyDisplayText(text, replyId)
+                        : text,
                     PacketId = packetId,
                     IsOutgoing = true,
+                    IsReplyLinked = replyId != 0,
+                    ReplyTargetFound = replyId != 0 && PendingReplyContext.Length > 0,
+                    ReplyToPacketId = replyId,
                     Delivery = MessageDelivery.Sent,
                 };
                 convo.Add(sent);
                 TrackPendingAck(sent);
                 PersistOutgoingText(convo.NodeNum, packetId, text,
-                                    usePkc ? "PKC" : (ch?.Config.Name ?? string.Empty));
+                                    usePkc ? "PKC" : (ch?.Config.Name ?? string.Empty),
+                                    MessageDelivery.Sent, replyId);
                 convo.ComposeText = string.Empty;
+                if (replyId != 0) ClearPendingReplyState();
                 Status = usePkc
                     ? $"DM (PKC) sent {frame.Length} B to {convo.TabHeader}"
                     : $"DM (legacy PSK) sent {frame.Length} B to {convo.TabHeader}";
@@ -3669,7 +3811,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// direct messages start as <see cref="MessageDelivery.Sent"/> and are later
     /// updated to delivered/failed.</summary>
     private void PersistOutgoingText(uint to, uint packetId, string text, string channel,
-                                    MessageDelivery delivery = MessageDelivery.Sent)
+                                    MessageDelivery delivery = MessageDelivery.Sent,
+                                    uint replyId = 0)
     {
         try
         {
@@ -3681,6 +3824,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Channel = channel ?? string.Empty,
                 PortNum = (int)PortNum.TextMessage,
                 Text = text,
+                ReplyId = replyId,
                 Decrypted = true,
                 RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 Delivery = (int)delivery,
@@ -4360,7 +4504,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         }
                         else if (isReplyLinkedNonReaction)
                         {
-                            Log($"  DM reply-linked packet from {senderName} ignored (target {reactionTargetId:x8})");
+                            if (existed)
+                                convo.Add(BuildReplyLinkedMessage(record, convo.Messages));
+                            MarkTabNeedsAttention(convo);
+                            Log($"  DM reply from {senderName}: {record.Text}");
                         }
                         else if (existed)
                             convo.Add(new ChannelMessage
@@ -4379,7 +4526,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         // Acknowledge if the sender asked for one (firmware does
                         // this for any unicast packet addressed to it).
                         if (header.WantAck) SendAck(header, result);
-                        if (!isReplyLinkedNonReaction && !IsNodeRtttlMuted(header.From))
+                        if (!IsNodeRtttlMuted(header.From))
                         {
                             var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
                             Task.Run(() => _ringtone.Play(rtttl, mode, vol));
@@ -4412,7 +4559,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         }
                         else if (isReplyLinkedNonReaction)
                         {
-                            Log($"  [{result.ChannelName}] {senderName} reply-linked packet ignored (target {reactionTargetId:x8})");
+                            if (chanVm is not null)
+                            {
+                                chanVm.Messages.Add(BuildReplyLinkedMessage(record, chanVm.Messages));
+                                if (chanVm.Messages.Count > 1000)
+                                    chanVm.Messages.RemoveAt(0);
+                                MarkTabNeedsAttention(chanVm);
+                            }
+                            Log($"  [{result.ChannelName}] {senderName} replied: {record.Text}");
+                            shouldRing = chanVm?.MuteRtttl != true;
                         }
                         else
                         {

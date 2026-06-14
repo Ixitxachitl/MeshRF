@@ -1245,6 +1245,23 @@
                                                    Visibility="{Binding DataContext.CanTransmit,
                                                                 RelativeSource={RelativeSource AncestorType=TabControl},
                                                                 Converter={StaticResource BoolToVis}}">
+                                            <StackPanel DockPanel.Dock="Left"
+                                                Orientation="Horizontal"
+                                                Margin="0,0,8,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="{Binding DataContext.HasPendingReply,
+                                                         RelativeSource={RelativeSource AncestorType=TabControl},
+                                                         Converter={StaticResource BoolToVis}}">
+                                            <TextBlock VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource BrushSubtle}"
+                                                   Text="{Binding DataContext.PendingReplyContext,
+                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                            <Button Content="Clear"
+                                                Margin="6,0,0,0"
+                                                Padding="6,1"
+                                                Command="{Binding DataContext.ClearPendingReplyCommand,
+                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                            </StackPanel>
                                             <Button DockPanel.Dock="Right" Content="Send" Padding="14,4"
                                                     Margin="4,0,0,0"
                                                     ToolTip="Encode and transmit a text message on this channel"
@@ -1282,11 +1299,14 @@
                                                  beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Grid Tag="{Binding DataContext.SendReactionCommand, RelativeSource={RelativeSource AncestorType=TabControl}}">
+                                                    <Grid Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=TabControl}}">
                                                         <Grid.ContextMenu>
                                                             <ContextMenu>
+                                                                <MenuItem Header="Reply"
+                                                                          Command="{Binding PlacementTarget.Tag.ReplyToMessageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                          CommandParameter="{Binding}" />
                                                                 <MenuItem Header="React..."
-                                                                          Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                          Command="{Binding PlacementTarget.Tag.SendReactionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                                           CommandParameter="{Binding}">
                                                                     <MenuItem.Icon>
                                                                         <TextBlock Text="&#xE11D;"
@@ -1382,6 +1402,23 @@
                                               Visibility="{Binding DataContext.CanTransmit,
                                                         RelativeSource={RelativeSource AncestorType=TabControl},
                                                         Converter={StaticResource BoolToVis}}">
+                                        <StackPanel DockPanel.Dock="Left"
+                                                Orientation="Horizontal"
+                                                Margin="0,0,8,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="{Binding DataContext.HasPendingReply,
+                                                     RelativeSource={RelativeSource AncestorType=TabControl},
+                                                     Converter={StaticResource BoolToVis}}">
+                                            <TextBlock VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource BrushSubtle}"
+                                                   Text="{Binding DataContext.PendingReplyContext,
+                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                            <Button Content="Clear"
+                                                Margin="6,0,0,0"
+                                                Padding="6,1"
+                                                Command="{Binding DataContext.ClearPendingReplyCommand,
+                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                        </StackPanel>
                                         <Button DockPanel.Dock="Right" Content="Send" Padding="14,4"
                                                 Margin="4,0,0,0"
                                                 ToolTip="Encode and transmit a direct message to this node"
@@ -1420,11 +1457,14 @@
                                                  beh:AutoScroll.IsEnabled="{Binding AutoScroll}">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Grid Tag="{Binding DataContext.SendReactionCommand, RelativeSource={RelativeSource AncestorType=TabControl}}">
+                                                    <Grid Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=TabControl}}">
                                                         <Grid.ContextMenu>
                                                             <ContextMenu>
+                                                                <MenuItem Header="Reply"
+                                                                          Command="{Binding PlacementTarget.Tag.ReplyToMessageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                          CommandParameter="{Binding}" />
                                                                 <MenuItem Header="React..."
-                                                                          Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                          Command="{Binding PlacementTarget.Tag.SendReactionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                                           CommandParameter="{Binding}">
                                                                     <MenuItem.Icon>
                                                                         <TextBlock Text="&#xE11D;"

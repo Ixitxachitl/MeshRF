@@ -186,6 +186,15 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>True for messages we transmitted (so delivery status applies).</summary>
     public bool IsOutgoing { get; init; }
 
+    /// <summary>True when this message references an earlier packet via reply_id.</summary>
+    public bool IsReplyLinked { get; init; }
+
+    /// <summary>True when the referenced reply target existed in the local view.</summary>
+    public bool ReplyTargetFound { get; init; }
+
+    /// <summary>Packet id this message replies to (0 when not reply-linked).</summary>
+    public uint ReplyToPacketId { get; init; }
+
     /// <summary>Aggregated reactions attached to this message.</summary>
     public ObservableCollection<MessageReaction> Reactions { get; } = new();
 
