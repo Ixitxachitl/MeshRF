@@ -399,6 +399,10 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID"
@@ -548,6 +552,52 @@
                                           Content="Allow gateways to uplink my packets to public MQTT"
                                           IsChecked="{Binding OkToMqtt, Mode=TwoWay}"
                                           ToolTip="Sets the ok_to_mqtt flag on packets you transmit so MQTT gateways may forward them to the public broker." />
+
+                                <TextBlock Grid.Row="13" Grid.Column="0" Text="Auto node info"
+                                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                                <DockPanel Grid.Row="13" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
+                                    <CheckBox Content="Enabled"
+                                              VerticalAlignment="Center"
+                                              IsChecked="{Binding AutoReportNodeInfoEnabled, Mode=TwoWay}" />
+                                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
+                                    <TextBox Width="60"
+                                             FontFamily="Consolas"
+                                             Text="{Binding AutoReportNodeInfoSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
+                                </DockPanel>
+
+                                <TextBlock Grid.Row="14" Grid.Column="0" Text="Auto position"
+                                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                                <DockPanel Grid.Row="14" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
+                                    <CheckBox Content="Enabled"
+                                              VerticalAlignment="Center"
+                                              IsChecked="{Binding AutoReportPositionEnabled, Mode=TwoWay}" />
+                                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
+                                    <TextBox Width="60"
+                                             FontFamily="Consolas"
+                                             Text="{Binding AutoReportPositionSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
+                                </DockPanel>
+
+                                <TextBlock Grid.Row="15" Grid.Column="0" Text="Auto device metrics"
+                                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                                <DockPanel Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
+                                    <CheckBox Content="Enabled"
+                                              VerticalAlignment="Center"
+                                              IsChecked="{Binding AutoReportDeviceMetricsEnabled, Mode=TwoWay}" />
+                                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
+                                    <TextBox Width="60"
+                                             FontFamily="Consolas"
+                                             Text="{Binding AutoReportDeviceMetricsSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
+                                </DockPanel>
+
+                                <TextBlock Grid.Row="16" Grid.Column="1" Margin="0,2,0,0"
+                                           FontFamily="Consolas"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource BrushSecondaryText}"
+                                           Text="{Binding AutoReportLastSentSummary}"
+                                           ToolTip="Last successful auto-send times for NodeInfo, Position, and Device Metrics." />
                             </Grid>
                         </Border>
                     </Expander>

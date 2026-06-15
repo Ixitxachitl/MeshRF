@@ -533,6 +533,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// may uplink them to the public MQTT broker.</summary>
     [ObservableProperty] private bool _okToMqtt;
 
+    [ObservableProperty] private bool _autoReportNodeInfoEnabled;
+    [ObservableProperty] private int _autoReportNodeInfoSeconds = 300;
+    [ObservableProperty] private bool _autoReportPositionEnabled;
+    [ObservableProperty] private int _autoReportPositionSeconds = 300;
+    [ObservableProperty] private bool _autoReportDeviceMetricsEnabled;
+    [ObservableProperty] private int _autoReportDeviceMetricsSeconds = 300;
+    [ObservableProperty] private string _autoReportLastSentSummary = "Auto last: NI never | POS never | MET never";
+
+    private DateTime _lastAutoNodeInfoUtc = DateTime.MinValue;
+    private DateTime _lastAutoPositionUtc = DateTime.MinValue;
+    private DateTime _lastAutoDeviceMetricsUtc = DateTime.MinValue;
+    private DateTime _nextAutoNodeInfoUtc = DateTime.MinValue;
+    private DateTime _nextAutoPositionUtc = DateTime.MinValue;
+    private DateTime _nextAutoDeviceMetricsUtc = DateTime.MinValue;
+    private int _autoReportTickInFlight;
+
+    private void UpdateAutoReportLastSentSummary()
+    {
+        static string Stamp(DateTime utc) =>
+            utc == DateTime.MinValue
+                ? "never"
+                : utc.ToLocalTime().ToString("h:mm:ss tt", CultureInfo.CurrentCulture);
+
+        AutoReportLastSentSummary =
+            $"Auto last: NI {Stamp(_lastAutoNodeInfoUtc)} | POS {Stamp(_lastAutoPositionUtc)} | MET {Stamp(_lastAutoDeviceMetricsUtc)}";
+    }
+
     [ObservableProperty] private string _homeLatitudeText  = string.Empty;
     [ObservableProperty] private string _homeLongitudeText = string.Empty;
     [ObservableProperty] private string _homeAltitudeText  = string.Empty;
@@ -1187,6 +1214,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RebroadcastMode = string.IsNullOrEmpty(_settings.RebroadcastMode) ? "ALL" : _settings.RebroadcastMode;
         HopLimit = Math.Clamp(_settings.HopLimit, 1, 7);
         OkToMqtt = _settings.OkToMqtt;
+        AutoReportNodeInfoEnabled = _settings.AutoReportNodeInfoEnabled;
+        AutoReportNodeInfoSeconds = Math.Max(5, _settings.AutoReportNodeInfoSeconds);
+        AutoReportPositionEnabled = _settings.AutoReportPositionEnabled;
+        AutoReportPositionSeconds = Math.Max(5, _settings.AutoReportPositionSeconds);
+        AutoReportDeviceMetricsEnabled = _settings.AutoReportDeviceMetricsEnabled;
+        AutoReportDeviceMetricsSeconds = Math.Max(5, _settings.AutoReportDeviceMetricsSeconds);
+        var now = DateTime.UtcNow;
+        _nextAutoNodeInfoUtc = AutoReportNodeInfoEnabled
+            ? now.AddSeconds(Math.Max(5, AutoReportNodeInfoSeconds))
+            : DateTime.MinValue;
+        _nextAutoPositionUtc = AutoReportPositionEnabled
+            ? now.AddSeconds(Math.Max(5, AutoReportPositionSeconds))
+            : DateTime.MinValue;
+        _nextAutoDeviceMetricsUtc = AutoReportDeviceMetricsEnabled
+            ? now.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds))
+            : DateTime.MinValue;
+        UpdateAutoReportLastSentSummary();
         MyPublicKey = _settings.UserPublicKey;
         MyPrivateKey = _settings.UserPrivateKey;
 
@@ -2450,6 +2494,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.RebroadcastMode = RebroadcastMode ?? "ALL";
         _settings.HopLimit = Math.Clamp(HopLimit, 1, 7);
         _settings.OkToMqtt = OkToMqtt;
+        _settings.AutoReportNodeInfoEnabled = AutoReportNodeInfoEnabled;
+        _settings.AutoReportNodeInfoSeconds = Math.Max(5, AutoReportNodeInfoSeconds);
+        _settings.AutoReportPositionEnabled = AutoReportPositionEnabled;
+        _settings.AutoReportPositionSeconds = Math.Max(5, AutoReportPositionSeconds);
+        _settings.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
+        _settings.AutoReportDeviceMetricsSeconds = Math.Max(5, AutoReportDeviceMetricsSeconds);
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.HomeLocationSource = SelectedLocationSource?.Value ?? ManualLocationSourceValue;
@@ -2483,6 +2533,60 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnRebroadcastModeChanged(string value) => SaveSettings();
     partial void OnOkToMqttChanged(bool value) => SaveSettings();
+
+    partial void OnAutoReportNodeInfoEnabledChanged(bool value)
+    {
+        _lastAutoNodeInfoUtc = DateTime.MinValue;
+        _nextAutoNodeInfoUtc = value
+            ? DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportNodeInfoSeconds))
+            : DateTime.MinValue;
+        UpdateAutoReportLastSentSummary();
+        SaveSettings();
+    }
+
+    partial void OnAutoReportPositionEnabledChanged(bool value)
+    {
+        _lastAutoPositionUtc = DateTime.MinValue;
+        _nextAutoPositionUtc = value
+            ? DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportPositionSeconds))
+            : DateTime.MinValue;
+        UpdateAutoReportLastSentSummary();
+        SaveSettings();
+    }
+
+    partial void OnAutoReportDeviceMetricsEnabledChanged(bool value)
+    {
+        _lastAutoDeviceMetricsUtc = DateTime.MinValue;
+        _nextAutoDeviceMetricsUtc = value
+            ? DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds))
+            : DateTime.MinValue;
+        UpdateAutoReportLastSentSummary();
+        SaveSettings();
+    }
+
+    partial void OnAutoReportNodeInfoSecondsChanged(int value)
+    {
+        if (value < 5) { AutoReportNodeInfoSeconds = 5; return; }
+        if (AutoReportNodeInfoEnabled)
+            _nextAutoNodeInfoUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportNodeInfoSeconds));
+        SaveSettings();
+    }
+
+    partial void OnAutoReportPositionSecondsChanged(int value)
+    {
+        if (value < 5) { AutoReportPositionSeconds = 5; return; }
+        if (AutoReportPositionEnabled)
+            _nextAutoPositionUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportPositionSeconds));
+        SaveSettings();
+    }
+
+    partial void OnAutoReportDeviceMetricsSecondsChanged(int value)
+    {
+        if (value < 5) { AutoReportDeviceMetricsSeconds = 5; return; }
+        if (AutoReportDeviceMetricsEnabled)
+            _nextAutoDeviceMetricsUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds));
+        SaveSettings();
+    }
 
     partial void OnHopLimitChanged(int value)
     {
@@ -4984,6 +5088,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Pulls fresh signal stats from the native core.</summary>
     public void RefreshStats()
     {
+        KickAutoReportTick();
+
         if (!_core.IsRunning) return;
         var s = _core.GetSignalStats();
         RssiDbfs = s.RssiDbfs;
@@ -5044,6 +5150,67 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             ReloadWaypoints();
             _waypointsDirty = false;
+        }
+    }
+
+    private void KickAutoReportTick()
+    {
+        if (Interlocked.Exchange(ref _autoReportTickInFlight, 1) != 0)
+            return;
+
+        _ = RunAutoReportTickAsync();
+    }
+
+    private async Task RunAutoReportTickAsync()
+    {
+        try
+        {
+            var now = DateTime.UtcNow;
+
+            if (AutoReportNodeInfoEnabled &&
+                CanSendNodeInfo() &&
+                now >= _nextAutoNodeInfoUtc)
+            {
+                _nextAutoNodeInfoUtc = now.AddSeconds(Math.Max(5, AutoReportNodeInfoSeconds));
+                await SendNodeInfoAsync();
+                if (Status.StartsWith("Sent node info", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastAutoNodeInfoUtc = now;
+                    UpdateAutoReportLastSentSummary();
+                }
+            }
+
+            now = DateTime.UtcNow;
+            if (AutoReportPositionEnabled &&
+                CanSendPosition() &&
+                now >= _nextAutoPositionUtc)
+            {
+                _nextAutoPositionUtc = now.AddSeconds(Math.Max(5, AutoReportPositionSeconds));
+                await SendPositionAsync();
+                if (Status.StartsWith("Sent position", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastAutoPositionUtc = now;
+                    UpdateAutoReportLastSentSummary();
+                }
+            }
+
+            now = DateTime.UtcNow;
+            if (AutoReportDeviceMetricsEnabled &&
+                CanSendTelemetry() &&
+                now >= _nextAutoDeviceMetricsUtc)
+            {
+                _nextAutoDeviceMetricsUtc = now.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds));
+                await SendDeviceMetricsAsync();
+                if (Status.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastAutoDeviceMetricsUtc = now;
+                    UpdateAutoReportLastSentSummary();
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _autoReportTickInFlight, 0);
         }
     }
 

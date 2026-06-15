@@ -94,6 +94,24 @@ public sealed class AppSettings
     /// (firmware <c>Config.LoRaConfig.config_ok_to_mqtt</c>). Off by default.</summary>
     public bool OkToMqtt { get; set; } = false;
 
+    /// <summary>Automatically transmit NODEINFO_APP at a fixed interval.</summary>
+    public bool AutoReportNodeInfoEnabled { get; set; } = false;
+
+    /// <summary>Interval in seconds for automatic NODEINFO_APP transmission.</summary>
+    public int AutoReportNodeInfoSeconds { get; set; } = 300;
+
+    /// <summary>Automatically transmit POSITION_APP at a fixed interval.</summary>
+    public bool AutoReportPositionEnabled { get; set; } = false;
+
+    /// <summary>Interval in seconds for automatic POSITION_APP transmission.</summary>
+    public int AutoReportPositionSeconds { get; set; } = 300;
+
+    /// <summary>Automatically transmit TELEMETRY device metrics at a fixed interval.</summary>
+    public bool AutoReportDeviceMetricsEnabled { get; set; } = false;
+
+    /// <summary>Interval in seconds for automatic TELEMETRY device metrics transmission.</summary>
+    public int AutoReportDeviceMetricsSeconds { get; set; } = 300;
+
     /// <summary>Base64 X25519 public key for PKI direct messages (TX).</summary>
     public string UserPublicKey  { get; set; } = string.Empty;
 
