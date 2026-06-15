@@ -403,6 +403,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID"
@@ -598,6 +599,14 @@
                                            Foreground="{DynamicResource BrushSecondaryText}"
                                            Text="{Binding AutoReportLastSentSummary}"
                                            ToolTip="Last successful auto-send times for NodeInfo, Position, and Device Metrics." />
+
+                                <TextBlock Grid.Row="17" Grid.Column="0" Text="Routing"
+                                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                                <CheckBox Grid.Row="17" Grid.Column="1" Margin="0,4,0,4"
+                                          VerticalAlignment="Center"
+                                          Content="Enable relay routing (role + rebroadcast mode)"
+                                          IsChecked="{Binding RoutingRelayEnabled, Mode=TwoWay}"
+                                          ToolTip="When enabled, this node may rebroadcast received packets using your selected role and rebroadcast mode policy." />
                             </Grid>
                         </Border>
                     </Expander>

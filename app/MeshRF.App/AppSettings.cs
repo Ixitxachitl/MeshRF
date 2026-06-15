@@ -94,6 +94,10 @@ public sealed class AppSettings
     /// (firmware <c>Config.LoRaConfig.config_ok_to_mqtt</c>). Off by default.</summary>
     public bool OkToMqtt { get; set; } = false;
 
+    /// <summary>When true, rebroadcast eligible received packets using the
+    /// current role/rebroadcast policy.</summary>
+    public bool RoutingRelayEnabled { get; set; } = false;
+
     /// <summary>Automatically transmit NODEINFO_APP at a fixed interval.</summary>
     public bool AutoReportNodeInfoEnabled { get; set; } = false;
 

@@ -532,6 +532,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>When set, transmitted packets flag <c>ok_to_mqtt</c> so gateways
     /// may uplink them to the public MQTT broker.</summary>
     [ObservableProperty] private bool _okToMqtt;
+    [ObservableProperty] private bool _routingRelayEnabled;
 
     [ObservableProperty] private bool _autoReportNodeInfoEnabled;
     [ObservableProperty] private int _autoReportNodeInfoSeconds = 300;
@@ -548,6 +549,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _nextAutoPositionUtc = DateTime.MinValue;
     private DateTime _nextAutoDeviceMetricsUtc = DateTime.MinValue;
     private int _autoReportTickInFlight;
+    private readonly object _relayScheduleLock = new();
+    private readonly Dictionary<ulong, CancellationTokenSource> _pendingRelayCancels = new();
 
     private void UpdateAutoReportLastSentSummary()
     {
@@ -1214,6 +1217,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RebroadcastMode = string.IsNullOrEmpty(_settings.RebroadcastMode) ? "ALL" : _settings.RebroadcastMode;
         HopLimit = Math.Clamp(_settings.HopLimit, 1, 7);
         OkToMqtt = _settings.OkToMqtt;
+        RoutingRelayEnabled = _settings.RoutingRelayEnabled;
         AutoReportNodeInfoEnabled = _settings.AutoReportNodeInfoEnabled;
         AutoReportNodeInfoSeconds = Math.Max(5, _settings.AutoReportNodeInfoSeconds);
         AutoReportPositionEnabled = _settings.AutoReportPositionEnabled;
@@ -2347,8 +2351,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void Log(string text)
     {
         var line = $"[{DateTime.Now.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}] {text}";
-        LogLines.Add(line);
-        if (LogLines.Count > 500) LogLines.RemoveAt(0);
+        RunOnUiThread(() =>
+        {
+            LogLines.Add(line);
+            if (LogLines.Count > 500) LogLines.RemoveAt(0);
+        });
+    }
+
+    private void RunOnUiThread(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        _ = dispatcher.InvokeAsync(action);
     }
 
     private static bool ShouldLogDeviceStatus(string? status)
@@ -2361,14 +2380,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void CopyLog()
     {
-        if (LogLines.Count == 0) return;
-        try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, LogLines)); }
-        catch { /* clipboard contention; ignore */ }
+        RunOnUiThread(() =>
+        {
+            if (LogLines.Count == 0) return;
+            try
+            {
+                string text = string.Join(Environment.NewLine, LogLines.ToArray());
+                System.Windows.Clipboard.SetText(text);
+            }
+            catch { /* clipboard contention; ignore */ }
+        });
     }
 
     /// <summary>Clear the global log.</summary>
     [RelayCommand]
-    private void ClearLog() => LogLines.Clear();
+    private void ClearLog() => RunOnUiThread(LogLines.Clear);
 
     partial void OnSelectedPresetChanged(LoraPreset value)
     {
@@ -2494,6 +2520,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.RebroadcastMode = RebroadcastMode ?? "ALL";
         _settings.HopLimit = Math.Clamp(HopLimit, 1, 7);
         _settings.OkToMqtt = OkToMqtt;
+        _settings.RoutingRelayEnabled = RoutingRelayEnabled;
         _settings.AutoReportNodeInfoEnabled = AutoReportNodeInfoEnabled;
         _settings.AutoReportNodeInfoSeconds = Math.Max(5, AutoReportNodeInfoSeconds);
         _settings.AutoReportPositionEnabled = AutoReportPositionEnabled;
@@ -2533,6 +2560,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnRebroadcastModeChanged(string value) => SaveSettings();
     partial void OnOkToMqttChanged(bool value) => SaveSettings();
+    partial void OnRoutingRelayEnabledChanged(bool value) => SaveSettings();
 
     partial void OnAutoReportNodeInfoEnabledChanged(bool value)
     {
@@ -4742,10 +4770,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (!isNew)
         {
+            CancelPendingRelay(header.From, header.PacketId);
             // Still refresh the sighting timestamp (done above), but don't echo.
             MarkNodeDirty(header.From);
             return;
         }
+
+        RelayIfEligible(frame, header, result);
 
         Messages.Insert(0, record);
 
@@ -5064,6 +5095,176 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MarkNodeDirty(header.From);
         if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
     }
+
+    private void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result)
+    {
+        if (!RoutingRelayEnabled) return;
+        if (!CanTransmit || _myNodeNum == 0) return;
+        if (header.From == _myNodeNum) return;
+        if (header.To == _myNodeNum) return;
+        if (header.PacketId == 0) return;
+        if (header.HopLimit == 0) return;
+        if (!IsRoutingRoleEnabled(MyRole)) return;
+
+        byte myRelayByte = (byte)(_myNodeNum & 0xFF);
+        if (header.NextHop != 0 && header.NextHop != myRelayByte) return;
+        if (!PassesRebroadcastPolicy(header, result)) return;
+
+        byte nextHopLimit = (byte)Math.Max(0, header.HopLimit - 1);
+        var relayFrame = (byte[])frame.Clone();
+        relayFrame[12] = (byte)((relayFrame[12] & 0xF8) | (nextHopLimit & 0x07));
+        relayFrame[14] = 0x00;
+        relayFrame[15] = myRelayByte;
+
+        var relayDelayMs = ComputeRelayDelayMs(header);
+        ScheduleDelayedRelay(header, relayFrame, nextHopLimit, relayDelayMs);
+    }
+
+    private int ComputeRelayDelayMs(MeshHeader header)
+    {
+        string role = (MyRole ?? string.Empty).Trim().ToUpperInvariant();
+        int minBase;
+        int maxBase;
+        if (role == "ROUTER")
+        {
+            minBase = 70;
+            maxBase = 150;
+        }
+        else if (role is "ROUTERLATE" or "CLIENTBASE")
+        {
+            minBase = 150;
+            maxBase = 280;
+        }
+        else
+        {
+            minBase = 220;
+            maxBase = 420;
+        }
+
+        int hopsAway = header.HopStart >= header.HopLimit
+            ? header.HopStart - header.HopLimit
+            : 0;
+        int hopPenalty = Math.Min(200, hopsAway * 25);
+        return Random.Shared.Next(minBase, maxBase + 1) + hopPenalty;
+    }
+
+    private static ulong RelayKey(uint from, uint packetId) => ((ulong)from << 32) | packetId;
+
+    private void CancelPendingRelay(uint from, uint packetId)
+    {
+        if (packetId == 0) return;
+        CancellationTokenSource? cts = null;
+        lock (_relayScheduleLock)
+        {
+            var key = RelayKey(from, packetId);
+            if (_pendingRelayCancels.TryGetValue(key, out cts))
+                _pendingRelayCancels.Remove(key);
+        }
+
+        if (cts is not null)
+        {
+            try { cts.Cancel(); }
+            catch { }
+            cts.Dispose();
+            Log($"  relay canceled for duplicate packet {packetId:x8}");
+        }
+    }
+
+    private void ScheduleDelayedRelay(MeshHeader header, byte[] relayFrame,
+                                      byte nextHopLimit, int delayMs)
+    {
+        var key = RelayKey(header.From, header.PacketId);
+        CancellationTokenSource cts;
+
+        lock (_relayScheduleLock)
+        {
+            if (_pendingRelayCancels.ContainsKey(key))
+                return;
+            cts = new CancellationTokenSource();
+            _pendingRelayCancels[key] = cts;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delayMs, cts.Token).ConfigureAwait(false);
+                if (cts.IsCancellationRequested) return;
+
+                var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+                TransmitBackground(SelectedPreset, hz, relayFrame, TxGainDb, AmpEnable);
+                Log($"  relayed packet {header.PacketId:x8} ({header.HopLimit}->{nextHopLimit}) after {delayMs} ms mode={RebroadcastMode}");
+            }
+            catch (TaskCanceledException)
+            {
+                // canceled due to receiving a duplicate first
+            }
+            finally
+            {
+                lock (_relayScheduleLock)
+                    _pendingRelayCancels.Remove(key);
+                cts.Dispose();
+            }
+        });
+    }
+
+    private bool PassesRebroadcastPolicy(MeshHeader header, MeshDecodeResult? result)
+    {
+        string mode = EffectiveRebroadcastMode();
+        return mode switch
+        {
+            "NONE" => false,
+            "ALL" => true,
+            "ALL_SKIP_DECODING" => true,
+            // Firmware semantics: local mesh packets only (ignore foreign/undecryptable).
+            "LOCAL_ONLY" => result is not null,
+            // Firmware semantics: local mesh + sender must be known in node DB.
+            "KNOWN_ONLY" => result is not null && _nodeStore.Get(header.From) is not null,
+            "CORE_PORTNUMS_ONLY" => result is not null && IsCorePort(result.Port),
+            _ => true,
+        };
+    }
+
+    private string EffectiveRebroadcastMode()
+    {
+        string role = (MyRole ?? string.Empty).Trim().ToUpperInvariant();
+        string mode = (RebroadcastMode ?? "ALL").Trim().ToUpperInvariant();
+
+        // Firmware admin module coerces NONE for ROUTER/ROUTER_LATE to ALL.
+        if (mode == "NONE" && (role == "ROUTER" || role == "ROUTERLATE"))
+            return "ALL";
+
+        // Firmware docs: ALL_SKIP_DECODING is repeater-only; other roles behave as ALL.
+        if (mode == "ALL_SKIP_DECODING" && role != "REPEATER")
+            return "ALL";
+
+        return mode;
+    }
+
+    private static bool IsRoutingRoleEnabled(string? role)
+    {
+        string r = (role ?? string.Empty).Trim();
+        // Firmware isRebroadcaster(): role != CLIENT_MUTE and rebroadcast_mode != NONE.
+        return !r.Equals("ClientMute", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCorePort(PortNum port) => port switch
+    {
+        PortNum.TextMessage => true,
+        PortNum.TextMessageCompressed => true,
+        PortNum.Position => true,
+        PortNum.NodeInfo => true,
+        PortNum.Routing => true,
+        PortNum.Telemetry => true,
+        PortNum.Admin => true,
+        PortNum.Alert => true,
+        PortNum.KeyVerification => true,
+        PortNum.StoreForward => true,
+        PortNum.StoreForwardPlusPlus => true,
+        PortNum.Traceroute => true,
+        PortNum.Waypoint => true,
+        _ => false,
+    };
 
     private static byte[] HexToBytes(string hex)
     {
