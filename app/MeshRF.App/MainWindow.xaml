@@ -1277,6 +1277,11 @@
                                                     ToolTip="Broadcast your position on the primary channel (uses the channel's position precision and your home location)"
                                                     Command="{Binding DataContext.SendPositionCommand,
                                                               RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                                <Button DockPanel.Dock="Right" Content="Device metrics" Padding="14,4"
+                                                    Margin="4,0,0,0"
+                                                    ToolTip="Send a TELEMETRY device-metrics packet on the primary channel (manual only)"
+                                                    Command="{Binding DataContext.SendDeviceMetricsCommand,
+                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
                                               <TextBox VerticalContentAlignment="Center"
                                                     FontFamily="Segoe UI, Segoe UI Emoji"
                                                      ToolTip="Type a message and press Enter or Send (HackRF only)"

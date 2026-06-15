@@ -4,6 +4,8 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Management;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Data;
@@ -30,6 +32,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly MessageStore _messageStore = new();
     private readonly UsbSerialGpsService _gpsService = new();
     private readonly AppSettings _settings;
+    private DateTime? _lastRxPlayUtc;
     private bool _settingsLoaded;
     private double? _manualHomeLatitude;
     private double? _manualHomeLongitude;
@@ -480,6 +483,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
+        SendDeviceMetricsCommand.NotifyCanExecuteChanged();
     }
 
     private void MarkTabNeedsAttention(ITabItem? tab)
@@ -2468,6 +2472,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(MyMacAddress));
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
+        SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SaveSettings();
         RefreshSelfNode();
     }
@@ -2890,6 +2895,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
+        SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (ShouldLogDeviceStatus(_core.DeviceStatus))
@@ -2911,6 +2917,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
+        SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (!_core.CanTransmit)
@@ -3032,6 +3039,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             StartRxWithCurrentParams(hz);
             IsRunning = true;
+            _lastRxPlayUtc = DateTime.UtcNow;
             Status = IsCustomLoraParams
                 ? $"RX @ {CenterFreqMHz:F3} MHz / SF{OverrideSf} BW{OverrideBwKhz:G}kHz CR4/{OverrideCr}"
                 : $"RX @ {CenterFreqMHz:F3} MHz / {SelectedPreset}";
@@ -3480,6 +3488,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         CanTransmit && _myNodeNum != 0 &&
         HomeLatitude is not null && HomeLongitude is not null;
 
+    private bool CanSendTelemetry() => CanTransmit && _myNodeNum != 0;
+
     /// <summary>
     /// Broadcast our location (POSITION_APP) on the primary channel, fuzzed to
     /// that channel's position precision (firmware behaviour). Uses the home
@@ -3537,6 +3547,60 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Status = $"Position error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast a TELEMETRY_APP DeviceMetrics payload on the primary channel.
+    /// Manual trigger only (no periodic broadcast scheduler).
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendTelemetry))]
+    private async Task SendDeviceMetricsAsync()
+    {
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null)
+        {
+            Status = "No primary channel to send device metrics on.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var self = _nodeStore.Get(_myNodeNum) ?? Nodes.FirstOrDefault(n => n.NodeNum == _myNodeNum);
+            uint uptime = _lastRxPlayUtc is DateTime startUtc
+                ? (uint)Math.Clamp((DateTime.UtcNow - startUtc).TotalSeconds, 0, uint.MaxValue)
+                : (self?.UptimeSeconds ?? 0u);
+
+            ComputeLocalAirtimeUtilization(out float channelUtil, out float airUtilTx);
+            TryGetWindowsPowerTelemetry(out var winBatteryPct, out var winVoltageV);
+
+            // Prefer local Windows power telemetry, then prior known mesh values.
+            byte batteryPct = winBatteryPct ?? self?.BatteryPct ?? 100;
+            float? voltageV = winVoltageV ?? self?.VoltageV;
+
+            var frame = MeshEncoder.EncodeTelemetryDeviceMetrics(
+                primary.Config, _myNodeNum, packetId,
+                batteryLevel: batteryPct,
+                voltage: voltageV,
+                channelUtilization: channelUtil,
+                airUtilTx: airUtilTx,
+                uptimeSeconds: uptime,
+                hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt);
+
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            Status = ok
+                ? $"Sent device metrics ({frame.Length} B) on {primary.DisplayName}"
+                : "Transmit failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Device metrics error: {ex.Message}";
             Log(Status);
         }
     }
@@ -4296,9 +4360,129 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static readonly Regex PreamblePeakRegex = new(
         @"peak=(?<peak>-?\d+(?:\.\d+)?)dB", RegexOptions.Compiled);
 
+    // Captures native airtime event lines such as:
+    //   "Packet RX: 262ms"
+    //   "Packet TX: 170ms"
+    private static readonly Regex PacketDurationRegex = new(
+        @"Packet\s+(?<dir>RX|TX):\s+(?<ms>\d+)ms", RegexOptions.Compiled);
+
     /// <summary>Peak-above-noise (dB) from the most recent preamble, applied as
     /// the SNR of the next decoded packet. NaN until a preamble is seen.</summary>
     private float _lastPreamblePeakDb = float.NaN;
+
+    private readonly Queue<(DateTime Utc, int Ms, bool IsTx)> _airtimeSamples = new();
+
+    private void TrackAirtimeFromEvent(string ev)
+    {
+        var m = PacketDurationRegex.Match(ev);
+        if (!m.Success) return;
+        if (!int.TryParse(m.Groups["ms"].Value, NumberStyles.Integer,
+            CultureInfo.InvariantCulture, out var ms) || ms <= 0)
+            return;
+
+        bool isTx = string.Equals(m.Groups["dir"].Value, "TX", StringComparison.Ordinal);
+        var now = DateTime.UtcNow;
+        _airtimeSamples.Enqueue((now, ms, isTx));
+        TrimAirtimeSamples(now);
+    }
+
+    private void TrimAirtimeSamples(DateTime nowUtc)
+    {
+        var maxAge = TimeSpan.FromHours(1);
+        while (_airtimeSamples.Count > 0 &&
+               nowUtc - _airtimeSamples.Peek().Utc > maxAge)
+            _airtimeSamples.Dequeue();
+    }
+
+    // Meshtastic-style approximations from local counters:
+    // - channel_utilization: RX+TX airtime over the last minute.
+    // - air_util_tx: TX airtime over the last hour.
+    private void ComputeLocalAirtimeUtilization(out float channelUtilPct, out float airUtilTxPct)
+    {
+        var now = DateTime.UtcNow;
+        TrimAirtimeSamples(now);
+
+        const double minuteMs = 60_000.0;
+        const double hourMs = 3_600_000.0;
+
+        double chanUsedMsMinute = 0;
+        double txUsedMsHour = 0;
+
+        foreach (var sample in _airtimeSamples)
+        {
+            var age = now - sample.Utc;
+            if (age <= TimeSpan.FromMinutes(1))
+                chanUsedMsMinute += sample.Ms;
+            if (sample.IsTx && age <= TimeSpan.FromHours(1))
+                txUsedMsHour += sample.Ms;
+        }
+
+        channelUtilPct = (float)Math.Clamp((chanUsedMsMinute / minuteMs) * 100.0, 0.0, 100.0);
+        airUtilTxPct = (float)Math.Clamp((txUsedMsHour / hourMs) * 100.0, 0.0, 100.0);
+    }
+
+    private static void TryGetWindowsPowerTelemetry(out byte? batteryPct, out float? voltageV)
+    {
+        batteryPct = null;
+        voltageV = null;
+
+        try
+        {
+            if (GetSystemPowerStatus(out var s))
+            {
+                // API returns 0..100 or 255 (unknown).
+                if (s.BatteryLifePercent <= 100)
+                    batteryPct = s.BatteryLifePercent;
+
+                // On wired systems (or desktops), report 100% when not known.
+                if (s.ACLineStatus == 1 && batteryPct is null)
+                    batteryPct = 100;
+            }
+            else
+            {
+                // If the OS call fails, preserve the prior fallback behavior.
+                batteryPct = 100;
+            }
+        }
+        catch
+        {
+            // Best effort only.
+        }
+
+        try
+        {
+            using var searcher = new ManagementObjectSearcher("SELECT Voltage, DesignVoltage FROM Win32_Battery");
+            foreach (ManagementObject b in searcher.Get().OfType<ManagementObject>())
+            {
+                var raw = b["Voltage"] ?? b["DesignVoltage"];
+                if (raw is null) continue;
+                if (!uint.TryParse(raw.ToString(), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var mv) || mv == 0)
+                    continue;
+                voltageV = mv / 1000f;
+                break;
+            }
+        }
+        catch
+        {
+            // Some systems/users disable WMI battery classes.
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SystemPowerStatus
+    {
+        public byte ACLineStatus;
+        public byte BatteryFlag;
+        public byte BatteryLifePercent;
+        public byte Reserved;
+        public uint BatteryLifeTime;
+        public uint BatteryFullLifeTime;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetSystemPowerStatus(out SystemPowerStatus systemPowerStatus);
 
     /// <summary>If payload recording is active and <paramref name="ev"/> is a
     /// decoded-payload event, append a structured JSON record to the file.</summary>
@@ -4347,6 +4531,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (ev.IndexOf("payload", StringComparison.Ordinal) < 0) return;
         var m = PayloadLineRegex.Match(ev);
         if (!m.Success) return;
+
         // Only trust frames whose CRC verified.
         if (!(m.Groups["status"].Success && m.Groups["status"].Value == "OK")) return;
 
@@ -4817,6 +5002,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var ev = _core.PullEvent();
             if (ev is null) break;
             Log(ev);
+            TrackAirtimeFromEvent(ev);
             // A "preamble: ..." line marks the start of a received frame; grab
             // its peak-above-noise as the SNR for the payload that follows.
             if (ev.StartsWith("preamble", StringComparison.Ordinal))

@@ -320,6 +320,43 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// Broadcast a TELEMETRY_APP packet carrying <c>DeviceMetrics</c>
+    /// (battery/voltage/channel utilization/airtime/uptime).
+    /// </summary>
+    public static byte[] EncodeTelemetryDeviceMetrics(ChannelConfig channel,
+                                                      uint from,
+                                                      uint packetId,
+                                                      byte? batteryLevel = null,
+                                                      float? voltage = null,
+                                                      float? channelUtilization = null,
+                                                      float? airUtilTx = null,
+                                                      uint? uptimeSeconds = null,
+                                                      uint to = 0xFFFFFFFFu,
+                                                      byte hopLimit = 3,
+                                                      bool okToMqtt = false)
+    {
+        var device = new ProtoWriter();
+        if (batteryLevel is byte batt)
+            device.WriteVarintField(1, batt);
+        if (voltage is float v)
+            device.WriteFloatField(2, v);
+        if (channelUtilization is float ch)
+            device.WriteFloatField(3, ch);
+        if (airUtilTx is float air)
+            device.WriteFloatField(4, air);
+        if (uptimeSeconds is uint up)
+            device.WriteVarintField(5, up);
+
+        var telemetry = new ProtoWriter();
+        telemetry.WriteFixed32Field(1, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        telemetry.WriteBytesField(2, device.ToArray()); // device_metrics
+
+        return Encode(channel, from, to, packetId, PortNum.Telemetry,
+                      telemetry.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: false, okToMqtt: okToMqtt);
+    }
+
+    /// <summary>
     /// Broadcast or unicast a waypoint (WAYPOINT_APP <c>Waypoint</c> protobuf).
     /// Mirrors the upstream fields: id, lat/lon, optional expiry/lock/name/
     /// description/icon.
