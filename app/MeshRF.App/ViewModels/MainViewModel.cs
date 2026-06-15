@@ -3575,11 +3575,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 : (self?.UptimeSeconds ?? 0u);
 
             ComputeLocalAirtimeUtilization(out float channelUtil, out float airUtilTx);
-            TryGetWindowsPowerTelemetry(out var winBatteryPct, out var winVoltageV);
+            TryGetWindowsPowerTelemetry(out bool acOnline, out var winBatteryPct, out var winVoltageV);
 
-            // Prefer local Windows power telemetry, then prior known mesh values.
-            byte batteryPct = winBatteryPct ?? self?.BatteryPct ?? 100;
-            float? voltageV = winVoltageV ?? self?.VoltageV;
+            // Meshtastic treats battery_level > 100 as externally powered.
+            byte batteryPct = acOnline
+                ? (byte)101
+                : (winBatteryPct ?? self?.BatteryPct ?? 0);
+            float? voltageV = winVoltageV;
+            if (voltageV is null && self?.VoltageV is float priorV && priorV > 0f)
+                voltageV = priorV;
 
             var frame = MeshEncoder.EncodeTelemetryDeviceMetrics(
                 primary.Config, _myNodeNum, packetId,
@@ -4421,8 +4425,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         airUtilTxPct = (float)Math.Clamp((txUsedMsHour / hourMs) * 100.0, 0.0, 100.0);
     }
 
-    private static void TryGetWindowsPowerTelemetry(out byte? batteryPct, out float? voltageV)
+    private static void TryGetWindowsPowerTelemetry(out bool acOnline, out byte? batteryPct, out float? voltageV)
     {
+        acOnline = false;
         batteryPct = null;
         voltageV = null;
 
@@ -4430,18 +4435,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (GetSystemPowerStatus(out var s))
             {
+                acOnline = s.ACLineStatus == 1;
                 // API returns 0..100 or 255 (unknown).
                 if (s.BatteryLifePercent <= 100)
                     batteryPct = s.BatteryLifePercent;
-
-                // On wired systems (or desktops), report 100% when not known.
-                if (s.ACLineStatus == 1 && batteryPct is null)
-                    batteryPct = 100;
-            }
-            else
-            {
-                // If the OS call fails, preserve the prior fallback behavior.
-                batteryPct = 100;
             }
         }
         catch
@@ -4451,13 +4448,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT Voltage, DesignVoltage FROM Win32_Battery");
+            using var searcher = new ManagementObjectSearcher(
+                "root\\WMI", "SELECT Voltage FROM BatteryStatus");
             foreach (ManagementObject b in searcher.Get().OfType<ManagementObject>())
             {
-                var raw = b["Voltage"] ?? b["DesignVoltage"];
+                var raw = b["Voltage"];
                 if (raw is null) continue;
                 if (!uint.TryParse(raw.ToString(), NumberStyles.Integer,
-                    CultureInfo.InvariantCulture, out var mv) || mv == 0)
+                    CultureInfo.InvariantCulture, out var mv))
+                    continue;
+                if (mv < 1000 || mv > 20000) // sanity: 1.0V..20.0V
                     continue;
                 voltageV = mv / 1000f;
                 break;
