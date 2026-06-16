@@ -1,159 +1,193 @@
 # MeshRF
 
-Windows-native [Meshtastic](https://meshtastic.org/) **transceiver** that uses
-an SDR ([HackRF One](https://greatscottgadgets.com/hackrf/) or an RTL-SDR
-dongle) as the radio instead of a LoRa modem chip. It demodulates and modulates
-LoRa chirps in software (a port of
-[`gr-lora_sdr`](https://github.com/tapparelj/gr-lora_sdr)), reassembles
-Meshtastic frames, decrypts channels, and parses the mesh protobufs — all on
-the host CPU.
+MeshRF is a Windows-native Meshtastic SDR transceiver.
 
-> **Status:** transmit + receive. The full RX chain (SDR → DSP → LoRa demod →
-> Meshtastic frame decode → channel decrypt → protobuf parse → UI) is working,
-> and the app can also **transmit**: channel broadcasts, encrypted (PKC) direct
-> messages with automatic key exchange, and Meshtastic-style ACK/NACK delivery
-> tracking.
+Instead of using a LoRa modem chip, MeshRF uses an SDR (HackRF One or RTL-SDR)
+and performs LoRa demodulation/modulation in software on the host CPU. It
+decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
+provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-## Features
+Current release line: **v0.8.2**
 
-- **Selectable SDR backend**: HackRF One or RTL-SDR, with auto-detection. The
-  active device is chosen in the toolbar and can be switched while the radio
-  is stopped. Backends are loaded at runtime (no build-time dependency) and a
-  synthetic source is used when no hardware is present.
-- **Software LoRa demodulation** from raw SDR IQ (CSS / chirp-chat),
-  configurable spreading factor, bandwidth, and coding rate via the standard
-  Meshtastic LoRa presets.
-- **Live spectrum + waterfall** with auto-levels, Turbo/Inferno colormaps, and a
-  frozen per-packet spectrogram snapshot of the most recently detected frame.
-- **Meshtastic frame decoding**: header parse, AES-CTR channel decryption
-  (default-key family discovery included), and protobuf parsing.
-- **Channels** with PSK management and per-channel message history (SQLite).
-- **Direct messages**: double-click a node to open a conversation tab.
-  Outgoing DMs are sealed with **PKC** (X25519 + AES-256-CCM); if the peer's
-  public key isn't known yet it is requested automatically over the air.
-  Conversations and which tabs were open are restored across restarts.
-- **Delivery tracking**: sent messages show **sent / delivered / no ack** using
-  Meshtastic-style Routing ACK/NACK, and the app acknowledges direct messages
-  addressed to it.
-- **Markdown in messages**: message text renders inline `**bold**` and
-  `*italic*` emphasis instead of showing the raw markers.
-- **Position broadcast**: share your location (from the home marker) on the
-  primary channel, fuzzed to the channel's **location precision** (configured
-  in meters, Meshtastic-style) so you can trade accuracy for privacy.
-- **OK to MQTT**: opt in to set the `ok_to_mqtt` flag on packets you transmit
-  so gateways may uplink them to the public MQTT broker (off by default).
-- **Hardware model**: pick your node's model from the full Meshtastic
-  `HardwareModel` list; it is advertised in your NodeInfo and received nodes
-  show their model name instead of a raw number.
-- **Node database** with positions, signal stats, and telemetry. Nodes whose
-  X25519 public key is known show a key icon (PKC direct messages enabled);
-  a red key flags a public-key mismatch, with a right-click option to request
-  fresh keys.
-- **Telemetry**: device metrics (battery, voltage, channel/air utilization,
-  uptime) and **environment metrics** (temperature, humidity, barometric
-  pressure, gas resistance, IAQ), shown per node in its conversation tab.
-- **Map view**: slippy OpenStreetMap tile map with node markers and a
-  right-click-to-set home location.
-- **X25519 key management** for PKI (key generation + public-key derivation).
+## Status
+
+- Receive path is operational end-to-end: SDR IQ -> DSP -> LoRa demod ->
+  Meshtastic frame decode -> decrypt -> parse -> UI.
+- Transmit path is operational for channel broadcast, direct messages, and
+  control/management packets.
+- The app is actively maintained with frequent updates focused on map scale,
+  messaging UX, telemetry/routing controls, and observability.
+
+## Key Capabilities
+
+### Radio and Signal Processing
+
+- Runtime-selectable SDR backend: HackRF One or RTL-SDR.
+- Independent RX and TX device selection.
+- Software LoRa demod/mod with Meshtastic-oriented preset support.
+- Optional receive conditioning features (including DC blocking).
+- Live spectrum and waterfall with packet-linked snapshot support.
+
+### Meshtastic Protocol Support
+
+- Channel decode/decrypt with PSK handling.
+- Channel and direct messaging workflows.
+- PKC direct messaging with X25519 key exchange and AES-256-CCM message
+  protection for DM payloads.
+- Routing ACK/NACK-based delivery state.
+- Reply-linked messages and per-message emoji reactions.
+- Waypoint send/receive support.
+- Traceroute and request-position / node-info exchanges.
+- Optional `ok_to_mqtt` transmit flag.
+
+### Nodes, Telemetry, and Mapping
+
+- SQLite-backed channel, node, message, and waypoint persistence.
+- Device metrics and environment metrics display.
+- Channel utilization and TX airtime surfaced in the UI.
+- OpenStreetMap-based map view with clustering and location history support.
+- Home location from manual map selection or USB serial GPS source.
+- Filtering for nodes, telemetry presence, ignore state, and position-history
+  presence.
+- Configurable map node label modes.
+
+### UI and Workflow
+
+- WPF desktop app (.NET 8) with MVVM architecture.
+- Channel/DM tabs with persisted history.
+- RTTTL notification controls (including per-channel mute options).
+- Improved auto-scroll and large-node-count map performance tuning.
+- Payload recording and JSON-focused logging improvements for analysis/replay.
 
 ## Architecture
 
+```text
+MeshRF.App   (.NET 8 WPF)
+  - UI, map, waterfall, view models, app settings
+  - P/Invoke into native bridge DLL
+
+MeshRF.Core  (.NET 8 class library)
+  - Native interop bindings
+  - Meshtastic frame decode/encode helpers
+  - Crypto helpers and key handling
+  - SQLite stores (channels, nodes, messages, waypoints)
+
+MeshRF.Native (C++20, built with CMake)
+  - SDR HAL (HackRF, RTL-SDR)
+  - DSP + LoRa modem pipeline
+  - Spectrum/waterfall and native packet plumbing
 ```
-+-----------------------------+
-|  MeshRF.App (WPF)           |   .NET 8, MVVM (CommunityToolkit.Mvvm)
-+--------------+--------------+
-               | P/Invoke (C ABI)
-+--------------v--------------+
-|  MeshRF.Native (DLL)        |   C++20
-|  - HAL (HackRF, RTL-SDR)    |
-|  - DSP / LoRa demod         |   (port of gr-lora_sdr)
-|  - Spectrum / waterfall     |
-+-----------------------------+
 
-Managed side (C#):
-  MeshRF.Core   - P/Invoke bindings, channel/node/message stores (SQLite),
-                        Meshtastic frame decoder, AES-CTR + X25519 crypto
-  MeshRF.App    - WPF UI, view models, map, waterfall
-```
+## Requirements
 
-## Building
-
-Prerequisites:
-
-- Visual Studio 2022 (MSVC v143) with the **Desktop development with C++** and
-  **.NET desktop development** workloads
-- CMake ≥ 3.25
+- Windows 10/11 x64.
+- Visual Studio 2022 with:
+  - Desktop development with C++
+  - .NET desktop development
+- CMake 3.25+
 - .NET 8 SDK
-- [vcpkg](https://github.com/microsoft/vcpkg) (manifest mode — see `vcpkg.json`)
-- An SDR with the WinUSB driver installed via [Zadig](https://zadig.akeo.ie/):
-  a HackRF One, or an RTL-SDR dongle. The `hackrf.dll` and `rtlsdr.dll` runtime
-  libraries are **vendored** under `third_party/` and copied next to the app at
-  build time, so no separate SDR install is required. (To override with your
-  own librtlsdr build, set the `RTLSDR_DIR` environment variable.)
+- SDR hardware and drivers (typically via Zadig/WinUSB as needed):
+  - HackRF One, or
+  - RTL-SDR dongle
+
+Notes:
+
+- Native runtime DLLs are vendored under `third_party/` and copied next to app
+  outputs.
+- Default development flow expects native `RelWithDebInfo` for practical SDR
+  throughput.
+
+## Build
+
+### Native (CMake)
 
 ```powershell
-# Configure + build the native core (RelWithDebInfo recommended; Debug C++ is
-# too slow for 2.4 MS/s streaming).
 cmake --preset windows-x64
 cmake --build build/windows-x64 --config RelWithDebInfo -j
-
-# Build the managed app (copies the native DLL alongside it).
-dotnet build app/MeshRF.App/MeshRF.App.csproj -c Debug
 ```
 
-VS Code tasks are provided for **Build Native**, **Deploy Native DLL**,
-**Build App**, **Build All**, and **Run App**.
-
-### Packaging a release
-
-`scripts/build-release.ps1` produces a self-contained, single-file Windows
-build (no .NET install needed on the target) and zips it under `dist/`:
+### Managed App
 
 ```powershell
-# Version defaults to <VersionPrefix> in Directory.Build.props.
-pwsh scripts/build-release.ps1
-
-# Override the version and create a matching git tag (v0.2.0).
-pwsh scripts/build-release.ps1 -Version 0.2.0 -Tag
+dotnet build app/MeshRF.App/MeshRF.App.csproj -c Debug --nologo
 ```
 
-The build identity (version + git commit) is shown in **About** (the ⓘ button
-on the toolbar) and is derived from `Directory.Build.props`.
+The app project copies `MeshRF.Native.dll` and required SDR runtime DLLs from
+`build/windows-x64/bin/<NativeConfig>/` into the managed output folder after
+build.
+
+## Run
+
+```powershell
+dotnet run --project app/MeshRF.App/MeshRF.App.csproj -c Debug --no-build
+```
+
+VS Code tasks are already included for configure/build/test/run workflows.
 
 ## Testing
 
-```powershell
-# Native (GoogleTest)
-ctest --test-dir build/windows-x64 --output-on-failure -C RelWithDebInfo
+### Native Tests
 
-# Managed (xUnit)
-dotnet test tests/managed/MeshRF.Tests.csproj
+```powershell
+ctest --test-dir build/windows-x64 --output-on-failure -C RelWithDebInfo
 ```
 
-## Layout
+### Managed Tests
+
+```powershell
+dotnet test tests/managed/MeshRF.Tests.csproj --nologo
+```
+
+## Release Packaging
+
+`scripts/build-release.ps1` builds a self-contained, single-file `win-x64`
+release and packages it as:
+
+`dist/MeshRF-v<version>-win-x64.zip`
+
+Usage:
+
+```powershell
+# Use VersionPrefix from Directory.Build.props
+pwsh scripts/build-release.ps1
+
+# Override version and optionally tag
+pwsh scripts/build-release.ps1 -Version 0.8.2
+pwsh scripts/build-release.ps1 -Version 0.8.2 -Tag
+```
+
+The release bundle includes:
+
+- Published MeshRF app
+- Native bridge/runtime DLLs
+- `LICENSE`
+- `README.md`
+
+## Repository Layout
 
 | Path | Purpose |
-| ---- | ------- |
-| `native/core/` | C++20 core: HAL, DSP, LoRa demod, spectrum |
-| `native/bridge/` | C ABI surface (`extern "C"`) consumed by P/Invoke |
-| `app/MeshRF.App/` | WPF .NET 8 desktop UI |
-| `app/MeshRF.Core/` | Managed bindings, decoder, crypto, SQLite stores |
-| `tests/native/` | GoogleTest unit tests |
-| `tests/managed/` | xUnit unit tests |
-| `third_party/hackrf/` | Vendored HackRF runtime DLLs |
-| `third_party/rtlsdr/` | Vendored RTL-SDR (librtlsdr) runtime DLL |
-| `scripts/build-release.ps1` | Self-contained release packager |
+| --- | --- |
+| `app/MeshRF.App/` | WPF desktop application |
+| `app/MeshRF.Core/` | Managed protocol/interop/storage library |
+| `native/core/` | C++ SDR/DSP/LoRa core |
+| `native/bridge/` | C ABI bridge DLL for P/Invoke |
+| `tests/managed/` | Managed unit tests |
+| `tests/native/` | Native unit tests |
+| `scripts/` | Utility and release scripts |
+| `third_party/hackrf/` | Vendored HackRF runtime bits |
+| `third_party/rtlsdr/` | Vendored RTL-SDR runtime bits |
 
-## License
+## Licensing
 
-This project is licensed under **GPL-3.0-or-later** (see [LICENSE](LICENSE)).
-The license is dictated by ports of / references to:
+This project is licensed under **GPL-3.0-or-later**. See [LICENSE](LICENSE).
 
-- [`gr-lora_sdr`](https://github.com/tapparelj/gr-lora_sdr) (DSP) — GPL-3.0
-- [`meshtastic/protobufs`](https://github.com/meshtastic/protobufs) — GPL-3.0
-- [`meshtastic/firmware`](https://github.com/meshtastic/firmware) (decode/crypto reference) — GPL-3.0
+Upstream references influencing licensing and implementation include:
+
+- [gr-lora_sdr](https://github.com/tapparelj/gr-lora_sdr)
+- [meshtastic/protobufs](https://github.com/meshtastic/protobufs)
+- [meshtastic/firmware](https://github.com/meshtastic/firmware)
 
 ## Disclaimer
 
-This is an independent project and is not affiliated with or endorsed by the
+MeshRF is an independent project and is not affiliated with or endorsed by the
 Meshtastic project.
