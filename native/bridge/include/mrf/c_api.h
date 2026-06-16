@@ -107,6 +107,13 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum(const mrf_core_t* core,
                                                  float* out_dbfs,
                                                  uint32_t capacity);
 
+// Returns a monotonic count of spectrum FFT frames produced since the pipeline
+// started. One frame corresponds to spectrum_size() received samples, so the
+// delta between two calls is proportional to elapsed received-signal time. Use
+// this to advance the waterfall in step with received data instead of the UI
+// refresh rate. 0 if not running.
+MRF_API uint64_t MRF_CALL mrf_core_spectrum_frame_count(const mrf_core_t* core);
+
 // Computes a high-time-resolution spectrogram of the most recent ~150 ms of
 // modem-rate IQ, cropped to the LoRa channel. Fills out_dbfs row-major as
 // n_time rows of n_freq dBFS values (low->high freq left->right). out_dbfs

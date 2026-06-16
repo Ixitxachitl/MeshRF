@@ -122,6 +122,13 @@ public:
     // available and out.size() >= spectrum_size().
     bool latest_spectrum(std::span<float> out) const;
 
+    // Monotonic count of spectrum FFT frames produced since the pipeline
+    // started. One frame corresponds to spectrum_size() samples of received
+    // signal, so the delta between two reads is proportional to the amount of
+    // real signal time elapsed. Use this to advance the waterfall at a rate
+    // tied to received data rather than the UI refresh rate. 0 if not running.
+    [[nodiscard]] std::uint64_t spectrum_frame_count() const noexcept;
+
     // Compute a high-time-resolution spectrogram of the most recent ~150 ms of
     // modem-rate IQ, cropped to the LoRa channel. Fills `out` row-major as
     // n_time rows of n_freq dBFS values (low->high freq left->right, matching

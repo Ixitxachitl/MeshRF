@@ -282,6 +282,16 @@
             <TextBlock Width="48" VerticalAlignment="Center"
                        Text="{Binding WaterfallCeilDb, StringFormat={}{0:F0} dB}" />
             <Separator />
+            <TextBlock Text="Speed" VerticalAlignment="Center" Margin="6,0,4,0" />
+            <Slider Width="120"
+                    Minimum="5" Maximum="60"
+                    TickFrequency="5" IsSnapToTickEnabled="False"
+                    Value="{Binding WaterfallRowsPerSecond, Mode=TwoWay}"
+                    VerticalAlignment="Center"
+                    ToolTip="Waterfall scroll speed in rows per second (time resolution). Higher = faster, finer time detail; does not affect frequency resolution." />
+            <TextBlock Width="48" VerticalAlignment="Center"
+                       Text="{Binding WaterfallRowsPerSecond, StringFormat={}{0:F0}/s}" />
+            <Separator />
             <Button Width="32" Height="28"
                     Click="OnAboutClick"
                     ToolTip="About MeshRF">
@@ -330,7 +340,10 @@
                     <Run Text="{Binding LiveChannelUtilizationPct, StringFormat=F2, Mode=OneWay}" />
                     <Run Text="%  AirTx: " />
                     <Run Text="{Binding LiveAirUtilTxPct, StringFormat=F2, Mode=OneWay}" />
-                    <Run Text="%" />
+                    <Run Text="%  UI FPS: " />
+                    <Run Text="{Binding UiFrameRateHz, StringFormat=F1, Mode=OneWay}" />
+                    <Run Text="  " />
+                    <Run Text="{Binding UiPerfSummary, Mode=OneWay}" />
                 </TextBlock>
             </StatusBarItem>
             <Separator />

@@ -159,6 +159,11 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum(const mrf_core_t* core,
     return ok ? static_cast<uint32_t>(n) : 0u;
 }
 
+MRF_API uint64_t MRF_CALL mrf_core_spectrum_frame_count(const mrf_core_t* core) {
+    if (!core) return 0u;
+    return core->core.spectrum_frame_count();
+}
+
 MRF_API uint32_t MRF_CALL mrf_core_pull_packet_spectrogram(const mrf_core_t* core,
                                                            float* out_dbfs,
                                                            uint32_t n_time,

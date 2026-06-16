@@ -193,7 +193,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _waterfallColormap = "Turbo";
 
-    public IReadOnlyList<string> WaterfallColormaps { get; } = new[] { "Turbo", "Inferno" };
+    public IReadOnlyList<string> WaterfallColormaps { get; } = new[] { "Turbo", "Inferno", "Meshtastic" };
 
     [ObservableProperty]
     private bool _waterfallAutoLevels = true;
@@ -203,6 +203,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private double _waterfallCeilDb = 0.0;
+
+    /// <summary>Waterfall scroll speed in rows per second. One row spans
+    /// 1/this seconds of received signal, so higher = faster scroll and finer
+    /// time resolution (independent of frequency/FFT resolution). Clamped to a
+    /// sane range; persisted across sessions.</summary>
+    [ObservableProperty]
+    private double _waterfallRowsPerSecond = 60.0;
 
     /// <summary>Displayed spectrum/waterfall span in Hz (= device sample rate).
     /// Updated from the running pipeline; 0 when stopped. Drives the frequency
@@ -275,6 +282,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private float _liveAirUtilTxPct;
+
+    [ObservableProperty]
+    private double _uiFrameRateHz;
+
+    [ObservableProperty]
+    private string _uiPerfSummary = string.Empty;
 
     [ObservableProperty]
     private bool _isRunning;
@@ -1217,6 +1230,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         WaterfallAutoLevels = _settings.WaterfallAutoLevels;
         WaterfallFloorDb = _settings.WaterfallFloorDb;
         WaterfallCeilDb = _settings.WaterfallCeilDb;
+        WaterfallRowsPerSecond = Math.Clamp(_settings.WaterfallRowsPerSecond, 5.0, 60.0);
 
         // Local node identity (for recognising direct messages).
         _myNodeNum = _settings.UserNodeNum;
@@ -2496,6 +2510,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnWaterfallAutoLevelsChanged(bool value) { SaveSettings(); }
     partial void OnWaterfallFloorDbChanged(double value) { SaveSettings(); }
     partial void OnWaterfallCeilDbChanged(double value) { SaveSettings(); }
+    partial void OnWaterfallRowsPerSecondChanged(double value) { SaveSettings(); }
 
     private void SaveSettings()
     {
@@ -2534,6 +2549,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.WaterfallAutoLevels = WaterfallAutoLevels;
         _settings.WaterfallFloorDb = WaterfallFloorDb;
         _settings.WaterfallCeilDb = WaterfallCeilDb;
+        _settings.WaterfallRowsPerSecond = WaterfallRowsPerSecond;
         _settings.UserNodeNum = _myNodeNum;
         _settings.UserLongName = MyLongName ?? string.Empty;
         _settings.UserShortName = MyShortName ?? string.Empty;

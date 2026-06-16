@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Linq;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -12,8 +13,39 @@ namespace MeshRF.App;
 
 public partial class MainWindow : Window
 {
-    private readonly DispatcherTimer _timer;
+    private readonly DispatcherTimer _statsTimer;
+    // The render-synced frame loop. Driven by CompositionTarget.Rendering so it
+    // fires once per composition frame (monitor refresh) instead of being
+    // coalesced by a DispatcherTimer, which capped us near ~21 Hz even though
+    // the UI thread was >98% idle.
+    private bool _renderingHooked;
+    private TimeSpan _lastRenderingTime = TimeSpan.MinValue;
+    // Render-loop frame cap. CompositionTarget.Rendering fires at the monitor's
+    // refresh rate (often 120/144 Hz). We gate work to a fixed cadence so the
+    // waterfall always advances at a constant rows/sec regardless of refresh
+    // rate (otherwise faster monitors scroll/stretch the waterfall).
+    private const double TargetFps = 60.0;
+    private static readonly TimeSpan TargetFrameInterval =
+        TimeSpan.FromSeconds(1.0 / TargetFps);
+    private TimeSpan _lastProcessedRenderTime = TimeSpan.MinValue;
     private float[] _spectrumBuffer = Array.Empty<float>();
+
+    // Waterfall row pacing. The waterfall advances one row per N received native
+    // spectrum frames so the scroll speed tracks received-signal time, not the
+    // UI refresh rate. Intervening pulls are max-held into _wfRowAccum so no
+    // spectral data is lost between rows. When no new native frames have arrived
+    // the waterfall holds still (it only moves "as data is received").
+    //
+    // The target rows/sec is user-controlled via MainViewModel.WaterfallRowsPerSecond
+    // (clamped below). This is pure time resolution: each row spans
+    // 1/rowsPerSecond of received time and is independent of FFT/frequency
+    // resolution, up to the native frame rate (sample_rate / fft_size).
+    private const double MinWaterfallRowsPerSecond = 5.0;
+    private const double MaxWaterfallRowsPerSecond = 60.0;
+    private ulong _wfLastFrameCount;
+    private float[] _wfRowAccum = Array.Empty<float>();
+    private bool _wfRowAccumValid;
+    private long _wfAccumFrames;
     private bool _layoutApplied;
     private int _snapshotInFlight;
     private double? _conversationMessagesPaneStar;
@@ -24,22 +56,51 @@ public partial class MainWindow : Window
     // Rolling history of recent spectrum frames, used to freeze a spectrogram
     // of the last detected packet. Holds the most recent HistoryFrames frames.
     private const int HistoryFrames = 64;
-    private readonly Queue<float[]> _specHistory = new();
+    private float[][]? _specHistoryRing;
+    private int _specHistoryWrite;
+    private int _specHistoryCount;
+    private int _specHistoryBinCount;
+
+    private long _lastUiTickStamp;
+    private double _uiFpsEma;
+
+    private long _perfWindowStartStamp;
+    private int _perfUiTickCount;
+    private double _perfUiTickMs;
+    private double _perfPullMs;
+    private double _perfSpectrumMs;
+    private double _perfWaterfallMs;
+    private int _perfStatsTickCount;
+    private double _perfStatsMs;
 
     public MainWindow()
     {
         InitializeComponent();
         ApplySavedLayout();
 
-        _timer = new DispatcherTimer(DispatcherPriority.Render)
+        _statsTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
-            Interval = TimeSpan.FromMilliseconds(50), // 20 Hz
+            Interval = TimeSpan.FromMilliseconds(100), // 10 Hz
         };
-        _timer.Tick += OnTick;
+        _statsTimer.Tick += OnStatsTick;
         Loaded   += OnLoaded;
         Closing  += OnClosing;
-        Unloaded += (_, _) => _timer.Stop();
+        Unloaded += (_, _) =>
+        {
+            HookRendering(false);
+            _statsTimer.Stop();
+        };
         MainTabs.SelectionChanged += (_, _) => ApplyConversationPaneLayoutToCurrentTab();
+    }
+
+    private void HookRendering(bool hook)
+    {
+        if (hook == _renderingHooked) return;
+        if (hook)
+            CompositionTarget.Rendering += OnUiTick;
+        else
+            CompositionTarget.Rendering -= OnUiTick;
+        _renderingHooked = hook;
     }
 
     private void OnAboutClick(object sender, RoutedEventArgs e)
@@ -50,7 +111,8 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
-        _timer.Start();
+        HookRendering(true);
+        _statsTimer.Start();
         if (!_layoutApplied)
         {
             ApplySavedLayout();
@@ -277,19 +339,82 @@ public partial class MainWindow : Window
         vm.RemoveWaypoints(selected);
     }
 
-    private void OnTick(object? sender, EventArgs e)
+    private void OnStatsTick(object? sender, EventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
+        long t0 = Stopwatch.GetTimestamp();
         vm.RefreshStats();
+        long t1 = Stopwatch.GetTimestamp();
+
+        _perfStatsTickCount++;
+        _perfStatsMs += TicksToMilliseconds(t1 - t0);
+        FlushUiPerfSummary(vm, t1);
+    }
+
+    private void OnUiTick(object? sender, EventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+
+        // CompositionTarget.Rendering can fire more than once for the same
+        // composition frame; skip the duplicate so FPS/perf accounting and the
+        // waterfall scroll advance exactly once per rendered frame.
+        if (e is RenderingEventArgs re)
+        {
+            if (re.RenderingTime == _lastRenderingTime) return;
+            TimeSpan monitorFrame = _lastRenderingTime == TimeSpan.MinValue
+                ? TargetFrameInterval
+                : re.RenderingTime - _lastRenderingTime;
+            _lastRenderingTime = re.RenderingTime;
+
+            // Cap to TargetFps. The render callback fires at the monitor refresh
+            // (often 120/144 Hz); process a frame only once we're at least half a
+            // monitor-frame short of the target interval. This self-adapts to the
+            // refresh rate and lands as close to 60 as the rate's divisors allow,
+            // keeping the cadence (and thus waterfall scroll) stable.
+            if (_lastProcessedRenderTime != TimeSpan.MinValue)
+            {
+                TimeSpan sinceProcessed = re.RenderingTime - _lastProcessedRenderTime;
+                if (sinceProcessed < TargetFrameInterval - new TimeSpan(monitorFrame.Ticks / 2))
+                    return;
+            }
+            _lastProcessedRenderTime = re.RenderingTime;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (_lastUiTickStamp != 0)
+        {
+            double dt = (now - _lastUiTickStamp) / (double)Stopwatch.Frequency;
+            if (dt > 0)
+            {
+                double instantFps = 1.0 / dt;
+                if (_uiFpsEma <= 0)
+                    _uiFpsEma = instantFps;
+                else
+                    _uiFpsEma += (instantFps - _uiFpsEma) * 0.12;
+                vm.UiFrameRateHz = _uiFpsEma;
+            }
+        }
+        _lastUiTickStamp = now;
+
+        long pullTicks = 0;
+        long spectrumTicks = 0;
+        long waterfallTicks = 0;
 
         // Don't pull spectrum when stopped — the native side caches the
         // last frame and would keep scrolling the waterfall.
-        if (!vm.IsRunning) return;
+        if (!vm.IsRunning)
+        {
+            long idleEnd = Stopwatch.GetTimestamp();
+            _perfUiTickCount++;
+            _perfUiTickMs += TicksToMilliseconds(idleEnd - now);
+            FlushUiPerfSummary(vm, idleEnd);
+            return;
+        }
 
         // Apply current colormap selection.
-        Waterfall.Colormap = vm.WaterfallColormap == "Inferno"
-            ? WaterfallColormap.Inferno
-            : WaterfallColormap.Turbo;
+        Waterfall.Colormap = ParseColormap(vm.WaterfallColormap);
+        // Keep the frozen snapshot's colormap matched to the live waterfall.
+        LastPacket.Colormap = Waterfall.Colormap;
 
         var n = vm.Core.SpectrumSize;
         if (n <= 0) return;
@@ -301,17 +426,173 @@ public partial class MainWindow : Window
         var centre = vm.Core.SpectrumCenterHz;
         if (centre > 0) vm.SpectrumCenterHz = centre;
 
+        long tPull0 = Stopwatch.GetTimestamp();
         var written = vm.Core.PullSpectrum(_spectrumBuffer);
+        long tPull1 = Stopwatch.GetTimestamp();
+        pullTicks = tPull1 - tPull0;
         if (written > 0)
         {
-            Spectrum.Update(_spectrumBuffer.AsSpan(0, written));
-            Waterfall.Push(_spectrumBuffer.AsSpan(0, written));
+            var spectrum = _spectrumBuffer.AsSpan(0, written);
 
-            // Keep a rolling history so we can freeze the last packet.
-            var frame = _spectrumBuffer.AsSpan(0, written).ToArray();
-            _specHistory.Enqueue(frame);
-            while (_specHistory.Count > HistoryFrames) _specHistory.Dequeue();
+            long tSpec0 = Stopwatch.GetTimestamp();
+            Spectrum.Update(spectrum);
+            long tSpec1 = Stopwatch.GetTimestamp();
+            spectrumTicks = tSpec1 - tSpec0;
+
+            long tWf0 = Stopwatch.GetTimestamp();
+            AdvanceWaterfall(vm, spectrum, rate, written);
+            long tWf1 = Stopwatch.GetTimestamp();
+            waterfallTicks = tWf1 - tWf0;
         }
+
+        long end = Stopwatch.GetTimestamp();
+        _perfUiTickCount++;
+        _perfUiTickMs += TicksToMilliseconds(end - now);
+        _perfPullMs += TicksToMilliseconds(pullTicks);
+        _perfSpectrumMs += TicksToMilliseconds(spectrumTicks);
+        _perfWaterfallMs += TicksToMilliseconds(waterfallTicks);
+        FlushUiPerfSummary(vm, end);
+    }
+
+    // Advances the waterfall in proportion to received signal time rather than
+    // UI frames. Each call max-holds the freshly pulled spectrum into the row
+    // accumulator and emits a finished row only once enough native frames have
+    // been received to fill one row at WaterfallRowsPerSecond. If no new native
+    // frames have arrived since the last call (delta == 0), nothing is pushed
+    // so the waterfall stays still until data actually arrives.
+    private void AdvanceWaterfall(
+        MainViewModel vm, ReadOnlySpan<float> spectrum, uint sampleRate, int bins)
+    {
+        ulong frameCount = vm.Core.SpectrumFrameCount;
+
+        // First read or pipeline (re)start: re-baseline without scrolling.
+        if (_wfLastFrameCount == 0 || frameCount < _wfLastFrameCount)
+        {
+            _wfLastFrameCount = frameCount;
+            _wfRowAccumValid = false;
+            _wfAccumFrames = 0;
+            return;
+        }
+
+        long frameDelta = (long)(frameCount - _wfLastFrameCount);
+        _wfLastFrameCount = frameCount;
+        if (frameDelta <= 0)
+            return; // No new received data -> don't scroll.
+
+        // Max-hold this pull into the current row so slowing the scroll never
+        // discards spectral peaks that occur between emitted rows.
+        if (!_wfRowAccumValid || _wfRowAccum.Length != bins)
+        {
+            if (_wfRowAccum.Length != bins)
+                _wfRowAccum = new float[bins];
+            spectrum.CopyTo(_wfRowAccum);
+            _wfRowAccumValid = true;
+        }
+        else
+        {
+            for (int i = 0; i < bins; i++)
+                if (spectrum[i] > _wfRowAccum[i])
+                    _wfRowAccum[i] = spectrum[i];
+        }
+        _wfAccumFrames += frameDelta;
+
+        // native frame rate = sampleRate / bins; one displayed row spans
+        // (nativeFrameRate / rowsPerSecond) native frames.
+        double rowsPerSecond = Math.Clamp(
+            vm.WaterfallRowsPerSecond,
+            MinWaterfallRowsPerSecond,
+            MaxWaterfallRowsPerSecond);
+        int framesPerRow = 1;
+        if (sampleRate > 0 && bins > 0)
+        {
+            double nativeFrameRate = (double)sampleRate / bins;
+            framesPerRow = (int)Math.Round(nativeFrameRate / rowsPerSecond);
+            if (framesPerRow < 1) framesPerRow = 1;
+        }
+
+        if (_wfAccumFrames >= framesPerRow)
+        {
+            var row = _wfRowAccum.AsSpan(0, bins);
+            Waterfall.Push(row);
+            PushSpectrumHistory(row);
+            _wfRowAccumValid = false;
+            // Carry the remainder for accurate pacing. Clamp to at most one
+            // group below threshold so a dropped render frame never causes the
+            // same max-held row to be pushed twice (we only have one distinct
+            // spectrum snapshot per tick).
+            _wfAccumFrames -= framesPerRow;
+            if (_wfAccumFrames >= framesPerRow)
+                _wfAccumFrames = framesPerRow - 1;
+        }
+    }
+
+    private static double TicksToMilliseconds(long ticks) =>
+        ticks * 1000.0 / Stopwatch.Frequency;
+
+    private void FlushUiPerfSummary(MainViewModel vm, long nowStamp)
+    {
+        if (_perfWindowStartStamp == 0)
+        {
+            _perfWindowStartStamp = nowStamp;
+            return;
+        }
+
+        double windowMs = TicksToMilliseconds(nowStamp - _perfWindowStartStamp);
+        if (windowMs < 1000.0) return;
+
+        double uiAvg = _perfUiTickCount > 0 ? _perfUiTickMs / _perfUiTickCount : 0.0;
+        double pullAvg = _perfUiTickCount > 0 ? _perfPullMs / _perfUiTickCount : 0.0;
+        double specAvg = _perfUiTickCount > 0 ? _perfSpectrumMs / _perfUiTickCount : 0.0;
+        double wfAvg = _perfUiTickCount > 0 ? _perfWaterfallMs / _perfUiTickCount : 0.0;
+        double statsAvg = _perfStatsTickCount > 0 ? _perfStatsMs / _perfStatsTickCount : 0.0;
+
+        double uiBusyPct = _perfUiTickMs * 100.0 / windowMs;
+        double statsBusyPct = _perfStatsMs * 100.0 / windowMs;
+
+        var (mapRenders, mapMs) = Map?.DrainRenderStats() ?? (0, 0.0);
+        double mapBusyPct = mapMs * 100.0 / windowMs;
+
+        vm.UiPerfSummary =
+            $"ui {uiAvg:0.0}ms (pull {pullAvg:0.0} spec {specAvg:0.0} wf {wfAvg:0.0}) " +
+            $"stats {statsAvg:0.0}ms@{_perfStatsTickCount}/s busy ui {uiBusyPct:0}% stats {statsBusyPct:0}% " +
+            $"map {mapRenders}/s {mapMs:0.0}ms busy {mapBusyPct:0}%";
+
+        _perfWindowStartStamp = nowStamp;
+        _perfUiTickCount = 0;
+        _perfUiTickMs = 0.0;
+        _perfPullMs = 0.0;
+        _perfSpectrumMs = 0.0;
+        _perfWaterfallMs = 0.0;
+        _perfStatsTickCount = 0;
+        _perfStatsMs = 0.0;
+    }
+
+    private void PushSpectrumHistory(ReadOnlySpan<float> frame)
+    {
+        if (frame.Length <= 0)
+            return;
+
+        if (_specHistoryRing is null || _specHistoryBinCount != frame.Length)
+        {
+            _specHistoryBinCount = frame.Length;
+            _specHistoryRing = new float[HistoryFrames][];
+            for (int i = 0; i < HistoryFrames; i++)
+                _specHistoryRing[i] = new float[_specHistoryBinCount];
+            _specHistoryWrite = 0;
+            _specHistoryCount = 0;
+        }
+
+        frame.CopyTo(_specHistoryRing[_specHistoryWrite]);
+        _specHistoryWrite = (_specHistoryWrite + 1) % HistoryFrames;
+        if (_specHistoryCount < HistoryFrames)
+            _specHistoryCount++;
+    }
+
+    private float[] GetHistoryFrameByAge(int index)
+    {
+        int oldest = (_specHistoryWrite - _specHistoryCount + HistoryFrames) % HistoryFrames;
+        int slot = (oldest + index) % HistoryFrames;
+        return _specHistoryRing![slot];
     }
 
     // Snapshots the last detected packet as a high-time-resolution STFT
@@ -321,13 +602,24 @@ public partial class MainWindow : Window
     // PullPacketSpectrogram is CPU-heavy (IQ ring copy + energy locator FFTs +
     // 512-frame STFT) so it runs on a thread-pool thread; only the final row
     // push and visibility update are marshalled back to the UI thread.
+    private static WaterfallColormap ParseColormap(string? name) => name switch
+    {
+        "Inferno" => WaterfallColormap.Inferno,
+        "Meshtastic" => WaterfallColormap.Meshtastic,
+        _ => WaterfallColormap.Turbo,
+    };
+
     private async Task FreezeLastPacketAsync()
     {
         try
         {
             if (DataContext is not MainViewModel vm) return;
 
-            const int nTime = 512;
+            // nTime is now the MAXIMUM number of rows the native side may emit;
+            // it returns fewer when the located packet window is shorter, so the
+            // snapshot's time resolution reflects the actual captured signal
+            // rather than always being stretched to a fixed height.
+            const int nTime = 1536;
             const int nFreq = 256;
 
             (int rows, float[] grid) PullFrames(int nTime, int nFreq)
@@ -372,6 +664,7 @@ public partial class MainWindow : Window
 
             int sampleCount = rows * nFreq;
             ApplySnapshotContrast(grid.AsSpan(0, sampleCount));
+            LastPacket.Colormap = ParseColormap(vm.WaterfallColormap);
             LastPacket.ReplaceFrames(grid.AsSpan(0, sampleCount), rows, nFreq);
             LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
         }
@@ -385,7 +678,7 @@ public partial class MainWindow : Window
     // spectrogram, cropped (zoomed) to just the LoRa channel around DC.
     private void FreezeLastPacketFromHistory(MainViewModel vm)
     {
-        if (_specHistory.Count == 0) return;
+        if (_specHistoryCount == 0 || _specHistoryRing is null) return;
 
         // The spectrum spans the full device sample rate, centered on DC
         // (LoRa is offset-tuned to DC). The channel is 250 kHz wide; show a
@@ -397,21 +690,23 @@ public partial class MainWindow : Window
                        : vm.Core.SampleRateHz > 0 ? vm.Core.SampleRateHz
                        : 2_400_000.0;
 
-        int binCount = _specHistory.Peek().Length;
+        int binCount = _specHistoryBinCount;
         int half = (int)Math.Round(zoomHz / spanHz * binCount / 2.0);
         half = Math.Clamp(half, 16, binCount / 2);
         int center = binCount / 2;
         int lo = center - half;
         int width = half * 2;
 
-        var frames = new List<float[]>(_specHistory.Count);
+        var frames = new List<float[]>(_specHistoryCount);
         var slice = new float[width];
-        foreach (var f in _specHistory)
+        for (int i = 0; i < _specHistoryCount; i++)
         {
+            var f = GetHistoryFrameByAge(i);
             Array.Copy(f, lo, slice, 0, width);
             frames.Add((float[])slice.Clone());
         }
         ApplySnapshotContrast(frames);
+        LastPacket.Colormap = ParseColormap(vm.WaterfallColormap);
         LastPacket.ReplaceFrames(frames);
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
     }

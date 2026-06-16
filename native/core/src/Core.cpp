@@ -481,6 +481,11 @@ bool Core::latest_spectrum(std::span<float> out) const {
     return impl_->spectrum->latest(out);
 }
 
+std::uint64_t Core::spectrum_frame_count() const noexcept {
+    if (!impl_->spectrum) return 0u;
+    return impl_->spectrum->frame_count();
+}
+
 std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
                                             std::uint32_t n_time,
                                             std::uint32_t n_freq) const {
@@ -708,9 +713,17 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         }
     }
 
-    const std::size_t hop = (n_time > 1u)
-        ? std::max<std::size_t>(1u, (window - kFft) / (n_time - 1u))
+    // Fixed STFT hop (75% overlap of the kFft window) so the snapshot's time
+    // resolution reflects the actual located packet length captured in the IQ
+    // history rather than always being stretched/compressed to a fixed row
+    // count. n_time is treated as the maximum the caller's buffer can hold.
+    const std::size_t hop = std::max<std::size_t>(1u, kFft / 4u);
+
+    std::uint32_t rows = (window > kFft)
+        ? static_cast<std::uint32_t>((window - kFft) / hop + 1u)
         : 1u;
+    if (rows > n_time) rows = n_time;
+    if (rows < 1u) rows = 1u;
 
     // Hann window.
     std::vector<float> win(kFft);
@@ -736,7 +749,7 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     const std::size_t cropN = cropHalf * 2u;
 
     const float norm = 1.0f / static_cast<float>(kFft);
-    for (std::uint32_t t = 0; t < n_time; ++t) {
+    for (std::uint32_t t = 0; t < rows; ++t) {
         const std::size_t base =
             off0 + std::min<std::size_t>(static_cast<std::size_t>(t) * hop,
                                          window - kFft);
@@ -762,7 +775,7 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         }
     }
 
-    return n_time;
+    return rows;
 }
 
 bool Core::set_rx_device(hal::DeviceKind kind) {

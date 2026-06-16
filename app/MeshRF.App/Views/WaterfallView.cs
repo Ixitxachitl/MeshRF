@@ -11,12 +11,13 @@ public enum WaterfallColormap
 {
     Turbo,
     Inferno,
+    Meshtastic,
 }
 
 /// <summary>
 /// Scrolling dBFS waterfall. Stores incoming spectrum frames in a ring
-/// buffer at their native bin count and re-renders to a WriteableBitmap on
-/// every push. Resizing just triggers a re-render from the same source data,
+/// buffer at their native bin count and incrementally updates a WriteableBitmap
+/// on pushes. Resizing still triggers a full re-render from the same source data,
 /// so it's pixel-stable across resizes.
 /// </summary>
 public sealed class WaterfallView : Image
@@ -67,6 +68,10 @@ public sealed class WaterfallView : Image
     private WriteableBitmap? _bmp;
     private int _w;
     private int _h;
+    private int[]? _x0Map;
+    private int[]? _x1Map;
+    private int _xMapW;
+    private int _xMapBins;
 
     // Auto-level smoothing state.
     private double _autoFloor = -100.0;
@@ -136,6 +141,10 @@ public sealed class WaterfallView : Image
         _h = h;
         _bmp = new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgra32, null);
         Source = _bmp;
+        _x0Map = null;
+        _x1Map = null;
+        _xMapW = 0;
+        _xMapBins = 0;
         ResizeRing(GetDesiredCapacity(w, h));
     }
 
@@ -182,6 +191,10 @@ public sealed class WaterfallView : Image
             _ring = new float[(long)_capacity * _binCount];
             _head = 0;
             _filled = 0;
+            _x0Map = null;
+            _x1Map = null;
+            _xMapW = 0;
+            _xMapBins = 0;
         }
         if (_ring is null || _capacity == 0) return;
 
@@ -205,7 +218,101 @@ public sealed class WaterfallView : Image
             _suppressRender = false;
         }
 
-        Render();
+        if (!TryRenderLatestRow(frame))
+            Render();
+    }
+
+    private void EnsureColumnMap(int width, int bins)
+    {
+        if (_x0Map is not null && _x1Map is not null && _xMapW == width && _xMapBins == bins)
+            return;
+
+        _x0Map = new int[width];
+        _x1Map = new int[width];
+        _xMapW = width;
+        _xMapBins = bins;
+        for (int x = 0; x < width; x++)
+        {
+            int start = (int)((long)x * bins / width);
+            int end = (int)(((long)(x + 1) * bins + width - 1) / width);
+            if (start < 0) start = 0; else if (start >= bins) start = bins - 1;
+            if (end <= start) end = start + 1;
+            if (end > bins) end = bins;
+            _x0Map[x] = start;
+            _x1Map[x] = end;
+        }
+    }
+
+    private unsafe bool TryRenderLatestRow(ReadOnlySpan<float> frame)
+    {
+        if (_bmp is null || TimeHorizontal) return false;
+        if (_ring is null || _binCount == 0 || frame.Length != _binCount) return false;
+
+        int w = _w;
+        int h = _h;
+        int n = _binCount;
+        if (w <= 0 || h <= 0 || n <= 0) return false;
+
+        EnsureLut();
+        EnsureColumnMap(w, n);
+
+        var floor = FloorDb;
+        var ceil = CeilDb;
+        if (ceil <= floor) ceil = floor + 1.0;
+        var invRange = 255f / (float)(ceil - floor);
+        var floorF = (float)floor;
+
+        _bmp.Lock();
+        try
+        {
+            int stride = _bmp.BackBufferStride;
+            byte* back = (byte*)_bmp.BackBuffer.ToPointer();
+
+            int rowsToShift = Math.Min(_filled - 1, h - 1);
+            for (int y = rowsToShift; y >= 1; y--)
+            {
+                byte* src = back + (y - 1) * stride;
+                byte* dst = back + y * stride;
+                Buffer.MemoryCopy(src, dst, stride, stride);
+            }
+
+            uint* dstRow0 = (uint*)back;
+            fixed (uint* lut = _lut)
+            {
+                var x0 = _x0Map!;
+                var x1 = _x1Map!;
+                for (int x = 0; x < w; x++)
+                {
+                    float v = float.NegativeInfinity;
+                    for (int sx = x0[x]; sx < x1[x]; sx++)
+                    {
+                        float candidate = frame[sx];
+                        if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) && candidate > v)
+                            v = candidate;
+                    }
+                    if (float.IsNegativeInfinity(v)) v = floorF;
+                    int idx = (int)((v - floorF) * invRange);
+                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                    dstRow0[x] = lut[idx];
+                }
+            }
+
+            if (_filled < h)
+            {
+                for (int y = _filled; y < h; y++)
+                {
+                    uint* dst = (uint*)(back + y * stride);
+                    for (int x = 0; x < w; x++) dst[x] = 0xFF000000u;
+                }
+            }
+
+            _bmp.AddDirtyRect(new Int32Rect(0, 0, w, h));
+            return true;
+        }
+        finally
+        {
+            _bmp.Unlock();
+        }
     }
 
     public void Clear()
@@ -355,6 +462,7 @@ public sealed class WaterfallView : Image
             float t = i / 255f;
             byte r, g, b;
             if (cmap == WaterfallColormap.Turbo) TurboMap(t, out r, out g, out b);
+            else if (cmap == WaterfallColormap.Meshtastic) MeshtasticMap(t, out r, out g, out b);
             else                                 InfernoMap(t, out r, out g, out b);
             _lut[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
         }
@@ -401,22 +509,9 @@ public sealed class WaterfallView : Image
                     return;
                 }
 
-                Span<int> x0Stack = stackalloc int[Math.Min(w, 4096)];
-                Span<int> x1Stack = stackalloc int[Math.Min(w, 4096)];
-                int[]? x0Heap = w > x0Stack.Length ? new int[w] : null;
-                int[]? x1Heap = w > x1Stack.Length ? new int[w] : null;
-                Span<int> x0 = x0Heap ?? x0Stack;
-                Span<int> x1 = x1Heap ?? x1Stack;
-                for (int x = 0; x < w; x++)
-                {
-                    int start = (int)((long)x * n / w);
-                    int end = (int)(((long)(x + 1) * n + w - 1) / w);
-                    if (start < 0) start = 0; else if (start >= n) start = n - 1;
-                    if (end <= start) end = start + 1;
-                    if (end > n) end = n;
-                    x0[x] = start;
-                    x1[x] = end;
-                }
+                EnsureColumnMap(w, n);
+                var x0 = _x0Map!;
+                var x1 = _x1Map!;
 
                 fixed (uint* lut = _lut)
                 fixed (float* ring = _ring)
@@ -570,6 +665,31 @@ public sealed class WaterfallView : Image
         if (t <= 0f) { r = 0; g = 0; b = 0; return; }
         if (t >= 1f) { r = 255; g = 255; b = 220; return; }
         float seg = t * 5f;
+        int i = (int)seg;
+        float f = seg - i;
+        int a = i * 3;
+        int c = (i + 1) * 3;
+        r = (byte)(stops[a]     + (stops[c]     - stops[a])     * f);
+        g = (byte)(stops[a + 1] + (stops[c + 1] - stops[a + 1]) * f);
+        b = (byte)(stops[a + 2] + (stops[c + 2] - stops[a + 2]) * f);
+    }
+
+    // Meshtastic-themed ramp: white -> Meshtastic green -> yellow -> blue -> black,
+    // running from the dB floor (t=0) to the dB ceil (t=1). Meshtastic brand
+    // green is #67EA94.
+    private static void MeshtasticMap(float t, out byte r, out byte g, out byte b)
+    {
+        ReadOnlySpan<int> stops = stackalloc int[]
+        {
+            255,255,255, // white
+            103,234,148, // Meshtastic green (#67EA94)
+            255,255,0,   // yellow
+            0,0,255,     // blue
+            0,0,0,       // black
+        };
+        if (t <= 0f) { r = 255; g = 255; b = 255; return; }
+        if (t >= 1f) { r = 0; g = 0; b = 0; return; }
+        float seg = t * 4f;
         int i = (int)seg;
         float f = seg - i;
         int a = i * 3;

@@ -331,6 +331,16 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
+    /// Monotonic count of spectrum FFT frames produced since RX started. One
+    /// frame corresponds to <see cref="SpectrumSize"/> received samples, so the
+    /// delta between two reads is proportional to elapsed received-signal time.
+    /// Use this to advance the waterfall in step with received data rather than
+    /// the UI refresh rate. 0 if RX is stopped.
+    /// </summary>
+    public ulong SpectrumFrameCount =>
+        _disposed || _handle == 0 ? 0ul : NativeMethods.CoreSpectrumFrameCount(_handle);
+
+    /// <summary>
     /// Computes a high-time-resolution spectrogram of the most recent ~150 ms
     /// of modem-rate IQ, cropped to the LoRa channel. Fills <paramref
     /// name="buffer"/> row-major as <paramref name="nTime"/> rows of <paramref

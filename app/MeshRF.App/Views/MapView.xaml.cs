@@ -145,6 +145,24 @@ public partial class MapView : UserControl
     private readonly Dictionary<string, int> _perfQueueFullRefreshReasons =
         new(StringComparer.Ordinal);
 
+    // Always-on (cheap) render accounting so the host window can surface map
+    // render cost alongside the waterfall perf line. Separate from the gated
+    // [MapPerf] logging above so it is available without a debug rebuild.
+    private int _liveRenderCount;
+    private long _liveRenderTicks;
+
+    /// <summary>Drains the render counters accumulated since the last call.
+    /// Returns the number of map renders (full + markers-only) and the total
+    /// time spent in them, then resets both counters.</summary>
+    public (int renders, double totalMs) DrainRenderStats()
+    {
+        int renders = _liveRenderCount;
+        double ms = _liveRenderTicks * 1000.0 / Stopwatch.Frequency;
+        _liveRenderCount = 0;
+        _liveRenderTicks = 0;
+        return (renders, ms);
+    }
+
     /// <summary>Fired when the user double-clicks a node marker on the map.
     /// Opens the same conversation tab as double-clicking the node list.</summary>
     public event Action<MeshRF.Nodes.NodeRecord>? NodeDoubleClicked;
@@ -545,7 +563,8 @@ public partial class MapView : UserControl
 
     private void RenderNow()
     {
-        long startTicks = MapPerfLoggingEnabled ? Stopwatch.GetTimestamp() : 0;
+        long liveStart = Stopwatch.GetTimestamp();
+        long startTicks = MapPerfLoggingEnabled ? liveStart : 0;
         var w = MarkerCanvas.ActualWidth;
         var h = MarkerCanvas.ActualHeight;
         if (w <= 0 || h <= 0) return;
@@ -586,6 +605,8 @@ public partial class MapView : UserControl
 
         DrawMarkers(originX, originY);
 
+        _liveRenderCount++;
+        _liveRenderTicks += Stopwatch.GetTimestamp() - liveStart;
         if (MapPerfLoggingEnabled)
         {
             _perfRenderNowCalls++;
@@ -601,7 +622,8 @@ public partial class MapView : UserControl
 
     private void RenderMarkersOnlyNow()
     {
-        long startTicks = MapPerfLoggingEnabled ? Stopwatch.GetTimestamp() : 0;
+        long liveStart = Stopwatch.GetTimestamp();
+        long startTicks = MapPerfLoggingEnabled ? liveStart : 0;
         var w = MarkerCanvas.ActualWidth;
         var h = MarkerCanvas.ActualHeight;
         if (w <= 0 || h <= 0) return;
@@ -615,6 +637,8 @@ public partial class MapView : UserControl
         _lastNodeMarkerCoords.Clear();
         DrawMarkers(originX, originY);
 
+        _liveRenderCount++;
+        _liveRenderTicks += Stopwatch.GetTimestamp() - liveStart;
         if (MapPerfLoggingEnabled)
         {
             _perfRenderMarkersOnlyNowCalls++;
