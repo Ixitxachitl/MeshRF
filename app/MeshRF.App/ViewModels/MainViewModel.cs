@@ -310,7 +310,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<string> NodeHopsFilterOptions     { get; } = ["Any", "Direct", "≤1 hop", "≤2 hops", "≤3 hops", "≤4 hops"];
     public IReadOnlyList<string> NodeKeyFilterOptions      { get; } = ["Any", "Good key", "Mismatch", "No key"];
-    public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "No position", "Invalid"];
+    public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "Has position history (>1)", "No position", "Invalid"];
     public IReadOnlyList<string> NodeIgnoredFilterOptions  { get; } = ["Show all", "Hide ignored", "Only ignored"];
     public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
     public IReadOnlyList<string> MapNodeLabelModeOptions   { get; } =
@@ -397,9 +397,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Location filter.
         bool hasPos = n.HasLocation;
+        bool hasPosHistory = Tabs.OfType<ConversationViewModel>()
+            .FirstOrDefault(c => c.NodeNum == n.NodeNum)?.LocationHistory.Count > 1;
         switch (NodeLocationFilter)
         {
             case "Has position": if (!hasPos) return false; break;
+            case "Has position history (>1)": if (!hasPosHistory) return false; break;
             case "No position":  if (hasPos)  return false; break;
             case "Invalid":      if (!n.HasInvalidLocation) return false; break;
         }
@@ -2253,6 +2256,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnConversationLocationHistoryChanged(ConversationViewModel convo)
     {
+        if (NodeLocationFilter == "Has position history (>1)")
+            RefreshNodesFilter();
+
         if (!convo.ShowLocationHistoryOnMap)
             return;
 
