@@ -130,7 +130,7 @@
             <Button Width="36" Height="28"
                     Margin="4,0,0,0"
                     Command="{Binding ToggleRecordPayloadsCommand}"
-                    ToolTip="Start / stop recording decoded payloads (.jsonl)">
+                    ToolTip="Start / stop recording decoded payloads (.json)">
                 <Button.Style>
                     <Style TargetType="Button">
                         <Setter Property="Content">

@@ -6,6 +6,8 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Data;
@@ -67,10 +69,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // Plays the RTTTL ringtone when a text message arrives.
     private readonly RtttlPlayer _ringtone = new();
-    // Payload recording: open StreamWriter when active. Each decoded payload is
-    // appended as one JSON object (JSONL). Null when not recording.
+    // Payload recording: open StreamWriter when active and emit a single valid
+    // JSON array document (one object per payload). Null when not recording.
     private StreamWriter? _payloadWriter;
     private int _payloadCount;
+    private bool _payloadJsonHasEntries;
 
     [ObservableProperty]
     private LoraPreset _selectedPreset = LoraPreset.LongFast;
@@ -4432,10 +4435,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Toggle recording of decoded LoRa payloads to a JSON Lines (.jsonl) file.
+    /// Toggle recording of decoded LoRa payloads to a JSON (.json) file.
     /// Prompts for a path when starting; each successfully demodulated payload
-    /// is appended as one JSON object (timestamp, length, CRC status, full hex
-    /// bytes). Closes the file when stopping.
+    /// is appended as one object inside a single JSON array document. Closes
+    /// and finalizes the JSON document when stopping.
     /// </summary>
     [RelayCommand]
     private void ToggleRecordPayloads()
@@ -4448,17 +4451,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var dlg = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "Record decoded payloads (.jsonl)",
-            Filter = "JSON Lines (*.jsonl)|*.jsonl|All files (*.*)|*.*",
-            DefaultExt = ".jsonl",
-            FileName = $"payloads_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl",
+            Title = "Record decoded payloads (.json)",
+            Filter = "JSON (*.json)|*.json|All files (*.*)|*.*",
+            DefaultExt = ".json",
+            FileName = $"payloads_{DateTime.Now:yyyyMMdd_HHmmss}.json",
         };
         if (dlg.ShowDialog() != true) return;
 
         try
         {
-            _payloadWriter = new StreamWriter(dlg.FileName, append: true) { AutoFlush = true };
+            _payloadWriter = new StreamWriter(dlg.FileName, append: false) { AutoFlush = true };
             _payloadCount = 0;
+            _payloadJsonHasEntries = false;
+            _payloadWriter.Write('[');
             IsRecordingPayloads = true;
             Status = $"Recording payloads -> {dlg.FileName}";
             Log(Status);
@@ -4475,8 +4480,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void StopPayloadRecording()
     {
         if (_payloadWriter is null) return;
-        try { _payloadWriter.Flush(); _payloadWriter.Dispose(); } catch { /* ignore */ }
+        try
+        {
+            if (_payloadJsonHasEntries)
+                _payloadWriter.WriteLine();
+            _payloadWriter.WriteLine("]");
+            _payloadWriter.Flush();
+            _payloadWriter.Dispose();
+        }
+        catch { /* ignore */ }
         _payloadWriter = null;
+        _payloadJsonHasEntries = false;
         IsRecordingPayloads = false;
         Status = $"Payload recording stopped ({_payloadCount} payloads)";
         Log(Status);
@@ -4489,6 +4503,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static readonly Regex PayloadLineRegex = new(
         @"payload(?:\[(?<status>OK|BAD)\])?\s+len=(?<len>\d+)(?:\s+crc=(?<rx>[0-9A-Fa-f]+)/(?<calc>[0-9A-Fa-f]+))?\s+(?<hex>[0-9A-Fa-f]+)",
         RegexOptions.Compiled);
+
+    private static readonly JsonSerializerOptions PayloadRecordJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     // Pulls the peak-above-noise figure out of a preamble line, e.g.
     //   "preamble: SF9 BW250k cfo=+101.6k peak=28.3dB"
@@ -4617,7 +4636,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static partial bool GetSystemPowerStatus(out SystemPowerStatus systemPowerStatus);
 
     /// <summary>If payload recording is active and <paramref name="ev"/> is a
-    /// decoded-payload event, append a structured JSON record to the file.</summary>
+    /// decoded-payload event, append a structured JSON object in the recording array.</summary>
     private void RecordPayloadIfActive(string ev)
     {
         if (_payloadWriter is null) return;
@@ -4634,15 +4653,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var hex = m.Groups["hex"].Value;
 
         var ts = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", CultureInfo.InvariantCulture);
-        var freq = CenterFreqMHz.ToString("F3", CultureInfo.InvariantCulture);
-        var json =
-            $"{{\"time\":\"{ts}\",\"freq_mhz\":{freq},\"preset\":\"{SelectedPreset}\"," +
-            $"\"status\":\"{status}\",\"crc_ok\":{(crcOk ? "true" : "false")}," +
-            $"\"len\":{len},\"crc_rx\":\"{rx}\",\"crc_calc\":\"{calc}\",\"hex\":\"{hex}\"}}";
+
+        MeshDecodeResult? decoded = null;
+        if (crcOk)
+        {
+            var frame = HexToBytes(hex);
+            if (frame.Length >= MeshHeader.Size && MeshHeader.TryParse(frame, out var header))
+            {
+                var channels = Channels.Select(c => c.Config).ToList();
+                decoded = MeshDecoder.Decode(frame, channels);
+                if (decoded is null && _myNodeNum != 0 &&
+                    header.To == _myNodeNum && !header.IsBroadcast &&
+                    header.ChannelHash == 0x00)
+                {
+                    decoded = TryDecodePkc(frame, header);
+                }
+            }
+        }
+
+        int.TryParse(len, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLen);
+        var payloadRecord = new
+        {
+            time = ts,
+            freq_mhz = CenterFreqMHz,
+            preset = SelectedPreset.ToString(),
+            status,
+            crc_ok = crcOk,
+            len = parsedLen,
+            crc_rx = string.IsNullOrEmpty(rx) ? null : rx,
+            crc_calc = string.IsNullOrEmpty(calc) ? null : calc,
+            hex,
+            decoded = BuildDecodedPayloadForRecord(decoded),
+        };
+
+        var json = JsonSerializer.Serialize(payloadRecord, PayloadRecordJsonOptions);
 
         try
         {
-            _payloadWriter.WriteLine(json);
+            if (_payloadJsonHasEntries)
+                _payloadWriter.Write(',');
+            _payloadWriter.WriteLine();
+            _payloadWriter.Write("  ");
+            _payloadWriter.Write(json);
+            _payloadJsonHasEntries = true;
             _payloadCount++;
         }
         catch (Exception ex)
@@ -4650,6 +4703,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Log($"payload record write failed: {ex.Message}");
             StopPayloadRecording();
         }
+    }
+
+    private static object? BuildDecodedPayloadForRecord(MeshDecodeResult? decoded)
+    {
+        if (decoded is null) return null;
+
+        var h = decoded.Header;
+        return new
+        {
+            header = new
+            {
+                to = h.To,
+                from = h.From,
+                packet_id = h.PacketId,
+                flags = h.Flags,
+                channel_hash = h.ChannelHash,
+                next_hop = h.NextHop,
+                relay_node = h.RelayNode,
+                hop_limit = h.HopLimit,
+                want_ack = h.WantAck,
+                via_mqtt = h.ViaMqtt,
+                hop_start = h.HopStart,
+                is_broadcast = h.IsBroadcast,
+                from_id = h.FromId,
+                to_id = h.ToId,
+            },
+            channel = decoded.ChannelName,
+            port = decoded.Port.ToString(),
+            text = decoded.Text,
+            want_response = decoded.WantResponse,
+            request_id = decoded.RequestId,
+            reply_id = decoded.ReplyId,
+            emoji = decoded.Emoji,
+            ok_to_mqtt = decoded.OkToMqtt,
+            routing_error = decoded.RoutingError,
+            user = decoded.User,
+            position = decoded.Position,
+            waypoint = decoded.Waypoint,
+            telemetry = decoded.Telemetry,
+            route_discovery = decoded.RouteDiscovery,
+            neighbor_info = decoded.NeighborInfo,
+            app_payload_hex = BytesToHex(decoded.AppPayload),
+        };
     }
 
     /// <summary>
