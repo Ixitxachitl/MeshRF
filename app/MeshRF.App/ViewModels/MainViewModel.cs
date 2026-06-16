@@ -271,6 +271,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private ulong _totalSamples;
 
     [ObservableProperty]
+    private float _liveChannelUtilizationPct;
+
+    [ObservableProperty]
+    private float _liveAirUtilTxPct;
+
+    [ObservableProperty]
     private bool _isRunning;
 
     [ObservableProperty]
@@ -4650,6 +4656,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         airUtilTxPct = (float)Math.Clamp((txUsedMsHour / hourMs) * 100.0, 0.0, 100.0);
     }
 
+    private void RefreshLiveUtilizationMetrics()
+    {
+        ComputeLocalAirtimeUtilization(out var channelUtilPct, out var airUtilTxPct);
+        LiveChannelUtilizationPct = channelUtilPct;
+        LiveAirUtilTxPct = airUtilTxPct;
+    }
+
     private static void TryGetWindowsPowerTelemetry(out bool acOnline, out byte? batteryPct, out float? voltageV)
     {
         acOnline = false;
@@ -5460,6 +5473,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void RefreshStats()
     {
         KickAutoReportTick();
+        RefreshLiveUtilizationMetrics();
 
         if (!_core.IsRunning) return;
         var s = _core.GetSignalStats();

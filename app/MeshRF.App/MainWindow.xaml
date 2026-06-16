@@ -326,6 +326,11 @@
                     <Run Text="{Binding PeakDbfs, StringFormat=F1, Mode=OneWay}" />
                     <Run Text=" dBFS  Samples: " />
                     <Run Text="{Binding TotalSamples, Mode=OneWay}" />
+                    <Run Text="  ChUtil: " />
+                    <Run Text="{Binding LiveChannelUtilizationPct, StringFormat=F2, Mode=OneWay}" />
+                    <Run Text="%  AirTx: " />
+                    <Run Text="{Binding LiveAirUtilTxPct, StringFormat=F2, Mode=OneWay}" />
+                    <Run Text="%" />
                 </TextBlock>
             </StatusBarItem>
             <Separator />
