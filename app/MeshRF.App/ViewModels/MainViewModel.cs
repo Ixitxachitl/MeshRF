@@ -1691,8 +1691,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await _txSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
-            return await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
-                             .ConfigureAwait(false);
+            bool ok = await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
+                                .ConfigureAwait(false);
+            if (ok)
+                RecordAirtimeSample(EstimatePacketAirtimeMs(preset, frame?.Length ?? 0), isTx: true);
+            return ok;
         }
         finally
         {
@@ -1712,7 +1715,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _ = Task.Run(async () =>
         {
             await _txSemaphore.WaitAsync().ConfigureAwait(false);
-            try { _core.Transmit(preset, hz, frame, gain, amp); }
+            try
+            {
+                if (_core.Transmit(preset, hz, frame, gain, amp))
+                    RecordAirtimeSample(EstimatePacketAirtimeMs(preset, frame?.Length ?? 0), isTx: true);
+            }
             catch { /* best-effort */ }
             finally { _txSemaphore.Release(); }
         });
@@ -4526,22 +4533,80 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private float _lastPreamblePeakDb = float.NaN;
 
     private readonly Queue<(DateTime Utc, int Ms, bool IsTx)> _airtimeSamples = new();
+    private readonly object _airtimeSamplesLock = new();
+
+    private void RecordAirtimeSample(int ms, bool isTx)
+    {
+        if (ms <= 0) return;
+        var now = DateTime.UtcNow;
+        lock (_airtimeSamplesLock)
+        {
+            _airtimeSamples.Enqueue((now, ms, isTx));
+            TrimAirtimeSamplesLocked(now);
+        }
+    }
+
+    private static int EstimatePacketAirtimeMs(LoraPreset preset, int payloadBytes)
+    {
+        if (payloadBytes <= 0)
+            return 0;
+
+        var p = LoraParamsHelper.FromPreset(preset);
+        double sf = p.Sf;
+        double bwHz = p.BwKhz * 1000.0;
+        double cr = p.Cr - 4.0; // 5..8 -> 1..4
+        if (bwHz <= 0.0 || cr < 1.0)
+            return 0;
+
+        double tSym = Math.Pow(2.0, sf) / bwHz;
+        int de = tSym >= 0.016 ? 1 : 0; // LDRO when symbol time >= 16 ms
+        const int ih = 0; // explicit header
+        const int crc = 1;
+
+        double payloadNumerator = (8.0 * payloadBytes) - (4.0 * sf) + 28.0 + (16.0 * crc) - (20.0 * ih);
+        double payloadDenominator = 4.0 * (sf - (2.0 * de));
+        double payloadSym = 8.0;
+        if (payloadDenominator > 0)
+            payloadSym += Math.Max(Math.Ceiling(payloadNumerator / payloadDenominator) * (cr + 4.0), 0.0);
+
+        const double preambleSym = 8.0 + 4.25;
+        double toaSeconds = (preambleSym + payloadSym) * tSym;
+        int ms = (int)Math.Round(toaSeconds * 1000.0, MidpointRounding.AwayFromZero);
+        return Math.Max(ms, 1);
+    }
 
     private void TrackAirtimeFromEvent(string ev)
     {
+        // Legacy format from older native builds.
         var m = PacketDurationRegex.Match(ev);
-        if (!m.Success) return;
-        if (!int.TryParse(m.Groups["ms"].Value, NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out var ms) || ms <= 0)
+        if (m.Success)
+        {
+            if (int.TryParse(m.Groups["ms"].Value, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out var legacyMs) && legacyMs > 0)
+            {
+                bool isTx = string.Equals(m.Groups["dir"].Value, "TX", StringComparison.Ordinal);
+                RecordAirtimeSample(legacyMs, isTx);
+            }
+            return;
+        }
+
+        // Current format includes payload length; infer RX airtime from length.
+        var payload = PayloadLineRegex.Match(ev);
+        if (!payload.Success) return;
+        if (!int.TryParse(payload.Groups["len"].Value, NumberStyles.Integer,
+            CultureInfo.InvariantCulture, out var payloadLen) || payloadLen <= 0)
             return;
 
-        bool isTx = string.Equals(m.Groups["dir"].Value, "TX", StringComparison.Ordinal);
-        var now = DateTime.UtcNow;
-        _airtimeSamples.Enqueue((now, ms, isTx));
-        TrimAirtimeSamples(now);
+        RecordAirtimeSample(EstimatePacketAirtimeMs(SelectedPreset, payloadLen), isTx: false);
     }
 
     private void TrimAirtimeSamples(DateTime nowUtc)
+    {
+        lock (_airtimeSamplesLock)
+            TrimAirtimeSamplesLocked(nowUtc);
+    }
+
+    private void TrimAirtimeSamplesLocked(DateTime nowUtc)
     {
         var maxAge = TimeSpan.FromHours(1);
         while (_airtimeSamples.Count > 0 &&
@@ -4555,7 +4620,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ComputeLocalAirtimeUtilization(out float channelUtilPct, out float airUtilTxPct)
     {
         var now = DateTime.UtcNow;
-        TrimAirtimeSamples(now);
 
         const double minuteMs = 60_000.0;
         const double hourMs = 3_600_000.0;
@@ -4563,13 +4627,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         double chanUsedMsMinute = 0;
         double txUsedMsHour = 0;
 
-        foreach (var sample in _airtimeSamples)
+        lock (_airtimeSamplesLock)
         {
-            var age = now - sample.Utc;
-            if (age <= TimeSpan.FromMinutes(1))
-                chanUsedMsMinute += sample.Ms;
-            if (sample.IsTx && age <= TimeSpan.FromHours(1))
-                txUsedMsHour += sample.Ms;
+            TrimAirtimeSamplesLocked(now);
+            foreach (var sample in _airtimeSamples)
+            {
+                var age = now - sample.Utc;
+                if (age <= TimeSpan.FromMinutes(1))
+                    chanUsedMsMinute += sample.Ms;
+                if (sample.IsTx && age <= TimeSpan.FromHours(1))
+                    txUsedMsHour += sample.Ms;
+            }
         }
 
         channelUtilPct = (float)Math.Clamp((chanUsedMsMinute / minuteMs) * 100.0, 0.0, 100.0);
