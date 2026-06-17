@@ -7,7 +7,7 @@ and performs LoRa demodulation/modulation in software on the host CPU. It
 decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-Current release line: **v0.8.2**
+Current release line: **v0.8.3**
 
 ## Status
 
