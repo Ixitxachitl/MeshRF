@@ -9,6 +9,9 @@ provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
 Current release line: **v0.8.4**
 
+<img width="1386" height="993" alt="image" src="https://github.com/user-attachments/assets/108e4d84-f767-44c0-a9bb-2750e67c33d7" />
+
+
 ## Status
 
 - Receive path is operational end-to-end: SDR IQ -> DSP -> LoRa demod ->
