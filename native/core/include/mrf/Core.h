@@ -129,6 +129,15 @@ public:
     // tied to received data rather than the UI refresh rate. 0 if not running.
     [[nodiscard]] std::uint64_t spectrum_frame_count() const noexcept;
 
+    // Extract up to max_count individual spectrum frames from the rolling
+    // history, starting after after_frame_idx. Fills out_frames row-major as
+    // max_count rows of spectrum_size() dBFS values each. Returns the actual
+    // count extracted (0 to max_count).
+    [[nodiscard]] std::uint32_t pull_spectrum_frames(
+        std::uint64_t after_frame_idx,
+        std::uint32_t max_count,
+        std::span<float> out_frames) const;
+
     // Compute a high-time-resolution spectrogram of the most recent ~150 ms of
     // modem-rate IQ, cropped to the LoRa channel. Fills `out` row-major as
     // n_time rows of n_freq dBFS values (low->high freq left->right, matching

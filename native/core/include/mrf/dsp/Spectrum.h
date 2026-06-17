@@ -35,6 +35,16 @@ public:
     // out must have capacity >= fft_size().
     bool latest(std::span<float> out_dbfs) const;
 
+    // Extract up to count individual (non-max-held) frames from the rolling
+    // history, starting after after_frame_index. Fills out_frames with
+    // count*fft_size() floats (each fft_size() consecutive floats is one frame).
+    // Returns the number of frames actually filled (0 to count). If out_frames
+    // is too small or after_frame_index >= current frame count, returns 0.
+    [[nodiscard]] std::uint32_t pull_frames(
+        std::uint64_t after_frame_index,
+        std::uint32_t max_count,
+        std::span<float> out_frames) const;
+
     [[nodiscard]] std::uint64_t frame_count() const noexcept;
 
 private:
@@ -53,6 +63,12 @@ private:
     mutable bool held_valid_{false};
     std::uint64_t frames_{0};
     std::vector<sample_t> scratch_;   // FFT working buffer
+
+    // Ring buffer of individual (non-max-held) frames. Holds the last 256
+    // frames. Each frame is n_ floats (FFT-shifted dBFS). Used by pull_frames().
+    std::vector<std::vector<float>> frame_ring_; // length 256, each n_ floats
+    std::size_t frame_ring_pos_{0};   // where the next frame will be written
+    static constexpr std::size_t kFrameRingCapacity = 256;
 };
 
 } // namespace mrf::dsp

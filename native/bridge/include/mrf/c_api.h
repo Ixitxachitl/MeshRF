@@ -114,6 +114,17 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum(const mrf_core_t* core,
 // refresh rate. 0 if not running.
 MRF_API uint64_t MRF_CALL mrf_core_spectrum_frame_count(const mrf_core_t* core);
 
+// Extract up to max_count individual spectrum frames from the rolling history,
+// starting after after_frame_idx. Fills out_frames row-major with max_count rows
+// of spectrum_size() floats each. Returns the number of frames actually extracted.
+// out_frames must hold at least max_count * spectrum_size() floats.
+MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum_frames(
+    const mrf_core_t* core,
+    uint64_t after_frame_idx,
+    uint32_t max_count,
+    float* out_frames,
+    uint32_t out_frames_len);
+
 // Computes a high-time-resolution spectrogram of the most recent ~150 ms of
 // modem-rate IQ, cropped to the LoRa channel. Fills out_dbfs row-major as
 // n_time rows of n_freq dBFS values (low->high freq left->right). out_dbfs

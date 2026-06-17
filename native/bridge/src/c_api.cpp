@@ -164,6 +164,18 @@ MRF_API uint64_t MRF_CALL mrf_core_spectrum_frame_count(const mrf_core_t* core) 
     return core->core.spectrum_frame_count();
 }
 
+MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum_frames(
+    const mrf_core_t* core,
+    uint64_t after_frame_idx,
+    uint32_t max_count,
+    float* out_frames,
+    uint32_t out_frames_len) {
+    if (!core || !out_frames || out_frames_len == 0u || max_count == 0u)
+        return 0u;
+    return core->core.pull_spectrum_frames(
+        after_frame_idx, max_count, std::span<float>(out_frames, out_frames_len));
+}
+
 MRF_API uint32_t MRF_CALL mrf_core_pull_packet_spectrogram(const mrf_core_t* core,
                                                            float* out_dbfs,
                                                            uint32_t n_time,

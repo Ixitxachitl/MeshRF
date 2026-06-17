@@ -284,7 +284,7 @@
             <Separator />
             <TextBlock Text="Speed" VerticalAlignment="Center" Margin="6,0,4,0" />
             <Slider Width="120"
-                    Minimum="5" Maximum="60"
+                    Minimum="5" Maximum="240"
                     TickFrequency="5" IsSnapToTickEnabled="False"
                     Value="{Binding WaterfallRowsPerSecond, Mode=TwoWay}"
                     VerticalAlignment="Center"

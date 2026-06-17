@@ -341,6 +341,27 @@ public sealed class MeshtasticCore : IDisposable
         _disposed || _handle == 0 ? 0ul : NativeMethods.CoreSpectrumFrameCount(_handle);
 
     /// <summary>
+    /// Extracts up to <paramref name="maxCount"/> individual spectrum frames
+    /// from the rolling history, starting after <paramref name="afterFrameIdx"/>.
+    /// Fills <paramref name="buffer"/> row-major with each spectrum_size() floats
+    /// per frame. The buffer must hold at least maxCount * spectrum_size() floats.
+    /// Returns the number of frames actually extracted (0 to maxCount).
+    /// </summary>
+    public int PullSpectrumFrames(Span<float> buffer, ulong afterFrameIdx, int maxCount)
+    {
+        if (_disposed || _handle == 0 || maxCount <= 0) return 0;
+        if (buffer.Length < maxCount * SpectrumSize) return 0;
+        unsafe
+        {
+            fixed (float* p = buffer)
+            {
+                return (int)NativeMethods.CorePullSpectrumFrames(
+                    _handle, afterFrameIdx, (uint)maxCount, p, (uint)buffer.Length);
+            }
+        }
+    }
+
+    /// <summary>
     /// Computes a high-time-resolution spectrogram of the most recent ~150 ms
     /// of modem-rate IQ, cropped to the LoRa channel. Fills <paramref
     /// name="buffer"/> row-major as <paramref name="nTime"/> rows of <paramref

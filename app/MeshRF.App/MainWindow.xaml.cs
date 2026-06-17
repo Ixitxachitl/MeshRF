@@ -41,9 +41,12 @@ public partial class MainWindow : Window
     // 1/rowsPerSecond of received time and is independent of FFT/frequency
     // resolution, up to the native frame rate (sample_rate / fft_size).
     private const double MinWaterfallRowsPerSecond = 5.0;
-    private const double MaxWaterfallRowsPerSecond = 60.0;
+    private const double MaxWaterfallRowsPerSecond = 240.0;
+    private const int MaxFramesToPull = 64; // Must handle ~32 frames/tick at 60fps + margin
     private ulong _wfLastFrameCount;
     private float[] _wfRowAccum = Array.Empty<float>();
+    private float[] _wfFrameBuffer = Array.Empty<float>(); // Pooled buffer for PullSpectrumFrames
+    private List<float[]> _wfRowBatch = new(); // Pooled list for batch push
     private bool _wfRowAccumValid;
     private long _wfAccumFrames;
     private bool _layoutApplied;
@@ -469,35 +472,13 @@ public partial class MainWindow : Window
         if (_wfLastFrameCount == 0 || frameCount < _wfLastFrameCount)
         {
             _wfLastFrameCount = frameCount;
-            _wfRowAccumValid = false;
-            _wfAccumFrames = 0;
             return;
         }
 
-        long frameDelta = (long)(frameCount - _wfLastFrameCount);
-        _wfLastFrameCount = frameCount;
-        if (frameDelta <= 0)
-            return; // No new received data -> don't scroll.
+        if (frameCount <= _wfLastFrameCount)
+            return; // No new frames.
 
-        // Max-hold this pull into the current row so slowing the scroll never
-        // discards spectral peaks that occur between emitted rows.
-        if (!_wfRowAccumValid || _wfRowAccum.Length != bins)
-        {
-            if (_wfRowAccum.Length != bins)
-                _wfRowAccum = new float[bins];
-            spectrum.CopyTo(_wfRowAccum);
-            _wfRowAccumValid = true;
-        }
-        else
-        {
-            for (int i = 0; i < bins; i++)
-                if (spectrum[i] > _wfRowAccum[i])
-                    _wfRowAccum[i] = spectrum[i];
-        }
-        _wfAccumFrames += frameDelta;
-
-        // native frame rate = sampleRate / bins; one displayed row spans
-        // (nativeFrameRate / rowsPerSecond) native frames.
+        // Calculate the desired frames per row (time resolution).
         double rowsPerSecond = Math.Clamp(
             vm.WaterfallRowsPerSecond,
             MinWaterfallRowsPerSecond,
@@ -510,20 +491,55 @@ public partial class MainWindow : Window
             if (framesPerRow < 1) framesPerRow = 1;
         }
 
-        if (_wfAccumFrames >= framesPerRow)
+        // Ensure the pooled frame buffer is large enough.
+        int bufferSize = MaxFramesToPull * bins;
+        if (_wfFrameBuffer.Length < bufferSize)
+            _wfFrameBuffer = new float[bufferSize];
+
+        int framesPulled = vm.Core.PullSpectrumFrames(_wfFrameBuffer, _wfLastFrameCount, MaxFramesToPull);
+        _wfLastFrameCount = frameCount;
+
+        if (framesPulled == 0)
+            return;
+
+        // Accumulate frames into rows, batching completed rows for a single push.
+        _wfRowBatch.Clear();
+
+        for (int frameIdx = 0; frameIdx < framesPulled; frameIdx++)
         {
-            var row = _wfRowAccum.AsSpan(0, bins);
-            Waterfall.Push(row);
-            PushSpectrumHistory(row);
-            _wfRowAccumValid = false;
-            // Carry the remainder for accurate pacing. Clamp to at most one
-            // group below threshold so a dropped render frame never causes the
-            // same max-held row to be pushed twice (we only have one distinct
-            // spectrum snapshot per tick).
-            _wfAccumFrames -= framesPerRow;
+            var frame = _wfFrameBuffer.AsSpan(frameIdx * bins, bins);
+
+            // Accumulate this frame into the current row via max-hold.
+            if (!_wfRowAccumValid || _wfRowAccum.Length != bins)
+            {
+                if (_wfRowAccum.Length != bins)
+                    _wfRowAccum = new float[bins];
+                frame.CopyTo(_wfRowAccum);
+                _wfRowAccumValid = true;
+            }
+            else
+            {
+                for (int i = 0; i < bins; i++)
+                    if (frame[i] > _wfRowAccum[i])
+                        _wfRowAccum[i] = frame[i];
+            }
+            _wfAccumFrames++;
+
+            // Complete a row when we have enough frames.
             if (_wfAccumFrames >= framesPerRow)
-                _wfAccumFrames = framesPerRow - 1;
+            {
+                // Clone the row for the batch (will be pushed later).
+                var row = (float[])_wfRowAccum.Clone();
+                _wfRowBatch.Add(row);
+                PushSpectrumHistory(row);
+                _wfRowAccumValid = false;
+                _wfAccumFrames = 0;
+            }
         }
+
+        // Batch-push all completed rows at once (single lock/unlock cycle).
+        if (_wfRowBatch.Count > 0)
+            Waterfall.PushBatch(_wfRowBatch);
     }
 
     private static double TicksToMilliseconds(long ticks) =>
@@ -622,11 +638,17 @@ public partial class MainWindow : Window
             const int nTime = 1536;
             const int nFreq = 256;
 
-            (int rows, float[] grid) PullFrames(int nTime, int nFreq)
+            // Pull spectrogram and compute contrast off the UI thread.
+            (int rows, float[] grid, double floor, double ceil) PullAndComputeContrast()
             {
                 var grid = new float[nTime * nFreq];
                 int written = vm.Core.PullPacketSpectrogram(grid, nTime, nFreq);
-                return written > 0 ? (written, grid) : (0, Array.Empty<float>());
+                if (written <= 0)
+                    return (0, Array.Empty<float>(), -100.0, 0.0);
+
+                int sampleCount = written * nFreq;
+                var (floor, ceil) = ComputeContrastLevels(grid.AsSpan(0, sampleCount));
+                return (written, grid, floor, ceil);
             }
 
             static int ComputeRetryDelayMs(MainViewModel vm)
@@ -643,8 +665,8 @@ public partial class MainWindow : Window
             }
 
             // Pull the packed spectrogram off the UI thread; commit once.
-            var (rows, grid) = await Task.Run(() => PullFrames(nTime, nFreq))
-                                  .ConfigureAwait(true);
+            var (rows, grid, floor, ceil) = await Task.Run(PullAndComputeContrast)
+                                                .ConfigureAwait(true);
 
             // The very first packet after RX start can arrive before enough
             // IQ history has accumulated for a robust native snapshot. Retry
@@ -652,8 +674,8 @@ public partial class MainWindow : Window
             if (rows <= 0)
             {
                 await Task.Delay(ComputeRetryDelayMs(vm)).ConfigureAwait(true);
-                (rows, grid) = await Task.Run(() => PullFrames(nTime, nFreq))
-                                    .ConfigureAwait(true);
+                (rows, grid, floor, ceil) = await Task.Run(PullAndComputeContrast)
+                                                 .ConfigureAwait(true);
             }
 
             if (rows <= 0)
@@ -663,7 +685,8 @@ public partial class MainWindow : Window
             }
 
             int sampleCount = rows * nFreq;
-            ApplySnapshotContrast(grid.AsSpan(0, sampleCount));
+            LastPacket.FloorDb = floor;
+            LastPacket.CeilDb = ceil;
             LastPacket.Colormap = ParseColormap(vm.WaterfallColormap);
             LastPacket.ReplaceFrames(grid.AsSpan(0, sampleCount), rows, nFreq);
             LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
@@ -672,6 +695,35 @@ public partial class MainWindow : Window
         {
             System.Threading.Interlocked.Exchange(ref _snapshotInFlight, 0);
         }
+    }
+
+    // Compute robust display levels from a spectrogram for high contrast.
+    // This is O(n log n) for sorting so it should be called off the UI thread.
+    private static (double floor, double ceil) ComputeContrastLevels(ReadOnlySpan<float> values)
+    {
+        if (values.Length < 16)
+            return (-100.0, 0.0);
+
+        var vals = new float[values.Length];
+        int valid = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            float v = values[i];
+            if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+            vals[valid++] = v;
+        }
+        if (valid < 16)
+            return (-100.0, 0.0);
+
+        Array.Sort(vals, 0, valid);
+        float p05 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.05), 0, valid - 1)];
+        float p995 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.995), 0, valid - 1)];
+
+        double floor = p05 - 2.0;
+        double ceil = p995 + 2.0;
+        if (ceil - floor < 24.0) ceil = floor + 24.0;
+
+        return (floor, ceil);
     }
 
     // Fallback: replays the rolling history into the frozen last-packet
@@ -738,32 +790,6 @@ public partial class MainWindow : Window
         Array.Sort(vals, 0, p);
         float p05 = vals[(int)Math.Clamp(Math.Round((p - 1) * 0.05), 0, p - 1)];
         float p995 = vals[(int)Math.Clamp(Math.Round((p - 1) * 0.995), 0, p - 1)];
-
-        double floor = p05 - 2.0;
-        double ceil = p995 + 2.0;
-        if (ceil - floor < 24.0) ceil = floor + 24.0;
-
-        LastPacket.FloorDb = floor;
-        LastPacket.CeilDb = ceil;
-    }
-
-    private void ApplySnapshotContrast(ReadOnlySpan<float> values)
-    {
-        if (values.Length < 16) return;
-
-        var vals = new float[values.Length];
-        int valid = 0;
-        for (int i = 0; i < values.Length; i++)
-        {
-            float v = values[i];
-            if (float.IsNaN(v) || float.IsInfinity(v)) continue;
-            vals[valid++] = v;
-        }
-        if (valid < 16) return;
-
-        Array.Sort(vals, 0, valid);
-        float p05 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.05), 0, valid - 1)];
-        float p995 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.995), 0, valid - 1)];
 
         double floor = p05 - 2.0;
         double ceil = p995 + 2.0;

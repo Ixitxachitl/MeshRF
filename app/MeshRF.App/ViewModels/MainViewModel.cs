@@ -1230,7 +1230,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         WaterfallAutoLevels = _settings.WaterfallAutoLevels;
         WaterfallFloorDb = _settings.WaterfallFloorDb;
         WaterfallCeilDb = _settings.WaterfallCeilDb;
-        WaterfallRowsPerSecond = Math.Clamp(_settings.WaterfallRowsPerSecond, 5.0, 60.0);
+        WaterfallRowsPerSecond = Math.Clamp(_settings.WaterfallRowsPerSecond, 5.0, 240.0);
 
         // Local node identity (for recognising direct messages).
         _myNodeNum = _settings.UserNodeNum;

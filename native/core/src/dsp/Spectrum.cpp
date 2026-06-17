@@ -21,6 +21,11 @@ Spectrum::Spectrum(std::size_t fft_size)
     latest_db_.assign(n_, -120.0f);
     held_db_.assign(n_, -200.0f);
     scratch_.assign(n_, sample_t{0.0f, 0.0f});
+
+    // Initialize the frame ring with kFrameRingCapacity frames.
+    frame_ring_.resize(kFrameRingCapacity);
+    for (auto& frame : frame_ring_)
+        frame.assign(n_, -200.0f);
 }
 
 void Spectrum::push(std::span<const sample_t> samples) {
@@ -58,9 +63,15 @@ void Spectrum::compute_frame_locked() {
             : -200.0f;
         latest_db_[shifted] = db;
         held_db_[shifted] = held_valid_ ? std::max(held_db_[shifted], db) : db;
+
+        // Store this frame in the rolling frame ring (not max-held).
+        frame_ring_[frame_ring_pos_][shifted] = db;
     }
     held_valid_ = true;
     ++frames_;
+
+    // Advance frame ring position for the next frame.
+    frame_ring_pos_ = (frame_ring_pos_ + 1) % kFrameRingCapacity;
 }
 
 bool Spectrum::latest(std::span<float> out_dbfs) const {
@@ -75,6 +86,47 @@ bool Spectrum::latest(std::span<float> out_dbfs) const {
         std::copy_n(latest_db_.begin(), n_, out_dbfs.begin());
     }
     return true;
+}
+
+std::uint32_t Spectrum::pull_frames(
+    std::uint64_t after_frame_index,
+    std::uint32_t max_count,
+    std::span<float> out_frames) const {
+    std::lock_guard<std::mutex> lk(mu_);
+
+    if (after_frame_index >= frames_ || max_count == 0)
+        return 0;
+
+    // Requested frames are those with index > after_frame_index, up to max_count.
+    std::uint64_t first_idx = after_frame_index + 1;
+    std::uint32_t avail = static_cast<std::uint32_t>(
+        std::min(static_cast<std::uint64_t>(max_count),
+                 frames_ - first_idx));
+
+    // Check if output buffer is large enough.
+    if (out_frames.size() < avail * n_)
+        return 0;
+
+    // Extract frames from the ring. The ring holds the most recent
+    // kFrameRingCapacity frames. Frame index F is stored at position
+    // (F - (frames_ - kFrameRingCapacity)) % kFrameRingCapacity, provided
+    // F >= frames_ - kFrameRingCapacity.
+    for (std::uint32_t i = 0; i < avail; ++i) {
+        std::uint64_t frame_idx = first_idx + i;
+        // Compute position in the frame ring.
+        std::uint64_t age = frames_ - frame_idx;  // how old is this frame?
+        if (age >= kFrameRingCapacity) {
+            // Frame has cycled out of the ring; fill with silence.
+            std::fill_n(out_frames.begin() + i * n_, n_, -200.0f);
+        } else {
+            // Position of this frame in frame_ring.
+            std::size_t pos = (frame_ring_pos_ + kFrameRingCapacity - age) %
+                              kFrameRingCapacity;
+            std::copy_n(frame_ring_[pos].begin(), n_,
+                        out_frames.begin() + i * n_);
+        }
+    }
+    return avail;
 }
 
 std::uint64_t Spectrum::frame_count() const noexcept {

@@ -486,6 +486,15 @@ std::uint64_t Core::spectrum_frame_count() const noexcept {
     return impl_->spectrum->frame_count();
 }
 
+std::uint32_t Core::pull_spectrum_frames(
+    std::uint64_t after_frame_idx,
+    std::uint32_t max_count,
+    std::span<float> out_frames) const {
+    if (!impl_->spectrum || max_count == 0u)
+        return 0u;
+    return impl_->spectrum->pull_frames(after_frame_idx, max_count, out_frames);
+}
+
 std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
                                             std::uint32_t n_time,
                                             std::uint32_t n_freq) const {

@@ -222,6 +222,156 @@ public sealed class WaterfallView : Image
             Render();
     }
 
+    /// <summary>
+    /// Batch-push multiple frames efficiently. Performs a single bitmap lock/unlock
+    /// and shifts rows once by the batch size, avoiding per-frame overhead.
+    /// </summary>
+    public void PushBatch(IReadOnlyList<float[]> frames)
+    {
+        if (frames.Count == 0) return;
+        if (_bmp is null) EnsureBitmap();
+
+        int bins = frames[0].Length;
+        if (bins == 0) return;
+
+        if (bins != _binCount)
+        {
+            _binCount = bins;
+            _ring = new float[(long)_capacity * _binCount];
+            _head = 0;
+            _filled = 0;
+            _x0Map = null;
+            _x1Map = null;
+            _xMapW = 0;
+            _xMapBins = 0;
+        }
+        if (_ring is null || _capacity == 0) return;
+
+        // Copy all frames into the ring buffer.
+        for (int i = 0; i < frames.Count; i++)
+        {
+            var frame = frames[i];
+            if (frame.Length != bins) continue;
+
+            int dstRow = _head;
+            long offset = (long)dstRow * _binCount;
+            if (offset > int.MaxValue) continue;
+            frame.AsSpan().CopyTo(_ring.AsSpan((int)offset, _binCount));
+            _head = (_head + 1) % _capacity;
+            if (_filled < _capacity) _filled++;
+        }
+
+        // Auto-levels on last frame only.
+        _suppressRender = true;
+        try
+        {
+            if (AutoLevels)
+            {
+                _autoFrameCounter += frames.Count;
+                if (_autoFrameCounter >= 10)
+                {
+                    _autoFrameCounter = 0;
+                    UpdateAutoLevels(frames[frames.Count - 1]);
+                }
+            }
+        }
+        finally
+        {
+            _suppressRender = false;
+        }
+
+        // Batch-render all new rows in one lock cycle.
+        if (!TryRenderBatch(frames))
+            Render();
+    }
+
+    private unsafe bool TryRenderBatch(IReadOnlyList<float[]> frames)
+    {
+        if (_bmp is null || TimeHorizontal) return false;
+        if (_ring is null || _binCount == 0) return false;
+
+        int w = _w;
+        int h = _h;
+        int n = _binCount;
+        int batchSize = frames.Count;
+        if (w <= 0 || h <= 0 || n <= 0 || batchSize <= 0) return false;
+
+        EnsureLut();
+        EnsureColumnMap(w, n);
+
+        var floor = FloorDb;
+        var ceil = CeilDb;
+        if (ceil <= floor) ceil = floor + 1.0;
+        var invRange = 255f / (float)(ceil - floor);
+        var floorF = (float)floor;
+
+        _bmp.Lock();
+        try
+        {
+            int stride = _bmp.BackBufferStride;
+            byte* back = (byte*)_bmp.BackBuffer.ToPointer();
+
+            // Shift existing rows down by batchSize (not 1).
+            int rowsToShift = Math.Min(_filled - batchSize, h - batchSize);
+            if (rowsToShift > 0)
+            {
+                for (int y = h - 1; y >= batchSize; y--)
+                {
+                    int srcY = y - batchSize;
+                    if (srcY < 0 || srcY >= rowsToShift + batchSize) continue;
+                    byte* src = back + srcY * stride;
+                    byte* dst = back + y * stride;
+                    Buffer.MemoryCopy(src, dst, stride, stride);
+                }
+            }
+
+            // Render all new rows at once (newest = row 0).
+            fixed (uint* lut = _lut)
+            {
+                var x0 = _x0Map!;
+                var x1 = _x1Map!;
+                for (int fi = 0; fi < batchSize && fi < h; fi++)
+                {
+                    // frames[batchSize-1] is newest, goes to row 0.
+                    var frame = frames[batchSize - 1 - fi];
+                    if (frame.Length != n) continue;
+                    uint* dstRowPtr = (uint*)(back + fi * stride);
+                    for (int x = 0; x < w; x++)
+                    {
+                        float v = float.NegativeInfinity;
+                        for (int sx = x0[x]; sx < x1[x]; sx++)
+                        {
+                            float candidate = frame[sx];
+                            if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) && candidate > v)
+                                v = candidate;
+                        }
+                        if (float.IsNegativeInfinity(v)) v = floorF;
+                        int idx = (int)((v - floorF) * invRange);
+                        if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                        dstRowPtr[x] = lut[idx];
+                    }
+                }
+            }
+
+            // Fill any remaining unfilled rows with black.
+            if (_filled < h)
+            {
+                for (int y = _filled; y < h; y++)
+                {
+                    uint* dst = (uint*)(back + y * stride);
+                    for (int x = 0; x < w; x++) dst[x] = 0xFF000000u;
+                }
+            }
+
+            _bmp.AddDirtyRect(new Int32Rect(0, 0, w, h));
+            return true;
+        }
+        finally
+        {
+            _bmp.Unlock();
+        }
+    }
+
     private void EnsureColumnMap(int width, int bins)
     {
         if (_x0Map is not null && _x1Map is not null && _xMapW == width && _xMapBins == bins)
