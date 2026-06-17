@@ -59,8 +59,6 @@ private:
 
     mutable std::mutex mu_;
     std::vector<float> latest_db_;    // length n_, FFT-shifted
-    mutable std::vector<float> held_db_; // max-held rows since previous pull
-    mutable bool held_valid_{false};
     std::uint64_t frames_{0};
     std::vector<sample_t> scratch_;   // FFT working buffer
 

@@ -19,7 +19,6 @@ Spectrum::Spectrum(std::size_t fft_size)
     }
     ring_.assign(n_, sample_t{0.0f, 0.0f});
     latest_db_.assign(n_, -120.0f);
-    held_db_.assign(n_, -200.0f);
     scratch_.assign(n_, sample_t{0.0f, 0.0f});
 
     // Initialize the frame ring with kFrameRingCapacity frames.
@@ -62,12 +61,10 @@ void Spectrum::compute_frame_locked() {
             ? 10.0f * std::log10(power)
             : -200.0f;
         latest_db_[shifted] = db;
-        held_db_[shifted] = held_valid_ ? std::max(held_db_[shifted], db) : db;
 
-        // Store this frame in the rolling frame ring (not max-held).
+        // Store this frame in the rolling frame ring.
         frame_ring_[frame_ring_pos_][shifted] = db;
     }
-    held_valid_ = true;
     ++frames_;
 
     // Advance frame ring position for the next frame.
@@ -78,13 +75,10 @@ bool Spectrum::latest(std::span<float> out_dbfs) const {
     if (out_dbfs.size() < n_) return false;
     std::lock_guard<std::mutex> lk(mu_);
     if (frames_ == 0) return false;
-    if (held_valid_) {
-        std::copy_n(held_db_.begin(), n_, out_dbfs.begin());
-        std::fill(held_db_.begin(), held_db_.end(), -200.0f);
-        held_valid_ = false;
-    } else {
-        std::copy_n(latest_db_.begin(), n_, out_dbfs.begin());
-    }
+    // Always return the latest instantaneous frame. The UI-side EMA smoothing
+    // provides visual stability; max-hold here caused bouncing when UI frame
+    // rate didn't align with native FFT frame rate.
+    std::copy_n(latest_db_.begin(), n_, out_dbfs.begin());
     return true;
 }
 
