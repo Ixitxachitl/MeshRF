@@ -40,12 +40,19 @@ public sealed class WaterfallView : Image
     public static readonly DependencyProperty SmoothPixelsProperty =
         DependencyProperty.Register(nameof(SmoothPixels), typeof(bool), typeof(WaterfallView),
             new PropertyMetadata(false, (d, _) => ((WaterfallView)d).OnSmoothPixelsChanged()));
+    public static readonly DependencyProperty ScaleToFitProperty =
+        DependencyProperty.Register(nameof(ScaleToFit), typeof(bool), typeof(WaterfallView),
+            new PropertyMetadata(false));
 
     public double FloorDb { get => (double)GetValue(FloorDbProperty); set => SetValue(FloorDbProperty, value); }
     public double CeilDb  { get => (double)GetValue(CeilDbProperty);  set => SetValue(CeilDbProperty, value); }
     public WaterfallColormap Colormap { get => (WaterfallColormap)GetValue(ColormapProperty); set => SetValue(ColormapProperty, value); }
     public bool AutoLevels { get => (bool)GetValue(AutoLevelsProperty); set => SetValue(AutoLevelsProperty, value); }
     public bool SmoothPixels { get => (bool)GetValue(SmoothPixelsProperty); set => SetValue(SmoothPixelsProperty, value); }
+
+    /// <summary>When true, stores all frames and scales them to fit the view.
+    /// Use for frozen snapshots where the entire packet should be visible.</summary>
+    public bool ScaleToFit { get => (bool)GetValue(ScaleToFitProperty); set => SetValue(ScaleToFitProperty, value); }
 
     /// <summary>When true, time runs along the horizontal axis (left = oldest,
     /// right = newest) and frequency along the vertical axis (bottom = low).
@@ -64,6 +71,12 @@ public sealed class WaterfallView : Image
     private int _capacity;
     private int _head;
     private int _filled;
+
+    // ScaleToFit storage: holds all frames from ReplaceFrames when ScaleToFit=true.
+    // Row-major layout: _scaleFrames[row * _scaleBinCount + bin].
+    private float[]? _scaleFrames;
+    private int _scaleFrameCount;
+    private int _scaleBinCount;
 
     private WriteableBitmap? _bmp;
     private int _w;
@@ -478,6 +491,7 @@ public sealed class WaterfallView : Image
     /// <summary>
     /// Replaces the ring-buffer contents with a chronological snapshot
     /// (oldest -> newest) and renders once. Intended for frozen packet views.
+    /// When ScaleToFit is true, stores all frames and scales to fit during render.
     /// </summary>
     public void ReplaceFrames(IReadOnlyList<float[]> frames)
     {
@@ -491,6 +505,22 @@ public sealed class WaterfallView : Image
 
         int bins = frames[0]?.Length ?? 0;
         if (bins <= 0) return;
+
+        if (ScaleToFit)
+        {
+            // Store ALL frames for scaled rendering.
+            _scaleBinCount = bins;
+            _scaleFrameCount = frames.Count;
+            _scaleFrames = new float[frames.Count * bins];
+            for (int i = 0; i < frames.Count; i++)
+            {
+                var src = frames[i];
+                if (src is null || src.Length != bins) continue;
+                src.AsSpan().CopyTo(_scaleFrames.AsSpan(i * bins, bins));
+            }
+            Render();
+            return;
+        }
 
         if (bins != _binCount)
         {
@@ -524,6 +554,7 @@ public sealed class WaterfallView : Image
     /// Replaces the ring-buffer contents from a row-major frame grid
     /// (<paramref name="frameCount"/> rows, <paramref name="bins"/> columns).
     /// Intended for frozen packet views to avoid per-row allocations.
+    /// When ScaleToFit is true, stores all frames and scales to fit during render.
     /// </summary>
     public void ReplaceFrames(ReadOnlySpan<float> frames, int frameCount, int bins)
     {
@@ -537,6 +568,17 @@ public sealed class WaterfallView : Image
         if (required > frames.Length) return;
 
         if (_bmp is null) EnsureBitmap();
+
+        if (ScaleToFit)
+        {
+            // Store ALL frames for scaled rendering.
+            _scaleBinCount = bins;
+            _scaleFrameCount = frameCount;
+            _scaleFrames = new float[frameCount * bins];
+            frames.Slice(0, frameCount * bins).CopyTo(_scaleFrames);
+            Render();
+            return;
+        }
 
         if (bins != _binCount)
         {
@@ -639,6 +681,18 @@ public sealed class WaterfallView : Image
                 byte* back = (byte*)_bmp.BackBuffer.ToPointer();
                 int w = _w;
                 int h = _h;
+
+                // Use ScaleToFit storage if available, otherwise ring buffer.
+                if (ScaleToFit && _scaleFrames is not null && _scaleFrameCount > 0 && _scaleBinCount > 0)
+                {
+                    if (TimeHorizontal)
+                        RenderScaledTimeHorizontal(back, stride, w, h, floorF, invRange);
+                    else
+                        RenderScaledTimeVertical(back, stride, w, h, floorF, invRange);
+                    _bmp.AddDirtyRect(new Int32Rect(0, 0, _w, _h));
+                    return;
+                }
+
                 int n = _binCount;
 
                 if (_ring is null || n == 0)
@@ -773,6 +827,144 @@ public sealed class WaterfallView : Image
                     int idx = (int)((v - floorF) * invRange);
                     if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
                     ((uint*)(back + y * stride))[x] = lut[idx];
+                }
+            }
+        }
+    }
+
+    // ScaleToFit render with time on horizontal axis. Maps all _scaleFrameCount
+    // frames to fit the bitmap width, scaling frequency bins to height.
+    private unsafe void RenderScaledTimeHorizontal(
+        byte* back, int stride, int w, int h, float floorF, float invRange)
+    {
+        int numFrames = _scaleFrameCount;
+        int n = _scaleBinCount;
+        if (numFrames <= 0 || n <= 0 || _scaleFrames is null)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                uint* blank = (uint*)(back + y * stride);
+                for (int x = 0; x < w; x++) blank[x] = 0xFF000000u;
+            }
+            return;
+        }
+
+        // Precompute frequency bin for each output row (top = high freq).
+        Span<int> myStack = stackalloc int[Math.Min(h, 4096)];
+        int[]? heap = h > myStack.Length ? new int[h] : null;
+        Span<int> my = heap ?? myStack;
+        for (int y = 0; y < h; y++)
+        {
+            int sy = (int)((long)(h - 1 - y) * n / h);
+            if (sy < 0) sy = 0; else if (sy >= n) sy = n - 1;
+            my[y] = sy;
+        }
+
+        // Precompute time range for each output column (left = oldest, right = newest).
+        Span<int> t0Stack = stackalloc int[Math.Min(w, 4096)];
+        Span<int> t1Stack = stackalloc int[Math.Min(w, 4096)];
+        int[]? t0Heap = w > t0Stack.Length ? new int[w] : null;
+        int[]? t1Heap = w > t1Stack.Length ? new int[w] : null;
+        Span<int> t0 = t0Heap ?? t0Stack;
+        Span<int> t1 = t1Heap ?? t1Stack;
+        for (int x = 0; x < w; x++)
+        {
+            int start = (int)((long)x * numFrames / w);
+            int end = (int)(((long)(x + 1) * numFrames + w - 1) / w);
+            if (start < 0) start = 0; else if (start >= numFrames) start = numFrames - 1;
+            if (end <= start) end = start + 1;
+            if (end > numFrames) end = numFrames;
+            t0[x] = start;
+            t1[x] = end;
+        }
+
+        fixed (uint* lut = _lut)
+        fixed (float* frames = _scaleFrames)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int start = t0[x];
+                int end = t1[x];
+                for (int y = 0; y < h; y++)
+                {
+                    float v = float.NegativeInfinity;
+                    int bin = my[y];
+                    for (int t = start; t < end; t++)
+                    {
+                        float candidate = frames[t * n + bin];
+                        if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) &&
+                            candidate > v)
+                            v = candidate;
+                    }
+                    if (float.IsNegativeInfinity(v)) v = floorF;
+                    int idx = (int)((v - floorF) * invRange);
+                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                    ((uint*)(back + y * stride))[x] = lut[idx];
+                }
+            }
+        }
+    }
+
+    // ScaleToFit render with time on vertical axis. Maps all _scaleFrameCount
+    // frames to fit the bitmap height, scaling frequency bins to width.
+    private unsafe void RenderScaledTimeVertical(
+        byte* back, int stride, int w, int h, float floorF, float invRange)
+    {
+        int numFrames = _scaleFrameCount;
+        int n = _scaleBinCount;
+        if (numFrames <= 0 || n <= 0 || _scaleFrames is null)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                uint* blank = (uint*)(back + y * stride);
+                for (int x = 0; x < w; x++) blank[x] = 0xFF000000u;
+            }
+            return;
+        }
+
+        // Precompute column to bin mapping.
+        Span<int> x0Stack = stackalloc int[Math.Min(w, 4096)];
+        Span<int> x1Stack = stackalloc int[Math.Min(w, 4096)];
+        int[]? x0Heap = w > x0Stack.Length ? new int[w] : null;
+        int[]? x1Heap = w > x1Stack.Length ? new int[w] : null;
+        Span<int> x0 = x0Heap ?? x0Stack;
+        Span<int> x1 = x1Heap ?? x1Stack;
+        for (int x = 0; x < w; x++)
+        {
+            int start = (int)((long)x * n / w);
+            int end = (int)(((long)(x + 1) * n + w - 1) / w);
+            if (start < 0) start = 0; else if (start >= n) start = n - 1;
+            if (end <= start) end = start + 1;
+            if (end > n) end = n;
+            x0[x] = start;
+            x1[x] = end;
+        }
+
+        fixed (uint* lut = _lut)
+        fixed (float* frames = _scaleFrames)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                uint* dstRow = (uint*)(back + y * stride);
+
+                // Map row to frame index (top = newest).
+                int frame = (int)((long)(h - 1 - y) * numFrames / h);
+                if (frame < 0) frame = 0; else if (frame >= numFrames) frame = numFrames - 1;
+                float* src = frames + frame * n;
+
+                for (int x = 0; x < w; x++)
+                {
+                    float v = float.NegativeInfinity;
+                    for (int sx = x0[x]; sx < x1[x]; sx++)
+                    {
+                        float candidate = src[sx];
+                        if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) && candidate > v)
+                            v = candidate;
+                    }
+                    if (float.IsNegativeInfinity(v)) v = floorF;
+                    int idx = (int)((v - floorF) * invRange);
+                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                    dstRow[x] = lut[idx];
                 }
             }
         }

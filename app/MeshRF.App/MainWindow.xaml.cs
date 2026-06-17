@@ -463,6 +463,8 @@ public partial class MainWindow : Window
     // been received to fill one row at WaterfallRowsPerSecond. If no new native
     // frames have arrived since the last call (delta == 0), nothing is pushed
     // so the waterfall stays still until data actually arrives.
+    private const int NativeFrameRingCapacity = 256; // Must match kFrameRingCapacity in C++.
+
     private void AdvanceWaterfall(
         MainViewModel vm, ReadOnlySpan<float> spectrum, uint sampleRate, int bins)
     {
@@ -477,6 +479,16 @@ public partial class MainWindow : Window
 
         if (frameCount <= _wfLastFrameCount)
             return; // No new frames.
+
+        // If we're too far behind (ring buffer overflow), skip ahead to avoid
+        // pulling silent/stale frames. Leave a margin to avoid boundary issues.
+        ulong behind = frameCount - _wfLastFrameCount;
+        if (behind > (ulong)(NativeFrameRingCapacity - MaxFramesToPull))
+        {
+            _wfLastFrameCount = frameCount - (ulong)(NativeFrameRingCapacity / 2);
+            _wfRowAccumValid = false;
+            _wfAccumFrames = 0;
+        }
 
         // Calculate the desired frames per row (time resolution).
         double rowsPerSecond = Math.Clamp(
@@ -497,10 +509,12 @@ public partial class MainWindow : Window
             _wfFrameBuffer = new float[bufferSize];
 
         int framesPulled = vm.Core.PullSpectrumFrames(_wfFrameBuffer, _wfLastFrameCount, MaxFramesToPull);
-        _wfLastFrameCount = frameCount;
 
         if (framesPulled == 0)
             return;
+
+        // Only advance by what we actually pulled (avoid gaps during stutter).
+        _wfLastFrameCount += (ulong)framesPulled;
 
         // Accumulate frames into rows, batching completed rows for a single push.
         _wfRowBatch.Clear();
@@ -631,12 +645,26 @@ public partial class MainWindow : Window
         {
             if (DataContext is not MainViewModel vm) return;
 
-            // nTime is now the MAXIMUM number of rows the native side may emit;
-            // it returns fewer when the located packet window is shorter, so the
-            // snapshot's time resolution reflects the actual captured signal
-            // rather than always being stretched to a fixed height.
-            const int nTime = 1536;
+            // Compute max rows based on LoRa parameters. Slow modes (high SF,
+            // low BW) need many more STFT frames to capture the full packet.
+            // STFT: 512-point FFT with 128-sample hop.
+            // Max packet airtime ≈ (preamble + header + max_payload) symbols.
+            // At modem rate = BW * 2 oversampling, symbol = 2^SF * 2 samples.
+            const int kFft = 512;
+            const int kHop = 128;
             const int nFreq = 256;
+
+            int sf = Math.Clamp(vm.OverrideSf, (byte)7, (byte)12);
+            double bwHz = Math.Max(7_800.0, vm.OverrideBwKhz * 1000.0);
+            double modemRate = bwHz * 2.0; // 2x oversampling
+            double symbolSamples = (1 << sf) * 2.0; // symbol at modem rate
+
+            // Estimate max packet: 16 preamble + 4.25 sync + 8 header + 255 payload symbols.
+            // For SF12/125k, 255-byte packet is ~280 symbols ≈ 9 seconds.
+            double maxSymbols = 16.0 + 4.25 + 8.0 + 280.0;
+            double maxSamples = maxSymbols * symbolSamples;
+            int nTime = Math.Max(2048, (int)Math.Ceiling((maxSamples - kFft) / kHop) + 1);
+            nTime = Math.Min(nTime, 16384); // Cap at 16K to avoid huge allocations
 
             // Pull spectrogram and compute contrast off the UI thread.
             (int rows, float[] grid, double floor, double ceil) PullAndComputeContrast()

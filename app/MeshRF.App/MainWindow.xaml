@@ -1097,6 +1097,7 @@
                                                  AutoLevels="True"
                                                  SmoothPixels="False"
                                                  TimeHorizontal="True"
+                                                 ScaleToFit="True"
                                                  Margin="2" />
                         </DockPanel>
                     </Border>

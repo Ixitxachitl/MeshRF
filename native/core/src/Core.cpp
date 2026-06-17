@@ -141,11 +141,11 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
     impl_->spectrum = std::make_unique<dsp::Spectrum>(kSpectrumFftSize);
     impl_->last_drops_reported = 0;
     // Allocate enough modem-rate IQ history for full-frame packet snapshots.
-    // Long SF11 frames can run multiple seconds, and the UI only commits the
-    // snapshot after CRC OK, so a short ring can lose the preamble before the
-    // snapshot is requested.
+    // Long SF12 frames can run ~10 seconds for max-length packets, and the UI
+    // only commits the snapshot after CRC OK, so a short ring can lose the
+    // preamble before the snapshot is requested.
     {
-        constexpr std::size_t kPacketHistorySeconds = 6u;
+        constexpr std::size_t kPacketHistorySeconds = 12u;
         std::lock_guard<std::mutex> ring_init_lk(impl_->iq_mu);
         impl_->iq_ring.assign(static_cast<std::size_t>(target) * kPacketHistorySeconds,
                               std::complex<float>{0.0f, 0.0f});
@@ -572,15 +572,19 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
             std::min<std::uint64_t>(packet_end - history_begin, filled));
         const std::size_t exact_len = exact_end > exact_start ? exact_end - exact_start : window;
         // Keep the full packet visible start-to-finish instead of clipping to
-        // the decoded interior. Add generous pre-roll (preamble + sync) and a
-        // little post-roll so the burst clearly tails out.
-        const std::size_t lead_syms = static_cast<std::size_t>(preamble) + 4u;
-        const std::size_t lead_margin = std::max<std::size_t>(
-            sym_samples,
-            std::min<std::size_t>(filled / 3u, lead_syms * sym_samples));
-        const std::size_t tail_margin = std::max<std::size_t>(
-            sym_samples / 2u,
-            std::min<std::size_t>(filled / 8u, 2u * sym_samples));
+        // the decoded interior. Add generous pre-roll (preamble + sync) and
+        // post-roll (the modem reports end_sample_index when decoding finishes,
+        // but the actual RF transmission continues for several more symbols:
+        // CRC, padding, and tail).
+        const std::size_t lead_syms = static_cast<std::size_t>(preamble) + 7u;
+        const std::size_t lead_margin = std::min<std::size_t>(
+            filled / 2u, lead_syms * sym_samples);
+        // The modem's end_sample_index is where payload decoding finished, but
+        // the actual packet continues for CRC (2-4 symbols) plus tail ramp-down.
+        // Use 4 symbols of post-roll to ensure the full transmission is visible.
+        const std::size_t tail_syms = 5u;
+        const std::size_t tail_margin = std::min<std::size_t>(
+            filled / 2u, tail_syms * sym_samples);
         window = std::min<std::size_t>(filled, exact_len + lead_margin + tail_margin);
         if (window < kFft) window = kFft;
         off0 = (exact_start > lead_margin) ? (exact_start - lead_margin) : 0u;
