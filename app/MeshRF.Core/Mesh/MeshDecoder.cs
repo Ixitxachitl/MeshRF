@@ -54,6 +54,9 @@ public sealed class MeshDecodeResult
     /// <summary>Parsed NeighborInfo (NEIGHBORINFO_APP); null otherwise.</summary>
     public MeshNeighborInfo? NeighborInfo { get; init; }
 
+    /// <summary>Parsed StoreForward (STORE_FORWARD_APP); null otherwise.</summary>
+    public MeshStoreForward? StoreForward { get; init; }
+
     /// <summary>Raw decrypted application payload (the Data.payload bytes).</summary>
     public byte[] AppPayload { get; init; } = Array.Empty<byte>();
 }
@@ -162,6 +165,62 @@ public sealed class MeshNeighborInfo
     public uint BroadcastIntervalSecs { get; init; }
     /// <summary>Neighbor list (field 4, repeated sub-message).</summary>
     public IReadOnlyList<MeshNeighborEntry> Neighbors { get; init; } = Array.Empty<MeshNeighborEntry>();
+}
+
+/// <summary>Store &amp; Forward request/response type (field 1 of StoreAndForward).</summary>
+public enum StoreForwardType
+{
+    Unset = 0,
+    RouterError = 1,
+    RouterHeartbeat = 2,
+    RouterPing = 3,
+    RouterPong = 4,
+    RouterBusy = 5,
+    RouterHistory = 6,
+    RouterStats = 7,
+    RouterTextDirect = 8,
+    RouterTextBroadcast = 9,
+    ClientError = 64,
+    ClientHistory = 65,
+    ClientStats = 66,
+    ClientPing = 67,
+    ClientPong = 68,
+    ClientAbort = 106,
+}
+
+/// <summary>Store &amp; Forward statistics (field 2 sub-message).</summary>
+public sealed class StoreForwardStats
+{
+    public uint MessagesTotal { get; init; }
+    public uint MessagesSaved { get; init; }
+    public uint MessagesMax { get; init; }
+    public uint UpTimeSeconds { get; init; }
+    public uint Requests { get; init; }
+    public uint RequestsHistory { get; init; }
+    public bool HeartbeatEnabled { get; init; }
+    public uint ReturnMax { get; init; }
+    public uint ReturnWindowMinutes { get; init; }
+}
+
+/// <summary>Store &amp; Forward heartbeat (field 4 sub-message).</summary>
+public sealed class StoreForwardHeartbeat
+{
+    public uint PeriodSeconds { get; init; }
+    public bool IsSecondary { get; init; }
+}
+
+/// <summary>Parsed StoreAndForward (STORE_FORWARD_APP).</summary>
+public sealed class MeshStoreForward
+{
+    public StoreForwardType Type { get; init; }
+    public StoreForwardStats? Stats { get; init; }
+    public StoreForwardHeartbeat? Heartbeat { get; init; }
+    /// <summary>History message count (field 3.1) when Type is RouterHistory.</summary>
+    public uint? HistoryMessages { get; init; }
+    /// <summary>History window in minutes (field 3.2).</summary>
+    public uint? HistoryWindow { get; init; }
+    /// <summary>Text payload for RouterTextDirect/RouterTextBroadcast.</summary>
+    public string? Text { get; init; }
 }
 
 /// <summary>
@@ -343,6 +402,7 @@ public static class MeshDecoder
         MeshTelemetry? telem = null;
         MeshRouteDiscovery? route = null;
         MeshNeighborInfo? neighborInfo = null;
+        MeshStoreForward? storeForward = null;
         int routingError = -1;
 
         switch (port)
@@ -371,6 +431,9 @@ public static class MeshDecoder
             case PortNum.NeighborInfo:
                 neighborInfo = ParseNeighborInfo(payload);
                 break;
+            case PortNum.StoreForward:
+                storeForward = ParseStoreForward(payload);
+                break;
         }
 
         return new MeshDecodeResult
@@ -385,6 +448,7 @@ public static class MeshDecoder
             Telemetry = telem,
             RouteDiscovery = route,
             NeighborInfo = neighborInfo,
+            StoreForward = storeForward,
             WantResponse = wantResponse,
             RequestId = requestId,
             ReplyId = replyId,
@@ -711,6 +775,125 @@ public static class MeshDecoder
             LastSentById = lastSentById,
             BroadcastIntervalSecs = broadcastInterval,
             Neighbors = neighbors,
+        };
+    }
+
+    private static MeshStoreForward ParseStoreForward(byte[] data)
+    {
+        var rr = StoreForwardType.Unset;
+        StoreForwardStats? stats = null;
+        StoreForwardHeartbeat? heartbeat = null;
+        uint? historyMessages = null, historyWindow = null;
+        string? text = null;
+
+        var rdr = new ProtoReader(data);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            switch (field)
+            {
+                case 1 when wt == ProtoReader.WireType.Varint:
+                    rr = (StoreForwardType)rdr.ReadVarint();
+                    break;
+                case 2 when wt == ProtoReader.WireType.Len:
+                    stats = ParseStoreForwardStats(rdr.ReadLengthDelimited().ToArray());
+                    break;
+                case 3 when wt == ProtoReader.WireType.Len:
+                    // History sub-message
+                    var histSub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
+                    while (histSub.TryReadTag(out int hf, out var hwt))
+                    {
+                        switch (hf)
+                        {
+                            case 1 when hwt == ProtoReader.WireType.Varint:
+                                historyMessages = (uint)histSub.ReadVarint(); break;
+                            case 2 when hwt == ProtoReader.WireType.Varint:
+                                historyWindow = (uint)histSub.ReadVarint(); break;
+                            default: histSub.SkipField(hwt); break;
+                        }
+                    }
+                    break;
+                case 4 when wt == ProtoReader.WireType.Len:
+                    heartbeat = ParseStoreForwardHeartbeat(rdr.ReadLengthDelimited().ToArray());
+                    break;
+                case 5 when wt == ProtoReader.WireType.Len:
+                    text = Encoding.UTF8.GetString(rdr.ReadLengthDelimited().ToArray());
+                    break;
+                default:
+                    rdr.SkipField(wt);
+                    break;
+            }
+        }
+
+        return new MeshStoreForward
+        {
+            Type = rr,
+            Stats = stats,
+            Heartbeat = heartbeat,
+            HistoryMessages = historyMessages,
+            HistoryWindow = historyWindow,
+            Text = text,
+        };
+    }
+
+    private static StoreForwardStats ParseStoreForwardStats(byte[] data)
+    {
+        uint messagesTotal = 0, messagesSaved = 0, messagesMax = 0;
+        uint upTime = 0, requests = 0, requestsHistory = 0;
+        bool heartbeatEnabled = false;
+        uint returnMax = 0, returnWindow = 0;
+
+        var rdr = new ProtoReader(data);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            switch (field)
+            {
+                case 1 when wt == ProtoReader.WireType.Varint: messagesTotal = (uint)rdr.ReadVarint(); break;
+                case 2 when wt == ProtoReader.WireType.Varint: messagesSaved = (uint)rdr.ReadVarint(); break;
+                case 3 when wt == ProtoReader.WireType.Varint: messagesMax = (uint)rdr.ReadVarint(); break;
+                case 4 when wt == ProtoReader.WireType.Varint: upTime = (uint)rdr.ReadVarint(); break;
+                case 5 when wt == ProtoReader.WireType.Varint: requests = (uint)rdr.ReadVarint(); break;
+                case 6 when wt == ProtoReader.WireType.Varint: requestsHistory = (uint)rdr.ReadVarint(); break;
+                case 7 when wt == ProtoReader.WireType.Varint: heartbeatEnabled = rdr.ReadVarint() != 0; break;
+                case 8 when wt == ProtoReader.WireType.Varint: returnMax = (uint)rdr.ReadVarint(); break;
+                case 9 when wt == ProtoReader.WireType.Varint: returnWindow = (uint)rdr.ReadVarint(); break;
+                default: rdr.SkipField(wt); break;
+            }
+        }
+
+        return new StoreForwardStats
+        {
+            MessagesTotal = messagesTotal,
+            MessagesSaved = messagesSaved,
+            MessagesMax = messagesMax,
+            UpTimeSeconds = upTime,
+            Requests = requests,
+            RequestsHistory = requestsHistory,
+            HeartbeatEnabled = heartbeatEnabled,
+            ReturnMax = returnMax,
+            ReturnWindowMinutes = returnWindow,
+        };
+    }
+
+    private static StoreForwardHeartbeat ParseStoreForwardHeartbeat(byte[] data)
+    {
+        uint period = 0;
+        bool secondary = false;
+
+        var rdr = new ProtoReader(data);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            switch (field)
+            {
+                case 1 when wt == ProtoReader.WireType.Varint: period = (uint)rdr.ReadVarint(); break;
+                case 2 when wt == ProtoReader.WireType.Varint: secondary = rdr.ReadVarint() != 0; break;
+                default: rdr.SkipField(wt); break;
+            }
+        }
+
+        return new StoreForwardHeartbeat
+        {
+            PeriodSeconds = period,
+            IsSecondary = secondary,
         };
     }
 

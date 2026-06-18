@@ -4334,6 +4334,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Log(sb.ToString());
     }
 
+    private void LogStoreForward(MeshHeader header, MeshRF.Mesh.MeshStoreForward sf)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"  storeforward {header.FromId}: {sf.Type}");
+
+        if (sf.Heartbeat is { } hb)
+        {
+            sb.Append($" — period={hb.PeriodSeconds}s");
+            if (hb.IsSecondary) sb.Append(" (secondary)");
+        }
+        if (sf.Stats is { } st)
+        {
+            var uptime = TimeSpan.FromSeconds(st.UpTimeSeconds);
+            sb.Append($" — msgs={st.MessagesSaved}/{st.MessagesMax}, req={st.Requests}, hist={st.RequestsHistory}, up={uptime:d\\.hh\\:mm\\:ss}");
+        }
+        if (sf.HistoryMessages is { } hm)
+        {
+            sb.Append($" — historyMsgs={hm}");
+            if (sf.HistoryWindow is { } hw) sb.Append($", window={hw}min");
+        }
+        if (!string.IsNullOrEmpty(sf.Text))
+        {
+            sb.Append($" — \"{sf.Text}\"");
+        }
+
+        Log(sb.ToString());
+    }
+
     // Render a traceroute RouteDiscovery as "us → hop (snr) → … → dest". SNR
     // entries are stored scaled by 4; a sentinel of -128 (unknown hop) shows "?".
     private string FormatTraceroute(uint origin, uint dest, MeshRouteDiscovery? rd)
@@ -5348,6 +5376,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     break;
                 case PortNum.NeighborInfo when result.NeighborInfo is not null:
                     HandleNeighborInfo(header, result.NeighborInfo);
+                    break;
+                case PortNum.StoreForward when result.StoreForward is not null:
+                    LogStoreForward(header, result.StoreForward);
                     break;
                 default:
                     Log($"  [{result.ChannelName}] {header.FromId} {result.Port} ({result.AppPayload.Length} B)");
