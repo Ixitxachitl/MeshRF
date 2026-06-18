@@ -85,6 +85,9 @@ public sealed class NodeRecord
     /// <summary>When true, packets from this node are ignored by the app.</summary>
     public bool Ignored { get; set; }
 
+    /// <summary>When true, this node is marked as a favorite for quick access.</summary>
+    public bool Favorite { get; set; }
+
     public DateTime LastHeard =>
         LastHeardEpoch == 0 ? DateTime.MinValue
             : DateTimeOffset.FromUnixTimeSeconds(LastHeardEpoch).LocalDateTime;

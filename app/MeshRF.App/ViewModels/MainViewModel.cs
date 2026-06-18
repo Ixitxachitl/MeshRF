@@ -2202,7 +2202,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         Channels.Clear();
-        foreach (var c in existing)
+        // Primary always first, then secondaries sorted by index
+        var sorted = existing
+            .OrderByDescending(c => c.Role == ChannelRole.Primary)
+            .ThenBy(c => c.Index);
+        foreach (var c in sorted)
             Channels.Add(new ChannelViewModel(c, OnChannelSaved,
                 IsChannelRtttlMuted(c.Index), OnChannelRtttlMuteChanged));
         SyncPrimaryChannelName();
@@ -2258,6 +2262,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             node.Ignored = ignored;
             _nodeStore.SetIgnored(node.NodeNum, ignored);
+            MarkNodeDirty(node.NodeNum);
+        }
+        if (!_suspendNodeReload)
+            _nodesDirty = ApplyDirtyNodeUpdates();
+    }
+
+    public void SetNodesFavorite(IEnumerable<NodeRecord> nodes, bool favorite)
+    {
+        foreach (var node in nodes)
+        {
+            node.Favorite = favorite;
+            _nodeStore.SetFavorite(node.NodeNum, favorite);
             MarkNodeDirty(node.NodeNum);
         }
         if (!_suspendNodeReload)
@@ -2353,9 +2369,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void AddChannel()
     {
         var taken = Channels.Select(c => c.Config.Index).ToHashSet();
-        int idx = -1;
-        for (int i = 1; i < 8; i++) if (!taken.Contains(i)) { idx = i; break; }
-        if (idx < 0) return; // 8-channel cap matches firmware
+        int idx = 1;
+        while (taken.Contains(idx)) idx++;
         var cfg = new ChannelConfig
         {
             Index = idx,
@@ -2378,6 +2393,55 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _channelStore.Delete(ch.Config.Index);
         ReloadChannels();
         LoadChatHistory();
+    }
+
+    [RelayCommand]
+    private void MoveChannelUp()
+    {
+        var ch = SelectedChannel;
+        if (ch is null) return;
+        if (ch.Config.Role == ChannelRole.Primary) return; // can't move primary
+        // Get secondaries only, sorted by index
+        var secondaries = Channels
+            .Where(c => c.Config.Role != ChannelRole.Primary)
+            .OrderBy(c => c.Config.Index)
+            .ToList();
+        int pos = secondaries.FindIndex(c => c.Config.Index == ch.Config.Index);
+        if (pos <= 0) return; // already first secondary
+        var prev = secondaries[pos - 1];
+        SwapChannelIndices(ch.Config, prev.Config);
+    }
+
+    [RelayCommand]
+    private void MoveChannelDown()
+    {
+        var ch = SelectedChannel;
+        if (ch is null) return;
+        if (ch.Config.Role == ChannelRole.Primary) return; // can't move primary
+        // Get secondaries only, sorted by index
+        var secondaries = Channels
+            .Where(c => c.Config.Role != ChannelRole.Primary)
+            .OrderBy(c => c.Config.Index)
+            .ToList();
+        int pos = secondaries.FindIndex(c => c.Config.Index == ch.Config.Index);
+        if (pos < 0 || pos >= secondaries.Count - 1) return; // already last
+        var next = secondaries[pos + 1];
+        SwapChannelIndices(ch.Config, next.Config);
+    }
+
+    private void SwapChannelIndices(ChannelConfig a, ChannelConfig b)
+    {
+        int idxA = a.Index;
+        int idxB = b.Index;
+        // Delete both, then re-insert with swapped indices
+        _channelStore.Delete(idxA);
+        _channelStore.Delete(idxB);
+        a.Index = idxB;
+        b.Index = idxA;
+        _channelStore.Upsert(a);
+        _channelStore.Upsert(b);
+        ReloadChannels();
+        SelectedTab = Channels.FirstOrDefault(c => c.Config.Index == idxB);
     }
 
     /// <summary>
@@ -5309,7 +5373,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (header.NextHop != 0 && header.NextHop != myRelayByte) return;
         if (!PassesRebroadcastPolicy(header, result)) return;
 
-        byte nextHopLimit = (byte)Math.Max(0, header.HopLimit - 1);
+        bool decrement = ShouldDecrementHopLimit(header);
+        byte nextHopLimit = decrement
+            ? (byte)Math.Max(0, header.HopLimit - 1)
+            : header.HopLimit;
         var relayFrame = (byte[])frame.Clone();
         relayFrame[12] = (byte)((relayFrame[12] & 0xF8) | (nextHopLimit & 0x07));
         relayFrame[14] = 0x00;
@@ -5317,6 +5384,52 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var relayDelayMs = ComputeRelayDelayMs(header);
         ScheduleDelayedRelay(header, relayFrame, nextHopLimit, relayDelayMs);
+    }
+
+    /// <summary>
+    /// Firmware-compatible hop decrement logic: ROUTER/ROUTER_LATE/CLIENT_BASE
+    /// roles preserve hop_limit when the previous relay was a favorited router.
+    /// First hop always decrements to prevent retry issues.
+    /// </summary>
+    private bool ShouldDecrementHopLimit(MeshHeader header)
+    {
+        // First hop must always decrement to prevent retry loops
+        int hopsAway = header.HopStart >= header.HopLimit
+            ? header.HopStart - header.HopLimit
+            : 0;
+        if (hopsAway == 0)
+            return true;
+
+        // Only router roles can preserve hops
+        string role = (MyRole ?? string.Empty).Trim().ToUpperInvariant();
+        if (role is not ("ROUTER" or "ROUTERLATE" or "CLIENTBASE"))
+            return true;
+
+        // Check if the previous relay is a favorited router node
+        byte relayByte = header.RelayNode;
+        if (relayByte == 0)
+            return true;
+
+        foreach (var node in _nodeStore.All())
+        {
+            if (!node.Favorite)
+                continue;
+
+            // Check if node's low byte matches the relay byte
+            if ((node.NodeNum & 0xFF) != relayByte)
+                continue;
+
+            // Check if the node has a router role
+            string nodeRole = (node.Role ?? string.Empty).Trim().ToUpperInvariant();
+            if (nodeRole is "ROUTER" or "ROUTERLATE" or "CLIENTBASE" or
+                "ROUTER_CLIENT" or "ROUTER_LATE")  // Also accept underscore variants
+            {
+                Log($"  preserving hop_limit: relay 0x{relayByte:x2} is favorite router {node.DisplayId}");
+                return false;  // Don't decrement for favorite routers
+            }
+        }
+
+        return true;
     }
 
     private int ComputeRelayDelayMs(MeshHeader header)

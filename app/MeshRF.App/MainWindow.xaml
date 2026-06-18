@@ -917,6 +917,15 @@
                                                        FontSize="12" />
                                         </MenuItem.Icon>
                                     </MenuItem>
+                                    <MenuItem x:Name="ToggleNodeFavoriteMenuItem"
+                                              Header="Add to favorites"
+                                              Click="OnToggleNodeFavorite">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE734;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
                                     <MenuItem x:Name="CopyNodesMenuItem"
                                               Header="Copy"
                                               Click="OnCopyNodes"
@@ -939,6 +948,29 @@
                                 </ContextMenu>
                             </DataGrid.ContextMenu>
                             <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="&#xE734;" Width="Auto"
+                                                        SortMemberPath="Favorite"
+                                                        CanUserResize="False">
+                                    <DataGridTemplateColumn.HeaderStyle>
+                                        <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                                            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+                                            <Setter Property="FontSize" Value="12" />
+                                            <Setter Property="ToolTip" Value="Favorite" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                        </Style>
+                                    </DataGridTemplateColumn.HeaderStyle>
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="&#xE735;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12"
+                                                       Foreground="#FFC107"
+                                                       HorizontalAlignment="Center"
+                                                       ToolTip="Favorite"
+                                                       Visibility="{Binding Favorite, Converter={StaticResource BoolToVis}}" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTemplateColumn Header="" Width="Auto"
                                                         SortMemberPath="HasPublicKey"
                                                         CanUserResize="False">
@@ -1131,6 +1163,21 @@
                                 ToolTip="Add a new channel (random PSK)"
                                 Content="&#xE710;"
                                 FontFamily="Segoe MDL2 Assets" FontSize="11" />
+                        <Button DockPanel.Dock="Right"
+                                Width="22" Height="22"
+                                Margin="0,0,4,0"
+                                Padding="0"
+                                Command="{Binding MoveChannelDownCommand}"
+                                ToolTip="Move channel down"
+                                Content="&#xE74B;"
+                                FontFamily="Segoe MDL2 Assets" FontSize="11" />
+                        <Button DockPanel.Dock="Right"
+                                Width="22" Height="22"
+                                Padding="0"
+                                Command="{Binding MoveChannelUpCommand}"
+                                ToolTip="Move channel up"
+                                Content="&#xE74A;"
+                                FontFamily="Segoe MDL2 Assets" FontSize="11" />
                         <TextBlock Text="Channels" FontWeight="SemiBold" Margin="2,0,0,0" />
                     </DockPanel>
 
@@ -1259,7 +1306,7 @@
                                                 <TextBox Grid.Row="2" Grid.Column="1"
                                                          Margin="0,4,0,4"
                                                          FontFamily="Consolas"
-                                                         ToolTip="default | none | base64:... | hex:..."
+                                                         ToolTip="Empty = no encryption, AQ== = default key, or paste base64/hex"
                                                          Text="{Binding EditPsk, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource PskText}}" />
                                                 <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Margin="8,4,0,4">
                                                     <Button Content="Default"  Margin="2,0"

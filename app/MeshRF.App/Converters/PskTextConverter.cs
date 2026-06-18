@@ -14,26 +14,19 @@ public sealed class PskTextConverter : IValueConverter
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         if (value is not byte[] b) return string.Empty;
-        if (b.Length == 0) return "none";
-        if (b.Length == 1 && b[0] == 0x00) return "none";
-        if (b.Length == 1 && b[0] == 0x01) return "default";
-        // The expanded default key persists from older versions — normalize
-        // it back to "default" ("AQ==") for display so the user isn't shown
-        // the well-known bytes.
-        if (b.Length == MeshRF.Channels.ChannelConfig.DefaultPsk.Length &&
-            b.AsSpan().SequenceEqual(MeshRF.Channels.ChannelConfig.DefaultPsk))
-            return "default";
-        return "base64:" + System.Convert.ToBase64String(b);
+        if (b.Length == 0) return string.Empty;
+        if (b.Length == 1 && b[0] == 0x00) return string.Empty;
+        return System.Convert.ToBase64String(b);
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         var s = value as string ?? string.Empty;
         s = s.Trim();
-        if (string.IsNullOrEmpty(s) || s.Equals("default", StringComparison.OrdinalIgnoreCase))
-            return new byte[] { 0x01 };
-        if (s.Equals("none", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(s) || s.Equals("none", StringComparison.OrdinalIgnoreCase))
             return Array.Empty<byte>();
+        if (s.Equals("default", StringComparison.OrdinalIgnoreCase))
+            return new byte[] { 0x01 };
 
         // Strip optional prefixes used by the firmware CLI / mesh URLs.
         if (s.StartsWith("base64:", StringComparison.OrdinalIgnoreCase))

@@ -21,8 +21,11 @@ public partial class MainWindow
         var selected = SelectedNodes();
         CopyNodesMenuItem.IsEnabled = selected.Length > 0;
         ToggleNodeIgnoredMenuItem.IsEnabled = selected.Length > 0;
+        ToggleNodeFavoriteMenuItem.IsEnabled = selected.Length > 0;
         bool allIgnored = selected.Length > 0 && selected.All(n => n.Ignored);
         ToggleNodeIgnoredMenuItem.Header = allIgnored ? "Unignore node" : "Ignore node";
+        bool allFavorite = selected.Length > 0 && selected.All(n => n.Favorite);
+        ToggleNodeFavoriteMenuItem.Header = allFavorite ? "Remove from favorites" : "Add to favorites";
     }
 
     private void OnNodesContextMenuClosed(object sender, RoutedEventArgs e)
@@ -39,5 +42,15 @@ public partial class MainWindow
 
         bool ignore = selected.Any(n => !n.Ignored);
         vm.SetNodesIgnored(selected, ignore);
+    }
+
+    private void OnToggleNodeFavorite(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = SelectedNodes();
+        if (selected.Length == 0) return;
+
+        bool favorite = selected.Any(n => !n.Favorite);
+        vm.SetNodesFavorite(selected, favorite);
     }
 }

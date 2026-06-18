@@ -58,8 +58,8 @@ public sealed class ChannelStore : IDisposable
     public void Upsert(ChannelConfig c)
     {
         ThrowIfDisposed();
-        if (c.Index < 0 || c.Index > 7)
-            throw new ArgumentOutOfRangeException(nameof(c.Index), "channel index must be 0..7");
+        if (c.Index < 0)
+            throw new ArgumentOutOfRangeException(nameof(c.Index), "channel index must be non-negative");
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO channels (idx, name, psk, role, position_precision,

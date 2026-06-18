@@ -84,6 +84,7 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("key_mismatch", "INTEGER");
         AddColumnIfMissing("mute_rtttl", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("ignored", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private void AddColumnIfMissing(string name, string sqlType)
@@ -204,6 +205,17 @@ public sealed class NodeStore : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Persist the UI's per-node favorite flag without affecting any other fields.</summary>
+    public void SetFavorite(uint nodeNum, bool favorite)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE nodes SET favorite = $favorite WHERE node_num = $node_num";
+        cmd.Parameters.AddWithValue("$node_num", nodeNum);
+        cmd.Parameters.AddWithValue("$favorite", favorite ? 1 : 0);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>Touch last-heard / RSSI / SNR for an existing or new node.</summary>
     public void RecordSighting(uint nodeNum, float? rssiDbm = null,
                                float? snrDb = null, byte? hopsAway = null,
@@ -316,6 +328,7 @@ public sealed class NodeStore : IDisposable
             KeyMismatch           = Nullable<bool>("key_mismatch"),
             MuteRtttl             = Nullable<bool>("mute_rtttl") == true,
             Ignored               = Nullable<bool>("ignored") == true,
+            Favorite              = Nullable<bool>("favorite") == true,
         };
     }
 
