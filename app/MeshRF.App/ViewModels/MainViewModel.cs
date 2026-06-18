@@ -5312,6 +5312,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     });
                     if (positionChanged)
                         Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
+                    else
+                        Log($"  position {header.FromId}: unchanged");
                     // Android's "exchange position" can include coordinates while
                     // still setting want_response on a directed packet.
                     if (directedPositionResponseRequest)

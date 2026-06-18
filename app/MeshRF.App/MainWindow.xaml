@@ -1806,6 +1806,9 @@
                                                         <DataGridTextColumn Header="Lon"
                                                                             Width="Auto"
                                                                             Binding="{Binding Longitude, StringFormat={}{0:0.#####}}" />
+                                                        <DataGridTextColumn Header="Alt"
+                                                                            Width="Auto"
+                                                                            Binding="{Binding AltitudeM, StringFormat={}{0} m}" />
                                                     </DataGrid.Columns>
                                                 </DataGrid>
                                             </Grid>

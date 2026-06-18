@@ -14,14 +14,15 @@ namespace MeshRF.App.ViewModels;
 public sealed record TelemetryItem(string Label, string Value);
 
 /// <summary>A single historical position sample for a conversation peer.</summary>
-public sealed record LocationHistoryPoint(double Latitude, double Longitude, DateTime TimestampUtc)
+public sealed record LocationHistoryPoint(double Latitude, double Longitude, int? AltitudeM, DateTime TimestampUtc)
 {
     private const string UiDateTimeFormat = "M/d/yyyy h:mm:ss tt";
 
     public DateTime TimestampLocal => TimestampUtc.ToLocalTime();
 
     public string Display =>
-        $"{TimestampLocal.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}  {Latitude:0.#####}, {Longitude:0.#####}";
+    $"{TimestampLocal.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}  {Latitude:0.#####}, {Longitude:0.#####}"
+    + (AltitudeM is int alt ? $"  {alt} m" : string.Empty);
 }
 
 /// <summary>
@@ -222,7 +223,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
                 return;
         }
 
-        LocationHistory.Add(new LocationHistoryPoint(lat, lon, sampleTimeUtc));
+        LocationHistory.Add(new LocationHistoryPoint(lat, lon, node.AltitudeM, sampleTimeUtc));
         if (LocationHistory.Count > 500)
             LocationHistory.RemoveAt(0);
 
