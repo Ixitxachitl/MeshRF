@@ -26,6 +26,10 @@ public partial class MainWindow
         ToggleNodeIgnoredMenuItem.Header = allIgnored ? "Unignore node" : "Ignore node";
         bool allFavorite = selected.Length > 0 && selected.All(n => n.Favorite);
         ToggleNodeFavoriteMenuItem.Header = allFavorite ? "Remove from favorites" : "Add to favorites";
+
+        // Show on map only enabled when a single node with a known location is selected
+        var first = selected.FirstOrDefault();
+        ShowOnMapMenuItem.IsEnabled = first?.Latitude is not null && first?.Longitude is not null;
     }
 
     private void OnNodesContextMenuClosed(object sender, RoutedEventArgs e)

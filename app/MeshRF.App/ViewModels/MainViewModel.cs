@@ -5064,6 +5064,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CancelPendingRelay(header.From, header.PacketId);
             // Still refresh the sighting timestamp (done above), but don't echo.
             MarkNodeDirty(header.From);
+            Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
             return;
         }
 

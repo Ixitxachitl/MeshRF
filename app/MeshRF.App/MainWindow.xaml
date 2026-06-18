@@ -892,6 +892,15 @@
                                                        FontSize="12" />
                                         </MenuItem.Icon>
                                     </MenuItem>
+                                    <MenuItem x:Name="ShowOnMapMenuItem"
+                                              Header="Show on map"
+                                              Click="OnShowOnMap">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE909;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
                                     <MenuItem Header="Traceroute"
                                               Click="OnTraceroute">
                                         <MenuItem.Icon>

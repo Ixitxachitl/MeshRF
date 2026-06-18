@@ -286,6 +286,26 @@ public partial class MainWindow : Window
         await vm.ExchangeLocationAsync(node);
     }
 
+    // Context-menu "Show on map" sets the node search filter and centers/zooms
+    // the map on the selected node's location.
+    private void OnShowOnMap(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var node = NodesGrid.SelectedItems
+            .OfType<MeshRF.Nodes.NodeRecord>()
+            .FirstOrDefault();
+        if (node is null) return;
+
+        // Set the search box to the node number so it's highlighted
+        vm.NodeSearchText = node.DisplayId;
+
+        // Center the map on this node if it has a position
+        if (node.Latitude is double lat && node.Longitude is double lon)
+        {
+            Map.CenterOn(lat, lon, zoom: 14);
+        }
+    }
+
     // Context-menu "Request new keys" forgets the stored key(s) and asks the
     // selected node(s) to re-send their NodeInfo so a changed key can be trusted.
     private void OnRequestKeys(object sender, RoutedEventArgs e)

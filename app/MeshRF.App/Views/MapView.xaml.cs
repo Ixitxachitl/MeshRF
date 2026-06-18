@@ -1950,6 +1950,16 @@ public partial class MapView : UserControl
         settings.MapClusterNodes = _clusterNodes;
     }
 
+    /// <summary>Centers the map on the given location and optionally zooms.</summary>
+    public void CenterOn(double lat, double lon, int zoom = 14)
+    {
+        _centerLat = ClampLat(lat);
+        _centerLon = lon;
+        _zoom = Math.Clamp(zoom, MinZoom, MaxZoom);
+        _userMovedView = true;
+        Render();
+    }
+
     /// <summary>Center / zoom so all markers fit, or default if there are none.</summary>
     /// <summary>Fits all visible markers into the viewport. Does not special-case home.</summary>
     private bool FitToMarkers() => FitToMarkers(_vm?.GetMapMarkers());
