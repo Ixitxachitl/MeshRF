@@ -576,13 +576,13 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         // post-roll (the modem reports end_sample_index when decoding finishes,
         // but the actual RF transmission continues for several more symbols:
         // CRC, padding, and tail).
-        const std::size_t lead_syms = static_cast<std::size_t>(preamble) + 7u;
+        const std::size_t lead_syms = static_cast<std::size_t>(preamble) + 8u;
         const std::size_t lead_margin = std::min<std::size_t>(
             filled / 2u, lead_syms * sym_samples);
         // The modem's end_sample_index is where payload decoding finished, but
         // the actual packet continues for CRC (2-4 symbols) plus tail ramp-down.
         // Use 4 symbols of post-roll to ensure the full transmission is visible.
-        const std::size_t tail_syms = 5u;
+        const std::size_t tail_syms = 6u;
         const std::size_t tail_margin = std::min<std::size_t>(
             filled / 2u, tail_syms * sym_samples);
         window = std::min<std::size_t>(filled, exact_len + lead_margin + tail_margin);
