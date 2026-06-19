@@ -2381,6 +2381,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
         _channelStore.Upsert(cfg);
         ReloadChannels();
+        LoadChatHistory();
         SelectedTab = Channels.FirstOrDefault(c => c.Config.Index == idx);
     }
 
