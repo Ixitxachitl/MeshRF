@@ -884,6 +884,14 @@
                                                        FontSize="12" />
                                         </MenuItem.Icon>
                                     </MenuItem>
+                                    <MenuItem Header="Request telemetry"
+                                              Click="OnRequestTelemetry">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE9D2;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
                                     <MenuItem Header="Exchange location"
                                               Click="OnExchangeLocation">
                                         <MenuItem.Icon>

@@ -765,17 +765,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Forget the stored public key for the given node(s) and ask them
     /// to re-send their NodeInfo, so a changed (mismatched) key can be re-learned
     /// and trusted. Wired to the node list's "Request new keys" menu item.</summary>
-    public void RequestKeys(IEnumerable<MeshRF.Nodes.NodeRecord> nodes)
+    public void RequestKeys(IEnumerable<MeshRF.Nodes.NodeRecord> nodes,
+                            ChannelConfig? channel = null)
     {
         var targets = nodes?.Where(n => n is not null).ToList();
         if (targets is null || targets.Count == 0) return;
+        var requestChannel = ResolveRequestChannel(channel);
+        if (requestChannel is null) return;
 
         foreach (var n in targets)
         {
             if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             _nodeStore.ClearPublicKey(n.NodeNum);
             uint packetId = NextPacketId();
-            SendNodeInfoExchangeRequest(n.NodeNum, packetId);
+            SendNodeInfoExchangeRequest(n.NodeNum, requestChannel, packetId);
             var name = NodeDisplayName(n.NodeNum);
             Log($"  requested new keys from {name}");
             // Surface the request in the node's DM tab (and persist it) so the
@@ -799,16 +802,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Ask the given node(s) for NodeInfo using a custom request-only
     /// packet (empty NODEINFO payload + want_response), so we do not advertise
     /// our own NodeInfo in the request packet.</summary>
-    public void RequestNodeInfoOnly(IEnumerable<MeshRF.Nodes.NodeRecord> nodes)
+    public void RequestNodeInfoOnly(IEnumerable<MeshRF.Nodes.NodeRecord> nodes,
+                                    ChannelConfig? channel = null)
     {
         var targets = nodes?.Where(n => n is not null).ToList();
         if (targets is null || targets.Count == 0) return;
+        var requestChannel = ResolveRequestChannel(channel);
+        if (requestChannel is null) return;
 
         foreach (var n in targets)
         {
             if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             uint packetId = NextPacketId();
-            SendNodeInfoRequestOnly(n.NodeNum, packetId);
+            SendNodeInfoRequestOnly(n.NodeNum, requestChannel, packetId);
             var name = NodeDisplayName(n.NodeNum);
             Log($"  requested NodeInfo from {name}");
             var convo = OpenConversation(n.NodeNum, name, focus: false);
@@ -828,16 +834,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Ask the given node(s) to exchange NodeInfo with us without
     /// clearing any stored keys. This sends our NodeInfo directed at the peer
     /// with want_response set so it replies with its own NodeInfo.</summary>
-    public void ExchangeNodeInfo(IEnumerable<MeshRF.Nodes.NodeRecord> nodes)
+    public void ExchangeNodeInfo(IEnumerable<MeshRF.Nodes.NodeRecord> nodes,
+                                 ChannelConfig? channel = null)
     {
         var targets = nodes?.Where(n => n is not null).ToList();
         if (targets is null || targets.Count == 0) return;
+        var requestChannel = ResolveRequestChannel(channel);
+        if (requestChannel is null) return;
 
         foreach (var n in targets)
         {
             if (_myNodeNum != 0 && n.NodeNum == _myNodeNum) continue;
             uint packetId = NextPacketId();
-            SendNodeInfoExchangeRequest(n.NodeNum, packetId);
+            SendNodeInfoExchangeRequest(n.NodeNum, requestChannel, packetId);
             var name = NodeDisplayName(n.NodeNum);
             Log($"  exchanged NodeInfo with {name}");
             var convo = OpenConversation(n.NodeNum, name, focus: false);
@@ -942,7 +951,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// the node row / map). Rate-limited to one request per
     /// <see cref="PositionRequestCooldown"/>.
     /// </summary>
-    public async Task RequestPositionAsync(MeshRF.Nodes.NodeRecord? node)
+    public async Task RequestPositionAsync(MeshRF.Nodes.NodeRecord? node,
+                                           ChannelConfig? channel = null)
     {
         if (node is null) return;
         if (_myNodeNum != 0 && node.NodeNum == _myNodeNum)
@@ -966,10 +976,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
-        if (primary is null)
+        var requestChannel = ResolveRequestChannel(channel);
+        if (requestChannel is null)
         {
-            Status = "Position request needs a primary channel.";
+            Status = "Position request needs a channel.";
             Log("  " + Status);
             return;
         }
@@ -978,7 +988,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodePositionRequest(
-                primary.Config, _myNodeNum, node.NodeNum, packetId,
+                requestChannel, _myNodeNum, node.NodeNum, packetId,
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
@@ -1015,14 +1025,84 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Request <paramref name="node"/>'s current telemetry (TELEMETRY_APP)
+    /// using the selected shared channel.
+    /// </summary>
+    public async Task RequestTelemetryAsync(MeshRF.Nodes.NodeRecord? node,
+                                            ChannelConfig? channel = null)
+    {
+        if (node is null) return;
+        if (_myNodeNum != 0 && node.NodeNum == _myNodeNum)
+        {
+            Status = "You can't request telemetry from your own node.";
+            Log("  " + Status);
+            return;
+        }
+        if (!CanTransmit || _myNodeNum == 0)
+        {
+            Status = "Telemetry request needs a transmit-capable device and your node id set.";
+            Log("  " + Status);
+            return;
+        }
+
+        var requestChannel = ResolveRequestChannel(channel);
+        if (requestChannel is null)
+        {
+            Status = "Telemetry request needs a channel.";
+            Log("  " + Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeTelemetryRequest(
+                requestChannel, _myNodeNum, node.NodeNum, packetId,
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            {
+                var name = NodeDisplayName(node.NodeNum);
+                Status = $"Telemetry requested from {name}";
+                Log($"  telemetry request → {name} (id {packetId:x8})");
+                var convo = OpenConversation(node.NodeNum, name, focus: false);
+                var noteText = $"Telemetry requested from {name}\u2026";
+                convo.Add(new ChannelMessage
+                {
+                    FromId = "telemetry",
+                    Text = noteText,
+                    IsOutgoing = true,
+                    PacketId = packetId,
+                });
+                PersistConversationNote(node.NodeNum, outgoing: true, packetId,
+                                        "telemetry", noteText);
+            }
+            else
+            {
+                Status = "Transmit failed (device cannot transmit).";
+                Log("  " + Status);
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = $"Telemetry request error: {ex.Message}";
+            Log("  " + Status);
+        }
+    }
+
+    /// <summary>
     /// Exchange location with <paramref name="node"/> by requesting its
     /// position and also sending our current position directly to it.
     /// </summary>
-    public async Task ExchangeLocationAsync(MeshRF.Nodes.NodeRecord? node)
+    public async Task ExchangeLocationAsync(MeshRF.Nodes.NodeRecord? node,
+                                            ChannelConfig? channel = null)
     {
         if (node is null) return;
-        await RequestPositionAsync(node);
-        ReplyWithPosition(node.NodeNum);
+        var requestChannel = ResolveRequestChannel(channel);
+        if (requestChannel is null) return;
+        await RequestPositionAsync(node, requestChannel);
+        ReplyWithPosition(node.NodeNum, channel: requestChannel);
     }
 
     /// <summary>Builds the multi-line tooltip shown when hovering a node on the
@@ -3497,9 +3577,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Log($"  DM: no public key known for {convo.TabHeader} yet — "
                   + "requesting their NodeInfo so the next DM can use PKC. "
                   + "Modern nodes reject legacy DMs; retry once their key arrives.");
-                                // Proactively pull the peer's key using the same NODEINFO_APP
-                                // request style as official Meshtastic apps.
-                                SendNodeInfoExchangeRequest(convo.NodeNum);
+                // Proactively pull the peer's key using the same NODEINFO_APP
+                // request style as official Meshtastic apps.
+                var requestChannel = ResolveRequestChannel();
+                if (requestChannel is not null)
+                    SendNodeInfoExchangeRequest(convo.NodeNum, requestChannel);
             }
         }
 
@@ -3982,17 +4064,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// need to reference the sent packet (e.g. to log a conversation note) can
     /// pass one in.
     /// </summary>
-    private void SendNodeInfoRequestOnly(uint to, uint packetId = 0)
+    private ChannelConfig? ResolveRequestChannel(ChannelConfig? preferred = null)
+    {
+        if (preferred is not null) return preferred;
+        return Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config
+            ?? Channels.FirstOrDefault(c => c.Config.Role != ChannelRole.Disabled)?.Config;
+    }
+
+    private ChannelConfig? FindChannelByName(string? channelName)
+    {
+        if (!string.IsNullOrWhiteSpace(channelName))
+        {
+            var channel = Channels.FirstOrDefault(c =>
+                string.Equals(c.Config.Name, channelName, StringComparison.Ordinal));
+            if (channel is not null) return channel.Config;
+        }
+        return ResolveRequestChannel();
+    }
+
+    private static bool IsDeviceTelemetryRequest(byte[] payload)
+    {
+        var rdr = new ProtoReader(payload);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            if (field == 2 && wt == ProtoReader.WireType.Len)
+                return true;
+            rdr.SkipField(wt);
+        }
+        return false;
+    }
+
+    private void SendNodeInfoRequestOnly(uint to, ChannelConfig channel, uint packetId = 0)
     {
         if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
-        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
-        if (primary is null) return;
 
         try
         {
             if (packetId == 0) packetId = NextPacketId();
             var frame = MeshEncoder.EncodeNodeInfoRequest(
-                primary.Config, _myNodeNum, to, packetId,
+                channel, _myNodeNum, to, packetId,
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var preset = SelectedPreset; var gain = TxGainDb; var amp = AmpEnable;
@@ -4009,11 +4119,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <c>want_response</c> set, prompting that node to reply with its own
     /// NodeInfo. This is the exchange flow.
     /// </summary>
-    private void SendNodeInfoExchangeRequest(uint to, uint packetId = 0)
+    private void SendNodeInfoExchangeRequest(uint to, ChannelConfig channel, uint packetId = 0)
     {
         if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
-        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
-        if (primary is null) return;
 
         try
         {
@@ -4021,7 +4129,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint role = RoleEnumValue(MyRole);
             byte[] pubKey = TryParseKeyBase64(MyPublicKey);
             var frame = MeshEncoder.EncodeNodeInfo(
-                primary.Config, _myNodeNum, packetId,
+                channel, _myNodeNum, packetId,
                 MyLongName ?? string.Empty, MyShortName ?? string.Empty,
                 hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: true);
@@ -4039,11 +4147,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Reply to a directed NodeInfo request with our NodeInfo (no want_response,
     /// to avoid a request/response loop) so the requester learns our public key.
     /// </summary>
-    private void RequestNodeInfoReply(uint to)
+    private void RequestNodeInfoReply(uint to, ChannelConfig? channel = null)
     {
         if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
-        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
-        if (primary is null) return;
+        var replyChannel = ResolveRequestChannel(channel);
+        if (replyChannel is null) return;
 
         try
         {
@@ -4051,7 +4159,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint role = RoleEnumValue(MyRole);
             byte[] pubKey = TryParseKeyBase64(MyPublicKey);
             var frame = MeshEncoder.EncodeNodeInfo(
-                primary.Config, _myNodeNum, packetId,
+                replyChannel, _myNodeNum, packetId,
                 MyLongName ?? string.Empty, MyShortName ?? string.Empty,
                 hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: false);
@@ -4070,20 +4178,53 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// requester. No-op when we can't transmit, have no home location set, or
     /// the primary channel has location sharing disabled (precision 0).
     /// </summary>
-    private void ReplyWithPosition(uint to, uint requestId = 0)
+    private byte[] BuildDeviceTelemetryFrame(ChannelConfig channel,
+                                             uint packetId,
+                                             uint to = 0xFFFFFFFFu,
+                                             uint requestId = 0)
+    {
+        var self = _nodeStore.Get(_myNodeNum) ?? Nodes.FirstOrDefault(n => n.NodeNum == _myNodeNum);
+        uint uptime = _lastRxPlayUtc is DateTime startUtc
+            ? (uint)Math.Clamp((DateTime.UtcNow - startUtc).TotalSeconds, 0, uint.MaxValue)
+            : (self?.UptimeSeconds ?? 0u);
+
+        ComputeLocalAirtimeUtilization(out float channelUtil, out float airUtilTx);
+        TryGetWindowsPowerTelemetry(out bool acOnline, out var winBatteryPct, out var winVoltageV);
+
+        byte batteryPct = acOnline
+            ? (byte)101
+            : (winBatteryPct ?? self?.BatteryPct ?? 0);
+        float? voltageV = winVoltageV;
+        if (voltageV is null && self?.VoltageV is float priorV && priorV > 0f)
+            voltageV = priorV;
+
+        return MeshEncoder.EncodeTelemetryDeviceMetrics(
+            channel, _myNodeNum, packetId,
+            batteryLevel: batteryPct,
+            voltage: voltageV,
+            channelUtilization: channelUtil,
+            airUtilTx: airUtilTx,
+            uptimeSeconds: uptime,
+            to: to,
+            hopLimit: (byte)HopLimit,
+            okToMqtt: OkToMqtt,
+            requestId: requestId);
+    }
+
+    private void ReplyWithPosition(uint to, uint requestId = 0, ChannelConfig? channel = null)
     {
         if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
         if (HomeLatitude is not double lat || HomeLongitude is not double lon) return;
-        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
-        if (primary is null || primary.Config.PositionPrecision == 0) return;
+        var replyChannel = ResolveRequestChannel(channel);
+        if (replyChannel is null || replyChannel.PositionPrecision == 0) return;
 
         try
         {
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodePosition(
-                primary.Config, _myNodeNum, packetId,
+                replyChannel, _myNodeNum, packetId,
                 lat, lon, altitudeM: HomeAltitude,
-                precisionBits: primary.Config.PositionPrecision,
+                precisionBits: replyChannel.PositionPrecision,
                 to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
                 requestId: requestId);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
@@ -4092,6 +4233,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Log($"  position reply failed: {ex.Message}");
+        }
+    }
+
+    private void ReplyWithTelemetry(uint to, uint requestId = 0, ChannelConfig? channel = null)
+    {
+        if (!CanTransmit || _myNodeNum == 0 || to == 0 || to == 0xFFFFFFFFu) return;
+        var replyChannel = ResolveRequestChannel(channel);
+        if (replyChannel is null) return;
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = BuildDeviceTelemetryFrame(replyChannel, packetId, to, requestId);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+        }
+        catch (Exception ex)
+        {
+            Log($"  telemetry reply failed: {ex.Message}");
         }
     }
 
@@ -5232,7 +5392,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             header.To == _myNodeNum && !header.IsBroadcast)
                         {
                             Log($"  NodeInfo requested by {senderName} — replying");
-                            RequestNodeInfoReply(header.From);
+                            RequestNodeInfoReply(header.From, FindChannelByName(result.ChannelName));
                         }
                         break;
                     }
@@ -5284,7 +5444,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         header.To == _myNodeNum && !header.IsBroadcast)
                     {
                         Log($"  NodeInfo requested by {senderName} — replying");
-                        RequestNodeInfoReply(header.From);
+                        RequestNodeInfoReply(header.From, FindChannelByName(result.ChannelName));
                     }
                     break;
                 case PortNum.Position when result.Position is not null:
@@ -5304,7 +5464,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         {
                             Log($"  position requested by {senderName} — replying");
                             ReplyWithPosition(header.From,
-                                requestId: result.RequestId != 0 ? result.RequestId : header.PacketId);
+                                requestId: result.RequestId != 0 ? result.RequestId : header.PacketId,
+                                channel: FindChannelByName(result.ChannelName));
                         }
                         break;
                     }
@@ -5333,7 +5494,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     {
                         Log($"  position exchange requested by {senderName} — replying");
                         ReplyWithPosition(header.From,
-                            requestId: result.RequestId != 0 ? result.RequestId : header.PacketId);
+                            requestId: result.RequestId != 0 ? result.RequestId : header.PacketId,
+                            channel: FindChannelByName(result.ChannelName));
                     }
                     break;
                 case PortNum.Waypoint when result.Waypoint is not null:
@@ -5362,6 +5524,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     }
                     break;
                 case PortNum.Telemetry when result.Telemetry is not null:
+                    if (result.WantResponse && _myNodeNum != 0 &&
+                        header.To == _myNodeNum && !header.IsBroadcast &&
+                        IsDeviceTelemetryRequest(result.AppPayload))
+                    {
+                        Log($"  telemetry requested by {senderName} — replying");
+                        ReplyWithTelemetry(header.From,
+                            requestId: result.RequestId != 0 ? result.RequestId : header.PacketId,
+                            channel: FindChannelByName(result.ChannelName));
+                        break;
+                    }
                     nodeChanged = true;
                     var t = result.Telemetry;
                     _nodeStore.Upsert(new NodeRecord
@@ -5463,17 +5635,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
 
             // Check if node's low byte matches the relay byte
-            if ((node.NodeNum & 0xFF) != relayByte)
-                continue;
-
-            // Check if the node has a router role
-            string nodeRole = (node.Role ?? string.Empty).Trim().ToUpperInvariant();
-            if (nodeRole is "ROUTER" or "ROUTERLATE" or "CLIENTBASE" or
-                "ROUTER_CLIENT" or "ROUTER_LATE")  // Also accept underscore variants
-            {
-                Log($"  preserving hop_limit: relay 0x{relayByte:x2} is favorite router {node.DisplayId}");
-                return false;  // Don't decrement for favorite routers
-            }
+            if ((node.NodeNum & 0xFF) == relayByte)
+                return false;
         }
 
         return true;
@@ -5482,12 +5645,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private int ComputeRelayDelayMs(MeshHeader header)
     {
         string role = (MyRole ?? string.Empty).Trim().ToUpperInvariant();
-        int minBase;
-        int maxBase;
+        int minBase, maxBase;
+
         if (role == "ROUTER")
         {
-            minBase = 70;
-            maxBase = 150;
+            minBase = 80;
+            maxBase = 160;
         }
         else if (role is "ROUTERLATE" or "CLIENTBASE")
         {

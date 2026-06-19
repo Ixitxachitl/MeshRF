@@ -333,7 +333,8 @@ public static class MeshEncoder
                                                       uint? uptimeSeconds = null,
                                                       uint to = 0xFFFFFFFFu,
                                                       byte hopLimit = 3,
-                                                      bool okToMqtt = false)
+                                                      bool okToMqtt = false,
+                                                      uint requestId = 0)
     {
         var device = new ProtoWriter();
         if (batteryLevel is byte batt)
@@ -353,7 +354,28 @@ public static class MeshEncoder
 
         return Encode(channel, from, to, packetId, PortNum.Telemetry,
                       telemetry.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: false, okToMqtt: okToMqtt);
+                      wantResponse: false, okToMqtt: okToMqtt,
+                      requestId: requestId);
+    }
+
+    /// <summary>
+    /// Encode a TELEMETRY_APP request for device metrics directed at
+    /// <paramref name="to"/>. Official firmware chooses the reply variant from
+    /// the Telemetry oneof tag, so this sends an empty <c>device_metrics</c>
+    /// sub-message with <c>want_response</c> set.
+    /// </summary>
+    public static byte[] EncodeTelemetryRequest(ChannelConfig channel,
+                                                uint from,
+                                                uint to,
+                                                uint packetId,
+                                                byte hopLimit = 3,
+                                                bool okToMqtt = false)
+    {
+        var telemetry = new ProtoWriter();
+        telemetry.WriteBytesField(2, Array.Empty<byte>());
+        return Encode(channel, from, to, packetId, PortNum.Telemetry,
+                      telemetry.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: true, okToMqtt: okToMqtt);
     }
 
     /// <summary>

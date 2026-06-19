@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
+using MeshRF.Channels;
 using MeshRF.App.ViewModels;
 using MeshRF.App.Views;
 
@@ -247,7 +248,23 @@ public partial class MainWindow : Window
             .OfType<MeshRF.Nodes.NodeRecord>()
             .FirstOrDefault();
         if (node is null) return;
-        await vm.RequestPositionAsync(node);
+        var channel = PromptForRequestChannel(vm, "Request location on which channel?");
+        if (channel is null) return;
+        await vm.RequestPositionAsync(node, channel);
+    }
+
+    // Context-menu "Request telemetry" asks the selected node to reply with
+    // device metrics on the chosen shared channel.
+    private async void OnRequestTelemetry(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var node = NodesGrid.SelectedItems
+            .OfType<MeshRF.Nodes.NodeRecord>()
+            .FirstOrDefault();
+        if (node is null) return;
+        var channel = PromptForRequestChannel(vm, "Request telemetry on which channel?");
+        if (channel is null) return;
+        await vm.RequestTelemetryAsync(node, channel);
     }
 
     // Context-menu "Request node info" asks the selected node(s) to reply
@@ -259,7 +276,9 @@ public partial class MainWindow : Window
             .OfType<MeshRF.Nodes.NodeRecord>()
             .ToList();
         if (selected.Count == 0) return;
-        vm.RequestNodeInfoOnly(selected);
+        var channel = PromptForRequestChannel(vm, "Request NodeInfo on which channel?");
+        if (channel is null) return;
+        vm.RequestNodeInfoOnly(selected, channel);
     }
 
     // Context-menu "Exchange node info" asks the selected node(s) to reply
@@ -271,7 +290,9 @@ public partial class MainWindow : Window
             .OfType<MeshRF.Nodes.NodeRecord>()
             .ToList();
         if (selected.Count == 0) return;
-        vm.ExchangeNodeInfo(selected);
+        var channel = PromptForRequestChannel(vm, "Exchange NodeInfo on which channel?");
+        if (channel is null) return;
+        vm.ExchangeNodeInfo(selected, channel);
     }
 
     // Context-menu "Exchange location" asks for the node's location and also
@@ -283,7 +304,9 @@ public partial class MainWindow : Window
             .OfType<MeshRF.Nodes.NodeRecord>()
             .FirstOrDefault();
         if (node is null) return;
-        await vm.ExchangeLocationAsync(node);
+        var channel = PromptForRequestChannel(vm, "Exchange location on which channel?");
+        if (channel is null) return;
+        await vm.ExchangeLocationAsync(node, channel);
     }
 
     // Context-menu "Show on map" sets the node search filter and centers/zooms
@@ -315,7 +338,33 @@ public partial class MainWindow : Window
             .OfType<MeshRF.Nodes.NodeRecord>()
             .ToList();
         if (selected.Count == 0) return;
-        vm.RequestKeys(selected);
+        var channel = PromptForRequestChannel(vm, "Request new keys on which channel?");
+        if (channel is null) return;
+        vm.RequestKeys(selected, channel);
+    }
+
+    private ChannelConfig? PromptForRequestChannel(MainViewModel vm, string prompt)
+    {
+        var channels = vm.Channels
+            .Where(c => c.Config.Role != ChannelRole.Disabled)
+            .ToList();
+        if (channels.Count == 0) return null;
+        if (channels.Count == 1) return channels[0].Config;
+
+                var selectedChannel = vm.SelectedChannel;
+                int preferredIndex = selectedChannel is not null &&
+                        selectedChannel.Config.Role != ChannelRole.Disabled
+                        ? selectedChannel.Config.Index
+                        : channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config.Index
+                            ?? channels[0].Config.Index;
+
+        var picker = new ChannelPickerWindow(channels, preferredIndex, prompt)
+        {
+            Owner = this,
+        };
+        return picker.ShowDialog() == true
+            ? picker.SelectedChannel?.Config
+            : null;
     }
 
     private void DeleteSelectedNodes()
