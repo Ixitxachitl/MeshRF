@@ -4218,16 +4218,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// (NAK), mirroring firmware <c>Router::handleReceived</c> ack handling.</summary>
     private void HandleRouting(MeshHeader header, MeshDecodeResult result)
     {
-        if (_myNodeNum == 0 || header.To != _myNodeNum) return;
-        if (result.RequestId == 0) return;
-        if (!_pendingAcks.Remove(result.RequestId, out var pending)) return;
-
         bool ack = result.RoutingError == 0;
-        pending.Message.Delivery = ack ? MessageDelivery.Delivered : MessageDelivery.Failed;
-        PersistDelivery(pending.Message);
+        bool addressedToUs = _myNodeNum != 0 && header.To == _myNodeNum;
+
+        if (addressedToUs && result.RequestId != 0 &&
+            _pendingAcks.Remove(result.RequestId, out var pending))
+        {
+            pending.Message.Delivery = ack ? MessageDelivery.Delivered : MessageDelivery.Failed;
+            PersistDelivery(pending.Message);
+            Log(ack
+                ? $"  ACK from {NodeDisplayName(header.From)} for id {result.RequestId:x8}"
+                : $"  NAK ({result.RoutingError}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
+            return;
+        }
+
+        var target = header.IsBroadcast
+            ? "^all"
+            : addressedToUs ? "us" : NodeDisplayName(header.To);
         Log(ack
-            ? $"  ACK from {NodeDisplayName(header.From)} for id {result.RequestId:x8}"
-            : $"  NAK ({result.RoutingError}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
+            ? $"  routing ACK {NodeDisplayName(header.From)} -> {target}"
+                + (result.RequestId != 0 ? $" for id {result.RequestId:x8}" : string.Empty)
+            : $"  routing NAK ({result.RoutingError}) {NodeDisplayName(header.From)} -> {target}"
+                + (result.RequestId != 0 ? $" for id {result.RequestId:x8}" : string.Empty));
     }
 
     /// <summary>Handle an inbound TRACEROUTE_APP packet: a reply to a request we
