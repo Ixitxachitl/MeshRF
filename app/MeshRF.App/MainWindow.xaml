@@ -1468,11 +1468,12 @@
                                                             <ColumnDefinition Width="Auto" SharedSizeGroup="NodeName" />
                                                             <ColumnDefinition Width="*" />
                                                         </Grid.ColumnDefinitions>
-                                                        <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
-                                                        <emoji:TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
+                                                        <TextBlock x:Name="ChannelMessageTimeText" Grid.Column="0" Text="{Binding TimePrefix}" />
+                                                        <emoji:TextBlock x:Name="ChannelMessageFromText" Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
                                                         <StackPanel Grid.Column="2" Margin="0,0,0,2">
-                                                            <emoji:TextBlock beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                            <emoji:TextBlock x:Name="ChannelMessageBodyText"
+                                                                             beh:MarkdownText.Text="{Binding TextWithStatus}"
                                                                              TextWrapping="Wrap" />
                                                             <ItemsControl ItemsSource="{Binding Reactions}"
                                                                           Margin="0,3,0,0"
@@ -1498,6 +1499,13 @@
                                                             </ItemsControl>
                                                         </StackPanel>
                                                     </Grid>
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding IsIgnoredSender}" Value="True">
+                                                            <Setter TargetName="ChannelMessageTimeText" Property="Foreground" Value="#E53935" />
+                                                            <Setter TargetName="ChannelMessageFromText" Property="Foreground" Value="#E53935" />
+                                                            <Setter TargetName="ChannelMessageBodyText" Property="Foreground" Value="#E53935" />
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
                                         </ListBox>
@@ -1626,11 +1634,12 @@
                                                             <ColumnDefinition Width="Auto" SharedSizeGroup="NodeName" />
                                                             <ColumnDefinition Width="*" />
                                                         </Grid.ColumnDefinitions>
-                                                        <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" />
-                                                        <emoji:TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
+                                                        <TextBlock x:Name="ConversationMessageTimeText" Grid.Column="0" Text="{Binding TimePrefix}" />
+                                                        <emoji:TextBlock x:Name="ConversationMessageFromText" Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
                                                         <StackPanel Grid.Column="2" Margin="0,0,0,2">
-                                                            <emoji:TextBlock beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                            <emoji:TextBlock x:Name="ConversationMessageBodyText"
+                                                                             beh:MarkdownText.Text="{Binding TextWithStatus}"
                                                                              TextWrapping="Wrap" />
                                                             <ItemsControl ItemsSource="{Binding Reactions}"
                                                                           Margin="0,3,0,0"
@@ -1656,6 +1665,13 @@
                                                             </ItemsControl>
                                                         </StackPanel>
                                                     </Grid>
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding IsIgnoredSender}" Value="True">
+                                                            <Setter TargetName="ConversationMessageTimeText" Property="Foreground" Value="#E53935" />
+                                                            <Setter TargetName="ConversationMessageFromText" Property="Foreground" Value="#E53935" />
+                                                            <Setter TargetName="ConversationMessageBodyText" Property="Foreground" Value="#E53935" />
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
                                         </ListBox>

@@ -863,8 +863,7 @@ std::size_t Core::pull_event(std::span<char> out) noexcept {
     std::lock_guard<std::mutex> lk(impl_->events_mu);
     if (impl_->events.empty() || out.empty()) return 0;
     const auto& front = impl_->events.front();
-    if (front.size() + 1 > out.size()) return 0; // include room for NUL
-    std::size_t n = front.size();
+    std::size_t n = std::min(front.size(), out.size() - 1);
     std::memcpy(out.data(), front.data(), n);
     out[n] = '\0';
     impl_->events.pop_front();

@@ -186,6 +186,9 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>True for messages we transmitted (so delivery status applies).</summary>
     public bool IsOutgoing { get; init; }
 
+    /// <summary>True when the sender is marked ignored in the node list.</summary>
+    public bool IsIgnoredSender { get; init; }
+
     /// <summary>True when this message references an earlier packet via reply_id.</summary>
     public bool IsReplyLinked { get; init; }
 

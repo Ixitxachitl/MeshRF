@@ -163,7 +163,7 @@ public sealed class MeshtasticCore : IDisposable
     {
         unsafe
         {
-            const int cap = 512;
+            const int cap = 4096;
             byte* buf = stackalloc byte[cap];
             var n = NativeMethods.CoreGetDeviceStatus(_handle, buf, cap);
             if (n == 0) return string.Empty;
@@ -392,7 +392,7 @@ public sealed class MeshtasticCore : IDisposable
         if (_disposed || _handle == 0) return null;
         unsafe
         {
-            const int cap = 512;
+            const int cap = 4096;
             byte* buf = stackalloc byte[cap];
             var n = NativeMethods.CorePullEvent(_handle, buf, cap);
             if (n == 0) return null;

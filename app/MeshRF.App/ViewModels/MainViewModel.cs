@@ -358,7 +358,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnNodeHopsFilterChanged(string value)          => RefreshNodesFilter();
     partial void OnNodeKeyFilterChanged(string value)           => RefreshNodesFilter();
     partial void OnNodeLocationFilterChanged(string value)      => RefreshNodesFilter();
-    partial void OnNodeIgnoredFilterChanged(string value)       => RefreshNodesFilter();
+    partial void OnNodeIgnoredFilterChanged(string value)
+    {
+        RefreshNodesFilter();
+        if (_settingsLoaded)
+            LoadChatHistory();
+    }
     partial void OnNodeTemperatureFilterChanged(string value)   => RefreshNodesFilter();
     partial void OnNodeHumidityFilterChanged(string value)      => RefreshNodesFilter();
     partial void OnNodePressureFilterChanged(string value)      => RefreshNodesFilter();
@@ -1902,6 +1907,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Rebuild channel (broadcast) chat rooms from history.
         foreach (var msg in _messageStore.TextHistory())
         {
+            if (!ChatMessagePassesIgnoredFilter(msg.FromNode)) continue;
+
             bool isDm = msg.ToNode != 0xFFFFFFFFu &&
                         (msg.FromNode == _myNodeNum || msg.ToNode == _myNodeNum);
             if (isDm) continue; // DMs are restored per-conversation below.
@@ -1953,6 +1960,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             foreach (var peer in toReopen)
             {
                 if (peer == 0 || peer == 0xFFFFFFFFu || peer == _myNodeNum) continue;
+                if (!ChatMessagePassesIgnoredFilter(peer)) continue;
                 OpenConversation(peer, NodeDisplayName(peer), focus: false);
             }
         }
@@ -1971,6 +1979,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var pendingReactions = new List<MessageRecord>();
         foreach (var msg in _messageStore.Conversation(convo.NodeNum, _myNodeNum))
         {
+            if (!ChatMessagePassesIgnoredFilter(msg.FromNode)) continue;
+
             if (IsReactionRecord(msg))
             {
                 pendingReactions.Add(msg);
@@ -2021,6 +2031,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SnrDb = msg.SnrDb,
                 PacketId = msg.PacketId,
                 IsOutgoing = outgoing,
+                IsIgnoredSender = !outgoing && IsNodeIgnored(msg.FromNode),
                 Delivery = MessageDelivery.None,
             };
         }
@@ -2037,6 +2048,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SnrDb = msg.SnrDb,
             PacketId = msg.PacketId,
             IsOutgoing = outgoing,
+            IsIgnoredSender = !outgoing && IsNodeIgnored(msg.FromNode),
             Delivery = outgoing && !isBroadcast
                 ? (MessageDelivery)msg.Delivery
                 : MessageDelivery.None,
@@ -2103,6 +2115,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SnrDb = reaction.SnrDb,
             PacketId = reaction.PacketId,
             IsOutgoing = outgoing,
+            IsIgnoredSender = !outgoing && IsNodeIgnored(reaction.FromNode),
             Delivery = outgoing && !isBroadcast
                 ? (MessageDelivery)reaction.Delivery
                 : MessageDelivery.None,
@@ -2141,6 +2154,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SnrDb = reply.SnrDb,
             PacketId = reply.PacketId,
             IsOutgoing = outgoing,
+            IsIgnoredSender = !outgoing && IsNodeIgnored(reply.FromNode),
             IsReplyLinked = true,
             ReplyTargetFound = target is not null,
             ReplyToPacketId = reply.ReplyId,
@@ -2355,6 +2369,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MarkNodeDirty(node.NodeNum);
         if (!_suspendNodeReload)
             _nodesDirty = ApplyDirtyNodeUpdates();
+        LoadChatHistory();
     }
 
     public void SetNodesIgnored(IEnumerable<NodeRecord> nodes, bool ignored)
@@ -2367,6 +2382,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         if (!_suspendNodeReload)
             _nodesDirty = ApplyDirtyNodeUpdates();
+        LoadChatHistory();
     }
 
     public void SetNodesFavorite(IEnumerable<NodeRecord> nodes, bool favorite)
@@ -2383,6 +2399,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private bool IsNodeIgnored(uint nodeNum) =>
         Nodes.FirstOrDefault(n => n.NodeNum == nodeNum)?.Ignored == true;
+
+    private bool ChatMessagePassesIgnoredFilter(uint fromNode)
+    {
+        if (_myNodeNum != 0 && fromNode == _myNodeNum) return true;
+        bool ignored = IsNodeIgnored(fromNode);
+        return NodeIgnoredFilter switch
+        {
+            "Hide ignored" => !ignored,
+            "Only ignored" => ignored,
+            _ => true,
+        };
+    }
 
     private void OnConversationMuteRtttlChanged(ConversationViewModel convo, bool muted)
     {
@@ -5176,8 +5204,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (IsNodeIgnored(header.From)) return;
-
         var rxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var channels = Channels.Select(c => c.Config).ToList();
         var result = MeshDecoder.Decode(frame, channels);
@@ -5286,6 +5312,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         bool nodeChanged = false;
         var senderName = NodeDisplayName(header.From);
+        bool senderIgnored = IsNodeIgnored(header.From);
         switch (result.Port)
             {
                 case PortNum.TextMessage:
@@ -5293,6 +5320,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     bool isReaction = reactionTargetId != 0
                         && result.Emoji != 0;
                     bool isReplyLinkedNonReaction = reactionTargetId != 0 && !isReaction;
+                    bool showInChat = ChatMessagePassesIgnoredFilter(header.From);
+                    if (!showInChat)
+                    {
+                        if (_myNodeNum != 0 && !header.IsBroadcast && header.To == _myNodeNum)
+                        {
+                            Log(isReaction
+                                ? $"  DM reaction from {senderName}: {ResolveReactionGlyph(result.Text, result.Emoji)}"
+                                : isReplyLinkedNonReaction
+                                    ? $"  DM reply from {senderName}: {record.Text}"
+                                    : $"  DM from {senderName}: {record.Text}");
+                            if (header.WantAck) SendAck(header, result);
+                        }
+                        else
+                        {
+                            Log(isReaction
+                                ? $"  [{result.ChannelName}] {senderName} reacted {ResolveReactionGlyph(result.Text, result.Emoji)}"
+                                : isReplyLinkedNonReaction
+                                    ? $"  [{result.ChannelName}] {senderName} replied: {record.Text}"
+                                    : $"  [{result.ChannelName}] {senderName}: {record.Text}");
+                        }
+                        break;
+                    }
+
                     // Direct message addressed to us → route to a conversation tab.
                     if (_myNodeNum != 0 && !header.IsBroadcast && header.To == _myNodeNum)
                     {
@@ -5335,6 +5385,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 RssiDbm = record.RssiDbfs,
                                 SnrDb = record.SnrDb,
                                 PacketId = header.PacketId,
+                                IsIgnoredSender = senderIgnored,
                             });
                         if (!isReaction && !isReplyLinkedNonReaction)
                         {
@@ -5344,7 +5395,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         // Acknowledge if the sender asked for one (firmware does
                         // this for any unicast packet addressed to it).
                         if (header.WantAck) SendAck(header, result);
-                        if (!IsNodeRtttlMuted(header.From))
+                        if (!senderIgnored && !IsNodeRtttlMuted(header.From))
                         {
                             var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
                             Task.Run(() => _ringtone.Play(rtttl, mode, vol));
@@ -5396,15 +5447,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 RssiDbm = record.RssiDbfs,
                                 SnrDb = record.SnrDb,
                                 PacketId = header.PacketId,
+                                IsIgnoredSender = senderIgnored,
                             });
                             MarkTabNeedsAttention(chanVm);
                             if (chanVm is not null && chanVm.Messages.Count > 1000)
                                 chanVm.Messages.RemoveAt(0);
                             Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
-                            shouldRing = chanVm?.MuteRtttl != true;
+                            shouldRing = !senderIgnored && chanVm?.MuteRtttl != true;
                         }
 
-                        if (shouldRing && !IsNodeRtttlMuted(header.From))
+                        if (shouldRing && !senderIgnored && !IsNodeRtttlMuted(header.From))
                         {
                             var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
                             Task.Run(() => _ringtone.Play(rtttl, mode, vol));
@@ -5503,6 +5555,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             ReplyWithPosition(header.From,
                                 requestId: result.RequestId != 0 ? result.RequestId : header.PacketId,
                                 channel: FindChannelByName(result.ChannelName));
+                        }
+                        else
+                        {
+                            string target = header.IsBroadcast ? "broadcast" : $"for {header.ToId}";
+                            Log($"  position request from {senderName} ({target})");
                         }
                         break;
                     }
@@ -5619,6 +5676,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!RoutingRelayEnabled) return;
         if (!CanTransmit || _myNodeNum == 0) return;
         if (header.From == _myNodeNum) return;
+        if (IsNodeIgnored(header.From)) return;
         if (header.To == _myNodeNum) return;
         if (header.PacketId == 0) return;
         if (header.HopLimit == 0) return;

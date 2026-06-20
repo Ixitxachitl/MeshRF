@@ -152,7 +152,8 @@ MRF_API uint32_t MRF_CALL mrf_core_get_device_status(const mrf_core_t* core,
 
 // Pop the next pending demodulator event into `buf` (UTF-8, NUL-terminated).
 // Returns the number of bytes written (excluding NUL), or 0 if no event is
-// queued or the buffer is too small.
+// queued. Oversized events are truncated and still popped so one large log
+// line cannot block the event queue.
 MRF_API uint32_t MRF_CALL mrf_core_pull_event(mrf_core_t* core,
                                               char* buf,
                                               uint32_t capacity);

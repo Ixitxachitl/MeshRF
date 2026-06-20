@@ -183,7 +183,7 @@ private:
 
     static constexpr int kHeaderSymbols = 8;
     static constexpr int kHeaderSlack   = 2; // SDRangel tryHeaderLock offset 0..2
-    static constexpr int kNbSymbolsMax  = 1600;
+    static constexpr int kNbSymbolsMax  = 768;
 
     // Counters / callbacks.
     std::uint64_t symbols_processed_{};

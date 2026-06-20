@@ -718,15 +718,15 @@ public partial class MainWindow : Window
             // low BW) need many more STFT frames to capture the full packet.
             // STFT: 512-point FFT with 128-sample hop.
             // Max packet airtime ≈ (preamble + header + max_payload) symbols.
-            // At modem rate = BW * 2 oversampling, symbol = 2^SF * 2 samples.
+            // At modem rate = BW * 4 oversampling, symbol = 2^SF * 4 samples.
             const int kFft = 512;
             const int kHop = 128;
             const int nFreq = 256;
 
             int sf = Math.Clamp(vm.OverrideSf, (byte)7, (byte)12);
             double bwHz = Math.Max(7_800.0, vm.OverrideBwKhz * 1000.0);
-            double modemRate = bwHz * 2.0; // 2x oversampling
-            double symbolSamples = (1 << sf) * 2.0; // symbol at modem rate
+            double modemRate = bwHz * 4.0; // native modem oversampling
+            double symbolSamples = (1 << sf) * 4.0; // symbol at modem rate
 
             // Estimate max packet: 16 preamble + 4.25 sync + 8 header + 255 payload symbols.
             // For SF12/125k, 255-byte packet is ~280 symbols ≈ 9 seconds.

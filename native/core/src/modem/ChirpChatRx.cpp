@@ -116,19 +116,32 @@ void ChirpChatRx::reset() {
     sym_filled_ = 0;
     stride_ = 0;
     sample_index_ = 0;
-    recent_bins_.clear();
-    recent_peaks_.clear();
-    last_locked_bin_ = -1;
     symbols_processed_ = 0;
     preambles_detected_ = 0;
-    tracking_remaining_ = 0;
-    tracking_index_ = 0;
-    header_symbols_.clear();
-    chosen_header_start_ = 0;
-    chosen_header_delta_ = 0;
+    reset_frame_state_();
+}
+
+void ChirpChatRx::reset_frame_state_() {
     state_ = State::Hunting;
     sfd_consecutive_ = 0;
     sfd_search_budget_ = 0;
+    frame_symbol_count_ = 0;
+    tracking_remaining_ = 0;
+    tracking_index_ = 0;
+    recent_bins_.clear();
+    recent_peaks_.clear();
+    recent_fracs_.clear();
+    last_locked_bin_ = -1;
+    header_symbols_.clear();
+    chosen_header_start_ = 0;
+    chosen_header_delta_ = 0;
+    payload_symbols_.clear();
+    payload_total_symbols_ = 0;
+    payload_length_bytes_ = 0;
+    payload_coding_rate_ = 0;
+    payload_has_crc_ = false;
+    payload_ldro_ = false;
+    header_leak_nibbles_.clear();
     cfo_bin_ = 0;
     sfd_down_bin_ = 0;
     cfo_int_ = 0;
@@ -136,7 +149,6 @@ void ChirpChatRx::reset() {
     cfo_frac_ = 0.0f;
     nco_phase_ = 0.0;
     nco_phase_inc_ = 0.0;
-    recent_fracs_.clear();
 }
 
 void ChirpChatRx::process(std::span<const std::complex<float>> samples) {
@@ -260,6 +272,7 @@ void ChirpChatRx::emit_symbol_(int peak_bin, float peak_db, float peak_frac,
             // noisy, so it must NOT feed the timing or the symbol value.)
             stride_ = -(n_ + n_ / 4);
             state_ = State::HeaderCapture;
+            frame_symbol_count_ = 0;
             header_symbols_.clear();
             header_first_sample_ = first_sample_index;
         } else {
@@ -281,6 +294,10 @@ void ChirpChatRx::emit_symbol_(int peak_bin, float peak_db, float peak_frac,
 
     // -- HeaderCapture: collect kHeaderSymbols, then decode. ------------
     if (state_ == State::HeaderCapture) {
+        if (++frame_symbol_count_ >= kFrameSymbolMax) {
+            reset_frame_state_();
+            return;
+        }
         // Apply offset correction the way SDRangel's ChirpChat sink does:
         // subtract the PREAMBLE reference bin (the combined CFO+STO offset).
         // A data symbol of value s dechirps to (s + cfo_bin_) mod N, so the
@@ -335,6 +352,10 @@ void ChirpChatRx::emit_symbol_(int peak_bin, float peak_db, float peak_frac,
 
     // -- PayloadCapture: collect payload_total_symbols_, then decode. ---
     if (state_ == State::PayloadCapture) {
+        if (++frame_symbol_count_ >= kFrameSymbolMax) {
+            reset_frame_state_();
+            return;
+        }
         const int corrected =
             ((peak_bin - cfo_bin_) % n_ + n_) % n_;
         if (sym_cb_) {

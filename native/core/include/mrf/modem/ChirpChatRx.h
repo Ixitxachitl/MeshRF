@@ -170,6 +170,7 @@ public:
 
 private:
     void emit_symbol_(int peak_bin, float peak_db, float peak_frac, std::uint64_t first_sample_index);
+    void reset_frame_state_();
     // Per-symbol CFO retrack: small EMA correction of the NCO based on
     // each symbol's residual sub-bin frequency offset.
     void retrack_cfo_(float peak_frac, float peak_db);
@@ -236,6 +237,7 @@ private:
     State state_{State::Hunting};
     int   sfd_consecutive_{0};   // upchirp-FFT peaks seen in a row
     int   sfd_search_budget_{0}; // give up if no SFD found in N symbols
+    int   frame_symbol_count_{0}; // post-SFD symbols consumed by current frame
     int   cfo_bin_{0};           // preamble bin = (CFO - STO), subtract from symbols
     int   sfd_down_bin_{0};      // SFD down-chirp bin = (CFO + STO)
     int   cfo_int_{0};           // disentangled integer CFO (signed), = symbol correction
@@ -258,6 +260,7 @@ private:
     static constexpr int kHeaderSymbols   = 8;
     static constexpr int kHeaderSlack     = 6; // extra symbols for anchor search
     static constexpr int kHeaderCapture   = kHeaderSymbols + kHeaderSlack;
+    static constexpr int kFrameSymbolMax  = 768;
     static constexpr int kSfdSearchMaxSymbols = 16; // give up after this many symbols
     // The SFD search slides at N/kSfdSearchOversample samples to find the
     // window aligned with the SFD down-chirp (see process()). The budget is
