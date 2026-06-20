@@ -55,10 +55,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
     private readonly Dictionary<uint, string> _nodeTooltipCache = new();
+    private readonly Queue<ulong> _recentUndecodedPacketOrder = new();
+    private readonly HashSet<ulong> _recentUndecodedPacketKeys = new();
     private DateTime _lastNodesViewRefreshUtc = DateTime.MinValue;
     private static readonly TimeSpan NodesViewRefreshInterval = TimeSpan.FromMilliseconds(250);
     private const int MaxDirtyNodeUpdatesPerTick = 64;
     private const int MaxRxEventsPerTick = 8;
+    private const int RecentUndecodedPacketLimit = 512;
     private bool _nodesViewRefreshPending;
     private readonly DispatcherTimer _nodesViewRefreshTimer;
 
@@ -1491,6 +1494,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             if (convo.NodeNum == nodeNum)
                 convo.Node = node;
+    }
+
+    private bool RememberUndecodedPacket(MeshHeader header)
+    {
+        ulong key = ((ulong)header.From << 32) ^ header.PacketId;
+        if (header.PacketId == 0)
+        {
+            key ^= ((ulong)header.To << 1);
+            key ^= header.ChannelHash;
+        }
+
+        if (!_recentUndecodedPacketKeys.Add(key))
+            return false;
+
+        _recentUndecodedPacketOrder.Enqueue(key);
+        while (_recentUndecodedPacketOrder.Count > RecentUndecodedPacketLimit)
+            _recentUndecodedPacketKeys.Remove(_recentUndecodedPacketOrder.Dequeue());
+        return true;
     }
 
     /// <summary>Apply database-backed updates for only the node ids that changed.</summary>
@@ -5177,16 +5198,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
         float? snrDb = float.IsNaN(_lastPreamblePeakDb) ? null : _lastPreamblePeakDb;
         _lastPreamblePeakDb = float.NaN; // consume it so it can't bleed to the next
 
+        byte hopsAway = (byte)(header.HopStart >= header.HopLimit
+            ? header.HopStart - header.HopLimit
+            : 0);
+        float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
+        bool nodeInfoRecord = result is { Port: PortNum.NodeInfo, User: not null } && result.AppPayload.Length != 0;
+
         // Always record the sender sighting (RSSI/last-heard), decoded or not.
-        try
+        // NodeInfo records fold these fields into their own upsert below so a
+        // key-bearing NodeInfo doesn't do two SQLite writes on the UI tick.
+        if (!nodeInfoRecord)
         {
-            _nodeStore.RecordSighting(header.From,
-                rssiDbm: float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs,
-                snrDb: snrDb,
-                hopsAway: (byte)(header.HopStart >= header.HopLimit
-                                 ? header.HopStart - header.HopLimit : 0));
+            try
+            {
+                _nodeStore.RecordSighting(header.From,
+                    rssiDbm: packetRssiDbm,
+                    snrDb: snrDb,
+                    hopsAway: hopsAway);
+            }
+            catch { /* DB best-effort */ }
         }
-        catch { /* DB best-effort */ }
 
         uint normalizedReplyId = 0;
         if (result is not null && result.Port == PortNum.TextMessage)
@@ -5197,33 +5228,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
             isReactionRecord = normalizedReplyId != 0
                 && result.Emoji != 0;
 
+        if (result is null)
+        {
+            if (!RememberUndecodedPacket(header))
+            {
+                CancelPendingRelay(header.From, header.PacketId);
+                MarkNodeDirty(header.From);
+                return;
+            }
+
+            RelayIfEligible(frame, header, result);
+            Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
+            MarkNodeDirty(header.From);
+            return;
+        }
+
         var record = new MessageRecord
         {
             PacketId = header.PacketId,
             FromNode = header.From,
             ToNode = header.To,
-            PortNum = (int)(result?.Port ?? PortNum.Unknown),
-            Channel = result?.ChannelName ?? string.Empty,
+            PortNum = (int)result.Port,
+            Channel = result.ChannelName,
             ReplyId = normalizedReplyId,
-            Emoji = result?.Emoji ?? 0,
+            Emoji = result.Emoji,
             IsReaction = isReactionRecord,
-            Decrypted = result is not null,
+            Decrypted = true,
             RxEpoch = rxEpoch,
             RssiDbfs = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs,
             SnrDb = snrDb,
         };
 
-        if (result is null)
-        {
-            // Couldn't decrypt with any known channel key. Store the raw frame.
-            record.PayloadHex = m.Groups["hex"].Value;
-        }
-        else
-        {
-            record.PayloadHex = BytesToHex(result.AppPayload);
-            if (result.Port == PortNum.TextMessage)
-                record.Text = result.Text ?? string.Empty;
-        }
+        record.PayloadHex = BytesToHex(result.AppPayload);
+        if (result.Port == PortNum.TextMessage)
+            record.Text = result.Text ?? string.Empty;
 
         // Dedup: Meshtastic floods packets, so the same message arrives several
         // times (different relays). MessageStore.Add returns false for a packet
@@ -5247,14 +5285,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Messages.Insert(0, record);
 
         bool nodeChanged = false;
-        if (result is null)
-        {
-            Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
-        }
-        else
-        {
-            var senderName = NodeDisplayName(header.From);
-            switch (result.Port)
+        var senderName = NodeDisplayName(header.From);
+        switch (result.Port)
             {
                 case PortNum.TextMessage:
                     uint reactionTargetId = ResolveReactionTargetId(result);
@@ -5402,7 +5434,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         string newKeyHex = result.User.PublicKey.Length == 32
                             ? Convert.ToHexString(result.User.PublicKey)
                             : string.Empty;
-                        var existingNode = _nodeStore.Get(header.From);
+                        var existingNode = _nodesByNum.GetValueOrDefault(header.From)
+                            ?? _nodeStore.Get(header.From);
                         // A mismatch is a NEW non-empty key that differs from a
                         // key we already trust. We keep the old key (don't
                         // silently accept a substitution) and flag it red until
@@ -5428,6 +5461,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             // Only touch the flag when this NodeInfo carried a key.
                             KeyMismatch = newKeyHex.Length > 0 ? keyMismatch : (bool?)null,
                             LastHeardEpoch = rxEpoch,
+                            RssiDbm = packetRssiDbm,
+                            SnrDb = snrDb,
+                            HopsAway = hopsAway,
                         });
 
                         if (keyMismatch)
@@ -5573,7 +5609,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     Log($"  [{result.ChannelName}] {header.FromId} {result.Port} ({result.AppPayload.Length} B)");
                     break;
             }
-        }
 
         MarkNodeDirty(header.From);
         if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
