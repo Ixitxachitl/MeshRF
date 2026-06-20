@@ -1144,7 +1144,7 @@
                                        VerticalAlignment="Center" />
                             <views:WaterfallView x:Name="LastPacket"
                                                  AutoLevels="True"
-                                                 SmoothPixels="False"
+                                                 SmoothPixels="True"
                                                  TimeHorizontal="True"
                                                  ScaleToFit="True"
                                                  Margin="2" />

@@ -849,54 +849,16 @@ public sealed class WaterfallView : Image
             return;
         }
 
-        // Precompute frequency bin for each output row (top = high freq).
-        Span<int> myStack = stackalloc int[Math.Min(h, 4096)];
-        int[]? heap = h > myStack.Length ? new int[h] : null;
-        Span<int> my = heap ?? myStack;
-        for (int y = 0; y < h; y++)
-        {
-            int sy = (int)((long)(h - 1 - y) * n / h);
-            if (sy < 0) sy = 0; else if (sy >= n) sy = n - 1;
-            my[y] = sy;
-        }
-
-        // Precompute time range for each output column (left = oldest, right = newest).
-        Span<int> t0Stack = stackalloc int[Math.Min(w, 4096)];
-        Span<int> t1Stack = stackalloc int[Math.Min(w, 4096)];
-        int[]? t0Heap = w > t0Stack.Length ? new int[w] : null;
-        int[]? t1Heap = w > t1Stack.Length ? new int[w] : null;
-        Span<int> t0 = t0Heap ?? t0Stack;
-        Span<int> t1 = t1Heap ?? t1Stack;
-        for (int x = 0; x < w; x++)
-        {
-            int start = (int)((long)x * numFrames / w);
-            int end = (int)(((long)(x + 1) * numFrames + w - 1) / w);
-            if (start < 0) start = 0; else if (start >= numFrames) start = numFrames - 1;
-            if (end <= start) end = start + 1;
-            if (end > numFrames) end = numFrames;
-            t0[x] = start;
-            t1[x] = end;
-        }
-
         fixed (uint* lut = _lut)
         fixed (float* frames = _scaleFrames)
         {
             for (int x = 0; x < w; x++)
             {
-                int start = t0[x];
-                int end = t1[x];
+                double tx = ((x + 0.5) * numFrames / w) - 0.5;
                 for (int y = 0; y < h; y++)
                 {
-                    float v = float.NegativeInfinity;
-                    int bin = my[y];
-                    for (int t = start; t < end; t++)
-                    {
-                        float candidate = frames[t * n + bin];
-                        if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) &&
-                            candidate > v)
-                            v = candidate;
-                    }
-                    if (float.IsNegativeInfinity(v)) v = floorF;
+                    double fy = ((h - 0.5 - y) * n / h) - 0.5;
+                    float v = SampleScaleFrameBicubic(frames, numFrames, n, tx, fy, floorF);
                     int idx = (int)((v - floorF) * invRange);
                     if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
                     ((uint*)(back + y * stride))[x] = lut[idx];
@@ -922,52 +884,72 @@ public sealed class WaterfallView : Image
             return;
         }
 
-        // Precompute column to bin mapping.
-        Span<int> x0Stack = stackalloc int[Math.Min(w, 4096)];
-        Span<int> x1Stack = stackalloc int[Math.Min(w, 4096)];
-        int[]? x0Heap = w > x0Stack.Length ? new int[w] : null;
-        int[]? x1Heap = w > x1Stack.Length ? new int[w] : null;
-        Span<int> x0 = x0Heap ?? x0Stack;
-        Span<int> x1 = x1Heap ?? x1Stack;
-        for (int x = 0; x < w; x++)
-        {
-            int start = (int)((long)x * n / w);
-            int end = (int)(((long)(x + 1) * n + w - 1) / w);
-            if (start < 0) start = 0; else if (start >= n) start = n - 1;
-            if (end <= start) end = start + 1;
-            if (end > n) end = n;
-            x0[x] = start;
-            x1[x] = end;
-        }
-
         fixed (uint* lut = _lut)
         fixed (float* frames = _scaleFrames)
         {
             for (int y = 0; y < h; y++)
             {
                 uint* dstRow = (uint*)(back + y * stride);
-
-                // Map row to frame index (top = newest).
-                int frame = (int)((long)(h - 1 - y) * numFrames / h);
-                if (frame < 0) frame = 0; else if (frame >= numFrames) frame = numFrames - 1;
-                float* src = frames + frame * n;
+                double ty = ((h - 0.5 - y) * numFrames / h) - 0.5;
 
                 for (int x = 0; x < w; x++)
                 {
-                    float v = float.NegativeInfinity;
-                    for (int sx = x0[x]; sx < x1[x]; sx++)
-                    {
-                        float candidate = src[sx];
-                        if (!float.IsNaN(candidate) && !float.IsInfinity(candidate) && candidate > v)
-                            v = candidate;
-                    }
-                    if (float.IsNegativeInfinity(v)) v = floorF;
+                    double fx = ((x + 0.5) * n / w) - 0.5;
+                    float v = SampleScaleFrameBicubic(frames, numFrames, n, ty, fx, floorF);
                     int idx = (int)((v - floorF) * invRange);
                     if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
                     dstRow[x] = lut[idx];
                 }
             }
         }
+    }
+
+    private static unsafe float SampleScaleFrameBicubic(
+        float* frames, int frameCount, int bins, double frameCoord, double binCoord, float fallback)
+    {
+        int frameBase = (int)Math.Floor(frameCoord);
+        int binBase = (int)Math.Floor(binCoord);
+        double ft = frameCoord - frameBase;
+        double fb = binCoord - binBase;
+
+        Span<float> rows = stackalloc float[4];
+        for (int row = 0; row < 4; row++)
+        {
+            int frame = ClampIndex(frameBase + row - 1, frameCount);
+            float p0 = GetScaleFrameValue(frames, frame, binBase - 1, bins, fallback);
+            float p1 = GetScaleFrameValue(frames, frame, binBase, bins, fallback);
+            float p2 = GetScaleFrameValue(frames, frame, binBase + 1, bins, fallback);
+            float p3 = GetScaleFrameValue(frames, frame, binBase + 2, bins, fallback);
+            rows[row] = CubicInterpolate(p0, p1, p2, p3, fb);
+        }
+
+        return CubicInterpolate(rows[0], rows[1], rows[2], rows[3], ft);
+    }
+
+    private static unsafe float GetScaleFrameValue(
+        float* frames, int frame, int bin, int bins, float fallback)
+    {
+        int clampedBin = ClampIndex(bin, bins);
+        float value = frames[(long)frame * bins + clampedBin];
+        return float.IsNaN(value) || float.IsInfinity(value) ? fallback : value;
+    }
+
+    private static int ClampIndex(int index, int count)
+    {
+        if (index < 0) return 0;
+        if (index >= count) return count - 1;
+        return index;
+    }
+
+    private static float CubicInterpolate(float p0, float p1, float p2, float p3, double t)
+    {
+        double t2 = t * t;
+        double t3 = t2 * t;
+        return (float)(0.5 * (
+            (2.0 * p1) +
+            (-p0 + p2) * t +
+            (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+            (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3));
     }
 
     // Google Turbo polynomial approximation
