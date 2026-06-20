@@ -1084,6 +1084,7 @@ public partial class MainWindow : Window
             settings.NodeFilterHops          = vm.NodeHopsFilter;
             settings.NodeFilterKey           = vm.NodeKeyFilter;
             settings.NodeFilterLocation      = vm.NodeLocationFilter;
+            settings.NodeFilterHideInvalidLocations = vm.HideInvalidNodeLocations;
             settings.NodeFilterIgnored       = vm.NodeIgnoredFilter;
             settings.NodeFilterTemperature   = vm.NodeTemperatureFilter;
             settings.NodeFilterHumidity      = vm.NodeHumidityFilter;

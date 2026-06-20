@@ -268,6 +268,9 @@ public sealed class AppSettings
     /// <summary>Persisted node location filter.</summary>
     public string NodeFilterLocation { get; set; } = "Any";
 
+    /// <summary>When true, hide nodes with invalid/near-origin positions.</summary>
+    public bool NodeFilterHideInvalidLocations { get; set; } = false;
+
     /// <summary>Persisted node ignored filter.</summary>
     public string NodeFilterIgnored { get; set; } = "Show all";
 

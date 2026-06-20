@@ -322,6 +322,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _nodeHopsFilter        = "Any";
     [ObservableProperty] private string _nodeKeyFilter         = "Any";
     [ObservableProperty] private string _nodeLocationFilter    = "Any";
+    [ObservableProperty] private bool _hideInvalidNodeLocations;
     [ObservableProperty] private string _nodeIgnoredFilter     = "Show all";
     [ObservableProperty] private string _nodeTemperatureFilter = "Any";
     [ObservableProperty] private string _nodeHumidityFilter    = "Any";
@@ -332,7 +333,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<string> NodeHopsFilterOptions     { get; } = ["Any", "Direct", "≤1 hop", "≤2 hops", "≤3 hops", "≤4 hops"];
     public IReadOnlyList<string> NodeKeyFilterOptions      { get; } = ["Any", "Good key", "Mismatch", "No key"];
-    public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "Has position history (>1)", "No position", "Invalid"];
+    public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "Has position history (>1)", "No position"];
     public IReadOnlyList<string> NodeIgnoredFilterOptions  { get; } = ["Show all", "Hide ignored", "Only ignored"];
     public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
     public IReadOnlyList<string> MapNodeLabelModeOptions   { get; } =
@@ -358,6 +359,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnNodeHopsFilterChanged(string value)          => RefreshNodesFilter();
     partial void OnNodeKeyFilterChanged(string value)           => RefreshNodesFilter();
     partial void OnNodeLocationFilterChanged(string value)      => RefreshNodesFilter();
+    partial void OnHideInvalidNodeLocationsChanged(bool value)  => RefreshNodesFilter();
     partial void OnNodeIgnoredFilterChanged(string value)
     {
         RefreshNodesFilter();
@@ -378,6 +380,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeHopsFilter        = "Any";
         NodeKeyFilter         = "Any";
         NodeLocationFilter    = "Any";
+        HideInvalidNodeLocations = false;
         NodeIgnoredFilter     = "Show all";
         NodeTemperatureFilter = "Any";
         NodeHumidityFilter    = "Any";
@@ -431,8 +434,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             case "Has position": if (!hasPos) return false; break;
             case "Has position history (>1)": if (!hasPosHistory) return false; break;
             case "No position":  if (hasPos)  return false; break;
-            case "Invalid":      if (!n.HasInvalidLocation) return false; break;
         }
+
+        if (HideInvalidNodeLocations && n.HasInvalidLocation)
+            return false;
 
         // Ignored filter.
         switch (NodeIgnoredFilter)
@@ -1386,7 +1391,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeSearchText        = _settings.NodeFilterSearch;
         NodeHopsFilter        = _settings.NodeFilterHops;
         NodeKeyFilter         = _settings.NodeFilterKey;
-        NodeLocationFilter    = _settings.NodeFilterLocation;
+        if (string.Equals(_settings.NodeFilterLocation, "Invalid", StringComparison.Ordinal))
+        {
+            NodeLocationFilter = "Any";
+            HideInvalidNodeLocations = true;
+        }
+        else
+        {
+            NodeLocationFilter = NodeLocationFilterOptions.Contains(_settings.NodeFilterLocation)
+                ? _settings.NodeFilterLocation
+                : "Any";
+            HideInvalidNodeLocations = _settings.NodeFilterHideInvalidLocations;
+        }
         NodeIgnoredFilter     = _settings.NodeFilterIgnored;
         NodeTemperatureFilter = _settings.NodeFilterTemperature;
         NodeHumidityFilter    = _settings.NodeFilterHumidity;
@@ -1672,6 +1688,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             !string.Equals(NodeHopsFilter, "Any", StringComparison.Ordinal) ||
             !string.Equals(NodeKeyFilter, "Any", StringComparison.Ordinal) ||
             !string.Equals(NodeLocationFilter, "Any", StringComparison.Ordinal) ||
+            HideInvalidNodeLocations ||
             !string.Equals(NodeIgnoredFilter, "Show all", StringComparison.Ordinal) ||
             !string.IsNullOrWhiteSpace(NodeDistanceKmText) ||
             !string.IsNullOrWhiteSpace(NodeMaxAgeMinutesText);
@@ -2402,7 +2419,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private bool ChatMessagePassesIgnoredFilter(uint fromNode)
     {
-        if (_myNodeNum != 0 && fromNode == _myNodeNum) return true;
         bool ignored = IsNodeIgnored(fromNode);
         return NodeIgnoredFilter switch
         {
