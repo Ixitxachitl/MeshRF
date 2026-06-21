@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MeshRF.App.Units;
 using MeshRF.Channels;
 
 namespace MeshRF.App.ViewModels;
@@ -27,7 +28,8 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
 
     public ChannelViewModel(ChannelConfig cfg, Action<ChannelConfig>? onSave = null,
                             bool muteRtttl = false,
-                            Action<ChannelViewModel, bool>? onMuteRtttlChanged = null)
+                            Action<ChannelViewModel, bool>? onMuteRtttlChanged = null,
+                            UnitSystem unitSystem = UnitSystem.Metric)
     {
         Config = cfg;
         _onSave = onSave;
@@ -38,6 +40,7 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         _editPsk = (byte[])cfg.Psk.Clone();
         _editPositionPrecision = cfg.PositionPrecision;
         _muteRtttl = muteRtttl;
+        UpdatePositionPrecisionOptions(unitSystem);
     }
 
     /// <summary>Decoded text messages, newest last.</summary>
@@ -81,22 +84,8 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     /// halves the uncertainty). Only these <c>position_precision</c> values are
     /// considered valid on the mesh.
     /// </summary>
-    public static IReadOnlyList<PositionPrecisionOption> PositionPrecisionOptions { get; } =
-        new[]
-        {
-            new PositionPrecisionOption(0,  "Do not share location"),
-            new PositionPrecisionOption(10, "Within 23 km"),
-            new PositionPrecisionOption(11, "Within 12 km"),
-            new PositionPrecisionOption(12, "Within 5.8 km"),
-            new PositionPrecisionOption(13, "Within 2.9 km"),
-            new PositionPrecisionOption(14, "Within 1.5 km"),
-            new PositionPrecisionOption(15, "Within 700 m"),
-            new PositionPrecisionOption(16, "Within 350 m"),
-            new PositionPrecisionOption(17, "Within 200 m"),
-            new PositionPrecisionOption(18, "Within 90 m"),
-            new PositionPrecisionOption(19, "Within 50 m"),
-            new PositionPrecisionOption(32, "Precise"),
-        };
+    private IReadOnlyList<PositionPrecisionOption> _positionPrecisionOptions = Array.Empty<PositionPrecisionOption>();
+    public IReadOnlyList<PositionPrecisionOption> PositionPrecisionOptions => _positionPrecisionOptions;
 
     public IReadOnlyList<ChannelRole> RoleOptions { get; } = Enum.GetValues<ChannelRole>();
 
@@ -142,6 +131,12 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         OnPropertyChanged(nameof(TabHeader));
         OnPropertyChanged(nameof(Hash));
         OnPropertyChanged(nameof(PskHex));
+    }
+
+    public void UpdatePositionPrecisionOptions(UnitSystem unitSystem)
+    {
+        _positionPrecisionOptions = DisplayUnits.BuildPositionPrecisionOptions(unitSystem);
+        OnPropertyChanged(nameof(PositionPrecisionOptions));
     }
 
     [RelayCommand]

@@ -243,16 +243,11 @@
                       SelectedItem="{Binding Theme, Mode=TwoWay}" />
 
             <Separator />
-            <CheckBox Content="Use °F"
-                      IsChecked="{Binding UseFahrenheit, Mode=TwoWay}"
-                      VerticalAlignment="Center"
-                      ToolTip="Toggle temperature display between Celsius and Fahrenheit" />
-
-            <Separator />
-            <CheckBox Content="Use miles"
-                      IsChecked="{Binding UseMiles, Mode=TwoWay}"
-                      VerticalAlignment="Center"
-                      ToolTip="Toggle distance filters between kilometers and miles" />
+            <TextBlock Text="Units" VerticalAlignment="Center" Margin="0,0,4,0" />
+            <ComboBox Width="92"
+                      ItemsSource="{Binding UnitSystems}"
+                      SelectedItem="{Binding UnitSystemName, Mode=TwoWay}"
+                      ToolTip="Display units used throughout the app" />
 
             <Separator />
             <TextBlock Text="Colormap" VerticalAlignment="Center" Margin="0,0,4,0" />
@@ -526,7 +521,7 @@
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 
-                                <TextBlock Grid.Row="10" Grid.Column="0" Text="Location (lat, lon, alt m)"
+                                <TextBlock Grid.Row="10" Grid.Column="0" Text="{Binding HomeLocationLabel}"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
                                 <Grid Grid.Row="10" Grid.Column="1" Margin="0,4,0,4"
                                       IsEnabled="{Binding IsManualLocationSource}">
@@ -545,7 +540,7 @@
                                              Text="{Binding HomeLongitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                     <TextBox Grid.Column="2" Margin="2,0,0,0"
                                              FontFamily="Consolas"
-                                             ToolTip="Altitude in metres above sea level (optional)"
+                                             ToolTip="{Binding HomeAltitudeToolTip}"
                                              Text="{Binding HomeAltitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </Grid>
 
@@ -775,6 +770,7 @@
                                       KeyDown="WaypointsGrid_KeyDown">
                                 <DataGrid.RowStyle>
                                     <Style TargetType="DataGridRow">
+                                        <Setter Property="ToolTip" Value="{Binding ToolTipText}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsExpired}" Value="True">
                                                 <Setter Property="Foreground" Value="#F57C00" />
@@ -796,9 +792,16 @@
                                     </ContextMenu>
                                 </DataGrid.ContextMenu>
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Icon" Width="42"
-                                                        SortMemberPath="Icon"
-                                                        Binding="{Binding IconText}" />
+                                    <DataGridTemplateColumn Header="Icon" Width="42"
+                                                            SortMemberPath="Icon">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <emoji:TextBlock Text="{Binding IconText}"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
                                     <DataGridTextColumn Header="Name" Width="2*"
                                                         SortMemberPath="Name"
                                                         Binding="{Binding DisplayName}" />
@@ -1747,13 +1750,13 @@
                                                                         <ColumnDefinition Width="Auto" MinWidth="92" />
                                                                         <ColumnDefinition Width="*" />
                                                                     </Grid.ColumnDefinitions>
-                                                                    <TextBlock Grid.Column="0"
-                                                                               Foreground="{DynamicResource BrushSubtle}"
-                                                                               Text="{Binding Label}" />
-                                                                    <TextBlock Grid.Column="1"
-                                                                               FontFamily="Consolas"
-                                                                               TextWrapping="Wrap"
-                                                                               Text="{Binding Value}" />
+                                                                    <emoji:TextBlock Grid.Column="0"
+                                                                                     Foreground="{DynamicResource BrushSubtle}"
+                                                                                     Text="{Binding Label}" />
+                                                                    <emoji:TextBlock Grid.Column="1"
+                                                                                     FontFamily="Consolas"
+                                                                                     TextWrapping="Wrap"
+                                                                                     Text="{Binding Value}" />
                                                                 </Grid>
                                                             </DataTemplate>
                                                         </ItemsControl.ItemTemplate>
@@ -1786,6 +1789,8 @@
                         </DockPanel>
                         <ListBox ItemsSource="{Binding LogLines}"
                                  FontFamily="Consolas"
+                                 ScrollViewer.CanContentScroll="False"
+                                 VirtualizingPanel.ScrollUnit="Pixel"
                                  beh:AutoScroll.IsEnabled="True">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>

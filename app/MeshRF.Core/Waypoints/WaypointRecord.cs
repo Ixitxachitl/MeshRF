@@ -32,6 +32,10 @@ public sealed class WaypointRecord
         ? $"Waypoint {WaypointId:x8}"
         : Name;
 
+    public string ToolTipText => string.IsNullOrWhiteSpace(Description)
+        ? DisplayName
+        : Description;
+
     public bool HasIcon => Icon is not null and > 0;
 
     public string IconText

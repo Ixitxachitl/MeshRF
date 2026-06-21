@@ -1,76 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 
 namespace MeshRF.App.Views;
 
-/// <summary>Simple searchable emoji picker used for per-message reactions.</summary>
+/// <summary>Emoji picker used for reactions and waypoint icons.</summary>
 public partial class EmojiPickerWindow : Window
 {
-    public sealed record EmojiEntry(string Glyph, string Name);
+    public sealed record EmojiEntry(string Glyph, int CodePoint, string Category)
+    {
+        public string ToolTip => $"{Glyph}  U+{CodePoint:X}";
+    }
+
     public sealed record EmojiCategory(string Name, IReadOnlyList<EmojiEntry> Emojis);
 
-    private static readonly EmojiEntry[] Catalog =
+    private readonly record struct Range(int Start, int End);
+    private sealed record CategorySpec(string Name, IReadOnlyList<Range> Ranges);
+
+    private static readonly CategorySpec[] s_categorySpecs =
     [
-        new("😀", "grinning face"), new("😃", "smiley face"), new("😄", "smile"), new("😁", "beaming smile"),
-        new("😆", "laugh"), new("😅", "grin sweat"), new("🤣", "rolling laugh"), new("😂", "tears of joy"),
-        new("🙂", "slight smile"), new("🙃", "upside down"), new("🫠", "melting"), new("😉", "wink"),
-        new("😊", "blush"), new("😇", "angel"), new("🥰", "hearts"), new("😍", "heart eyes"),
-        new("🤩", "star struck"), new("😘", "kiss"), new("😗", "kissing"), new("😚", "closed eyes kiss"),
-        new("😋", "yum"), new("😛", "tongue"), new("😜", "winky tongue"), new("🤪", "zany"),
-        new("😝", "squint tongue"), new("🤑", "money mouth"), new("🤗", "hug"), new("🤭", "hand over mouth"),
-        new("🫢", "open eyes hand mouth"), new("🫣", "peeking"), new("🤫", "shh"), new("🤔", "thinking"),
-        new("🫡", "salute"), new("🤐", "zipper mouth"), new("🤨", "raised eyebrow"), new("😐", "neutral"),
-        new("😑", "expressionless"), new("😶", "no mouth"), new("🫥", "dotted face"), new("😶‍🌫️", "in clouds"),
-        new("😏", "smirk"), new("😒", "unamused"), new("🙄", "eye roll"), new("😬", "grimace"),
-        new("😮‍💨", "exhale"), new("😌", "relieved"), new("😔", "pensive"), new("😪", "sleepy"),
-        new("🤤", "drool"), new("😴", "sleeping"), new("🥱", "yawn"), new("😷", "mask"),
-        new("🤒", "thermometer"), new("🤕", "head bandage"), new("🤢", "nauseated"), new("🤮", "vomit"),
-        new("🤧", "sneeze"), new("🥵", "hot"), new("🥶", "cold"), new("🥴", "woozy"),
-        new("😵", "dizzy"), new("😵‍💫", "spiral eyes"), new("🤯", "mind blown"), new("🤠", "cowboy"),
-        new("🥳", "party"), new("🥸", "disguise"), new("😎", "sunglasses"), new("🤓", "nerd"),
-        new("🧐", "monocle"), new("😕", "confused"), new("🫤", "diagonal mouth"), new("😟", "worried"),
-        new("🙁", "slight frown"), new("☹️", "frown"), new("😮", "open mouth"), new("😯", "hushed"),
-        new("😲", "astonished"), new("😳", "flushed"), new("🥺", "pleading"), new("🥹", "teary"),
-        new("😦", "frown open mouth"), new("😧", "anguished"), new("😨", "fearful"), new("😰", "anxious sweat"),
-        new("😥", "sad relieved"), new("😢", "cry"), new("😭", "sob"), new("😱", "scream"),
-        new("😖", "confounded"), new("😣", "persevere"), new("😞", "disappointed"), new("😓", "downcast sweat"),
-        new("😩", "weary"), new("😫", "tired"), new("🥱", "yawn"), new("😤", "steam nose"),
-        new("😡", "pout"), new("😠", "angry"), new("🤬", "swearing"), new("😈", "smiling devil"),
-        new("👿", "angry devil"), new("💀", "skull"), new("☠️", "skull crossbones"), new("💩", "poop"),
-        new("🤡", "clown"), new("👹", "ogre"), new("👺", "goblin"), new("👻", "ghost"),
-        new("👽", "alien"), new("👾", "space invader"), new("🤖", "robot"), new("🎃", "jack o lantern"),
-        new("😺", "cat grin"), new("😸", "cat smile"), new("😹", "cat tears"), new("😻", "cat heart eyes"),
-        new("😼", "cat smirk"), new("😽", "cat kiss"), new("🙀", "cat scream"), new("😿", "cat cry"),
-        new("😾", "cat pout"), new("🫶", "heart hands"), new("👐", "open hands"), new("🙌", "raised hands"),
-        new("👏", "clap"), new("🤝", "handshake"), new("👍", "thumbs up"), new("👎", "thumbs down"),
-        new("👊", "fist"), new("✊", "raised fist"), new("🤛", "left fist"), new("🤜", "right fist"),
-        new("🫷", "left push hand"), new("🫸", "right push hand"), new("🤞", "crossed fingers"), new("✌️", "victory"),
-        new("🤟", "love you hand"), new("🤘", "horns"), new("👌", "ok hand"), new("🤌", "pinched fingers"),
-        new("🤏", "pinching hand"), new("🫰", "finger heart"), new("🫵", "point at you"), new("👈", "point left"),
-        new("👉", "point right"), new("👆", "point up"), new("👇", "point down"), new("☝️", "index up"),
-        new("✋", "raised hand"), new("🤚", "raised back hand"), new("🖐️", "splayed hand"), new("🖖", "vulcan salute"),
-        new("👋", "wave"), new("🤙", "call me"), new("💪", "biceps"), new("🦾", "mechanical arm"),
-        new("🫱", "rightward hand"), new("🫲", "leftward hand"), new("🫳", "palm down"), new("🫴", "palm up"),
-        new("🙏", "pray"), new("🫲", "left hand"), new("❤️", "red heart"), new("🩷", "pink heart"),
-        new("🧡", "orange heart"), new("💛", "yellow heart"), new("💚", "green heart"), new("🩵", "light blue heart"),
-        new("💙", "blue heart"), new("💜", "purple heart"), new("🤎", "brown heart"), new("🖤", "black heart"),
-        new("🩶", "grey heart"), new("🤍", "white heart"), new("💔", "broken heart"), new("❣️", "heart exclamation"),
-        new("💕", "two hearts"), new("💞", "revolving hearts"), new("💓", "beating heart"), new("💗", "growing heart"),
-        new("💖", "sparkling heart"), new("💘", "heart arrow"), new("💝", "heart ribbon"), new("💟", "heart decoration"),
-        new("☮️", "peace"), new("✨", "sparkles"), new("⭐", "star"), new("🌟", "glowing star"),
-        new("🔥", "fire"), new("💥", "collision"), new("💫", "dizzy"), new("💦", "sweat drops"),
-        new("💨", "dash"), new("🕳️", "hole"), new("💬", "speech bubble"), new("🗨️", "left speech bubble"),
-        new("💭", "thought bubble"), new("💤", "zzz"), new("✅", "check"), new("❌", "cross"),
-        new("⚠️", "warning"), new("🚫", "prohibited"), new("📌", "pin"), new("📍", "round pin"),
-        new("🛰️", "satellite"), new("📡", "antenna"), new("🧭", "compass"), new("🗺️", "map"),
-        new("🏠", "house"), new("🏕️", "camping"), new("🚧", "construction"), new("🎯", "target"),
-        new("🧪", "test tube"), new("🔧", "wrench"), new("🔋", "battery"), new("🔌", "plug"),
-        new("📶", "signal bars"), new("📳", "vibration"), new("🔔", "bell"), new("🎵", "music note")
+        new("Smileys", [new(0x1F600, 0x1F64F), new(0x1F910, 0x1F92F), new(0x1FAE0, 0x1FAE8)]),
+        new("Hands", [new(0x1F440, 0x1F450), new(0x1F90C, 0x1F93A), new(0x1FAF0, 0x1FAF8), new(0x270A, 0x270D)]),
+        new("People", [new(0x1F460, 0x1F487), new(0x1F574, 0x1F57A), new(0x1F645, 0x1F64F)]),
+        new("Animals", [new(0x1F400, 0x1F43E), new(0x1F980, 0x1F9AE), new(0x1F330, 0x1F33F)]),
+        new("Food", [new(0x1F32D, 0x1F37F), new(0x1F950, 0x1F96F)]),
+        new("Travel", [new(0x1F680, 0x1F6FF), new(0x1F300, 0x1F32C), new(0x1F5FA, 0x1F5FF), new(0x26F0, 0x26FF)]),
+        new("Activities", [new(0x1F380, 0x1F3C8), new(0x1F3D0, 0x1F3FA), new(0x1F93F, 0x1F94F)]),
+        new("Objects", [new(0x1F4A1, 0x1F4FF), new(0x1F6E0, 0x1F6EC), new(0x1F9F0, 0x1F9FF), new(0x1FA70, 0x1FAFF)]),
+        new("Symbols", [new(0x2600, 0x26FF), new(0x2700, 0x27BF), new(0x2B00, 0x2BFF), new(0x2194, 0x21AA), new(0x2300, 0x23FF), new(0x2934, 0x2935), new(0x3030, 0x3030), new(0x303D, 0x303D), new(0x3297, 0x3299)])
     ];
 
-    public ObservableCollection<EmojiCategory> Categories { get; } = new();
+    private static readonly Lazy<IReadOnlyList<EmojiEntry>> s_catalog = new(BuildCatalog);
+    private static readonly Lazy<IReadOnlyList<EmojiCategory>> s_categories = new(BuildCategories);
+
+    public IReadOnlyList<EmojiCategory> Categories => s_categories.Value;
 
     public string? SelectedEmoji { get; private set; }
 
@@ -78,7 +44,6 @@ public partial class EmojiPickerWindow : Window
     {
         InitializeComponent();
         DataContext = this;
-        BuildCategories();
     }
 
     public static string? PickEmoji(Window? owner)
@@ -91,42 +56,82 @@ public partial class EmojiPickerWindow : Window
         return dlg.ShowDialog() == true ? dlg.SelectedEmoji : null;
     }
 
-    private void BuildCategories()
+    private static IReadOnlyList<EmojiCategory> BuildCategories()
     {
-        static bool NameHas(EmojiEntry e, params string[] tokens)
-            => tokens.Any(t => e.Name.Contains(t, StringComparison.OrdinalIgnoreCase));
+        var catalog = s_catalog.Value;
+        var categories = new List<EmojiCategory>(s_categorySpecs.Length + 1);
 
-        var categoryDefs = new (string Name, Func<EmojiEntry, bool> Match)[]
+        foreach (var spec in s_categorySpecs)
         {
-            ("Smileys", e => NameHas(e,
-                "face", "smile", "grin", "laugh", "wink", "kiss", "sleep", "cry", "angry", "dizzy", "woozy", "party")),
-            ("People", e => NameHas(e,
-                "hand", "thumb", "fist", "point", "wave", "pray", "biceps", "clap", "hug", "salute", "finger")),
-            ("Hearts", e => NameHas(e,
-                "heart", "hearts", "love")),
-            ("Symbols", e => NameHas(e,
-                "check", "cross", "warning", "prohibited", "sparkles", "star", "fire", "collision", "speech bubble", "thought bubble", "zzz", "peace")),
-            ("Objects", e => NameHas(e,
-                "pin", "satellite", "antenna", "compass", "map", "house", "camping", "construction", "target", "test tube", "wrench", "battery", "plug", "signal", "vibration", "bell", "music")),
-            ("Creatures", e => NameHas(e,
-                "cat", "alien", "robot", "ghost", "goblin", "ogre", "devil", "clown", "skull", "poop", "jack o lantern")),
-        };
-
-        var assigned = new HashSet<EmojiEntry>();
-        Categories.Clear();
-
-        foreach (var (name, match) in categoryDefs)
-        {
-            var list = Catalog.Where(match).Distinct().ToList();
-            foreach (var e in list) assigned.Add(e);
+            var list = catalog.Where(e => string.Equals(e.Category, spec.Name, StringComparison.Ordinal)).ToList();
             if (list.Count > 0)
-                Categories.Add(new EmojiCategory(name, list));
+                categories.Add(new EmojiCategory($"{spec.Name} ({list.Count.ToString(CultureInfo.InvariantCulture)})", list));
         }
 
-        var more = Catalog.Where(e => !assigned.Contains(e)).ToList();
-        if (more.Count > 0)
-            Categories.Add(new EmojiCategory("More", more));
+        categories.Add(new EmojiCategory($"All ({catalog.Count.ToString(CultureInfo.InvariantCulture)})", catalog));
+        return categories;
     }
+
+    private static IReadOnlyList<EmojiEntry> BuildCatalog()
+    {
+        var list = new List<EmojiEntry>();
+        var seen = new HashSet<int>();
+
+        foreach (var spec in s_categorySpecs)
+        {
+            foreach (var range in spec.Ranges)
+            {
+                for (int codePoint = range.Start; codePoint <= range.End; codePoint++)
+                {
+                    if (!IsSupportedSingleCodePointEmoji(codePoint) || !seen.Add(codePoint))
+                        continue;
+
+                    list.Add(new EmojiEntry(char.ConvertFromUtf32(codePoint), codePoint, spec.Name));
+                }
+            }
+        }
+
+        return list
+            .OrderBy(e => CategoryOrder(e.Category))
+            .ThenBy(e => e.CodePoint)
+            .ToList();
+    }
+
+    private static bool IsSupportedSingleCodePointEmoji(int codePoint)
+    {
+        if (!Rune.IsValid(codePoint)) return false;
+        if (char.IsSurrogate((char)Math.Min(codePoint, char.MaxValue))) return false;
+
+        return codePoint switch
+        {
+            >= 0x1F300 and <= 0x1F5FF => true,
+            >= 0x1F600 and <= 0x1F64F => true,
+            >= 0x1F680 and <= 0x1F6FF => true,
+            >= 0x1F900 and <= 0x1F9FF => true,
+            >= 0x1FA70 and <= 0x1FAFF => true,
+            >= 0x2600 and <= 0x26FF => true,
+            >= 0x2700 and <= 0x27BF => true,
+            >= 0x2B00 and <= 0x2BFF => true,
+            >= 0x2300 and <= 0x23FF => true,
+            >= 0x2194 and <= 0x21AA => true,
+            0x00A9 or 0x00AE or 0x203C or 0x2049 or 0x2122 or 0x2139 or 0x3030 or 0x303D or 0x3297 or 0x3299 => true,
+            _ => false,
+        };
+    }
+
+    private static int CategoryOrder(string category) => category switch
+    {
+        "Smileys" => 0,
+        "Hands" => 1,
+        "People" => 2,
+        "Animals" => 3,
+        "Food" => 4,
+        "Travel" => 5,
+        "Activities" => 6,
+        "Objects" => 7,
+        "Symbols" => 8,
+        _ => 99,
+    };
 
     private void OnEmojiClick(object sender, RoutedEventArgs e)
     {

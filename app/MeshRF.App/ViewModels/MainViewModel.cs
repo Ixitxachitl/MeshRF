@@ -16,6 +16,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.App.Audio;
 using MeshRF.App.Location;
+using MeshRF.App.Units;
 using MeshRF.App.Views;
 using MeshRF.Channels;
 using MeshRF.Mesh;
@@ -146,12 +147,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _theme = "System";
 
     [ObservableProperty]
-    private bool _useFahrenheit;
-
-    [ObservableProperty]
-    private bool _useMiles;
+    private string _unitSystemName = nameof(UnitSystem.Metric);
 
     public IReadOnlyList<string> Themes { get; } = new[] { "System", "Light", "Dark" };
+    public IReadOnlyList<string> UnitSystems { get; } = new[] { nameof(UnitSystem.Metric), nameof(UnitSystem.Imperial) };
+    public UnitSystem CurrentUnitSystem => DisplayUnits.Parse(UnitSystemName);
+    public bool UseImperial => DisplayUnits.IsImperial(CurrentUnitSystem);
+    public bool UseFahrenheit => UseImperial;
+    public bool UseMiles => UseImperial;
 
     /// <summary>Incoming-message ringtone duration.</summary>
     [ObservableProperty]
@@ -341,11 +344,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>True when a home location is set (enables the distance filter).</summary>
     public bool HasHomeLocation => HomeLatitude.HasValue && HomeLongitude.HasValue;
+    public string HomeLocationLabel => $"Location (lat, lon, alt {DisplayUnits.AltitudeUnitShort(CurrentUnitSystem)})";
+    public string HomeAltitudeToolTip => UseImperial
+        ? "Altitude in feet above sea level (optional)"
+        : "Altitude in metres above sea level (optional)";
 
-    public string DistanceUnitShort => UseMiles ? "mi" : "km";
-    public string DistanceUnitLong => UseMiles ? "miles" : "km";
+    public string DistanceUnitShort => DisplayUnits.DistanceUnitShort(CurrentUnitSystem);
+    public string DistanceUnitLong => DisplayUnits.DistanceUnitLong(CurrentUnitSystem);
     public string MaxDistanceFilterToolTip =>
-        UseMiles
+        UseImperial
             ? "Max distance from location in miles (blank = any; requires location to be set)"
             : "Max distance from location in km (blank = any; requires location to be set)";
 
@@ -469,7 +476,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             && maxDistance > 0
             && HomeLatitude is double hlat && HomeLongitude is double hlon)
         {
-            double maxKm = UseMiles ? maxDistance * 1.609344 : maxDistance;
+            double maxKm = DisplayUnits.ConvertDistanceInputToKm(maxDistance, CurrentUnitSystem);
             if (n.Latitude is not double nlat || n.Longitude is not double nlon) return false;
             if (HaversineKm(hlat, hlon, nlat, nlon) > maxKm) return false;
         }
@@ -1118,7 +1125,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             sb.Append('\n').Append(la.ToString("F5", CultureInfo.InvariantCulture))
               .Append(", ").Append(lo.ToString("F5", CultureInfo.InvariantCulture));
-            if (n.AltitudeM is int alt) sb.Append("  ").Append(alt).Append(" m");
+            if (n.AltitudeM is int alt) sb.Append("  ").Append(FormatAltitude(alt));
         }
 
         // Signal.
@@ -1144,7 +1151,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var env = new List<string>();
         if (n.TemperatureC is float t) env.Add(FormatTemperature(t));
         if (n.RelativeHumidityPct is float h) env.Add($"{h:F0}% RH");
-        if (n.BarometricPressureHpa is float p) env.Add($"{p:F0} hPa");
+        if (n.BarometricPressureHpa is float p) env.Add(FormatPressure(p));
         if (env.Count > 0) sb.Append('\n').Append(string.Join("  ", env));
 
         // Last heard (relative).
@@ -1152,14 +1159,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return sb.ToString();
     }
 
-    private static string BuildWaypointTooltip(WaypointRecord wp)
+    private string BuildWaypointTooltip(WaypointRecord wp)
     {
         var sb = new System.Text.StringBuilder();
                 sb.Append(string.IsNullOrWhiteSpace(wp.IconText) ? wp.DisplayName : $"{wp.IconText} {wp.DisplayName}")
           .Append("\nFrom ").Append(wp.FromId)
           .Append("\n").Append(wp.Latitude.ToString("F5", CultureInfo.InvariantCulture))
           .Append(", ").Append(wp.Longitude.ToString("F5", CultureInfo.InvariantCulture));
-        if (wp.AltitudeM is int alt) sb.Append("  ").Append(alt).Append(" m");
+        if (wp.AltitudeM is int alt) sb.Append("  ").Append(FormatAltitude(alt));
         if (!string.IsNullOrWhiteSpace(wp.Description))
             sb.Append("\n").Append(wp.Description);
         if (wp.LockedTo != 0)
@@ -1174,12 +1181,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static string FormatLocalDateTime(DateTime localTime) =>
         localTime.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture);
 
-    private static float CelsiusToFahrenheit(float celsius) => (celsius * 9f / 5f) + 32f;
-
     private string FormatTemperature(float temperatureC) =>
-        UseFahrenheit
-            ? $"{CelsiusToFahrenheit(temperatureC):F1} °F"
-            : $"{temperatureC:F1} °C";
+        DisplayUnits.FormatTemperature(temperatureC, CurrentUnitSystem);
+
+    private string FormatPressure(float pressureHpa) =>
+        DisplayUnits.FormatPressure(pressureHpa, CurrentUnitSystem);
+
+    private string FormatAltitude(int altitudeMeters) =>
+        DisplayUnits.FormatAltitude(altitudeMeters, CurrentUnitSystem);
 
     private string GetMapNodeLabel(NodeRecord n) => MapNodeLabelMode switch
     {
@@ -1188,7 +1197,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         "Short Name" => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
         "Temperature" => n.TemperatureC is float t ? FormatTemperature(t) : n.DisplayId,
         "Humidity" => n.RelativeHumidityPct is float h ? $"{h:F0}%" : n.DisplayId,
-        "Pressure" => n.BarometricPressureHpa is float p ? $"{p:F0} hPa" : n.DisplayId,
+        "Pressure" => n.BarometricPressureHpa is float p ? FormatPressure(p) : n.DisplayId,
         _ => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
     };
 
@@ -1293,8 +1302,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         BiasTee = _settings.BiasTee;
         DcBlockEnable = _settings.DcBlockEnable;
         Theme = _settings.Theme;
-        UseFahrenheit = _settings.UseFahrenheit;
-        UseMiles = _settings.UseMiles;
+        UnitSystemName = _settings.UnitSystem;
         WaterfallColormap = _settings.WaterfallColormap;
         RingtoneMode = _settings.RingtoneMode;
         RingtoneVolume = _settings.RingtoneVolume;
@@ -1359,7 +1367,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _suppressHomeTextUpdate = true;
         HomeLatitudeText  = _manualHomeLatitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
         HomeLongitudeText = _manualHomeLongitude?.ToString("0.######", CultureInfo.InvariantCulture) ?? string.Empty;
-        HomeAltitudeText  = _manualHomeAltitude?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        HomeAltitudeText  = DisplayUnits.FormatAltitudeInput(_manualHomeAltitude, CurrentUnitSystem);
         _suppressHomeTextUpdate = false;
         HomeAltitude = _manualHomeAltitude;
         SelectedLocationSource = LocationSourceOptions.FirstOrDefault(o =>
@@ -2319,7 +2327,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ThenBy(c => c.Index);
         foreach (var c in sorted)
             Channels.Add(new ChannelViewModel(c, OnChannelSaved,
-                IsChannelRtttlMuted(c.Index), OnChannelRtttlMuteChanged));
+                IsChannelRtttlMuted(c.Index), OnChannelRtttlMuteChanged, CurrentUnitSystem));
         SyncPrimaryChannelName();
         RebuildTabs();
         SelectedTab = Channels.FirstOrDefault();
@@ -2671,24 +2679,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
     }
     partial void OnThemeChanged(string value) { ThemeManager.Apply(value); SaveSettings(); }
-    partial void OnUseFahrenheitChanged(bool value)
+    partial void OnUnitSystemNameChanged(string value)
     {
         SaveSettings();
-        if (!_settingsLoaded) return;
-
-        _nodeTooltipSignatures.Clear();
-        _nodeTooltipCache.Clear();
-        foreach (var convo in Tabs.OfType<ConversationViewModel>())
-            convo.RefreshTelemetryFormatting();
-        MapDataChanged?.Invoke(this, EventArgs.Empty);
-    }
-    partial void OnUseMilesChanged(bool value)
-    {
-        SaveSettings();
+        OnPropertyChanged(nameof(CurrentUnitSystem));
+        OnPropertyChanged(nameof(UseImperial));
+        OnPropertyChanged(nameof(UseFahrenheit));
+        OnPropertyChanged(nameof(UseMiles));
         OnPropertyChanged(nameof(DistanceUnitShort));
         OnPropertyChanged(nameof(DistanceUnitLong));
         OnPropertyChanged(nameof(MaxDistanceFilterToolTip));
+        OnPropertyChanged(nameof(HomeLocationLabel));
+        OnPropertyChanged(nameof(HomeAltitudeToolTip));
         if (!_settingsLoaded) return;
+
+        _suppressHomeTextUpdate = true;
+        HomeAltitudeText = DisplayUnits.FormatAltitudeInput(_manualHomeAltitude, CurrentUnitSystem);
+        _suppressHomeTextUpdate = false;
+
+        _nodeTooltipSignatures.Clear();
+        _nodeTooltipCache.Clear();
+        foreach (var channel in Channels)
+            channel.UpdatePositionPrecisionOptions(CurrentUnitSystem);
+        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+            convo.RefreshTelemetryFormatting();
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
         RefreshNodesFilter();
     }
     partial void OnWaterfallColormapChanged(string value) { SaveSettings(); }
@@ -2719,8 +2734,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.BiasTee = BiasTee;
         _settings.DcBlockEnable = DcBlockEnable;
         _settings.Theme = Theme;
-        _settings.UseFahrenheit = UseFahrenheit;
-        _settings.UseMiles = UseMiles;
+        _settings.UnitSystem = UnitSystemName;
+        _settings.UseFahrenheit = UseImperial;
+        _settings.UseMiles = UseImperial;
         _settings.WaterfallColormap = WaterfallColormap;
         _settings.MutedRingtoneChannels = Channels
             .Where(c => c.MuteRtttl)
@@ -2908,9 +2924,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _manualHomeLongitude = string.IsNullOrWhiteSpace(HomeLongitudeText)
             ? null : (TryParseCoord(HomeLongitudeText, -180, 180) ?? _manualHomeLongitude);
         _manualHomeAltitude = string.IsNullOrWhiteSpace(HomeAltitudeText)
-            ? null : (int.TryParse(HomeAltitudeText.Trim(), NumberStyles.Integer,
-                                   CultureInfo.InvariantCulture, out int altParsed)
-                      ? altParsed : _manualHomeAltitude);
+            ? null : (DisplayUnits.ParseAltitudeInput(HomeAltitudeText, CurrentUnitSystem) ?? _manualHomeAltitude);
         HomeAltitude = _manualHomeAltitude;
         if (IsManualLocationSource)
             ApplyResolvedHomeLocation(_manualHomeLatitude, _manualHomeLongitude);
@@ -3047,7 +3061,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyGpsFix(GpsFix fix)
     {
-        var altStr = fix.AltitudeM is int a ? $"  alt {a} m" : string.Empty;
+        var altStr = fix.AltitudeM is int a ? $"  alt {FormatAltitude(a)}" : string.Empty;
         GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}{altStr}";
         if (!IsUsbSerialLocationSource) return;
         if (fix.AltitudeM is int alt)
@@ -3138,6 +3152,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             OnConversationMuteRtttlChanged,
             OnConversationLocationHistoryChanged,
             FormatTemperature,
+            FormatPressure,
+            FormatAltitude,
             _nodeStore);
         convo.LoadNodeHistories();
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
@@ -3969,7 +3985,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Send a waypoint to the mesh and persist it locally so it remains on the
     /// map until explicitly deleted.
     /// </summary>
-    public async Task SendWaypointFromMapAsync(double lat, double lon)
+    public async Task SendWaypointFromMapAsync(double lat, double lon,
+                                               ChannelConfig? channel = null)
     {
         if (!CanTransmit || _myNodeNum == 0)
         {
@@ -3978,13 +3995,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
-        if (primary is null)
+        var selectedChannel = ResolveRequestChannel(channel);
+        if (selectedChannel is null)
         {
-            Status = "No primary channel to send waypoint on.";
+            Status = "No enabled channel to send waypoint on.";
             Log(Status);
             return;
         }
+
+        var selectedChannelVm = Channels.FirstOrDefault(c => c.Config.Index == selectedChannel.Index);
+        var selectedChannelName = selectedChannelVm?.DisplayName ?? selectedChannel.Name;
 
         try
         {
@@ -3997,7 +4017,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint? icon = EmojiToCodePoint(SelectedWaypointEmoji);
             uint expireEpoch = BuildWaypointExpiryEpoch();
             var frame = MeshEncoder.EncodeWaypoint(
-                primary.Config,
+                selectedChannel,
                 _myNodeNum,
                 packetId,
                 waypointId,
@@ -4025,7 +4045,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 FromNode = _myNodeNum,
                 WaypointId = waypointId,
                 PacketId = packetId,
-                Channel = primary.Config.Name,
+                Channel = selectedChannel.Name,
                 Name = name,
                 Description = description,
                 Icon = icon,
@@ -4036,7 +4056,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             });
             ReloadWaypoints();
 
-            Status = $"Sent waypoint ({frame.Length} B) on {primary.DisplayName}";
+            Status = $"Sent waypoint ({frame.Length} B) on {selectedChannelName}";
             Log(Status);
         }
         catch (Exception ex)
@@ -5638,7 +5658,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     if (t.HasEnvironmentMetrics)
                     {
                         var temp = t.TemperatureC is float tempC ? FormatTemperature(tempC) : "n/a";
-                        Log($"  telemetry {header.FromId}: {temp} {t.RelativeHumidityPct:F0}% {t.BarometricPressureHpa:F0}hPa");
+                        var pressure = t.BarometricPressureHpa is float pressureHpa ? FormatPressure(pressureHpa) : "n/a";
+                        Log($"  telemetry {header.FromId}: {temp} {t.RelativeHumidityPct:F0}% {pressure}");
                     }
                     else
                         Log($"  telemetry {header.FromId}: batt {t.BatteryLevel}% {t.Voltage:F2}V");

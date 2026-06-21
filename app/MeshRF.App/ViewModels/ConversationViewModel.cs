@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MeshRF.App.Units;
 using MeshRF.Mesh;
 using MeshRF.Nodes;
 
@@ -14,7 +15,7 @@ namespace MeshRF.App.ViewModels;
 public sealed record TelemetryItem(string Label, string Value);
 
 /// <summary>A single historical position sample for a conversation peer.</summary>
-public sealed record LocationHistoryPoint(double Latitude, double Longitude, int? AltitudeM, DateTime TimestampUtc)
+public sealed record LocationHistoryPoint(double Latitude, double Longitude, int? AltitudeM, string AltitudeDisplay, DateTime TimestampUtc)
 {
     private const string UiDateTimeFormat = "M/d/yyyy h:mm:ss tt";
 
@@ -22,7 +23,7 @@ public sealed record LocationHistoryPoint(double Latitude, double Longitude, int
 
     public string Display =>
     $"{TimestampLocal.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}  {Latitude:0.#####}, {Longitude:0.#####}"
-    + (AltitudeM is int alt ? $"  {alt} m" : string.Empty);
+    + (string.IsNullOrWhiteSpace(AltitudeDisplay) ? string.Empty : $"  {AltitudeDisplay}");
 
     public long Id { get; init; }
 }
@@ -74,6 +75,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     private readonly Action<ConversationViewModel, bool>? _onMuteRtttlChanged;
     private readonly Action<ConversationViewModel>? _onLocationHistoryChanged;
     private readonly Func<float, string>? _formatTemperature;
+    private readonly Func<float, string>? _formatPressure;
+    private readonly Func<int, string>? _formatAltitude;
     private readonly NodeStore? _nodeStore;
     private bool _syncingNodeMute;
 
@@ -81,6 +84,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
                                  Action<ConversationViewModel, bool>? onMuteRtttlChanged = null,
                                  Action<ConversationViewModel>? onLocationHistoryChanged = null,
                                  Func<float, string>? formatTemperature = null,
+                                 Func<float, string>? formatPressure = null,
+                                 Func<int, string>? formatAltitude = null,
                                  NodeStore? nodeStore = null)
     {
         NodeNum = nodeNum;
@@ -88,6 +93,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         _onMuteRtttlChanged = onMuteRtttlChanged;
         _onLocationHistoryChanged = onLocationHistoryChanged;
         _formatTemperature = formatTemperature;
+        _formatPressure = formatPressure;
+        _formatAltitude = formatAltitude;
         _nodeStore = nodeStore;
     }
 
@@ -194,7 +201,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             if (n.TemperatureC is float temp)
                 Add("Temperature", _formatTemperature?.Invoke(temp) ?? $"{temp:0.0} \u00B0C");
             if (n.RelativeHumidityPct is float hum) Add("Humidity", $"{hum:0.0}%");
-            if (n.BarometricPressureHpa is float pres) Add("Pressure", $"{pres:0.0} hPa");
+            if (n.BarometricPressureHpa is float pres) Add("Pressure", _formatPressure?.Invoke(pres) ?? $"{pres:0.0} hPa");
             if (n.GasResistanceMohm is float gas) Add("Gas resistance", $"{gas:0.0} M\u03A9");
             if (n.Iaq is int iaq) Add("Air quality (IAQ)", iaq.ToString());
             if (n.SnrDb is float snr) Add("SNR", $"{snr:0.0} dB");
@@ -202,7 +209,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             if (n.HopsAway is byte hops) Add("Hops away", hops.ToString());
             if (n.Latitude is double lat && n.Longitude is double lon)
                 Add("Position", $"{lat:0.#####}, {lon:0.#####}");
-            if (n.AltitudeM is int alt) Add("Altitude", $"{alt} m");
+            if (n.AltitudeM is int alt) Add("Altitude", _formatAltitude?.Invoke(alt) ?? $"{alt} m");
             if (n.LastHeardEpoch != 0)
                 Add("Last heard", n.LastHeard.ToString("M/d/yyyy h:mm:ss tt", CultureInfo.CurrentCulture));
         }
@@ -228,6 +235,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
                 point.Latitude,
                 point.Longitude,
                 point.AltitudeM,
+                point.AltitudeM is int altitude ? (_formatAltitude?.Invoke(altitude) ?? $"{altitude} m") : string.Empty,
                 point.TimestampUtc)
             { Id = point.Id });
         }
@@ -328,7 +336,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
                 return;
         }
 
-        var point = new LocationHistoryPoint(lat, lon, node.AltitudeM, sampleTimeUtc);
+        var point = new LocationHistoryPoint(
+            lat,
+            lon,
+            node.AltitudeM,
+            node.AltitudeM is int altitude ? (_formatAltitude?.Invoke(altitude) ?? $"{altitude} m") : string.Empty,
+            sampleTimeUtc);
         if (_nodeStore is not null)
         {
             var id = _nodeStore.AddLocationHistory(NodeNum, sampleTimeUtc, lat, lon, node.AltitudeM);
@@ -424,7 +437,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             record.UptimeSeconds is double up ? FormatUptime((uint)Math.Max(0, up)) : string.Empty,
             record.TemperatureC is double temp ? (_formatTemperature?.Invoke((float)temp) ?? $"{temp:0.0} \u00B0C") : string.Empty,
             record.RelativeHumidityPct is double hum ? $"{hum:0.0}%" : string.Empty,
-            record.BarometricPressureHpa is double pres ? $"{pres:0.0} hPa" : string.Empty,
+            record.BarometricPressureHpa is double pres ? (_formatPressure?.Invoke((float)pres) ?? $"{pres:0.0} hPa") : string.Empty,
             record.GasResistanceMohm is double gas ? $"{gas:0.0} M\u03A9" : string.Empty,
             record.IaqValue is double iaq ? iaq.ToString("0", CultureInfo.InvariantCulture) : string.Empty,
             record.Signature)

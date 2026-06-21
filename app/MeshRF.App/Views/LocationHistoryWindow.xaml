@@ -149,7 +149,7 @@
                                         Binding="{Binding Longitude, StringFormat={}{0:0.#####}}" />
                     <DataGridTextColumn Header="Alt"
                                         Width="Auto"
-                                        Binding="{Binding AltitudeM, StringFormat={}{0} m}" />
+                                        Binding="{Binding AltitudeDisplay}" />
                 </DataGrid.Columns>
             </DataGrid>
         </Grid>

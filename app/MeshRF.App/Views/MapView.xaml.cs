@@ -13,6 +13,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using MeshRF.App;
 using MeshRF.App.ViewModels;
+using MeshRF.Channels;
 using Path = System.IO.Path;
 namespace MeshRF.App.Views;
 
@@ -1701,7 +1702,14 @@ public partial class MapView : UserControl
             double lat = YToLat(originY + p.Y, _zoom);
             lon = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
 
-            _ = _vm.SendWaypointFromMapAsync(ClampLat(lat), lon);
+            var channel = PromptForWaypointChannel(_vm);
+            if (channel is null)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            _ = _vm.SendWaypointFromMapAsync(ClampLat(lat), lon, channel);
             e.Handled = true;
             return;
         }
@@ -1734,6 +1742,35 @@ public partial class MapView : UserControl
         _lastDragPreviewTick = 0;
         _lastDragCommitTick = 0;
         MarkerCanvas.CaptureMouse();
+    }
+
+    private ChannelConfig? PromptForWaypointChannel(MainViewModel vm)
+    {
+        var channels = vm.Channels
+            .Where(c => c.Config.Role != ChannelRole.Disabled)
+            .ToList();
+        if (channels.Count == 0)
+        {
+            vm.Status = "No enabled channel to send waypoint on.";
+            return null;
+        }
+
+        var selectedChannel = vm.SelectedChannel;
+        int preferredIndex = selectedChannel is not null &&
+            selectedChannel.Config.Role != ChannelRole.Disabled
+            ? selectedChannel.Config.Index
+            : channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config.Index
+                ?? channels[0].Config.Index;
+
+        var picker = new ChannelPickerWindow(channels, preferredIndex,
+            "Send waypoint on which channel?")
+        {
+            Owner = Window.GetWindow(this),
+        };
+
+        return picker.ShowDialog() == true
+            ? picker.SelectedChannel?.Config
+            : null;
     }
 
     private bool IsWithinSpider(DependencyObject? source)

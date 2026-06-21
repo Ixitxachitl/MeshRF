@@ -63,6 +63,9 @@ public sealed class AppSettings
     /// <summary>UI theme: "Light", "Dark", or "System".</summary>
     public string Theme { get; set; } = "System";
 
+    /// <summary>Display unit system: "Metric" or "Imperial".</summary>
+    public string UnitSystem { get; set; } = "Metric";
+
     /// <summary>When true, display temperatures in Fahrenheit; otherwise Celsius.</summary>
     public bool UseFahrenheit { get; set; } = false;
 
@@ -340,7 +343,9 @@ public sealed class AppSettings
             var path = SettingsPath;
             if (!File.Exists(path)) return new AppSettings();
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+            settings.NormalizeUnitSystem();
+            return settings;
         }
         catch
         {
@@ -353,6 +358,7 @@ public sealed class AppSettings
     {
         try
         {
+            NormalizeUnitSystem();
             // Serialize on the caller's thread (fast, <1 ms), then write the
             // file on a thread-pool thread so the UI never blocks on disk I/O.
             // Each call captures its own snapshot so concurrent calls are safe.
@@ -367,5 +373,15 @@ public sealed class AppSettings
         {
             // Persistence failures are non-fatal.
         }
+    }
+
+    private void NormalizeUnitSystem()
+    {
+        if (string.IsNullOrWhiteSpace(UnitSystem))
+            UnitSystem = (UseFahrenheit || UseMiles) ? "Imperial" : "Metric";
+
+        bool imperial = string.Equals(UnitSystem, "Imperial", StringComparison.OrdinalIgnoreCase);
+        UseFahrenheit = imperial;
+        UseMiles = imperial;
     }
 }
