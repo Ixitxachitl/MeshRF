@@ -1122,6 +1122,7 @@ public partial class MainWindow : Window
             settings.NodeFilterLocation      = vm.NodeLocationFilter;
             settings.NodeFilterHideInvalidLocations = vm.HideInvalidNodeLocations;
             settings.NodeFilterIgnored       = vm.NodeIgnoredFilter;
+            settings.NodeFilterMqtt          = vm.NodeMqttFilter;
             settings.NodeFilterTemperature   = vm.NodeTemperatureFilter;
             settings.NodeFilterHumidity      = vm.NodeHumidityFilter;
             settings.NodeFilterPressure      = vm.NodePressureFilter;

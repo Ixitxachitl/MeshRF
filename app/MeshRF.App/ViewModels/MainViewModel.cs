@@ -328,6 +328,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _nodeLocationFilter    = "Any";
     [ObservableProperty] private bool _hideInvalidNodeLocations;
     [ObservableProperty] private string _nodeIgnoredFilter     = "Show all";
+    [ObservableProperty] private string _nodeMqttFilter        = "Any";
     [ObservableProperty] private string _nodeTemperatureFilter = "Any";
     [ObservableProperty] private string _nodeHumidityFilter    = "Any";
     [ObservableProperty] private string _nodePressureFilter    = "Any";
@@ -339,6 +340,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<string> NodeKeyFilterOptions      { get; } = ["Any", "Good key", "Mismatch", "No key"];
     public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "Has position history (>1)", "No position"];
     public IReadOnlyList<string> NodeIgnoredFilterOptions  { get; } = ["Show all", "Hide ignored", "Only ignored"];
+    public IReadOnlyList<string> NodeMqttFilterOptions     { get; } = ["Any", "Hide via MQTT", "Only via MQTT"];
     public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
     public IReadOnlyList<string> MapNodeLabelModeOptions   { get; } =
         ["Node Number", "Long Name", "Short Name", "Temperature", "Humidity", "Pressure"];
@@ -374,6 +376,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_settingsLoaded)
             LoadChatHistory();
     }
+    partial void OnNodeMqttFilterChanged(string value)          => RefreshNodesFilter();
     partial void OnNodeTemperatureFilterChanged(string value)   => RefreshNodesFilter();
     partial void OnNodeHumidityFilterChanged(string value)      => RefreshNodesFilter();
     partial void OnNodePressureFilterChanged(string value)      => RefreshNodesFilter();
@@ -390,6 +393,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeLocationFilter    = "Any";
         HideInvalidNodeLocations = false;
         NodeIgnoredFilter     = "Show all";
+        NodeMqttFilter        = "Any";
         NodeTemperatureFilter = "Any";
         NodeHumidityFilter    = "Any";
         NodePressureFilter    = "Any";
@@ -452,6 +456,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             case "Hide ignored": if (n.Ignored) return false; break;
             case "Only ignored": if (!n.Ignored) return false; break;
+        }
+
+        switch (NodeMqttFilter)
+        {
+            case "Hide via MQTT": if (n.SeenViaMqtt) return false; break;
+            case "Only via MQTT": if (!n.SeenViaMqtt) return false; break;
         }
 
         // Telemetry presence filters.
@@ -1392,6 +1402,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             HideInvalidNodeLocations = _settings.NodeFilterHideInvalidLocations;
         }
         NodeIgnoredFilter     = _settings.NodeFilterIgnored;
+        NodeMqttFilter        = NodeMqttFilterOptions.Contains(_settings.NodeFilterMqtt)
+            ? _settings.NodeFilterMqtt
+            : "Any";
         NodeTemperatureFilter = _settings.NodeFilterTemperature;
         NodeHumidityFilter    = _settings.NodeFilterHumidity;
         NodePressureFilter    = _settings.NodeFilterPressure;
@@ -1681,6 +1694,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             !string.Equals(NodeLocationFilter, "Any", StringComparison.Ordinal) ||
             HideInvalidNodeLocations ||
             !string.Equals(NodeIgnoredFilter, "Show all", StringComparison.Ordinal) ||
+            !string.Equals(NodeMqttFilter, "Any", StringComparison.Ordinal) ||
             !string.IsNullOrWhiteSpace(NodeDistanceKmText) ||
             !string.IsNullOrWhiteSpace(NodeMaxAgeMinutesText);
 
@@ -2773,6 +2787,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.AutoReportDeviceMetricsSeconds = Math.Max(5, AutoReportDeviceMetricsSeconds);
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
+        _settings.NodeFilterMqtt = NodeMqttFilter;
         _settings.HomeLocationSource = SelectedLocationSource?.Value ?? ManualLocationSourceValue;
         _settings.HomeLatitude  = _manualHomeLatitude;
         _settings.HomeLongitude = _manualHomeLongitude;
@@ -5254,7 +5269,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _nodeStore.RecordSighting(header.From,
                     rssiDbm: packetRssiDbm,
                     snrDb: snrDb,
-                    hopsAway: hopsAway);
+                    hopsAway: hopsAway,
+                    seenViaMqtt: header.ViaMqtt);
             }
             catch { /* DB best-effort */ }
         }
@@ -5294,6 +5310,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Emoji = result.Emoji,
             IsReaction = isReactionRecord,
             Decrypted = true,
+            ViaMqtt = header.ViaMqtt,
             RxEpoch = rxEpoch,
             RssiDbfs = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs,
             SnrDb = snrDb,
@@ -5527,6 +5544,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             // Only touch the flag when this NodeInfo carried a key.
                             KeyMismatch = newKeyHex.Length > 0 ? keyMismatch : (bool?)null,
                             LastHeardEpoch = rxEpoch,
+                            SeenViaMqtt = header.ViaMqtt,
                             RssiDbm = packetRssiDbm,
                             SnrDb = snrDb,
                             HopsAway = hopsAway,
@@ -5591,6 +5609,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         Longitude = result.Position.Longitude,
                         AltitudeM = result.Position.AltitudeM,
                         LastHeardEpoch = rxEpoch,
+                        SeenViaMqtt = header.ViaMqtt,
                     });
                     if (positionChanged)
                         _nodeStore.AddLocationHistory(
@@ -5657,6 +5676,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     {
                         NodeNum = header.From,
                         LastHeardEpoch = rxEpoch,
+                        SeenViaMqtt = header.ViaMqtt,
                         BatteryPct = t.BatteryLevel,
                         VoltageV = t.Voltage,
                         ChannelUtilPct = t.ChannelUtilization,

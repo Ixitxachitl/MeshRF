@@ -39,6 +39,9 @@ public sealed class MessageRecord
     /// <summary>True if the channel key successfully decrypted the packet.</summary>
     public bool Decrypted { get; set; }
 
+    /// <summary>True when the packet header reported <c>via_mqtt</c>.</summary>
+    public bool ViaMqtt { get; set; }
+
     public long RxEpoch { get; set; }
     public float? RssiDbfs { get; set; }
     public float? SnrDb { get; set; }

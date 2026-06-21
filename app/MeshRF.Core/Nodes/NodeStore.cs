@@ -79,6 +79,7 @@ public sealed class NodeStore : IDisposable
                 hw_model         TEXT    NOT NULL DEFAULT '',
                 role             TEXT    NOT NULL DEFAULT '',
                 last_heard_epoch INTEGER NOT NULL DEFAULT 0,
+                seen_via_mqtt    INTEGER NOT NULL DEFAULT 0,
                 snr_db           REAL,
                 rssi_dbm         REAL,
                 hops_away        INTEGER,
@@ -109,6 +110,7 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("mute_rtttl", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("ignored", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("seen_via_mqtt", "INTEGER NOT NULL DEFAULT 0");
 
         using var history = _conn.CreateCommand();
         history.CommandText = """
@@ -165,7 +167,7 @@ public sealed class NodeStore : IDisposable
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO nodes (node_num, user_id, long_name, short_name,
-                               hw_model, role, last_heard_epoch,
+                               hw_model, role, last_heard_epoch, seen_via_mqtt,
                                snr_db, rssi_dbm, hops_away,
                                latitude, longitude, altitude_m,
                                battery_pct, voltage_v,
@@ -175,7 +177,7 @@ public sealed class NodeStore : IDisposable
                                    gas_resistance_mohm, iaq, public_key, key_mismatch,
                                    mute_rtttl, ignored)
             VALUES ($node_num, $user_id, $long_name, $short_name,
-                    $hw_model, $role, $last_heard,
+                    $hw_model, $role, $last_heard, $seen_via_mqtt,
                     $snr, $rssi, $hops,
                     $lat, $lon, $alt,
                     $batt, $volt,
@@ -191,6 +193,7 @@ public sealed class NodeStore : IDisposable
                 hw_model         = COALESCE(NULLIF(excluded.hw_model, ''),   hw_model),
                 role             = COALESCE(NULLIF(excluded.role, ''),       role),
                 last_heard_epoch = MAX(excluded.last_heard_epoch, last_heard_epoch),
+                seen_via_mqtt    = MAX(excluded.seen_via_mqtt, seen_via_mqtt),
                 snr_db           = COALESCE(excluded.snr_db, snr_db),
                 rssi_dbm         = COALESCE(excluded.rssi_dbm, rssi_dbm),
                 hops_away        = COALESCE(excluded.hops_away, hops_away),
@@ -217,6 +220,7 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$hw_model", rec.HwModel ?? string.Empty);
         cmd.Parameters.AddWithValue("$role", rec.Role ?? string.Empty);
         cmd.Parameters.AddWithValue("$last_heard", rec.LastHeardEpoch);
+        cmd.Parameters.AddWithValue("$seen_via_mqtt", rec.SeenViaMqtt ? 1 : 0);
         cmd.Parameters.AddWithValue("$snr",  (object?)rec.SnrDb       ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$rssi", (object?)rec.RssiDbm     ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$hops", (object?)rec.HopsAway    ?? DBNull.Value);
@@ -277,13 +281,15 @@ public sealed class NodeStore : IDisposable
     /// <summary>Touch last-heard / RSSI / SNR for an existing or new node.</summary>
     public void RecordSighting(uint nodeNum, float? rssiDbm = null,
                                float? snrDb = null, byte? hopsAway = null,
-                               DateTimeOffset? when = null)
+                               DateTimeOffset? when = null,
+                               bool seenViaMqtt = false)
     {
         var ts = (when ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds();
         Upsert(new NodeRecord
         {
             NodeNum = nodeNum,
             LastHeardEpoch = ts,
+            SeenViaMqtt = seenViaMqtt,
             RssiDbm = rssiDbm,
             SnrDb = snrDb,
             HopsAway = hopsAway,
@@ -586,6 +592,7 @@ public sealed class NodeStore : IDisposable
             HwModel        = r.GetString(r.GetOrdinal("hw_model")),
             Role           = r.GetString(r.GetOrdinal("role")),
             LastHeardEpoch = r.GetInt64(r.GetOrdinal("last_heard_epoch")),
+            SeenViaMqtt    = Nullable<bool>("seen_via_mqtt") == true,
             SnrDb          = Nullable<float>("snr_db"),
             RssiDbm        = Nullable<float>("rssi_dbm"),
             HopsAway       = Nullable<byte>("hops_away"),

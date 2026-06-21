@@ -298,6 +298,9 @@ public sealed class AppSettings
     /// <summary>Persisted node ignored filter.</summary>
     public string NodeFilterIgnored { get; set; } = "Show all";
 
+    /// <summary>Persisted node MQTT provenance filter.</summary>
+    public string NodeFilterMqtt { get; set; } = "Any";
+
     /// <summary>Persisted node temperature filter.</summary>
     public string NodeFilterTemperature { get; set; } = "Any";
 

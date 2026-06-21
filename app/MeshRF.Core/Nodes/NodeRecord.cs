@@ -22,6 +22,9 @@ public sealed class NodeRecord
     /// <summary>Unix epoch seconds, 0 if never heard.</summary>
     public long LastHeardEpoch { get; set; }
 
+    /// <summary>True when any stored sighting for this node reported <c>via_mqtt</c>.</summary>
+    public bool SeenViaMqtt { get; set; }
+
     public float? SnrDb       { get; set; }
     public float? RssiDbm     { get; set; }
     public byte?  HopsAway    { get; set; }

@@ -671,6 +671,7 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Hops" />
@@ -705,16 +706,22 @@
                                               SelectedItem="{Binding NodeIgnoredFilter, Mode=TwoWay}"
                                               ToolTip="Ignored nodes" />
 
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Heard within" />
-                                    <DockPanel Grid.Row="5" Grid.Column="1" LastChildFill="False">
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Via MQTT" />
+                                    <ComboBox Grid.Row="5" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding NodeMqttFilterOptions}"
+                                              SelectedItem="{Binding NodeMqttFilter, Mode=TwoWay}"
+                                              ToolTip="Filter nodes that have been seen via MQTT" />
+
+                                    <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Heard within" />
+                                    <DockPanel Grid.Row="6" Grid.Column="1" LastChildFill="False">
                                         <TextBox Width="56" Height="22" FontSize="11"
                                                  Text="{Binding NodeMaxAgeMinutesText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                  ToolTip="Show only nodes heard within the last N minutes (blank = any)" />
                                         <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Text="minutes" />
                                     </DockPanel>
 
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Max distance" />
-                                    <DockPanel Grid.Row="6" Grid.Column="1" LastChildFill="False"
+                                    <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Max distance" />
+                                    <DockPanel Grid.Row="7" Grid.Column="1" LastChildFill="False"
                                                Opacity="{Binding HasHomeLocation, Converter={StaticResource BoolToOpacity}}">
                                         <TextBox Width="64" Height="22" FontSize="11"
                                                  IsEnabled="{Binding HasHomeLocation}"
@@ -723,20 +730,20 @@
                                         <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Text="{Binding DistanceUnitShort}" />
                                     </DockPanel>
 
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has temperature" />
-                                    <ComboBox Grid.Row="7" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="8" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has temperature" />
+                                    <ComboBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodeTemperatureFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether temperature telemetry is present" />
 
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has humidity" />
-                                    <ComboBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="9" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has humidity" />
+                                    <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodeHumidityFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether humidity telemetry is present" />
 
-                                    <TextBlock Grid.Row="9" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has pressure" />
-                                    <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="10" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has pressure" />
+                                    <ComboBox Grid.Row="10" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodePressureFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether pressure telemetry is present" />

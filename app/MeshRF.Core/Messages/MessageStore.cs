@@ -63,6 +63,7 @@ public sealed class MessageStore : IDisposable
                 text        TEXT    NOT NULL DEFAULT '',
                 payload_hex TEXT    NOT NULL DEFAULT '',
                 decrypted   INTEGER NOT NULL DEFAULT 0,
+                via_mqtt    INTEGER NOT NULL DEFAULT 0,
                 rx_epoch    INTEGER NOT NULL DEFAULT 0,
                 rssi_dbfs   REAL,
                 snr_db      REAL
@@ -79,6 +80,7 @@ public sealed class MessageStore : IDisposable
         AddColumnIfMissing("reply_id", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("emoji", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("is_reaction", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("via_mqtt", "INTEGER NOT NULL DEFAULT 0");
 
         // Backfill obvious historical reaction rows for older DBs that predate
         // the explicit is_reaction flag.
@@ -119,9 +121,9 @@ public sealed class MessageStore : IDisposable
             INSERT OR IGNORE INTO messages
                 (packet_id, from_node, to_node, channel, portnum, reply_id,
                  emoji, is_reaction, text,
-                 payload_hex, decrypted, rx_epoch, rssi_dbfs, snr_db, delivery)
+                 payload_hex, decrypted, via_mqtt, rx_epoch, rssi_dbfs, snr_db, delivery)
                 VALUES ($pid, $from, $to, $chan, $port, $reply, $emoji, $isReaction, $text,
-                    $hex, $dec, $rx, $rssi, $snr, $del);
+                    $hex, $dec, $mqtt, $rx, $rssi, $snr, $del);
             """;
         cmd.Parameters.AddWithValue("$pid",  m.PacketId);
         cmd.Parameters.AddWithValue("$from", m.FromNode);
@@ -134,6 +136,7 @@ public sealed class MessageStore : IDisposable
         cmd.Parameters.AddWithValue("$text", m.Text ?? string.Empty);
         cmd.Parameters.AddWithValue("$hex",  m.PayloadHex ?? string.Empty);
         cmd.Parameters.AddWithValue("$dec",  m.Decrypted ? 1 : 0);
+        cmd.Parameters.AddWithValue("$mqtt", m.ViaMqtt ? 1 : 0);
         cmd.Parameters.AddWithValue("$rx",   m.RxEpoch);
         cmd.Parameters.AddWithValue("$rssi", (object?)m.RssiDbfs ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$snr",  (object?)m.SnrDb ?? DBNull.Value);
@@ -316,6 +319,7 @@ public sealed class MessageStore : IDisposable
             Text       = r.GetString(r.GetOrdinal("text")),
             PayloadHex = r.GetString(r.GetOrdinal("payload_hex")),
             Decrypted  = r.GetInt64(r.GetOrdinal("decrypted")) != 0,
+            ViaMqtt    = r.GetInt64(r.GetOrdinal("via_mqtt")) != 0,
             RxEpoch    = r.GetInt64(r.GetOrdinal("rx_epoch")),
             RssiDbfs   = NullableF("rssi_dbfs"),
             SnrDb      = NullableF("snr_db"),
