@@ -712,29 +712,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return list;
     }
 
-    /// <summary>Location history paths requested by open conversation tabs.</summary>
-    public IReadOnlyList<MapPolyline> GetMapPolylines()
-    {
-        var list = new List<MapPolyline>();
-
-        foreach (var convo in Tabs.OfType<ConversationViewModel>())
-        {
-            if (!convo.ShowLocationHistoryOnMap || convo.LocationHistory.Count < 2)
-                continue;
-
-            var points = convo.LocationHistory
-                .Select(p => (p.Latitude, p.Longitude))
-                .ToList();
-            if (points.Count < 2)
-                continue;
-
-            list.Add(new MapPolyline(
-                string.IsNullOrWhiteSpace(convo.PeerName) ? convo.PeerId : convo.PeerName,
-                points));
-        }
-
-        return list;
-    }
+    /// <summary>Location history is rendered in the per-node popup minimap.</summary>
+    public IReadOnlyList<MapPolyline> GetMapPolylines() => Array.Empty<MapPolyline>();
 
     /// <summary>Removes the given nodes from the in-memory list, the persistent
     /// store, and refreshes the map.</summary>
@@ -2439,11 +2418,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (NodeLocationFilter == "Has position history (>1)")
             RefreshNodesFilter();
-
-        if (!convo.ShowLocationHistoryOnMap)
-            return;
-
-        MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -3163,7 +3137,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var convo = new ConversationViewModel(nodeNum, name ?? NodeDisplayName(nodeNum),
             OnConversationMuteRtttlChanged,
             OnConversationLocationHistoryChanged,
-            FormatTemperature);
+            FormatTemperature,
+            _nodeStore);
+        convo.LoadNodeHistories();
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
         // Add the tab immediately so the UI is responsive while history loads.
         Tabs.Add(convo);
@@ -3201,7 +3177,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (tab is ConversationViewModel convo)
         {
-            bool affectedMap = convo.ShowLocationHistoryOnMap && convo.LocationHistory.Count > 1;
             int idx = Tabs.IndexOf(convo);
             Tabs.Remove(convo);
             if (ReferenceEquals(SelectedTab, convo))
@@ -3210,8 +3185,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     : null;
             // Closing a DM tab means it should not reopen next launch.
             SaveSettings();
-            if (affectedMap)
-                MapDataChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -5661,6 +5634,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         GasResistanceMohm = t.GasResistanceMohm,
                         Iaq = t.Iaq,
                     });
+                    PersistTelemetryHistory(header.From, rxEpoch, t);
                     if (t.HasEnvironmentMetrics)
                     {
                         var temp = t.TemperatureC is float tempC ? FormatTemperature(tempC) : "n/a";
@@ -5686,6 +5660,84 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MarkNodeDirty(header.From);
         if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
     }
+
+    private void PersistTelemetryHistory(uint nodeNum, long rxEpoch, MeshTelemetry telemetry)
+    {
+        if (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics)
+            return;
+
+        string signature = BuildTelemetryHistorySignature(telemetry);
+        var lastSameKind = _nodeStore.TelemetryHistory(nodeNum)
+            .LastOrDefault(row => SameTelemetryHistoryKind(row.Signature, signature));
+        if (lastSameKind?.Signature == signature)
+            return;
+
+        DateTime timestampUtc = rxEpoch > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime
+            : DateTime.UtcNow;
+
+        var record = new NodeTelemetryHistoryRecord(
+            0,
+            nodeNum,
+            timestampUtc,
+            telemetry.HasDeviceMetrics ? telemetry.BatteryLevel : null,
+            telemetry.HasDeviceMetrics ? telemetry.Voltage : null,
+            telemetry.HasDeviceMetrics ? telemetry.ChannelUtilization : null,
+            telemetry.HasDeviceMetrics ? telemetry.AirUtilTx : null,
+            telemetry.HasDeviceMetrics ? telemetry.UptimeSeconds : null,
+            telemetry.HasEnvironmentMetrics ? telemetry.TemperatureC : null,
+            telemetry.HasEnvironmentMetrics ? telemetry.RelativeHumidityPct : null,
+            telemetry.HasEnvironmentMetrics ? telemetry.BarometricPressureHpa : null,
+            telemetry.HasEnvironmentMetrics ? telemetry.GasResistanceMohm : null,
+            telemetry.HasEnvironmentMetrics ? telemetry.Iaq : null,
+            signature);
+
+        _nodeStore.AddTelemetryHistory(record);
+
+        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+            if (convo.NodeNum == nodeNum)
+                convo.LoadNodeHistories();
+    }
+
+    private static string BuildTelemetryHistorySignature(MeshTelemetry telemetry)
+    {
+        string kind = telemetry switch
+        {
+            { HasDeviceMetrics: true, HasEnvironmentMetrics: true } => "DE",
+            { HasDeviceMetrics: true } => "D",
+            { HasEnvironmentMetrics: true } => "E",
+            _ => string.Empty,
+        };
+
+        return string.Join("|",
+            kind,
+            telemetry.HasDeviceMetrics ? FormatTelemetrySignatureValue(telemetry.BatteryLevel) : string.Empty,
+            telemetry.HasDeviceMetrics ? FormatTelemetrySignatureValue(telemetry.Voltage) : string.Empty,
+            telemetry.HasDeviceMetrics ? FormatTelemetrySignatureValue(telemetry.ChannelUtilization) : string.Empty,
+            telemetry.HasDeviceMetrics ? FormatTelemetrySignatureValue(telemetry.AirUtilTx) : string.Empty,
+            telemetry.HasDeviceMetrics ? FormatTelemetrySignatureValue(telemetry.UptimeSeconds) : string.Empty,
+            telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.TemperatureC) : string.Empty,
+            telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.RelativeHumidityPct) : string.Empty,
+            telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.BarometricPressureHpa) : string.Empty,
+            telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.GasResistanceMohm) : string.Empty,
+            telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.Iaq) : string.Empty);
+    }
+
+    private static bool SameTelemetryHistoryKind(string? left, string right)
+    {
+        static string Kind(string? signature)
+        {
+            if (string.IsNullOrWhiteSpace(signature)) return string.Empty;
+            int separator = signature.IndexOf('|');
+            return separator < 0 ? signature : signature[..separator];
+        }
+
+        return string.Equals(Kind(left), Kind(right), StringComparison.Ordinal);
+    }
+
+    private static string FormatTelemetrySignatureValue<T>(T? value)
+        where T : struct, IFormattable =>
+        value.HasValue ? value.Value.ToString(null, CultureInfo.InvariantCulture) : string.Empty;
 
     private void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result)
     {

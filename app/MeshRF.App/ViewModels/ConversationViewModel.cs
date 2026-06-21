@@ -23,6 +23,46 @@ public sealed record LocationHistoryPoint(double Latitude, double Longitude, int
     public string Display =>
     $"{TimestampLocal.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}  {Latitude:0.#####}, {Longitude:0.#####}"
     + (AltitudeM is int alt ? $"  {alt} m" : string.Empty);
+
+    public long Id { get; init; }
+}
+
+/// <summary>A single telemetry snapshot for a conversation peer.</summary>
+public sealed record TelemetryHistoryPoint(
+    DateTime TimestampUtc,
+    double? BatteryPct,
+    double? VoltageV,
+    double? ChannelUtilPct,
+    double? AirUtilTxPct,
+    double? UptimeSeconds,
+    double? TemperatureC,
+    double? RelativeHumidityPct,
+    double? BarometricPressureHpa,
+    double? GasResistanceMohm,
+    double? IaqValue,
+    string Battery,
+    string Voltage,
+    string ChannelUtil,
+    string AirUtilTx,
+    string Uptime,
+    string Temperature,
+    string Humidity,
+    string Pressure,
+    string GasResistance,
+    string AirQuality,
+    string Signature)
+{
+    public DateTime TimestampLocal => TimestampUtc.ToLocalTime();
+
+    public long Id { get; init; }
+
+    public bool HasDeviceTelemetry =>
+        BatteryPct.HasValue || VoltageV.HasValue || ChannelUtilPct.HasValue ||
+        AirUtilTxPct.HasValue || UptimeSeconds.HasValue;
+
+    public bool HasEnvironmentalTelemetry =>
+        TemperatureC.HasValue || RelativeHumidityPct.HasValue ||
+        BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || IaqValue.HasValue;
 }
 
 /// <summary>
@@ -34,18 +74,21 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     private readonly Action<ConversationViewModel, bool>? _onMuteRtttlChanged;
     private readonly Action<ConversationViewModel>? _onLocationHistoryChanged;
     private readonly Func<float, string>? _formatTemperature;
+    private readonly NodeStore? _nodeStore;
     private bool _syncingNodeMute;
 
     public ConversationViewModel(uint nodeNum, string? peerName = null,
                                  Action<ConversationViewModel, bool>? onMuteRtttlChanged = null,
                                  Action<ConversationViewModel>? onLocationHistoryChanged = null,
-                                 Func<float, string>? formatTemperature = null)
+                                 Func<float, string>? formatTemperature = null,
+                                 NodeStore? nodeStore = null)
     {
         NodeNum = nodeNum;
         _peerName = string.IsNullOrWhiteSpace(peerName) ? string.Empty : peerName!;
         _onMuteRtttlChanged = onMuteRtttlChanged;
         _onLocationHistoryChanged = onLocationHistoryChanged;
         _formatTemperature = formatTemperature;
+        _nodeStore = nodeStore;
     }
 
     /// <summary>32-bit node number of the conversation peer.</summary>
@@ -68,11 +111,23 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     /// <summary>Recent historical peer positions collected while this tab is open.</summary>
     public ObservableCollection<LocationHistoryPoint> LocationHistory { get; } = new();
 
+    /// <summary>Recent telemetry snapshots collected while this tab is open.</summary>
+    public ObservableCollection<TelemetryHistoryPoint> TelemetryHistory { get; } = new();
+
+    /// <summary>Telemetry history rows that contain device metrics.</summary>
+    public ObservableCollection<TelemetryHistoryPoint> DeviceTelemetryHistory { get; } = new();
+
+    /// <summary>Telemetry history rows that contain environmental metrics.</summary>
+    public ObservableCollection<TelemetryHistoryPoint> EnvironmentalTelemetryHistory { get; } = new();
+
     /// <summary>True when at least one telemetry value is available.</summary>
     public bool HasTelemetry => Telemetry.Count > 0;
 
     /// <summary>True when at least one location sample exists.</summary>
     public bool HasLocationHistory => LocationHistory.Count > 0;
+
+    /// <summary>True when at least one telemetry snapshot exists.</summary>
+    public bool HasTelemetryHistory => TelemetryHistory.Count > 0;
 
     /// <summary>Direct messages exchanged with this peer, newest last.</summary>
     public ObservableCollection<ChannelMessage> Messages { get; } = new();
@@ -92,10 +147,6 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     /// <summary>True when this tab has unseen incoming activity.</summary>
     [ObservableProperty]
     private bool _tabNeedsAttention;
-
-    /// <summary>When true, draw this peer's history as line segments on the map.</summary>
-    [ObservableProperty]
-    private bool _showLocationHistoryOnMap;
 
     public string TabHeader =>
         string.IsNullOrEmpty(PeerName) ? PeerId : PeerName;
@@ -118,9 +169,6 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         if (!_syncingNodeMute)
             _onMuteRtttlChanged?.Invoke(this, value);
     }
-
-    partial void OnShowLocationHistoryOnMapChanged(bool value) =>
-        _onLocationHistoryChanged?.Invoke(this);
 
     private void RebuildTelemetry()
     {
@@ -163,7 +211,37 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     }
 
     /// <summary>Rebuild telemetry labels/values after a formatting preference change.</summary>
-    public void RefreshTelemetryFormatting() => RebuildTelemetry();
+    public void RefreshTelemetryFormatting()
+    {
+        RebuildTelemetry();
+        LoadNodeHistories();
+    }
+
+    public void LoadNodeHistories()
+    {
+        if (_nodeStore is null) return;
+
+        LocationHistory.Clear();
+        foreach (var point in _nodeStore.LocationHistory(NodeNum))
+        {
+            LocationHistory.Add(new LocationHistoryPoint(
+                point.Latitude,
+                point.Longitude,
+                point.AltitudeM,
+                point.TimestampUtc)
+            { Id = point.Id });
+        }
+
+        TelemetryHistory.Clear();
+        DeviceTelemetryHistory.Clear();
+        EnvironmentalTelemetryHistory.Clear();
+        foreach (var point in _nodeStore.TelemetryHistory(NodeNum))
+            AddTelemetryHistoryPoint(BuildTelemetryHistoryPoint(point));
+
+        OnPropertyChanged(nameof(HasLocationHistory));
+        OnPropertyChanged(nameof(HasTelemetryHistory));
+        _onLocationHistoryChanged?.Invoke(this);
+    }
 
     private static string FormatUptime(uint seconds)
     {
@@ -183,9 +261,21 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     private void ClearLocationHistory()
     {
         if (LocationHistory.Count == 0) return;
+        _nodeStore?.ClearLocationHistory(NodeNum);
         LocationHistory.Clear();
         OnPropertyChanged(nameof(HasLocationHistory));
         _onLocationHistoryChanged?.Invoke(this);
+    }
+
+    [RelayCommand]
+    private void ClearTelemetryHistory()
+    {
+        if (TelemetryHistory.Count == 0) return;
+        _nodeStore?.ClearTelemetryHistory(NodeNum);
+        TelemetryHistory.Clear();
+        DeviceTelemetryHistory.Clear();
+        EnvironmentalTelemetryHistory.Clear();
+        OnPropertyChanged(nameof(HasTelemetryHistory));
     }
 
     [RelayCommand]
@@ -193,8 +283,22 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     {
         if (point is null) return;
         if (!LocationHistory.Remove(point)) return;
+        if (point.Id != 0)
+            _nodeStore?.DeleteLocationHistory(point.Id);
         OnPropertyChanged(nameof(HasLocationHistory));
         _onLocationHistoryChanged?.Invoke(this);
+    }
+
+    [RelayCommand]
+    private void DeleteTelemetryHistoryPoint(TelemetryHistoryPoint? point)
+    {
+        if (point is null) return;
+        if (!TelemetryHistory.Remove(point)) return;
+        DeviceTelemetryHistory.Remove(point);
+        EnvironmentalTelemetryHistory.Remove(point);
+        if (point.Id != 0)
+            _nodeStore?.DeleteTelemetryHistory(point.Id);
+        OnPropertyChanged(nameof(HasTelemetryHistory));
     }
 
     [RelayCommand]
@@ -218,16 +322,137 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         if (last is not null)
         {
             bool sameCoord = Math.Abs(last.Latitude - lat) < 1e-7
-                && Math.Abs(last.Longitude - lon) < 1e-7;
+                && Math.Abs(last.Longitude - lon) < 1e-7
+                && last.AltitudeM == node.AltitudeM;
             if (sameCoord)
                 return;
         }
 
-        LocationHistory.Add(new LocationHistoryPoint(lat, lon, node.AltitudeM, sampleTimeUtc));
+        var point = new LocationHistoryPoint(lat, lon, node.AltitudeM, sampleTimeUtc);
+        if (_nodeStore is not null)
+        {
+            var id = _nodeStore.AddLocationHistory(NodeNum, sampleTimeUtc, lat, lon, node.AltitudeM);
+            point = point with { Id = id };
+        }
+
+        LocationHistory.Add(point);
         if (LocationHistory.Count > 500)
             LocationHistory.RemoveAt(0);
 
         OnPropertyChanged(nameof(HasLocationHistory));
         _onLocationHistoryChanged?.Invoke(this);
     }
+
+    private void AppendTelemetryHistory(NodeRecord? node)
+    {
+        if (node is null || !HasTelemetrySnapshot(node))
+            return;
+
+        var signature = BuildTelemetrySignature(node);
+        var last = TelemetryHistory.LastOrDefault();
+        if (last?.Signature == signature)
+            return;
+
+        var sampleTimeUtc = node.LastHeardEpoch > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(node.LastHeardEpoch).UtcDateTime
+            : DateTime.UtcNow;
+
+        var record = new NodeTelemetryHistoryRecord(
+            0,
+            NodeNum,
+            sampleTimeUtc,
+            node.BatteryPct,
+            node.VoltageV,
+            node.ChannelUtilPct,
+            node.AirUtilTxPct,
+            node.UptimeSeconds,
+            node.TemperatureC,
+            node.RelativeHumidityPct,
+            node.BarometricPressureHpa,
+            node.GasResistanceMohm,
+            node.Iaq,
+            signature);
+
+        var point = BuildTelemetryHistoryPoint(record);
+        if (_nodeStore is not null)
+        {
+            var id = _nodeStore.AddTelemetryHistory(record);
+            point = point with { Id = id };
+        }
+
+        AddTelemetryHistoryPoint(point);
+
+        if (TelemetryHistory.Count > 500)
+            RemoveTelemetryHistoryPoint(TelemetryHistory[0]);
+
+        OnPropertyChanged(nameof(HasTelemetryHistory));
+    }
+
+    private void AddTelemetryHistoryPoint(TelemetryHistoryPoint point)
+    {
+        TelemetryHistory.Add(point);
+        if (point.HasDeviceTelemetry)
+            DeviceTelemetryHistory.Add(point);
+        if (point.HasEnvironmentalTelemetry)
+            EnvironmentalTelemetryHistory.Add(point);
+    }
+
+    private void RemoveTelemetryHistoryPoint(TelemetryHistoryPoint point)
+    {
+        TelemetryHistory.Remove(point);
+        DeviceTelemetryHistory.Remove(point);
+        EnvironmentalTelemetryHistory.Remove(point);
+    }
+
+    private TelemetryHistoryPoint BuildTelemetryHistoryPoint(NodeTelemetryHistoryRecord record) =>
+        new(
+            record.TimestampUtc,
+            record.BatteryPct,
+            record.VoltageV,
+            record.ChannelUtilPct,
+            record.AirUtilTxPct,
+            record.UptimeSeconds,
+            record.TemperatureC,
+            record.RelativeHumidityPct,
+            record.BarometricPressureHpa,
+            record.GasResistanceMohm,
+            record.IaqValue,
+            record.BatteryPct is double bat ? $"{bat:0}%" : string.Empty,
+            record.VoltageV is double volt ? $"{volt:0.00} V" : string.Empty,
+            record.ChannelUtilPct is double chUtil ? $"{chUtil:0.0}%" : string.Empty,
+            record.AirUtilTxPct is double airUtil ? $"{airUtil:0.0}%" : string.Empty,
+            record.UptimeSeconds is double up ? FormatUptime((uint)Math.Max(0, up)) : string.Empty,
+            record.TemperatureC is double temp ? (_formatTemperature?.Invoke((float)temp) ?? $"{temp:0.0} \u00B0C") : string.Empty,
+            record.RelativeHumidityPct is double hum ? $"{hum:0.0}%" : string.Empty,
+            record.BarometricPressureHpa is double pres ? $"{pres:0.0} hPa" : string.Empty,
+            record.GasResistanceMohm is double gas ? $"{gas:0.0} M\u03A9" : string.Empty,
+            record.IaqValue is double iaq ? iaq.ToString("0", CultureInfo.InvariantCulture) : string.Empty,
+            record.Signature)
+        { Id = record.Id };
+
+    private static bool HasTelemetrySnapshot(NodeRecord node) =>
+        node.BatteryPct.HasValue
+        || node.VoltageV.HasValue
+        || node.ChannelUtilPct.HasValue
+        || node.AirUtilTxPct.HasValue
+        || node.TemperatureC.HasValue
+        || node.RelativeHumidityPct.HasValue
+        || node.BarometricPressureHpa.HasValue
+        || node.GasResistanceMohm.HasValue
+        || node.Iaq.HasValue;
+
+    private static string BuildTelemetrySignature(NodeRecord node) => string.Join("|",
+        FormatNullable(node.BatteryPct),
+        FormatNullable(node.VoltageV),
+        FormatNullable(node.ChannelUtilPct),
+        FormatNullable(node.AirUtilTxPct),
+        FormatNullable(node.TemperatureC),
+        FormatNullable(node.RelativeHumidityPct),
+        FormatNullable(node.BarometricPressureHpa),
+        FormatNullable(node.GasResistanceMohm),
+        FormatNullable(node.Iaq));
+
+    private static string FormatNullable<T>(T? value)
+        where T : struct, IFormattable =>
+        value.HasValue ? value.Value.ToString(null, CultureInfo.InvariantCulture) : string.Empty;
 }

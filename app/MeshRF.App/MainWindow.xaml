@@ -1703,12 +1703,19 @@
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
                                                 <RowDefinition Height="*" MinHeight="80" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="*" MinHeight="80" />
                                             </Grid.RowDefinitions>
 
                                             <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,6">
-                                                <TextBlock Text="Telemetry"
+                                                <Button DockPanel.Dock="Right"
+                                                        Content="Location history"
+                                                        Padding="8,2"
+                                                        Margin="6,0,0,0"
+                                                        Click="OnOpenLocationHistory" />
+                                                <Button DockPanel.Dock="Right"
+                                                        Content="Telemetry history"
+                                                        Padding="8,2"
+                                                        Click="OnOpenTelemetryHistory" />
+                                                <TextBlock Text="Node Information"
                                                            FontWeight="SemiBold"
                                                            VerticalAlignment="Center" />
                                             </DockPanel>
@@ -1753,98 +1760,6 @@
                                                     </ItemsControl>
                                                 </StackPanel>
                                             </ScrollViewer>
-
-                                            <GridSplitter Grid.Row="2"
-                                                          Height="5"
-                                                          HorizontalAlignment="Stretch"
-                                                          VerticalAlignment="Center"
-                                                          Background="{DynamicResource BrushSplitter}"
-                                                          DragCompleted="ConversationTelemetrySplitter_DragCompleted"
-                                                          ShowsPreview="False"
-                                                          ResizeBehavior="PreviousAndNext" />
-
-                                            <Grid Grid.Row="3">
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="*" />
-                                                </Grid.RowDefinitions>
-
-                                                <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,6,0,4">
-                                                    <Button DockPanel.Dock="Right"
-                                                            Content="Clear"
-                                                            Padding="8,2"
-                                                            Command="{Binding ClearLocationHistoryCommand}" />
-                                                    <CheckBox DockPanel.Dock="Right"
-                                                              Content="Show on map"
-                                                              Margin="0,0,8,0"
-                                                              VerticalAlignment="Center"
-                                                              IsChecked="{Binding ShowLocationHistoryOnMap, Mode=TwoWay}" />
-                                                    <TextBlock Text="Location history"
-                                                               FontWeight="SemiBold"
-                                                               VerticalAlignment="Center" />
-                                                </DockPanel>
-
-                                                <TextBlock Grid.Row="1"
-                                                           Foreground="{DynamicResource BrushSubtle}"
-                                                           FontSize="11"
-                                                           Margin="0,0,0,4"
-                                                           Text="No location samples yet.">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding HasLocationHistory}" Value="False">
-                                                                    <Setter Property="Visibility" Value="Visible" />
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-
-                                                <DataGrid Grid.Row="2"
-                                                          ItemsSource="{Binding LocationHistory}"
-                                                          AutoGenerateColumns="False"
-                                                          HeadersVisibility="Column"
-                                                          CanUserAddRows="False"
-                                                          CanUserDeleteRows="False"
-                                                          CanUserResizeRows="False"
-                                                          IsReadOnly="True"
-                                                          SelectionMode="Single"
-                                                          SelectionUnit="FullRow"
-                                                          Margin="0,0,0,0"
-                                                          MinHeight="80"
-                                                          VerticalScrollBarVisibility="Auto"
-                                                          HorizontalScrollBarVisibility="Auto"
-                                                          Visibility="{Binding HasLocationHistory, Converter={StaticResource BoolToVis}}">
-                                                    <DataGrid.InputBindings>
-                                                        <KeyBinding Key="Delete"
-                                                                    Command="{Binding DeleteLocationHistoryPointCommand}"
-                                                                    CommandParameter="{Binding SelectedItem, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
-                                                    </DataGrid.InputBindings>
-                                                    <DataGrid.ContextMenu>
-                                                        <ContextMenu>
-                                                            <MenuItem Header="Delete"
-                                                                      Command="{Binding PlacementTarget.DataContext.DeleteLocationHistoryPointCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                                      CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                        </ContextMenu>
-                                                    </DataGrid.ContextMenu>
-                                                    <DataGrid.Columns>
-                                                        <DataGridTextColumn Header="Time"
-                                                                            Width="*"
-                                                                            Binding="{Binding TimestampLocal, StringFormat={}{0:M/d/yyyy h:mm:ss tt}}" />
-                                                        <DataGridTextColumn Header="Lat"
-                                                                            Width="Auto"
-                                                                            Binding="{Binding Latitude, StringFormat={}{0:0.#####}}" />
-                                                        <DataGridTextColumn Header="Lon"
-                                                                            Width="Auto"
-                                                                            Binding="{Binding Longitude, StringFormat={}{0:0.#####}}" />
-                                                        <DataGridTextColumn Header="Alt"
-                                                                            Width="Auto"
-                                                                            Binding="{Binding AltitudeM, StringFormat={}{0} m}" />
-                                                    </DataGrid.Columns>
-                                                </DataGrid>
-                                            </Grid>
                                         </Grid>
                                     </Border>
                                     </Grid>

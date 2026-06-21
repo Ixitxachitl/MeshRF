@@ -3,6 +3,30 @@ using Microsoft.Data.Sqlite;
 
 namespace MeshRF.Nodes;
 
+public sealed record NodeLocationHistoryRecord(
+    long Id,
+    uint NodeNum,
+    DateTime TimestampUtc,
+    double Latitude,
+    double Longitude,
+    int? AltitudeM);
+
+public sealed record NodeTelemetryHistoryRecord(
+    long Id,
+    uint NodeNum,
+    DateTime TimestampUtc,
+    double? BatteryPct,
+    double? VoltageV,
+    double? ChannelUtilPct,
+    double? AirUtilTxPct,
+    double? UptimeSeconds,
+    double? TemperatureC,
+    double? RelativeHumidityPct,
+    double? BarometricPressureHpa,
+    double? GasResistanceMohm,
+    double? IaqValue,
+    string Signature);
+
 /// <summary>
 /// SQLite-backed persistent node database, modeled after the Meshtastic
 /// firmware <c>NodeDB</c>. The schema mirrors the <c>NodeInfo</c> protobuf so
@@ -85,6 +109,40 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("mute_rtttl", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("ignored", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
+
+        using var history = _conn.CreateCommand();
+        history.CommandText = """
+            CREATE TABLE IF NOT EXISTS node_location_history (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_num        INTEGER NOT NULL,
+                timestamp_epoch INTEGER NOT NULL,
+                latitude        REAL    NOT NULL,
+                longitude       REAL    NOT NULL,
+                altitude_m      INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_node_location_history_node_time
+                ON node_location_history(node_num, timestamp_epoch ASC, id ASC);
+
+            CREATE TABLE IF NOT EXISTS node_telemetry_history (
+                id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_num                   INTEGER NOT NULL,
+                timestamp_epoch            INTEGER NOT NULL,
+                battery_pct                REAL,
+                voltage_v                  REAL,
+                channel_util_pct           REAL,
+                air_util_tx_pct            REAL,
+                uptime_seconds             REAL,
+                temperature_c              REAL,
+                relative_humidity_pct      REAL,
+                barometric_pressure_hpa    REAL,
+                gas_resistance_mohm        REAL,
+                iaq                        REAL,
+                signature                  TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_node_telemetry_history_node_time
+                ON node_telemetry_history(node_num, timestamp_epoch ASC, id ASC);
+            """;
+        history.ExecuteNonQuery();
     }
 
     private void AddColumnIfMissing(string name, string sqlType)
@@ -266,8 +324,203 @@ public sealed class NodeStore : IDisposable
     {
         ThrowIfDisposed();
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM nodes WHERE node_num = $n";
+        cmd.CommandText = """
+            DELETE FROM nodes WHERE node_num = $n;
+            DELETE FROM node_location_history WHERE node_num = $n;
+            DELETE FROM node_telemetry_history WHERE node_num = $n;
+            """;
         cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<NodeLocationHistoryRecord> LocationHistory(uint nodeNum, int limit = 500)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, node_num, timestamp_epoch, latitude, longitude, altitude_m
+            FROM node_location_history
+            WHERE node_num = $n
+            ORDER BY timestamp_epoch DESC, id DESC
+            LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        var rows = new List<NodeLocationHistoryRecord>();
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read())
+        {
+            rows.Add(new NodeLocationHistoryRecord(
+                rd.GetInt64(rd.GetOrdinal("id")),
+                (uint)rd.GetInt64(rd.GetOrdinal("node_num")),
+                DateTimeOffset.FromUnixTimeSeconds(rd.GetInt64(rd.GetOrdinal("timestamp_epoch"))).UtcDateTime,
+                rd.GetDouble(rd.GetOrdinal("latitude")),
+                rd.GetDouble(rd.GetOrdinal("longitude")),
+                Nullable<int>(rd, "altitude_m")));
+        }
+        rows.Reverse();
+        return rows;
+    }
+
+    public long AddLocationHistory(uint nodeNum, DateTime timestampUtc,
+                                   double latitude, double longitude, int? altitudeM)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO node_location_history
+                (node_num, timestamp_epoch, latitude, longitude, altitude_m)
+            VALUES ($node_num, $ts, $lat, $lon, $alt);
+            SELECT last_insert_rowid();
+            """;
+        cmd.Parameters.AddWithValue("$node_num", nodeNum);
+        cmd.Parameters.AddWithValue("$ts", new DateTimeOffset(timestampUtc).ToUnixTimeSeconds());
+        cmd.Parameters.AddWithValue("$lat", latitude);
+        cmd.Parameters.AddWithValue("$lon", longitude);
+        cmd.Parameters.AddWithValue("$alt", (object?)altitudeM ?? DBNull.Value);
+        var id = Convert.ToInt64(cmd.ExecuteScalar());
+        TrimLocationHistory(nodeNum, 500);
+        return id;
+    }
+
+    public void DeleteLocationHistory(long id)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM node_location_history WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void ClearLocationHistory(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM node_location_history WHERE node_num = $n";
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<NodeTelemetryHistoryRecord> TelemetryHistory(uint nodeNum, int limit = 500)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT *
+            FROM node_telemetry_history
+            WHERE node_num = $n
+            ORDER BY timestamp_epoch DESC, id DESC
+            LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        var rows = new List<NodeTelemetryHistoryRecord>();
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read())
+        {
+            rows.Add(new NodeTelemetryHistoryRecord(
+                rd.GetInt64(rd.GetOrdinal("id")),
+                (uint)rd.GetInt64(rd.GetOrdinal("node_num")),
+                DateTimeOffset.FromUnixTimeSeconds(rd.GetInt64(rd.GetOrdinal("timestamp_epoch"))).UtcDateTime,
+                Nullable<double>(rd, "battery_pct"),
+                Nullable<double>(rd, "voltage_v"),
+                Nullable<double>(rd, "channel_util_pct"),
+                Nullable<double>(rd, "air_util_tx_pct"),
+                Nullable<double>(rd, "uptime_seconds"),
+                Nullable<double>(rd, "temperature_c"),
+                Nullable<double>(rd, "relative_humidity_pct"),
+                Nullable<double>(rd, "barometric_pressure_hpa"),
+                Nullable<double>(rd, "gas_resistance_mohm"),
+                Nullable<double>(rd, "iaq"),
+                ReadStringOrEmpty(rd, "signature")));
+        }
+        rows.Reverse();
+        return rows;
+    }
+
+    public long AddTelemetryHistory(NodeTelemetryHistoryRecord rec)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO node_telemetry_history
+                (node_num, timestamp_epoch, battery_pct, voltage_v,
+                 channel_util_pct, air_util_tx_pct, uptime_seconds,
+                 temperature_c, relative_humidity_pct, barometric_pressure_hpa,
+                 gas_resistance_mohm, iaq, signature)
+            VALUES ($node_num, $ts, $batt, $volt,
+                    $chan, $airx, $uptime,
+                    $temp, $hum, $pres,
+                    $gas, $iaq, $sig);
+            SELECT last_insert_rowid();
+            """;
+        cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
+        cmd.Parameters.AddWithValue("$ts", new DateTimeOffset(rec.TimestampUtc).ToUnixTimeSeconds());
+        cmd.Parameters.AddWithValue("$batt", (object?)rec.BatteryPct ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$volt", (object?)rec.VoltageV ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$chan", (object?)rec.ChannelUtilPct ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$airx", (object?)rec.AirUtilTxPct ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$uptime", (object?)rec.UptimeSeconds ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$temp", (object?)rec.TemperatureC ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$hum", (object?)rec.RelativeHumidityPct ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pres", (object?)rec.BarometricPressureHpa ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$gas", (object?)rec.GasResistanceMohm ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$iaq", (object?)rec.IaqValue ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$sig", rec.Signature ?? string.Empty);
+        var id = Convert.ToInt64(cmd.ExecuteScalar());
+        TrimTelemetryHistory(rec.NodeNum, 500);
+        return id;
+    }
+
+    public void DeleteTelemetryHistory(long id)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM node_telemetry_history WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void ClearTelemetryHistory(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM node_telemetry_history WHERE node_num = $n";
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.ExecuteNonQuery();
+    }
+
+    private void TrimLocationHistory(uint nodeNum, int keep)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM node_location_history
+            WHERE node_num = $n
+              AND id NOT IN (
+                  SELECT id FROM node_location_history
+                  WHERE node_num = $n
+                  ORDER BY timestamp_epoch DESC, id DESC
+                  LIMIT $keep)
+            """;
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.Parameters.AddWithValue("$keep", keep);
+        cmd.ExecuteNonQuery();
+    }
+
+    private void TrimTelemetryHistory(uint nodeNum, int keep)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM node_telemetry_history
+            WHERE node_num = $n
+              AND id NOT IN (
+                  SELECT id FROM node_telemetry_history
+                  WHERE node_num = $n
+                  ORDER BY timestamp_epoch DESC, id DESC
+                  LIMIT $keep)
+            """;
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.Parameters.AddWithValue("$keep", keep);
         cmd.ExecuteNonQuery();
     }
 
@@ -288,7 +541,11 @@ public sealed class NodeStore : IDisposable
     {
         ThrowIfDisposed();
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM nodes";
+        cmd.CommandText = """
+            DELETE FROM nodes;
+            DELETE FROM node_location_history;
+            DELETE FROM node_telemetry_history;
+            """;
         cmd.ExecuteNonQuery();
     }
 
@@ -330,6 +587,12 @@ public sealed class NodeStore : IDisposable
             Ignored               = Nullable<bool>("ignored") == true,
             Favorite              = Nullable<bool>("favorite") == true,
         };
+    }
+
+    private static T? Nullable<T>(SqliteDataReader r, string col) where T : struct
+    {
+        var i = r.GetOrdinal(col);
+        return r.IsDBNull(i) ? null : (T)Convert.ChangeType(r.GetValue(i), typeof(T));
     }
 
     private static string ReadStringOrEmpty(SqliteDataReader r, string col)

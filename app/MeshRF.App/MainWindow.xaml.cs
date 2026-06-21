@@ -113,6 +113,42 @@ public partial class MainWindow : Window
         about.ShowDialog();
     }
 
+    private void OnOpenTelemetryHistory(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ConversationViewModel conversation)
+            return;
+
+        ShowOwnedHistoryWindow(conversation, c => new TelemetryHistoryWindow(c));
+    }
+
+    private void OnOpenLocationHistory(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ConversationViewModel conversation)
+            return;
+
+        ShowOwnedHistoryWindow(conversation, c => new LocationHistoryWindow(c));
+    }
+
+    private void ShowOwnedHistoryWindow<T>(ConversationViewModel conversation,
+                                           Func<ConversationViewModel, T> create)
+        where T : Window
+    {
+        foreach (Window window in OwnedWindows)
+        {
+            if (window is T existing && ReferenceEquals(existing.DataContext, conversation))
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                    existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return;
+            }
+        }
+
+        var historyWindow = create(conversation);
+        historyWindow.Owner = this;
+        historyWindow.Show();
+    }
+
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
         HookRendering(true);

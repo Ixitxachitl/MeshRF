@@ -212,6 +212,27 @@ public sealed class AppSettings
     /// <summary>Conversation tab location-history pane star height.</summary>
     public double? ConversationLocationHistoryPaneStar { get; set; }
 
+    /// <summary>Shared location-history popup width.</summary>
+    public double? LocationHistoryWindowWidth { get; set; }
+
+    /// <summary>Shared location-history popup height.</summary>
+    public double? LocationHistoryWindowHeight { get; set; }
+
+    /// <summary>Shared location-history popup left map pane width.</summary>
+    public double? LocationHistoryLeftPaneWidth { get; set; }
+
+    /// <summary>Shared telemetry-history popup width.</summary>
+    public double? TelemetryHistoryWindowWidth { get; set; }
+
+    /// <summary>Shared telemetry-history popup height.</summary>
+    public double? TelemetryHistoryWindowHeight { get; set; }
+
+    /// <summary>Shared telemetry-history popup left graph pane width.</summary>
+    public double? TelemetryHistoryLeftPaneWidth { get; set; }
+
+    /// <summary>Shared telemetry-history popup top device pane height.</summary>
+    public double? TelemetryHistoryTopPaneHeight { get; set; }
+
     /// <summary>Whether the identity expander is open.</summary>
     public bool IdentityExpanded { get; set; } = false;
 
