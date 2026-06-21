@@ -342,12 +342,6 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             node.AltitudeM,
             node.AltitudeM is int altitude ? (_formatAltitude?.Invoke(altitude) ?? $"{altitude} m") : string.Empty,
             sampleTimeUtc);
-        if (_nodeStore is not null)
-        {
-            var id = _nodeStore.AddLocationHistory(NodeNum, sampleTimeUtc, lat, lon, node.AltitudeM);
-            point = point with { Id = id };
-        }
-
         LocationHistory.Add(point);
         if (LocationHistory.Count > 500)
             LocationHistory.RemoveAt(0);

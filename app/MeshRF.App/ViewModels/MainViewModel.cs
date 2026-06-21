@@ -53,6 +53,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _suspendNodeReload;
     private readonly HashSet<uint> _dirtyNodeNums = new();
     private readonly Dictionary<uint, NodeRecord> _nodesByNum = new();
+    private readonly Dictionary<uint, int> _nodeLocationHistoryCounts = new();
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
     private readonly Dictionary<uint, string> _nodeTooltipCache = new();
@@ -434,8 +435,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Location filter.
         bool hasPos = n.HasLocation;
-        bool hasPosHistory = Tabs.OfType<ConversationViewModel>()
-            .FirstOrDefault(c => c.NodeNum == n.NodeNum)?.LocationHistory.Count > 1;
+        bool hasPosHistory = _nodeLocationHistoryCounts.TryGetValue(n.NodeNum, out int historyCount)
+            && historyCount > 1;
         switch (NodeLocationFilter)
         {
             case "Has position": if (!hasPos) return false; break;
@@ -1468,6 +1469,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _dirtyNodeNums.Clear();
         _nodesByNum.Clear();
+        _nodeLocationHistoryCounts.Clear();
+        foreach (var pair in _nodeStore.LocationHistoryCounts())
+            _nodeLocationHistoryCounts[pair.Key] = pair.Value;
         _nodeMapStateSignatures.Clear();
         _nodeTooltipSignatures.Clear();
         _nodeTooltipCache.Clear();
@@ -2424,6 +2428,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnConversationLocationHistoryChanged(ConversationViewModel convo)
     {
+        _nodeLocationHistoryCounts[convo.NodeNum] = convo.LocationHistory.Count;
         if (NodeLocationFilter == "Has position history (>1)")
             RefreshNodesFilter();
     }
@@ -5587,6 +5592,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         AltitudeM = result.Position.AltitudeM,
                         LastHeardEpoch = rxEpoch,
                     });
+                    if (positionChanged)
+                        _nodeStore.AddLocationHistory(
+                            header.From,
+                            DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime,
+                            result.Position.Latitude,
+                            result.Position.Longitude,
+                            result.Position.AltitudeM);
+                    if (positionChanged)
+                        _nodeLocationHistoryCounts[header.From] = _nodeStore.LocationHistoryCount(header.From);
                     if (positionChanged)
                         Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
                     else

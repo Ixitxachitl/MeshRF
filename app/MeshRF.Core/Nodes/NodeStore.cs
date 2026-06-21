@@ -362,6 +362,27 @@ public sealed class NodeStore : IDisposable
         return rows;
     }
 
+    public int LocationHistoryCount(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM node_location_history WHERE node_num = $n";
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    public IReadOnlyDictionary<uint, int> LocationHistoryCounts()
+    {
+        ThrowIfDisposed();
+        var counts = new Dictionary<uint, int>();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT node_num, COUNT(*) AS cnt FROM node_location_history GROUP BY node_num";
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read())
+            counts[(uint)rd.GetInt64(0)] = rd.GetInt32(1);
+        return counts;
+    }
+
     public long AddLocationHistory(uint nodeNum, DateTime timestampUtc,
                                    double latitude, double longitude, int? altitudeM)
     {
