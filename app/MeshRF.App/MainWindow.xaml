@@ -160,76 +160,120 @@
                        Text="{Binding Status}" />
         </ToolBar>
 
-        <ToolBar DockPanel.Dock="Top"
-                 Visibility="{Binding IsHackRf, Converter={StaticResource BoolToVis}}">
-            <TextBlock Text="LNA" VerticalAlignment="Center" Margin="0,0,4,0"
-                       ToolTip="HackRF LNA gain (RF-stage), 0..40 dB step 8" />
-            <Slider Width="160"
-                    Minimum="0" Maximum="40"
-                    TickFrequency="8" IsSnapToTickEnabled="True"
-                    SmallChange="8" LargeChange="8"
-                    Value="{Binding LnaGainDb, Mode=TwoWay}"
-                    VerticalAlignment="Center" />
-            <TextBlock Width="32" VerticalAlignment="Center"
-                       Text="{Binding LnaGainDb, StringFormat={}{0} dB}" />
+        <Border DockPanel.Dock="Top"
+            Background="{DynamicResource BrushPanelBackground}"
+            Padding="4,2">
+              <StackPanel Orientation="Horizontal">
+                  <StackPanel
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Left"
+                        ClipToBounds="True"
+                        Visibility="{Binding IsHackRf, Converter={StaticResource BoolToVis}}">
+                 <TextBlock Text="RX" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" />
+                 <TextBlock Text="LNA" VerticalAlignment="Center" Margin="0,0,4,0"
+                          ToolTip="HackRF LNA gain (RF-stage), 0..40 dB step 8" />
+                 <Slider Width="110"
+                        Minimum="0" Maximum="40"
+                        TickFrequency="8" IsSnapToTickEnabled="True"
+                        SmallChange="8" LargeChange="8"
+                        Value="{Binding LnaGainDb, Mode=TwoWay}"
+                        VerticalAlignment="Center" />
+                 <TextBlock Width="32" VerticalAlignment="Center"
+                          Text="{Binding LnaGainDb, StringFormat={}{0} dB}" />
 
-            <TextBlock Text="VGA" VerticalAlignment="Center" Margin="8,0,4,0"
-                       ToolTip="HackRF baseband VGA gain, 0..62 dB step 2" />
-            <Slider Width="200"
-                    Minimum="0" Maximum="62"
-                    TickFrequency="2" IsSnapToTickEnabled="True"
-                    SmallChange="2" LargeChange="2"
-                    Value="{Binding VgaGainDb, Mode=TwoWay}"
-                    VerticalAlignment="Center" />
-            <TextBlock Width="32" VerticalAlignment="Center"
-                       Text="{Binding VgaGainDb, StringFormat={}{0} dB}" />
+                 <TextBlock Text="VGA" VerticalAlignment="Center" Margin="8,0,4,0"
+                          ToolTip="HackRF baseband VGA gain, 0..62 dB step 2" />
+                 <Slider Width="130"
+                        Minimum="0" Maximum="62"
+                        TickFrequency="2" IsSnapToTickEnabled="True"
+                        SmallChange="2" LargeChange="2"
+                        Value="{Binding VgaGainDb, Mode=TwoWay}"
+                        VerticalAlignment="Center" />
+                 <TextBlock Width="32" VerticalAlignment="Center"
+                          Text="{Binding VgaGainDb, StringFormat={}{0} dB}" />
 
-            <Separator />
-            <CheckBox Content="AMP (+14 dB)"
-                      IsChecked="{Binding AmpEnable, Mode=TwoWay}"
-                      VerticalAlignment="Center"
-                      ToolTip="Enable HackRF front-end RF amplifier" />
-            <Separator />
-            <CheckBox Content="AGC"
-                      IsChecked="{Binding AgcEnable, Mode=TwoWay}"
-                      VerticalAlignment="Center"
-                      ToolTip="Auto-Gain-Control: keep peak power near target by nudging LNA/VGA" />
-            <TextBlock Text="target" VerticalAlignment="Center" Margin="6,0,4,0" />
-            <Slider Width="120"
-                    Minimum="-40" Maximum="-3"
-                    TickFrequency="1" IsSnapToTickEnabled="True"
-                    Value="{Binding AgcTargetDbfs, Mode=TwoWay}"
-                    VerticalAlignment="Center"
-                    IsEnabled="{Binding AgcEnable}" />
-            <TextBlock Width="48" VerticalAlignment="Center"
-                       Text="{Binding AgcTargetDbfs, StringFormat={}{0:F0} dBFS}" />
-        </ToolBar>
+                 <Separator />
+                 <CheckBox Content="AMP (+14 dB)"
+                         IsChecked="{Binding AmpEnable, Mode=TwoWay}"
+                         VerticalAlignment="Center"
+                         ToolTip="Enable HackRF front-end RF amplifier" />
+                 <Separator />
+                 <CheckBox Content="AGC"
+                         IsChecked="{Binding AgcEnable, Mode=TwoWay}"
+                         VerticalAlignment="Center"
+                         ToolTip="Auto-Gain-Control: keep peak power near target by nudging LNA/VGA" />
+                 <TextBlock Text="target" VerticalAlignment="Center" Margin="6,0,4,0" />
+                 <Slider Width="90"
+                        Minimum="-40" Maximum="-3"
+                        TickFrequency="1" IsSnapToTickEnabled="True"
+                        Value="{Binding AgcTargetDbfs, Mode=TwoWay}"
+                        VerticalAlignment="Center"
+                        IsEnabled="{Binding AgcEnable}" />
+                 <TextBlock Width="48" VerticalAlignment="Center"
+                          Text="{Binding AgcTargetDbfs, StringFormat={}{0:F0} dBFS}" />
+              </StackPanel>
 
-        <ToolBar DockPanel.Dock="Top"
-                 Visibility="{Binding IsRtlSdr, Converter={StaticResource BoolToVis}}">
-            <TextBlock Text="Gain" VerticalAlignment="Center" Margin="0,0,4,0"
-                       ToolTip="RTL-SDR manual tuner gain, 0..49 dB" />
-            <Slider Width="220"
+                                    <StackPanel
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Left"
+                    ClipToBounds="True"
+                    Visibility="{Binding IsRtlSdr, Converter={StaticResource BoolToVis}}">
+                 <TextBlock Text="RX" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" />
+                 <TextBlock Text="Gain" VerticalAlignment="Center" Margin="0,0,4,0"
+                      ToolTip="RTL-SDR manual tuner gain, 0..49 dB" />
+                 <Slider Width="220"
                     Minimum="0" Maximum="49"
                     TickFrequency="1" IsSnapToTickEnabled="True"
                     SmallChange="1" LargeChange="5"
                     Value="{Binding RtlGainDb, Mode=TwoWay}"
                     VerticalAlignment="Center"
                     IsEnabled="{Binding AmpEnable, Converter={StaticResource InverseBool}}" />
-            <TextBlock Width="40" VerticalAlignment="Center"
-                       Text="{Binding RtlGainDb, StringFormat={}{0} dB}" />
+                 <TextBlock Width="40" VerticalAlignment="Center"
+                      Text="{Binding RtlGainDb, StringFormat={}{0} dB}" />
 
-            <Separator />
-            <CheckBox Content="AGC"
-                      IsChecked="{Binding AmpEnable, Mode=TwoWay}"
-                      VerticalAlignment="Center"
-                      ToolTip="Tuner automatic gain control (overrides the manual gain slider)" />
-            <Separator />
-            <CheckBox Content="Bias-T"
-                      IsChecked="{Binding BiasTee, Mode=TwoWay}"
-                      VerticalAlignment="Center"
-                      ToolTip="Enable 5 V bias-T on the antenna port to power an external LNA/active antenna" />
-        </ToolBar>
+                 <Separator />
+                 <CheckBox Content="AGC"
+                     IsChecked="{Binding AmpEnable, Mode=TwoWay}"
+                     VerticalAlignment="Center"
+                     ToolTip="Tuner automatic gain control (overrides the manual gain slider)" />
+                 <Separator />
+                 <CheckBox Content="Bias-T"
+                     IsChecked="{Binding BiasTee, Mode=TwoWay}"
+                     VerticalAlignment="Center"
+                     ToolTip="Enable 5 V bias-T on the antenna port to power an external LNA/active antenna" />
+                  </StackPanel>
+
+                      <Border Width="1"
+                          Height="22"
+                          Margin="12,0"
+                          VerticalAlignment="Center"
+                          Background="{DynamicResource BrushPanelBorder}"
+                          Visibility="{Binding IsTxHackRf, Converter={StaticResource BoolToVis}}" />
+
+                  <StackPanel
+                        Orientation="Horizontal"
+                                HorizontalAlignment="Left"
+                        Visibility="{Binding IsTxHackRf, Converter={StaticResource BoolToVis}}">
+                 <TextBlock Text="TX" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" />
+                 <TextBlock Text="Gain" VerticalAlignment="Center" Margin="0,0,4,0"
+                          ToolTip="HackRF TX VGA gain, 0..47 dB" />
+                 <Slider Width="120"
+                        Minimum="0" Maximum="47"
+                        TickFrequency="1" IsSnapToTickEnabled="True"
+                        SmallChange="1" LargeChange="4"
+                        Value="{Binding TxGainDb, Mode=TwoWay}"
+                        VerticalAlignment="Center" />
+                 <TextBlock Width="40" VerticalAlignment="Center"
+                          Text="{Binding TxGainDb, StringFormat={}{0} dB}" />
+
+                 <Separator />
+                 <CheckBox Content="AMP (+14 dB)"
+                         IsChecked="{Binding TxAmpEnable, Mode=TwoWay}"
+                         VerticalAlignment="Center"
+                         ToolTip="Enable the HackRF RF amplifier for transmit output" />
+              </StackPanel>
+              </StackPanel>
+          </Border>
 
         <ToolBar DockPanel.Dock="Top">
             <CheckBox Content="DC block"
@@ -1443,6 +1487,14 @@
                                                     ToolTip="Send a TELEMETRY device-metrics packet on the primary channel (manual only)"
                                                     Command="{Binding DataContext.SendDeviceMetricsCommand,
                                                           RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                              <Button DockPanel.Dock="Right"
+                                                    Content="😀"
+                                                    Padding="8,4"
+                                                    Margin="4,0,0,0"
+                                                    FontFamily="Segoe UI Emoji"
+                                                    ToolTip="Insert emoji into this message"
+                                                    Command="{Binding DataContext.InsertComposeEmojiCommand,
+                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
                                               <TextBox VerticalContentAlignment="Center"
                                                     FontFamily="Segoe UI, Segoe UI Emoji"
                                                      ToolTip="Type a message and press Enter or Send (HackRF only)"
@@ -1599,6 +1651,15 @@
                                                 Command="{Binding DataContext.SendDirectMessageCommand,
                                                           RelativeSource={RelativeSource AncestorType=TabControl}}"
                                                 CommandParameter="{Binding}" />
+                                        <Button DockPanel.Dock="Right"
+                                            Content="😀"
+                                            Padding="8,4"
+                                            Margin="4,0,0,0"
+                                            FontFamily="Segoe UI Emoji"
+                                            ToolTip="Insert emoji into this message"
+                                            Command="{Binding DataContext.InsertConversationEmojiCommand,
+                                                  RelativeSource={RelativeSource AncestorType=TabControl}}"
+                                            CommandParameter="{Binding}" />
                                                  <TextBox VerticalContentAlignment="Center"
                                                     FontFamily="Segoe UI, Segoe UI Emoji"
                                                  ToolTip="Type a direct message and press Enter or Send"

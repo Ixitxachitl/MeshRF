@@ -10,9 +10,25 @@ namespace MeshRF.App.Views;
 /// <summary>Emoji picker used for reactions and waypoint icons.</summary>
 public partial class EmojiPickerWindow : Window
 {
-    public sealed record EmojiEntry(string Glyph, int CodePoint, string Category)
+    public enum EmojiPickerMode
     {
-        public string ToolTip => $"{Glyph}  U+{CodePoint:X}";
+        WaypointIcon,
+        Reaction,
+    }
+
+    public sealed record EmojiEntry(string Glyph, string Category, string? Description = null, int? PrimaryCodePoint = null)
+    {
+        public string ToolTip => string.IsNullOrWhiteSpace(Description)
+            ? BuildCodePointLabel(Glyph)
+            : $"{Glyph}  {Description}";
+
+        private static string BuildCodePointLabel(string glyph)
+        {
+            var parts = new List<string>();
+            foreach (var rune in glyph.EnumerateRunes())
+                parts.Add($"U+{rune.Value:X}");
+            return $"{glyph}  {string.Join(" ", parts)}";
+        }
     }
 
     public sealed record EmojiCategory(string Name, IReadOnlyList<EmojiEntry> Emojis);
@@ -34,21 +50,28 @@ public partial class EmojiPickerWindow : Window
     ];
 
     private static readonly Lazy<IReadOnlyList<EmojiEntry>> s_catalog = new(BuildCatalog);
-    private static readonly Lazy<IReadOnlyList<EmojiCategory>> s_categories = new(BuildCategories);
+    private static readonly Lazy<IReadOnlyList<EmojiCategory>> s_waypointCategories =
+        new(() => BuildCategories(includeReactionSequences: false));
+    private static readonly Lazy<IReadOnlyList<EmojiCategory>> s_reactionCategories =
+        new(() => BuildCategories(includeReactionSequences: true));
 
-    public IReadOnlyList<EmojiCategory> Categories => s_categories.Value;
+    public IReadOnlyList<EmojiCategory> Categories { get; }
 
     public string? SelectedEmoji { get; private set; }
 
-    public EmojiPickerWindow()
+    public EmojiPickerWindow(EmojiPickerMode mode)
     {
         InitializeComponent();
+        Categories = mode == EmojiPickerMode.Reaction
+            ? s_reactionCategories.Value
+            : s_waypointCategories.Value;
+        Title = mode == EmojiPickerMode.Reaction ? "Pick Reaction" : "Pick Waypoint Icon";
         DataContext = this;
     }
 
-    public static string? PickEmoji(Window? owner)
+    public static string? PickEmoji(Window? owner, EmojiPickerMode mode = EmojiPickerMode.Reaction)
     {
-        var dlg = new EmojiPickerWindow
+        var dlg = new EmojiPickerWindow(mode)
         {
             Owner = owner,
         };
@@ -56,10 +79,11 @@ public partial class EmojiPickerWindow : Window
         return dlg.ShowDialog() == true ? dlg.SelectedEmoji : null;
     }
 
-    private static IReadOnlyList<EmojiCategory> BuildCategories()
+    private static IReadOnlyList<EmojiCategory> BuildCategories(bool includeReactionSequences)
     {
         var catalog = s_catalog.Value;
-        var categories = new List<EmojiCategory>(s_categorySpecs.Length + 1);
+        var categories = new List<EmojiCategory>(s_categorySpecs.Length + 3);
+        var all = new List<EmojiEntry>(catalog);
 
         foreach (var spec in s_categorySpecs)
         {
@@ -68,7 +92,17 @@ public partial class EmojiPickerWindow : Window
                 categories.Add(new EmojiCategory($"{spec.Name} ({list.Count.ToString(CultureInfo.InvariantCulture)})", list));
         }
 
-        categories.Add(new EmojiCategory($"All ({catalog.Count.ToString(CultureInfo.InvariantCulture)})", catalog));
+        if (includeReactionSequences)
+        {
+            var keycaps = BuildKeycapEntries();
+            var flags = BuildFlagEntries();
+            categories.Add(new EmojiCategory($"Keycaps ({keycaps.Count.ToString(CultureInfo.InvariantCulture)})", keycaps));
+            categories.Add(new EmojiCategory($"Flags ({flags.Count.ToString(CultureInfo.InvariantCulture)})", flags));
+            all.AddRange(keycaps);
+            all.AddRange(flags);
+        }
+
+        categories.Add(new EmojiCategory($"All ({all.Count.ToString(CultureInfo.InvariantCulture)})", all));
         return categories;
     }
 
@@ -86,14 +120,15 @@ public partial class EmojiPickerWindow : Window
                     if (!IsSupportedSingleCodePointEmoji(codePoint) || !seen.Add(codePoint))
                         continue;
 
-                    list.Add(new EmojiEntry(char.ConvertFromUtf32(codePoint), codePoint, spec.Name));
+                    list.Add(new EmojiEntry(char.ConvertFromUtf32(codePoint), spec.Name, PrimaryCodePoint: codePoint));
                 }
             }
         }
 
         return list
             .OrderBy(e => CategoryOrder(e.Category))
-            .ThenBy(e => e.CodePoint)
+            .ThenBy(e => e.PrimaryCodePoint ?? int.MaxValue)
+            .ThenBy(e => e.Glyph, StringComparer.Ordinal)
             .ToList();
     }
 
@@ -132,6 +167,56 @@ public partial class EmojiPickerWindow : Window
         "Symbols" => 8,
         _ => 99,
     };
+
+    private static IReadOnlyList<EmojiEntry> BuildKeycapEntries()
+    {
+        return new List<EmojiEntry>
+        {
+            new("0️⃣", "Keycaps", "keycap 0"),
+            new("1️⃣", "Keycaps", "keycap 1"),
+            new("2️⃣", "Keycaps", "keycap 2"),
+            new("3️⃣", "Keycaps", "keycap 3"),
+            new("4️⃣", "Keycaps", "keycap 4"),
+            new("5️⃣", "Keycaps", "keycap 5"),
+            new("6️⃣", "Keycaps", "keycap 6"),
+            new("7️⃣", "Keycaps", "keycap 7"),
+            new("8️⃣", "Keycaps", "keycap 8"),
+            new("9️⃣", "Keycaps", "keycap 9"),
+            new("#️⃣", "Keycaps", "keycap #"),
+            new("*️⃣", "Keycaps", "keycap *"),
+        };
+    }
+
+    private static IReadOnlyList<EmojiEntry> BuildFlagEntries()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var flags = new List<EmojiEntry>();
+
+        foreach (var culture in CultureInfo.GetCultures(CultureTypes.SpecificCultures))
+        {
+            try
+            {
+                var region = new RegionInfo(culture.Name);
+                var iso = region.TwoLetterISORegionName;
+                if (iso.Length != 2 || !iso.All(ch => ch is >= 'A' and <= 'Z') || !seen.Add(iso))
+                    continue;
+
+                flags.Add(new EmojiEntry(BuildFlagGlyph(iso), "Flags", region.EnglishName));
+            }
+            catch
+            {
+            }
+        }
+
+        return flags.OrderBy(f => f.Description, StringComparer.CurrentCulture).ToList();
+    }
+
+    private static string BuildFlagGlyph(string isoCountryCode)
+    {
+        const int regionalIndicatorBase = 0x1F1E6;
+        return string.Concat(char.ConvertFromUtf32(regionalIndicatorBase + (isoCountryCode[0] - 'A')),
+                             char.ConvertFromUtf32(regionalIndicatorBase + (isoCountryCode[1] - 'A')));
+    }
 
     private void OnEmojiClick(object sender, RoutedEventArgs e)
     {

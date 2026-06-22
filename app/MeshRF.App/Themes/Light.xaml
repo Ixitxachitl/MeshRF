@@ -52,4 +52,85 @@
      <Style TargetType="{x:Type TextBox}">
           <Setter Property="ContextMenu" Value="{StaticResource TextEditingContextMenu}" />
      </Style>
+
+     <Style TargetType="{x:Type ToolBar}">
+          <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+          <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+          <Setter Property="Padding" Value="4,2" />
+          <Setter Property="Template">
+               <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ToolBar}">
+                         <Border x:Name="Bd"
+                                 Background="{TemplateBinding Background}"
+                                 BorderBrush="{TemplateBinding BorderBrush}"
+                                 BorderThickness="{TemplateBinding BorderThickness}"
+                                 Padding="{TemplateBinding Padding}">
+                              <DockPanel>
+                                   <ToggleButton x:Name="OverflowButton"
+                                                 DockPanel.Dock="Right"
+                                                 IsEnabled="{TemplateBinding HasOverflowItems}"
+                                                 IsChecked="{Binding IsOverflowOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                                 ClickMode="Press"
+                                                 Focusable="False">
+                                        <ToggleButton.Template>
+                                             <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                                  <Border x:Name="ObBd" Background="Transparent" Width="14">
+                                                       <Path x:Name="Arrow"
+                                                             HorizontalAlignment="Center"
+                                                             VerticalAlignment="Bottom"
+                                                             Margin="0,0,0,4"
+                                                             Data="M 0 0 L 3.5 3.5 L 7 0 Z"
+                                                             Fill="{DynamicResource BrushAppForeground}" />
+                                                  </Border>
+                                                  <ControlTemplate.Triggers>
+                                                       <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ObBd" Property="Background" Value="#FFEDEDED" />
+                                                       </Trigger>
+                                                       <Trigger Property="IsEnabled" Value="False">
+                                                            <Setter TargetName="Arrow" Property="Fill"
+                                                                    Value="{DynamicResource BrushSubtle}" />
+                                                       </Trigger>
+                                                  </ControlTemplate.Triggers>
+                                             </ControlTemplate>
+                                        </ToggleButton.Template>
+                                   </ToggleButton>
+
+                                   <Popup x:Name="OverflowPopup"
+                                          AllowsTransparency="True"
+                                          Placement="Bottom"
+                                          IsOpen="{Binding IsOverflowOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                          StaysOpen="False"
+                                          Focusable="False"
+                                          PopupAnimation="Slide">
+                                        <Border Background="{DynamicResource BrushPanelBackground}"
+                                                BorderBrush="{DynamicResource BrushPanelBorder}"
+                                                BorderThickness="1">
+                                             <ToolBarOverflowPanel x:Name="PART_ToolBarOverflowPanel"
+                                                                   Margin="2"
+                                                                   WrapWidth="200"
+                                                                   Focusable="True"
+                                                                   FocusVisualStyle="{x:Null}"
+                                                                   KeyboardNavigation.TabNavigation="Cycle"
+                                                                   KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                        </Border>
+                                   </Popup>
+
+                                   <ToolBarPanel x:Name="PART_ToolBarPanel"
+                                                 IsItemsHost="True"
+                                                 Margin="0" />
+                              </DockPanel>
+                         </Border>
+                         <ControlTemplate.Triggers>
+                              <Trigger Property="HasOverflowItems" Value="False">
+                                   <Setter TargetName="OverflowButton" Property="Visibility" Value="Collapsed" />
+                              </Trigger>
+                         </ControlTemplate.Triggers>
+                    </ControlTemplate>
+               </Setter.Value>
+          </Setter>
+     </Style>
+
+     <Style TargetType="{x:Type ToolBarTray}">
+          <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+     </Style>
 </ResourceDictionary>

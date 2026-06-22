@@ -37,6 +37,12 @@ public sealed class AppSettings
     /// <summary>Selected TX radio backend. HackRF can transmit; RTL-SDR cannot.</summary>
     public string TxDeviceKind { get; set; } = "HackRf";
 
+    /// <summary>HackRF TX VGA gain in dB (0..47).</summary>
+    public byte TxGainDb { get; set; } = 47;
+
+    /// <summary>Enable the HackRF RF amplifier during TX.</summary>
+    public bool TxAmpEnable { get; set; } = false;
+
     /// <summary>Auto-Gain-Control: when on, the app pushes LNA/VGA to keep
     /// the peak power around <see cref="AgcTargetDbfs"/>.</summary>
     public bool AgcEnable { get; set; } = false;

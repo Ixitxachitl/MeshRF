@@ -272,6 +272,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// HackRF-style LNA/VGA/AMP gain model.</summary>
     public bool IsHackRf => !IsRtlSdr;
 
+    /// <summary>True when the selected TX backend is a HackRF.</summary>
+    public bool IsTxHackRf => SelectedTxDevice?.Kind == RadioDeviceKind.HackRf;
+
     /// <summary>The device selectors are only editable while RX is stopped.</summary>
     public bool CanSelectDevice => !IsRunning;
 
@@ -655,7 +658,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void PickWaypointEmoji()
     {
-        string? picked = EmojiPickerWindow.PickEmoji(Application.Current?.MainWindow);
+        string? picked = EmojiPickerWindow.PickEmoji(
+            Application.Current?.MainWindow,
+            EmojiPickerWindow.EmojiPickerMode.WaypointIcon);
         if (!string.IsNullOrWhiteSpace(picked))
             SelectedWaypointEmoji = picked.Trim();
     }
@@ -920,7 +925,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable))
             {
                 _lastTracerouteUtc = DateTime.UtcNow;
                 _pendingTraceroutes[packetId] = node.NodeNum;
@@ -1002,7 +1007,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable))
             {
                 _lastPositionRequestUtc = DateTime.UtcNow;
                 var name = NodeDisplayName(node.NodeNum);
@@ -1071,7 +1076,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable))
+            if (await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable))
             {
                 var name = NodeDisplayName(node.NodeNum);
                 Status = $"Telemetry requested from {name}";
@@ -1307,6 +1312,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         LnaGainDb = _settings.LnaGainDb;
         VgaGainDb = _settings.VgaGainDb;
         AmpEnable = _settings.AmpEnable;
+        TxGainDb = _settings.TxGainDb;
+        TxAmpEnable = _settings.TxAmpEnable;
         AgcEnable = _settings.AgcEnable;
         AgcTargetDbfs = _settings.AgcTargetDbfs;
         RtlGainDb = _settings.RtlGainDb;
@@ -2678,12 +2685,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
     partial void OnSelectedTxDeviceChanged(DeviceOption? value)
     {
+        OnPropertyChanged(nameof(IsTxHackRf));
         if (_suppressDeviceUpdate || value is null) return;
         ApplyTxDevice(value.Kind);
     }
     partial void OnAgcEnableChanged(bool value) { SaveSettings(); }
     partial void OnAgcTargetDbfsChanged(double value) { SaveSettings(); }
     partial void OnRtlGainDbChanged(byte value) { PushGains(); SaveSettings(); }
+    partial void OnTxGainDbChanged(byte value) { SaveSettings(); }
+    partial void OnTxAmpEnableChanged(bool value) { SaveSettings(); }
     partial void OnBiasTeeChanged(bool value) { _core.SetDeviceOption("bias_tee", value ? 1 : 0); SaveSettings(); }
     partial void OnDcBlockEnableChanged(bool value) { _core.SetDcBlock(value); SaveSettings(); }
 
@@ -2747,6 +2757,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.DeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
         _settings.RxDeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
         _settings.TxDeviceKind = SelectedTxDevice?.Kind.ToString() ?? "HackRf";
+        _settings.TxGainDb = TxGainDb;
+        _settings.TxAmpEnable = TxAmpEnable;
         _settings.AgcEnable = AgcEnable;
         _settings.AgcTargetDbfs = AgcTargetDbfs;
         _settings.RtlGainDb = RtlGainDb;
@@ -3478,6 +3490,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private byte _txGainDb = 47;
 
+    /// <summary>Enable the HackRF RF amplifier during TX.</summary>
+    [ObservableProperty]
+    private bool _txAmpEnable;
+
     // Per-packet id seed; Meshtastic uses a 32-bit packet id (also the CTR
     // nonce). Start random and increment, keeping it non-zero.
     private uint _txPacketId = (uint)Random.Shared.Next(1, int.MaxValue);
@@ -3542,6 +3558,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Log(Status);
     }
 
+    [RelayCommand]
+    private void InsertComposeEmoji()
+    {
+        string? emoji = EmojiPickerWindow.PickEmoji(
+            Application.Current?.MainWindow,
+            EmojiPickerWindow.EmojiPickerMode.Reaction);
+        if (string.IsNullOrWhiteSpace(emoji)) return;
+        ComposeText += emoji;
+    }
+
     /// <summary>
     /// Encode the composed text as a Meshtastic TEXT_MESSAGE_APP frame on the
     /// selected channel and transmit it on the current preset/frequency. The
@@ -3572,7 +3598,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             if (ok)
             {
                 ch.Messages.Add(new ChannelMessage
@@ -3686,7 +3712,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                       okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             if (ok)
             {
                 var sent = new ChannelMessage
@@ -3731,6 +3757,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// targeting the selected message in the active chat tab.
     /// </summary>
     [RelayCommand]
+    private void InsertConversationEmoji(ConversationViewModel? convo)
+    {
+        if (convo is null) return;
+        string? emoji = EmojiPickerWindow.PickEmoji(
+            Application.Current?.MainWindow,
+            EmojiPickerWindow.EmojiPickerMode.Reaction);
+        if (string.IsNullOrWhiteSpace(emoji)) return;
+        convo.ComposeText += emoji;
+    }
+
+    [RelayCommand]
     private async Task SendReactionAsync(ChannelMessage? target)
     {
         if (target is null || target.PacketId == 0) return;
@@ -3743,7 +3780,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        string? emoji = EmojiPickerWindow.PickEmoji(Application.Current?.MainWindow);
+        string? emoji = EmojiPickerWindow.PickEmoji(
+            Application.Current?.MainWindow,
+            EmojiPickerWindow.EmojiPickerMode.Reaction);
         if (string.IsNullOrWhiteSpace(emoji)) return;
         uint? emojiCodePoint = EmojiToCodePoint(emoji);
         if (emojiCodePoint is null || emojiCodePoint.Value == 0)
@@ -3788,7 +3827,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         replyId: target.PacketId, emoji: 1,
                         okToMqtt: OkToMqtt);
 
-                ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+                ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
                 channelTag = usePkc ? "PKC" : primary?.Config.Name ?? string.Empty;
             }
             else if (SelectedTab is ChannelViewModel ch)
@@ -3799,7 +3838,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     hopLimit: (byte)HopLimit,
                     replyId: target.PacketId, emoji: 1,
                     okToMqtt: OkToMqtt);
-                ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+                ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
                 channelTag = ch.Config.Name;
             }
             else
@@ -3863,7 +3902,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
                 ? $"Sent node info ({frame.Length} B) on {primary.DisplayName}"
                 : "Transmit failed (device cannot transmit).";
@@ -3930,7 +3969,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
                 ? $"Sent position ({frame.Length} B) on {primary.DisplayName}"
                 : "Transmit failed (device cannot transmit).";
@@ -3988,7 +4027,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 okToMqtt: OkToMqtt);
 
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
                 ? $"Sent device metrics ({frame.Length} B) on {primary.DisplayName}"
                 : "Transmit failed (device cannot transmit).";
@@ -4051,7 +4090,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
-            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             if (!ok)
             {
                 Status = "Transmit failed (device cannot transmit).";
@@ -4184,7 +4223,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 channel, _myNodeNum, to, packetId,
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var preset = SelectedPreset; var gain = TxGainDb; var amp = AmpEnable;
+            var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
             TransmitBackground(preset, hz, frame, gain, amp);
         }
         catch (Exception ex)
@@ -4213,7 +4252,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: true);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var preset = SelectedPreset; var gain = TxGainDb; var amp = AmpEnable;
+            var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
             TransmitBackground(preset, hz, frame, gain, amp);
         }
         catch (Exception ex)
@@ -4243,7 +4282,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
                 to: to, hopLimit: (byte)HopLimit, wantResponse: false);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
         }
         catch (Exception ex)
         {
@@ -4307,7 +4346,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
                 requestId: requestId);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
         }
         catch (Exception ex)
         {
@@ -4326,7 +4365,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = BuildDeviceTelemetryFrame(replyChannel, packetId, to, requestId);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
         }
         catch (Exception ex)
         {
@@ -4550,7 +4589,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ch.Config, _myNodeNum, origHeader.From, packetId, origHeader.PacketId,
                 route, snrTowards, hopLimit: (byte)HopLimit);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
         }
         catch (Exception ex)
         {
@@ -4694,7 +4733,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var ackTarget = NodeDisplayName(origHeader.From);
             var ackId = origHeader.PacketId;
-            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, AmpEnable);
+            TransmitBackground(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Log($"  sent ACK to {ackTarget} for id {ackId:x8}");
         }
         catch (Exception ex)
@@ -5931,7 +5970,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (cts.IsCancellationRequested) return;
 
                 var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-                TransmitBackground(SelectedPreset, hz, relayFrame, TxGainDb, AmpEnable);
+                TransmitBackground(SelectedPreset, hz, relayFrame, TxGainDb, TxAmpEnable);
                 Log($"  relayed packet {header.PacketId:x8} ({header.HopLimit}->{nextHopLimit}) after {delayMs} ms mode={RebroadcastMode}");
             }
             catch (TaskCanceledException)

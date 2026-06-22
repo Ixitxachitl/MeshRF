@@ -136,45 +136,16 @@
     <Style TargetType="{x:Type ToolBar}">
         <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+        <Setter Property="Padding" Value="4,2" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ToolBar}">
                     <Border x:Name="Bd"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}">
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}">
                         <DockPanel>
-                            <!-- Grip: the "dots" on the left of the toolbar. -->
-                            <Thumb x:Name="ToolBarThumb"
-                                   DockPanel.Dock="Left"
-                                   Width="10"
-                                   Cursor="SizeAll"
-                                   Margin="0,1,4,1">
-                                <Thumb.Template>
-                                    <ControlTemplate TargetType="{x:Type Thumb}">
-                                        <Border Background="Transparent" Padding="3,2">
-                                            <Rectangle Width="3">
-                                                <Rectangle.Fill>
-                                                    <DrawingBrush Viewport="0,0,3,4"
-                                                                  ViewportUnits="Absolute"
-                                                                  TileMode="Tile">
-                                                        <DrawingBrush.Drawing>
-                                                            <GeometryDrawing Brush="{DynamicResource BrushSubtle}">
-                                                                <GeometryDrawing.Geometry>
-                                                                    <EllipseGeometry Center="1,1"
-                                                                                     RadiusX="0.8"
-                                                                                     RadiusY="0.8" />
-                                                                </GeometryDrawing.Geometry>
-                                                            </GeometryDrawing>
-                                                        </DrawingBrush.Drawing>
-                                                    </DrawingBrush>
-                                                </Rectangle.Fill>
-                                            </Rectangle>
-                                        </Border>
-                                    </ControlTemplate>
-                                </Thumb.Template>
-                            </Thumb>
-
                             <!-- Overflow toggle: the arrow on the right. -->
                             <ToggleButton x:Name="OverflowButton"
                                           DockPanel.Dock="Right"
@@ -227,7 +198,7 @@
 
                             <ToolBarPanel x:Name="PART_ToolBarPanel"
                                           IsItemsHost="True"
-                                          Margin="0,1,2,1" />
+                                          Margin="0" />
                         </DockPanel>
                     </Border>
                     <ControlTemplate.Triggers>
