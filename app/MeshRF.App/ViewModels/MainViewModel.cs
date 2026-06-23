@@ -1551,7 +1551,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_dirtyNodeNums.Count == 0)
         {
-            ReloadNodes();
+            // If no concrete node ids are marked dirty there is nothing
+            // incremental to apply; avoid a full reload (Nodes.Clear + map
+            // refresh) because that causes visible UI flicker.
             return false;
         }
 
@@ -1598,8 +1600,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (keepDefaultOrder)
                 {
-                    Nodes.Remove(existing);
-                    InsertNodeByDefaultOrder(latest);
+                    int existingIndex = Nodes.IndexOf(existing);
+                    int targetIndex = FindDefaultInsertIndex(latest, skipNodeNum: existing.NodeNum);
+
+                    // Keep updates cheap when the node already belongs at the
+                    // same index: replacing in place avoids remove/insert churn
+                    // that can make the grid appear to "blink".
+                    if (existingIndex >= 0 && existingIndex == targetIndex)
+                    {
+                        Nodes[existingIndex] = latest;
+                    }
+                    else
+                    {
+                        if (existingIndex >= 0)
+                            Nodes.RemoveAt(existingIndex);
+                        if (existingIndex >= 0 && targetIndex > existingIndex)
+                            targetIndex--;
+                        targetIndex = Math.Clamp(targetIndex, 0, Nodes.Count);
+                        Nodes.Insert(targetIndex, latest);
+                    }
                 }
                 else
                 {
@@ -1678,15 +1697,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void InsertNodeByDefaultOrder(NodeRecord node)
     {
+        int insertAt = FindDefaultInsertIndex(node);
+        Nodes.Insert(insertAt, node);
+    }
+
+    private int FindDefaultInsertIndex(NodeRecord node, uint? skipNodeNum = null)
+    {
         int insertAt = 0;
-        while (insertAt < Nodes.Count)
+        foreach (var current in Nodes)
         {
-            var current = Nodes[insertAt];
+            if (skipNodeNum.HasValue && current.NodeNum == skipNodeNum.Value)
+                continue;
+
             if (node.LastHeardEpoch > current.LastHeardEpoch) break;
             if (node.LastHeardEpoch == current.LastHeardEpoch && node.NodeNum < current.NodeNum) break;
             insertAt++;
         }
-        Nodes.Insert(insertAt, node);
+
+        return insertAt;
     }
 
     private void RefreshNodesViewIfNeeded()
@@ -1707,7 +1735,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         bool hasSortOrGroup = view.SortDescriptions.Count > 0 || view.GroupDescriptions?.Count > 0;
 
-        if (!hasActiveFilter && !hasSortOrGroup)
+        // Collection change notifications already keep sorted/grouped views in
+        // sync for our add/remove/replace updates; avoid forcing extra refresh
+        // pulses unless a filter is active.
+        if (!hasActiveFilter)
         {
             _nodesViewRefreshPending = false;
             if (_nodesViewRefreshTimer.IsEnabled)
@@ -1755,10 +1786,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!suspended && _nodesDirty)
         {
             if (_dirtyNodeNums.Count == 0)
-            {
-                ReloadNodes();
                 _nodesDirty = false;
-            }
             else
                 _nodesDirty = ApplyDirtyNodeUpdates();
         }
@@ -6116,13 +6144,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // rebind stutter on every received frame).
         if (_nodesDirty && !_suspendNodeReload)
         {
-            // Fallback: if we somehow flagged node dirtiness without tracking
-            // specific node ids, do a full sync so the grid can't get stale.
+            // If node dirtiness was flagged without concrete ids, clear the
+            // latch and wait for the next concrete update rather than forcing
+            // a full reload (which can visibly flicker the node grid/map).
             if (_dirtyNodeNums.Count == 0)
-            {
-                ReloadNodes();
                 _nodesDirty = false;
-            }
             else
                 _nodesDirty = ApplyDirtyNodeUpdates();
         }

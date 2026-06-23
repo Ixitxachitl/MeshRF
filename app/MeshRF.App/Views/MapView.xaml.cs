@@ -401,17 +401,24 @@ public partial class MapView : UserControl
             return;
         }
 
-        // During drag, don't wait for the batching timer; process immediately
-        // (render path is still throttled) so updates don't appear deferred.
+        // During drag we only preview pan via transforms. Defer marker work
+        // until mouse-up to avoid clearing/rebuilding marker visuals mid-drag,
+        // which appears as occasional blinking.
         if (_dragging)
         {
+            foreach (var nodeNum in nodeNums)
+                _pendingNodeMarkerNums.Add(nodeNum);
+            _pendingMarkerRefresh = true;
+
             if (MapPerfLoggingEnabled)
             {
                 _perfNodeMarkersChangedEvents++;
                 _perfNodeMarkersChangedNodes += nodeNums.Count;
+                if (_pendingNodeMarkerNums.Count > _perfPendingNodeMax)
+                    _perfPendingNodeMax = _pendingNodeMarkerNums.Count;
             }
-            OnNodeMarkersChangedCore(nodeNums);
-            PerfMaybeLog("node-event-drag-live");
+
+            PerfMaybeLog("node-event-drag-deferred");
             return;
         }
 
@@ -474,11 +481,10 @@ public partial class MapView : UserControl
 
         if (_dragging)
         {
-            // Keep markers live while panning. The canvases are still moved by
-            // drag transforms, so a marker-only redraw updates positions/data
-            // without forcing an expensive full tile render mid-drag.
-            RenderMarkersOnly();
-            PerfMaybeLog("markers-dragging-live");
+            // Defer redraw while dragging. Marker/tile layers are already moved
+            // by drag transforms, so deferring avoids mid-drag canvas clears.
+            _pendingMarkerRefresh = true;
+            PerfMaybeLog("markers-dragging-deferred");
             return;
         }
 
@@ -1802,6 +1808,13 @@ public partial class MapView : UserControl
 
         _dragOffset = default;
         _lastDragCommitTick = 0;
+
+        if (_pendingNodeMarkerNums.Count > 0)
+        {
+            var changed = _pendingNodeMarkerNums.ToArray();
+            _pendingNodeMarkerNums.Clear();
+            OnNodeMarkersChangedCore(changed);
+        }
 
         if (_pendingMarkerRefresh)
         {
