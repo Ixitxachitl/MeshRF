@@ -608,6 +608,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _nextAutoPositionUtc = DateTime.MinValue;
     private DateTime _nextAutoDeviceMetricsUtc = DateTime.MinValue;
     private int _autoReportTickInFlight;
+    private static readonly TimeSpan RxBusyDefaultHold = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan RxBusyMaxWait = TimeSpan.FromMilliseconds(450);
+    private const int RxBusyPollMs = 20;
+    private readonly object _rxBusyLock = new();
+    private DateTime _rxBusyUntilUtc = DateTime.MinValue;
     private readonly object _relayScheduleLock = new();
     private readonly Dictionary<ulong, CancellationTokenSource> _pendingRelayCancels = new();
 
@@ -1865,6 +1870,71 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // -- Transmit helpers ----------------------------------------------------
 
     /// <summary>
+    /// Mark RX as busy for at least <paramref name="hold"/> from now. Called
+    /// from the demod event drain when a preamble/frame is detected.
+    /// </summary>
+    private void MarkRxBusy(DateTime nowUtc, TimeSpan hold)
+    {
+        var until = nowUtc + hold;
+        lock (_rxBusyLock)
+        {
+            if (until > _rxBusyUntilUtc)
+                _rxBusyUntilUtc = until;
+        }
+    }
+
+    /// <summary>
+    /// Clear RX busy state when a payload line indicates the frame decode ended.
+    /// </summary>
+    private void MarkRxFrameComplete(DateTime nowUtc)
+    {
+        lock (_rxBusyLock)
+            _rxBusyUntilUtc = nowUtc;
+    }
+
+    private bool IsRxBusy(DateTime nowUtc)
+    {
+        lock (_rxBusyLock)
+            return nowUtc < _rxBusyUntilUtc;
+    }
+
+    /// <summary>
+    /// Wait briefly for the channel to go idle when we are actively receiving.
+    /// Bounded so critical responses are delayed, not blocked indefinitely.
+    /// </summary>
+    private async Task WaitForRxIdleAsync(TimeSpan maxWait, CancellationToken cancellationToken = default)
+    {
+        if (maxWait <= TimeSpan.Zero)
+            return;
+
+        var start = DateTime.UtcNow;
+        while (true)
+        {
+            var now = DateTime.UtcNow;
+            if (!IsRxBusy(now))
+                return;
+
+            var elapsed = now - start;
+            if (elapsed >= maxWait)
+                return;
+
+            var remainMs = Math.Max(1, (int)(maxWait - elapsed).TotalMilliseconds);
+            await Task.Delay(Math.Min(RxBusyPollMs, remainMs), cancellationToken)
+                      .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Opportunistic CSMA-like defer: wait for RX idle up to a small bound, then
+    /// add a short random backoff to reduce synchronized key-ups.
+    /// </summary>
+    private async Task WaitForTxOpportunityAsync(CancellationToken cancellationToken = default)
+    {
+        await WaitForRxIdleAsync(RxBusyMaxWait, cancellationToken).ConfigureAwait(false);
+        await Task.Delay(Random.Shared.Next(8, 24), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Offloads a blocking <see cref="MeshtasticCore.Transmit"/> call to a
     /// thread-pool thread, serialized through <see cref="_txSemaphore"/> so
     /// concurrent sends never race on the shared native Core handle.
@@ -1877,6 +1947,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await _txSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
+            await WaitForTxOpportunityAsync().ConfigureAwait(false);
             bool ok = await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
                                 .ConfigureAwait(false);
             if (ok)
@@ -1903,6 +1974,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             await _txSemaphore.WaitAsync().ConfigureAwait(false);
             try
             {
+                await WaitForTxOpportunityAsync().ConfigureAwait(false);
                 if (_core.Transmit(preset, hz, frame, gain, amp))
                     RecordAirtimeSample(EstimatePacketAirtimeMs(preset, frame?.Length ?? 0), isTx: true);
             }
@@ -6115,17 +6187,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             var ev = _core.PullEvent();
             if (ev is null) break;
+            var nowUtc = DateTime.UtcNow;
             Log(ev);
             TrackAirtimeFromEvent(ev);
             // A "preamble: ..." line marks the start of a received frame; grab
             // its peak-above-noise as the SNR for the payload that follows.
             if (ev.StartsWith("preamble", StringComparison.Ordinal))
             {
+                MarkRxBusy(nowUtc, RxBusyDefaultHold);
                 var pm = PreamblePeakRegex.Match(ev);
                 if (pm.Success &&
                     float.TryParse(pm.Groups["peak"].Value,
                         NumberStyles.Float, CultureInfo.InvariantCulture, out var pk))
                     _lastPreamblePeakDb = pk;
+            }
+            else if (ev.StartsWith("payload", StringComparison.Ordinal))
+            {
+                MarkRxFrameComplete(nowUtc);
             }
             RecordPayloadIfActive(ev);
             DecodePayloadIfPossible(ev);

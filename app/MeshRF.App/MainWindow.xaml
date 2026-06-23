@@ -21,7 +21,18 @@
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
-        <ToolBar DockPanel.Dock="Top">
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+            BorderThickness="0"
+                Padding="4,2">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ToolBar Grid.Column="0">
             <TextBlock Text="RX" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox Width="150"
                       ItemsSource="{Binding DeviceOptions}"
@@ -158,7 +169,18 @@
             <TextBlock Margin="16,0,0,0"
                        VerticalAlignment="Center"
                        Text="{Binding Status}" />
-        </ToolBar>
+                </ToolBar>
+
+                <Button Grid.Column="1"
+                        Width="32" Height="28"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Center"
+                        Click="OnAboutClick"
+                        ToolTip="About MeshRF">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE946;" />
+                </Button>
+            </Grid>
+        </Border>
 
         <Border DockPanel.Dock="Top"
             Background="{DynamicResource BrushPanelBackground}"
@@ -275,68 +297,70 @@
               </StackPanel>
           </Border>
 
-        <ToolBar DockPanel.Dock="Top">
-            <CheckBox Content="DC block"
+        <Border DockPanel.Dock="Top"
+            Background="{DynamicResource BrushPanelBackground}"
+            BorderBrush="{DynamicResource BrushPanelBorder}"
+            BorderThickness="0"
+            Padding="4,2">
+            <Grid>
+            <ToolBar HorizontalAlignment="Stretch">
+                <CheckBox Content="DC block"
                       IsChecked="{Binding DcBlockEnable, Mode=TwoWay}"
                       VerticalAlignment="Center"
                       ToolTip="IIR high-pass to remove the LO leakage spike at the tuned centre frequency. Leave on for normal use; disable only for diagnostics." />
-            <Separator />
-            <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox Width="90"
+                <Separator />
+                <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <ComboBox Width="90"
                       ItemsSource="{Binding Themes}"
                       SelectedItem="{Binding Theme, Mode=TwoWay}" />
 
-            <Separator />
-            <TextBlock Text="Units" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox Width="92"
+                <Separator />
+                <TextBlock Text="Units" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <ComboBox Width="92"
                       ItemsSource="{Binding UnitSystems}"
                       SelectedItem="{Binding UnitSystemName, Mode=TwoWay}"
                       ToolTip="Display units used throughout the app" />
 
-            <Separator />
-            <TextBlock Text="Colormap" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <ComboBox Width="90"
+                <Separator />
+                <TextBlock Text="Colormap" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <ComboBox Width="90"
                       ItemsSource="{Binding WaterfallColormaps}"
                       SelectedItem="{Binding WaterfallColormap, Mode=TwoWay}" />
 
-            <Separator />
-            <CheckBox Content="Auto levels"
+                <Separator />
+                <CheckBox Content="Auto levels"
                       IsChecked="{Binding WaterfallAutoLevels, Mode=TwoWay}"
                       VerticalAlignment="Center"
                       ToolTip="Track 5th/99th percentile of recent frames" />
-            <TextBlock Text="floor" VerticalAlignment="Center" Margin="6,0,4,0" />
-            <Slider Width="140"
+                <TextBlock Text="floor" VerticalAlignment="Center" Margin="6,0,4,0" />
+                <Slider Width="140"
                     Minimum="-140" Maximum="0"
                     TickFrequency="5" IsSnapToTickEnabled="False"
                     Value="{Binding WaterfallFloorDb, Mode=TwoWay}"
                     VerticalAlignment="Center" />
-            <TextBlock Width="48" VerticalAlignment="Center"
+                <TextBlock Width="48" VerticalAlignment="Center"
                        Text="{Binding WaterfallFloorDb, StringFormat={}{0:F0} dB}" />
-            <TextBlock Text="ceil" VerticalAlignment="Center" Margin="6,0,4,0" />
-            <Slider Width="140"
+                <TextBlock Text="ceil" VerticalAlignment="Center" Margin="6,0,4,0" />
+                <Slider Width="140"
                     Minimum="-100" Maximum="20"
                     TickFrequency="5" IsSnapToTickEnabled="False"
                     Value="{Binding WaterfallCeilDb, Mode=TwoWay}"
                     VerticalAlignment="Center" />
-            <TextBlock Width="48" VerticalAlignment="Center"
+                <TextBlock Width="48" VerticalAlignment="Center"
                        Text="{Binding WaterfallCeilDb, StringFormat={}{0:F0} dB}" />
-            <Separator />
-            <TextBlock Text="Speed" VerticalAlignment="Center" Margin="6,0,4,0" />
-            <Slider Width="120"
+                <Separator />
+                <TextBlock Text="Speed" VerticalAlignment="Center" Margin="6,0,4,0" />
+                <Slider Width="120"
                     Minimum="5" Maximum="240"
                     TickFrequency="5" IsSnapToTickEnabled="False"
                     Value="{Binding WaterfallRowsPerSecond, Mode=TwoWay}"
                     VerticalAlignment="Center"
                     ToolTip="Waterfall scroll speed in rows per second (time resolution). Higher = faster, finer time detail; does not affect frequency resolution." />
-            <TextBlock Width="48" VerticalAlignment="Center"
+                <TextBlock Width="48" VerticalAlignment="Center"
                        Text="{Binding WaterfallRowsPerSecond, StringFormat={}{0:F0}/s}" />
-            <Separator />
-            <Button Width="32" Height="28"
-                    Click="OnAboutClick"
-                    ToolTip="About MeshRF">
-                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE946;" />
-            </Button>
-        </ToolBar>
+            </ToolBar>
+            </Grid>
+        </Border>
 
         <ToolBar DockPanel.Dock="Top">
             <TextBlock Text="Ringtone" VerticalAlignment="Center" Margin="0,0,4,0" />
@@ -357,7 +381,7 @@
 
             <Separator />
             <TextBlock Text="RTTTL" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <TextBox Width="260"
+            <TextBox Width="600"
                      Text="{Binding RingtoneRtttl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                      VerticalAlignment="Center"
                      ToolTip="Ringtone in Meshtastic RTTTL format" />
