@@ -170,7 +170,12 @@ public partial class ChannelMessage : ObservableObject
     private const string UiDateTimeFormat = "M/d/yyyy h:mm:ss tt";
 
     public DateTime Timestamp { get; init; } = DateTime.Now;
-    public string FromId  { get; init; } = string.Empty;
+    [ObservableProperty]
+    private string _fromId = string.Empty;
+
+    /// <summary>Sender node id for display-name refresh (0 when unknown/system).</summary>
+    public uint SenderNodeNum { get; init; }
+
     public string Text    { get; init; } = string.Empty;
     public float? RssiDbm { get; init; }
     public float? SnrDb   { get; init; }
@@ -211,6 +216,8 @@ public partial class ChannelMessage : ObservableObject
         OnPropertyChanged(nameof(Display));
         OnPropertyChanged(nameof(TextWithStatus));
     }
+
+    partial void OnFromIdChanged(string value) => OnPropertyChanged(nameof(Display));
 
     private string DeliverySuffix => Delivery switch
     {

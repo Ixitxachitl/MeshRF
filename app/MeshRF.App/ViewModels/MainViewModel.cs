@@ -1182,9 +1182,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private string BuildWaypointTooltip(WaypointRecord wp)
     {
+          var fromName = NodeDisplayName(wp.FromNode);
         var sb = new System.Text.StringBuilder();
                 sb.Append(string.IsNullOrWhiteSpace(wp.IconText) ? wp.DisplayName : $"{wp.IconText} {wp.DisplayName}")
-          .Append("\nFrom ").Append(wp.FromId)
+            .Append("\nFrom ").Append(fromName)
           .Append("\n").Append(wp.Latitude.ToString("F5", CultureInfo.InvariantCulture))
           .Append(", ").Append(wp.Longitude.ToString("F5", CultureInfo.InvariantCulture));
         if (wp.AltitudeM is int alt) sb.Append("  ").Append(FormatAltitude(alt));
@@ -1533,6 +1534,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 convo.Node = node;
     }
 
+    private void RefreshNodeDisplayNameReferences(uint nodeNum)
+    {
+        var resolvedName = NodeDisplayName(nodeNum);
+
+        foreach (var channel in Channels)
+        {
+            foreach (var message in channel.Messages)
+            {
+                if (message.SenderNodeNum == nodeNum &&
+                    !string.Equals(message.FromId, resolvedName, StringComparison.Ordinal))
+                    message.FromId = resolvedName;
+            }
+        }
+
+        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+        {
+            if (convo.NodeNum == nodeNum &&
+                !string.Equals(convo.PeerName, resolvedName, StringComparison.Ordinal))
+                convo.PeerName = resolvedName;
+
+            foreach (var message in convo.Messages)
+            {
+                if (message.SenderNodeNum == nodeNum &&
+                    !string.Equals(message.FromId, resolvedName, StringComparison.Ordinal))
+                    message.FromId = resolvedName;
+            }
+        }
+    }
+
     private bool RememberUndecodedPacket(MeshHeader header)
     {
         ulong key = ((ulong)header.From << 32) ^ header.PacketId;
@@ -1574,6 +1604,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .Take(MaxDirtyNodeUpdatesPerTick)
             .ToArray();
         var mapChangedNodeNums = new List<uint>(changedNodeNums.Length);
+        bool waypointTooltipsNeedRefresh = false;
 
         foreach (var nodeNum in changedNodeNums)
         {
@@ -1638,6 +1669,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 mapChangedNodeNums.Add(nodeNum);
 
             RefreshConversationNode(nodeNum);
+            RefreshNodeDisplayNameReferences(nodeNum);
+            if (!waypointTooltipsNeedRefresh && Waypoints.Any(w => w.FromNode == nodeNum))
+                waypointTooltipsNeedRefresh = true;
         }
 
         foreach (var nodeNum in changedNodeNums)
@@ -1645,6 +1679,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RefreshNodesViewIfNeeded();
         if (mapChangedNodeNums.Count > 0)
             NodeMarkersChanged?.Invoke(mapChangedNodeNums);
+        if (waypointTooltipsNeedRefresh)
+            MapDataChanged?.Invoke(this, EventArgs.Empty);
         return _dirtyNodeNums.Count > 0;
     }
 
@@ -1818,6 +1854,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         return markers;
+    }
+
+    public string GetLiveNodeTooltip(uint nodeNum)
+    {
+        if (_nodesByNum.TryGetValue(nodeNum, out var node))
+            return BuildNodeTooltip(node);
+
+        var stored = _nodeStore.Get(nodeNum);
+        return stored is not null
+            ? BuildNodeTooltip(stored)
+            : $"!{nodeNum:x8}";
+    }
+
+    public string GetLiveWaypointTooltip(long waypointRowId)
+    {
+        var waypoint = Waypoints.FirstOrDefault(w => w.Id == waypointRowId)
+            ?? _waypointStore.All().FirstOrDefault(w => w.Id == waypointRowId);
+        return waypoint is not null
+            ? BuildWaypointTooltip(waypoint)
+            : string.Empty;
     }
 
     private string GetNodeTooltipCached(MeshRF.Nodes.NodeRecord n)
@@ -2172,6 +2228,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Timestamp = DateTimeOffset.FromUnixTimeSeconds(msg.RxEpoch).LocalDateTime,
             FromId = NodeDisplayName(msg.FromNode),
+            SenderNodeNum = msg.FromNode,
             Text = msg.Text,
             RssiDbm = msg.RssiDbfs,
             SnrDb = msg.SnrDb,
@@ -2239,6 +2296,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Timestamp = DateTimeOffset.FromUnixTimeSeconds(reaction.RxEpoch).LocalDateTime,
             FromId = NodeDisplayName(reaction.FromNode),
+            SenderNodeNum = reaction.FromNode,
             Text = $"reacted {glyph} (original message {targetText} not found)",
             RssiDbm = reaction.RssiDbfs,
             SnrDb = reaction.SnrDb,
@@ -2278,6 +2336,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Timestamp = DateTimeOffset.FromUnixTimeSeconds(reply.RxEpoch).LocalDateTime,
             FromId = NodeDisplayName(reply.FromNode),
+            SenderNodeNum = reply.FromNode,
             Text = $"{context}\n{body}",
             RssiDbm = reply.RssiDbfs,
             SnrDb = reply.SnrDb,
@@ -3704,6 +3763,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ch.Messages.Add(new ChannelMessage
                 {
                     FromId = NodeDisplayName(_myNodeNum),
+                    SenderNodeNum = _myNodeNum,
                     Text = replyId != 0
                         ? BuildOutgoingReplyDisplayText(text, replyId)
                         : text,
@@ -3818,6 +3878,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var sent = new ChannelMessage
                 {
                     FromId = NodeDisplayName(_myNodeNum),
+                    SenderNodeNum = _myNodeNum,
                     Text = replyId != 0
                         ? BuildOutgoingReplyDisplayText(text, replyId)
                         : text,
@@ -5429,6 +5490,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 CancelPendingRelay(header.From, header.PacketId);
                 MarkNodeDirty(header.From);
+                Log($"  (dup undecoded) {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2})");
                 return;
             }
 
@@ -5551,6 +5613,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             convo.Add(new ChannelMessage
                             {
                                 FromId = senderName,
+                                SenderNodeNum = header.From,
                                 Text = record.Text,
                                 RssiDbm = record.RssiDbfs,
                                 SnrDb = record.SnrDb,
@@ -5613,6 +5676,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             chanVm?.Messages.Add(new ChannelMessage
                             {
                                 FromId = senderName,
+                                SenderNodeNum = header.From,
                                 Text = record.Text,
                                 RssiDbm = record.RssiDbfs,
                                 SnrDb = record.SnrDb,
@@ -5794,7 +5858,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             LockedTo = wp.LockedTo,
                             RxEpoch = rxEpoch,
                         });
-                        _waypointsDirty = true;
+                        ReloadWaypoints();
+                        _waypointsDirty = false;
                         Log($"  waypoint {header.FromId}: {wp.Latitude:F5}, {wp.Longitude:F5}  {wp.Name}");
                     }
                     break;

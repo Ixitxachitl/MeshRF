@@ -92,6 +92,8 @@ public partial class MapView : UserControl
     private readonly DispatcherTimer _nodeMarkerUpdateTimer;
     private readonly DispatcherTimer _fullMarkerRefreshTimer;
     private readonly DispatcherTimer _renderThrottleTimer;
+    private readonly DispatcherTimer _liveToolTipTimer;
+    private readonly HashSet<ToolTip> _liveToolTips = new();
     private bool _fullMarkerRefreshPending;
     private const int MaxNodeMarkerUpdatesPerTick = 32;
     private static readonly long MapRenderMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
@@ -198,6 +200,11 @@ public partial class MapView : UserControl
             Interval = TimeSpan.FromMilliseconds(1),
         };
         _renderThrottleTimer.Tick += OnRenderThrottleTimerTick;
+        _liveToolTipTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _liveToolTipTimer.Tick += OnLiveToolTipTimerTick;
         Directory.CreateDirectory(s_cacheDir);
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -258,10 +265,41 @@ public partial class MapView : UserControl
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _renderThrottleTimer.Stop();
+        _liveToolTipTimer.Stop();
+        _liveToolTips.Clear();
         _mapRenderQueued = false;
         _mapFullRenderQueued = false;
         Unsubscribe();
         PerfMaybeLog("unloaded");
+    }
+
+    private void OnLiveToolTipTimerTick(object? sender, EventArgs e)
+    {
+        if (_liveToolTips.Count == 0)
+        {
+            _liveToolTipTimer.Stop();
+            return;
+        }
+
+        var stale = new List<ToolTip>();
+        foreach (var tip in _liveToolTips)
+        {
+            if (!tip.IsOpen)
+            {
+                stale.Add(tip);
+                continue;
+            }
+
+            if (tip.Tag is Func<string> resolve)
+                UpdateToolTipContent(tip, resolve());
+        }
+
+        if (stale.Count > 0)
+            foreach (var tip in stale)
+                _liveToolTips.Remove(tip);
+
+        if (_liveToolTips.Count == 0)
+            _liveToolTipTimer.Stop();
     }
 
     private void OnRenderThrottleTimerTick(object? sender, EventArgs e)
@@ -699,7 +737,7 @@ public partial class MapView : UserControl
                     continue;
                 }
 
-                AddOrUpdateNodeVisual(mk, px, py, updateTooltip: false);
+                AddOrUpdateNodeVisual(mk, px, py, updateTooltip: true);
             }
             return;
         }
@@ -749,7 +787,7 @@ public partial class MapView : UserControl
             {
                 // Telemetry-only updates are common; avoid forcing cluster
                 // geometry checks/rebuilds when marker position is unchanged.
-                AddOrUpdateNodeVisual(mk, px, py, updateTooltip: false);
+                AddOrUpdateNodeVisual(mk, px, py, updateTooltip: true);
                 continue;
             }
 
@@ -761,7 +799,7 @@ public partial class MapView : UserControl
                 return;
             }
 
-            AddOrUpdateNodeVisual(mk, px, py, updateTooltip: false);
+            AddOrUpdateNodeVisual(mk, px, py, updateTooltip: true);
         }
     }
 
@@ -1317,6 +1355,7 @@ public partial class MapView : UserControl
         var fill = mk.IsWaypoint
             ? (mk.IsExpired ? WaypointExpiredFillBrush : WaypointFillBrush)
             : NodeFillBrush;
+        var liveText = BuildLiveToolTipResolver(mk);
         var dot = new Ellipse
         {
             Width = 12,
@@ -1324,7 +1363,7 @@ public partial class MapView : UserControl
             Fill = fill,
             Stroke = Brushes.White,
             StrokeThickness = 1.5,
-            ToolTip = BuildNodeToolTip(mk.Title),
+            ToolTip = BuildNodeToolTip(mk.Title, liveText),
         };
         ToolTipService.SetInitialShowDelay(dot, 250);
         ToolTipService.SetShowDuration(dot, 60000);
@@ -1369,7 +1408,7 @@ public partial class MapView : UserControl
             if (!ReferenceEquals(existing.Dot.Fill, NodeFillBrush))
                 existing.Dot.Fill = NodeFillBrush;
             if (updateTooltip)
-                UpdateNodeToolTip(existing.Dot, mk.Title);
+                UpdateNodeToolTip(existing.Dot, mk);
             if (existing.Label is Emoji.Wpf.TextBlock tb &&
                 !string.Equals(tb.Text, mk.Label, StringComparison.Ordinal))
                 tb.Text = mk.Label;
@@ -1396,15 +1435,30 @@ public partial class MapView : UserControl
         UpdateNodeVisualSpatialIndex(nodeNum, px, py);
     }
 
-    private void UpdateNodeToolTip(FrameworkElement element, string text)
+    private Func<string>? BuildLiveToolTipResolver(MainViewModel.MapMarker mk)
     {
+        if (mk.NodeNum is uint nodeNum)
+            return () => _vm?.GetLiveNodeTooltip(nodeNum) ?? mk.Title;
+
+        if (mk.WaypointRowId is long waypointId)
+            return () => _vm?.GetLiveWaypointTooltip(waypointId) ?? mk.Title;
+
+        return null;
+    }
+
+    private void UpdateNodeToolTip(FrameworkElement element, MainViewModel.MapMarker mk)
+    {
+        var liveText = BuildLiveToolTipResolver(mk);
         if (element.ToolTip is ToolTip tip && tip.Content is Emoji.Wpf.TextBlock tb)
         {
-            if (!string.Equals(tb.Text, text, StringComparison.Ordinal))
-                tb.Text = text;
+            if (!string.Equals(tb.Text, mk.Title, StringComparison.Ordinal))
+                tb.Text = mk.Title;
+            tip.Tag = liveText;
+            if (tip.IsOpen && liveText is not null)
+                UpdateToolTipContent(tip, liveText());
             return;
         }
-        element.ToolTip = BuildNodeToolTip(text);
+        element.ToolTip = BuildNodeToolTip(mk.Title, liveText);
     }
 
     private void RemoveNodeVisual(uint nodeNum)
@@ -1565,7 +1619,7 @@ public partial class MapView : UserControl
             double angle = 2 * Math.PI * i / members.Count - Math.PI / 2;
             double mx = lcx + legLen * Math.Cos(angle);
             double my = lcy + legLen * Math.Sin(angle);
-            var toolTip = BuildNodeToolTip(members[i].mk.Title);
+            var toolTip = BuildNodeToolTip(members[i].mk.Title, BuildLiveToolTipResolver(members[i].mk));
 
             var leg = new Line
             {
@@ -1637,7 +1691,14 @@ public partial class MapView : UserControl
 
     /// <summary>Wraps the multi-line marker description in a ToolTip that stays
     /// visible while the pointer hovers the node.</summary>
-    private ToolTip BuildNodeToolTip(string text)
+    private static void UpdateToolTipContent(ToolTip toolTip, string text)
+    {
+        if (toolTip.Content is Emoji.Wpf.TextBlock tb &&
+            !string.Equals(tb.Text, text, StringComparison.Ordinal))
+            tb.Text = text;
+    }
+
+    private ToolTip BuildNodeToolTip(string text, Func<string>? liveText = null)
     {
         var toolTip = new ToolTip
         {
@@ -1647,11 +1708,26 @@ public partial class MapView : UserControl
                 FontSize = 11,
                 FontFamily = new FontFamily("Segoe UI"),
             },
+            Tag = liveText,
         };
 
-        toolTip.Opened += (_, _) => _openNodeToolTips++;
+        toolTip.Opened += (_, _) =>
+        {
+            _openNodeToolTips++;
+            if (toolTip.Tag is Func<string> resolve)
+            {
+                UpdateToolTipContent(toolTip, resolve());
+                _liveToolTips.Add(toolTip);
+                if (!_liveToolTipTimer.IsEnabled)
+                    _liveToolTipTimer.Start();
+            }
+        };
         toolTip.Closed += (_, _) =>
         {
+            _liveToolTips.Remove(toolTip);
+            if (_liveToolTips.Count == 0 && _liveToolTipTimer.IsEnabled)
+                _liveToolTipTimer.Stop();
+
             if (_openNodeToolTips > 0)
                 _openNodeToolTips--;
 
