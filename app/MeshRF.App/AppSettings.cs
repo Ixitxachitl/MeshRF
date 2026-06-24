@@ -316,6 +316,12 @@ public sealed class AppSettings
     /// <summary>Persisted node pressure filter.</summary>
     public string NodeFilterPressure { get; set; } = "Any";
 
+    /// <summary>Persisted node-grid sort column (SortMemberPath).</summary>
+    public string NodeSortMemberPath { get; set; } = string.Empty;
+
+    /// <summary>Persisted node-grid sort direction.</summary>
+    public bool NodeSortDescending { get; set; } = false;
+
     /// <summary>Persisted map node label mode.</summary>
     public string MapNodeLabelMode { get; set; } = "Short name";
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Linq;
 using System.Diagnostics;
+using System.ComponentModel;
+using System.Windows.Data;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -158,6 +160,8 @@ public partial class MainWindow : Window
             ApplySavedLayout();
             _layoutApplied = true;
         }
+
+        ApplyNodesGridSort(AppSettings.Load());
 
         // When the waterfall recomputes auto-levels, mirror them back onto
         // the VM so the manual sliders track. Only do this when AutoLevels
@@ -961,6 +965,7 @@ public partial class MainWindow : Window
         _conversationLocationHistoryPaneStar = settings.ConversationLocationHistoryPaneStar;
 
         ApplyWaypointsColumnWidths(settings.WaypointColumnWidths);
+        ApplyNodesGridSort(settings);
 
         IdentityExpander.IsExpanded = settings.IdentityExpanded;
         RestoreSelectedTab(settings);
@@ -1126,6 +1131,7 @@ public partial class MainWindow : Window
             settings.NodeFilterTemperature   = vm.NodeTemperatureFilter;
             settings.NodeFilterHumidity      = vm.NodeHumidityFilter;
             settings.NodeFilterPressure      = vm.NodePressureFilter;
+            SaveNodesGridSort(settings);
             settings.MapNodeLabelMode        = vm.MapNodeLabelMode;
             settings.NodeFilterDistanceKm    = vm.NodeDistanceKmText;
             settings.NodeFilterMaxAgeMinutes = vm.NodeMaxAgeMinutesText;
@@ -1313,5 +1319,55 @@ public partial class MainWindow : Window
             widths.Add(w);
         }
         return widths;
+    }
+
+    private void ApplyNodesGridSort(AppSettings settings)
+    {
+        if (NodesGrid.ItemsSource is null || string.IsNullOrWhiteSpace(settings.NodeSortMemberPath))
+            return;
+
+        var view = CollectionViewSource.GetDefaultView(NodesGrid.ItemsSource);
+        if (view is null)
+            return;
+
+        var column = NodesGrid.Columns.FirstOrDefault(c =>
+            string.Equals(c.SortMemberPath, settings.NodeSortMemberPath, StringComparison.Ordinal));
+        if (column is null)
+            return;
+
+        view.SortDescriptions.Clear();
+        view.SortDescriptions.Add(new SortDescription(
+            settings.NodeSortMemberPath,
+            settings.NodeSortDescending
+                ? ListSortDirection.Descending
+                : ListSortDirection.Ascending));
+
+        foreach (var other in NodesGrid.Columns)
+            other.SortDirection = null;
+        column.SortDirection = settings.NodeSortDescending
+            ? ListSortDirection.Descending
+            : ListSortDirection.Ascending;
+    }
+
+    private void SaveNodesGridSort(AppSettings settings)
+    {
+        if (NodesGrid.ItemsSource is null)
+        {
+            settings.NodeSortMemberPath = string.Empty;
+            settings.NodeSortDescending = false;
+            return;
+        }
+
+        var view = CollectionViewSource.GetDefaultView(NodesGrid.ItemsSource);
+        if (view is null || view.SortDescriptions.Count == 0)
+        {
+            settings.NodeSortMemberPath = string.Empty;
+            settings.NodeSortDescending = false;
+            return;
+        }
+
+        var sort = view.SortDescriptions[0];
+        settings.NodeSortMemberPath = sort.PropertyName ?? string.Empty;
+        settings.NodeSortDescending = sort.Direction == ListSortDirection.Descending;
     }
 }

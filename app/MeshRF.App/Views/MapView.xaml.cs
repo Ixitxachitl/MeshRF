@@ -98,7 +98,7 @@ public partial class MapView : UserControl
     private const int MaxNodeMarkerUpdatesPerTick = 32;
     private static readonly long MapRenderMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
     private static readonly long DragPreviewMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
-    private static readonly long DragCommitMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 8.0);
+    private static readonly long DragCommitMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 5.0);
     private const double DragCommitMinPixels = 48.0;
     private const double ClusterRadiusPx = 14;
     private const double ClusterBucketSizePx = 48;
@@ -439,27 +439,6 @@ public partial class MapView : UserControl
             return;
         }
 
-        // During drag we only preview pan via transforms. Defer marker work
-        // until mouse-up to avoid clearing/rebuilding marker visuals mid-drag,
-        // which appears as occasional blinking.
-        if (_dragging)
-        {
-            foreach (var nodeNum in nodeNums)
-                _pendingNodeMarkerNums.Add(nodeNum);
-            _pendingMarkerRefresh = true;
-
-            if (MapPerfLoggingEnabled)
-            {
-                _perfNodeMarkersChangedEvents++;
-                _perfNodeMarkersChangedNodes += nodeNums.Count;
-                if (_pendingNodeMarkerNums.Count > _perfPendingNodeMax)
-                    _perfPendingNodeMax = _pendingNodeMarkerNums.Count;
-            }
-
-            PerfMaybeLog("node-event-drag-deferred");
-            return;
-        }
-
         foreach (var nodeNum in nodeNums)
             _pendingNodeMarkerNums.Add(nodeNum);
 
@@ -519,10 +498,11 @@ public partial class MapView : UserControl
 
         if (_dragging)
         {
-            // Defer redraw while dragging. Marker/tile layers are already moved
-            // by drag transforms, so deferring avoids mid-drag canvas clears.
+            // Keep marker-only refreshes flowing while dragging; tile redraws
+            // are still handled by coarse drag commits.
             _pendingMarkerRefresh = true;
-            PerfMaybeLog("markers-dragging-deferred");
+            RenderMarkersOnly();
+            PerfMaybeLog("markers-dragging-markers-only");
             return;
         }
 
@@ -1920,8 +1900,9 @@ public partial class MapView : UserControl
         _markerDragTransform.X = _dragOffset.X;
         _markerDragTransform.Y = _dragOffset.Y;
 
-        // Commit drag in coarse steps so viewport-dependent updates (tiles,
-        // marker culling/reclustering) continue while dragging.
+        // Periodically sync the logical viewport while dragging so newly
+        // exposed tiles/markers can start loading, while still spending most
+        // frames on the cheap transform preview path.
         if (_dragOffset.LengthSquared >= DragCommitMinPixels * DragCommitMinPixels &&
             (nowTicks - _lastDragCommitTick) >= DragCommitMinIntervalTicks)
         {
@@ -1933,7 +1914,7 @@ public partial class MapView : UserControl
                 _markerDragTransform.Y = 0;
                 _dragOffset = default;
                 _lastDragCommitTick = nowTicks;
-                Render();
+                RequestRender(fullRender: true);
             }
         }
     }
@@ -2044,7 +2025,7 @@ public partial class MapView : UserControl
         _centerLon = XToLon(cx, _zoom);
         _centerLat = ClampLat(YToLat(cy, _zoom));
         _userMovedView = true;
-        Render();
+        RequestRender(fullRender: true);
     }
 
     private static double ClampLat(double lat) => Math.Clamp(lat, -85.05, 85.05);

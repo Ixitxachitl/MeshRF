@@ -1637,21 +1637,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (keepDefaultOrder)
                 {
                     int existingIndex = Nodes.IndexOf(existing);
-                    int targetIndex = FindDefaultInsertIndex(latest, skipNodeNum: existing.NodeNum);
-
-                    // Keep updates cheap when the node already belongs at the
-                    // same index: replacing in place avoids remove/insert churn
-                    // that can make the grid appear to "blink".
-                    if (existingIndex >= 0 && existingIndex == targetIndex)
+                    // Keep existing rows in place so a fresh sighting only
+                    // updates the content instead of re-sorting the whole grid.
+                    // That avoids the row-move stutter the user sees when many
+                    // packets arrive in a burst.
+                    if (existingIndex >= 0)
                     {
                         Nodes[existingIndex] = latest;
                     }
                     else
                     {
-                        if (existingIndex >= 0)
-                            Nodes.RemoveAt(existingIndex);
-                        if (existingIndex >= 0 && targetIndex > existingIndex)
-                            targetIndex--;
+                        int targetIndex = FindDefaultInsertIndex(latest);
                         targetIndex = Math.Clamp(targetIndex, 0, Nodes.Count);
                         Nodes.Insert(targetIndex, latest);
                     }
@@ -1750,8 +1746,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (skipNodeNum.HasValue && current.NodeNum == skipNodeNum.Value)
                 continue;
 
-            if (node.LastHeardEpoch > current.LastHeardEpoch) break;
-            if (node.LastHeardEpoch == current.LastHeardEpoch && node.NodeNum < current.NodeNum) break;
+            if (node.NodeNum < current.NodeNum) break;
             insertAt++;
         }
 

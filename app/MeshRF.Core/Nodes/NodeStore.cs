@@ -312,7 +312,7 @@ public sealed class NodeStore : IDisposable
         ThrowIfDisposed();
         var list = new List<NodeRecord>();
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM nodes ORDER BY last_heard_epoch DESC, node_num ASC";
+        cmd.CommandText = "SELECT * FROM nodes ORDER BY node_num ASC";
         using var rd = cmd.ExecuteReader();
         while (rd.Read()) list.Add(Read(rd));
         return list;
