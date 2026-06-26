@@ -243,10 +243,16 @@ public static class MeshDecoder
 
         var cipher = frame.Slice(MeshHeader.Size).ToArray();
 
-        // Prefer channels whose 1-byte hash hint matches, then fall back to the
-        // rest (the hint can collide, and some senders send hash 0).
+        // Only try channels whose computed hash matches the packet's channel-hash
+        // hint byte.  This mirrors firmware perhapsDecode (Router.cpp) which rejects
+        // any channel whose hash doesn't match rather than falling back to all
+        // channels.  Trying non-matching channels can produce false-positive decodes
+        // because a wrong-key AES-CTR result can accidentally pass the IsPlausible
+        // check (PortNum enum value in range + rdr.End clean).
+        // Hash collisions (two channels with the same computed byte) are handled
+        // naturally: both candidates are tried in index order.
         var ordered = channels
-            .OrderByDescending(c => c.Hash == header.ChannelHash)
+            .Where(c => c.Hash == header.ChannelHash)
             .ToList();
 
         foreach (var ch in ordered)

@@ -59,6 +59,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly Dictionary<uint, string> _nodeTooltipCache = new();
     private readonly Queue<ulong> _recentUndecodedPacketOrder = new();
     private readonly HashSet<ulong> _recentUndecodedPacketKeys = new();
+    
+    // Filter optimization: pre-computed set of nodes that pass current filter criteria.
+    // Computed on background thread and marshaled to UI thread for display.
+    private readonly HashSet<uint> _nodeFilterCache = new();
+    private FilterCriteria _currentFilterCriteria = FilterCriteria.CreateEmpty();
+    private readonly object _filterCriteriaSyncLock = new();
+    private readonly DispatcherTimer _filterChangeDebounceTimer;
+    private CancellationTokenSource? _filterComputeCts;
+    
     private DateTime _lastNodesViewRefreshUtc = DateTime.MinValue;
     private static readonly TimeSpan NodesViewRefreshInterval = TimeSpan.FromMilliseconds(250);
     private const int MaxDirtyNodeUpdatesPerTick = 64;
@@ -362,12 +371,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? "Max distance from location in miles (blank = any; requires location to be set)"
             : "Max distance from location in km (blank = any; requires location to be set)";
 
-    private void RefreshNodesFilter()
-    {
-        NodesView?.Refresh();
-        RebuildNodeMapStateSignatures();
-        MapDataChanged?.Invoke(this, EventArgs.Empty);
-    }
     partial void OnNodeSearchTextChanged(string value)          => RefreshNodesFilter();
     partial void OnNodeHopsFilterChanged(string value)          => RefreshNodesFilter();
     partial void OnNodeKeyFilterChanged(string value)           => RefreshNodesFilter();
@@ -402,109 +405,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodePressureFilter    = "Any";
         NodeDistanceKmText    = string.Empty;
         NodeMaxAgeMinutesText = string.Empty;
-    }
-
-    private bool NodePassesFilter(NodeRecord n)
-    {
-        // Text search across long name, short name, user ID.
-        if (!string.IsNullOrWhiteSpace(NodeSearchText))
-        {
-            var t = NodeSearchText.Trim();
-            if (!n.LongName.Contains(t, StringComparison.OrdinalIgnoreCase)
-             && !n.ShortName.Contains(t, StringComparison.OrdinalIgnoreCase)
-             && !n.DisplayId.Contains(t, StringComparison.OrdinalIgnoreCase)
-             && !n.UserId.Contains(t, StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
-
-        // Hops filter.
-        if (NodeHopsFilter != "Any")
-        {
-            int maxH = NodeHopsFilter switch
-            {
-                "Direct"  => 0,
-                "≤1 hop"  => 1,
-                "≤2 hops" => 2,
-                "≤3 hops" => 3,
-                "≤4 hops" => 4,
-                _          => -1,
-            };
-            if (maxH >= 0 && (n.HopsAway is not byte h || h > maxH)) return false;
-        }
-
-        // Key status filter.
-        switch (NodeKeyFilter)
-        {
-            case "Good key": if (!n.HasPublicKey || n.HasKeyMismatch) return false; break;
-            case "Mismatch": if (!n.HasKeyMismatch) return false; break;
-            case "No key":   if (n.HasPublicKey) return false; break;
-        }
-
-        // Location filter.
-        bool hasPos = n.HasLocation;
-        bool hasPosHistory = _nodeLocationHistoryCounts.TryGetValue(n.NodeNum, out int historyCount)
-            && historyCount > 1;
-        switch (NodeLocationFilter)
-        {
-            case "Has position": if (!hasPos) return false; break;
-            case "Has position history (>1)": if (!hasPosHistory) return false; break;
-            case "No position":  if (hasPos)  return false; break;
-        }
-
-        if (HideInvalidNodeLocations && n.HasInvalidLocation)
-            return false;
-
-        // Ignored filter.
-        switch (NodeIgnoredFilter)
-        {
-            case "Hide ignored": if (n.Ignored) return false; break;
-            case "Only ignored": if (!n.Ignored) return false; break;
-        }
-
-        switch (NodeMqttFilter)
-        {
-            case "Hide via MQTT": if (n.SeenViaMqtt) return false; break;
-            case "Only via MQTT": if (!n.SeenViaMqtt) return false; break;
-        }
-
-        // Telemetry presence filters.
-        switch (NodeTemperatureFilter)
-        {
-            case "Has value": if (n.TemperatureC is null) return false; break;
-            case "No value":  if (n.TemperatureC is not null) return false; break;
-        }
-        switch (NodeHumidityFilter)
-        {
-            case "Has value": if (n.RelativeHumidityPct is null) return false; break;
-            case "No value":  if (n.RelativeHumidityPct is not null) return false; break;
-        }
-        switch (NodePressureFilter)
-        {
-            case "Has value": if (n.BarometricPressureHpa is null) return false; break;
-            case "No value":  if (n.BarometricPressureHpa is not null) return false; break;
-        }
-
-        // Distance from home (entered in km or miles based on user preference).
-        if (!string.IsNullOrWhiteSpace(NodeDistanceKmText)
-            && double.TryParse(NodeDistanceKmText, NumberStyles.Float, CultureInfo.CurrentCulture, out double maxDistance)
-            && maxDistance > 0
-            && HomeLatitude is double hlat && HomeLongitude is double hlon)
-        {
-            double maxKm = DisplayUnits.ConvertDistanceInputToKm(maxDistance, CurrentUnitSystem);
-            if (n.Latitude is not double nlat || n.Longitude is not double nlon) return false;
-            if (HaversineKm(hlat, hlon, nlat, nlon) > maxKm) return false;
-        }
-
-        // Max age (minutes since last heard).
-        if (!string.IsNullOrWhiteSpace(NodeMaxAgeMinutesText)
-            && int.TryParse(NodeMaxAgeMinutesText, out int maxMin) && maxMin > 0)
-        {
-            if (n.LastHeardEpoch == 0) return false;
-            double ageMin = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - n.LastHeardEpoch) / 60.0;
-            if (ageMin > maxMin) return false;
-        }
-
-        return true;
     }
 
     private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
@@ -1285,6 +1185,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Interval = NodesViewRefreshInterval,
         };
         _nodesViewRefreshTimer.Tick += OnNodesViewRefreshTimerTick;
+        
+        _filterChangeDebounceTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(100), // Batch filter changes within 100ms
+        };
+        _filterChangeDebounceTimer.Tick += OnFilterChangeDebounceTimerTick;
 
         _settings = AppSettings.Load();
         var soon = DateTime.Now.AddHours(1);
@@ -6405,9 +6311,301 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    // ========== Filter Optimization: Parallel evaluation off UI thread ==========
+
+    /// <summary>Cached filter criteria struct to avoid re-parsing on every node evaluation.</summary>
+    private struct FilterCriteria
+    {
+        public string SearchText { get; set; }
+        public int MaxHops { get; set; }
+        public string KeyStatus { get; set; }
+        public string LocationStatus { get; set; }
+        public bool HideInvalidLocations { get; set; }
+        public string IgnoredStatus { get; set; }
+        public string MqttStatus { get; set; }
+        public string TemperatureStatus { get; set; }
+        public string HumidityStatus { get; set; }
+        public string PressureStatus { get; set; }
+        public double MaxDistanceKm { get; set; }
+        public double HomeLatitude { get; set; }
+        public double HomeLongitude { get; set; }
+        public int MaxAgeMinutes { get; set; }
+
+        public FilterCriteria()
+        {
+            SearchText = string.Empty;
+            MaxHops = -1;
+            KeyStatus = "Any";
+            LocationStatus = "Any";
+            HideInvalidLocations = false;
+            IgnoredStatus = "Show all";
+            MqttStatus = "Any";
+            TemperatureStatus = "Any";
+            HumidityStatus = "Any";
+            PressureStatus = "Any";
+            MaxDistanceKm = -1;
+            HomeLatitude = 0;
+            HomeLongitude = 0;
+            MaxAgeMinutes = -1;
+        }
+
+        /// <summary>Precompute all filter values to avoid repeated parsing on each node evaluation.</summary>
+        public static FilterCriteria Create(MainViewModel vm, Dictionary<uint, int> locationCounts)
+        {
+            var criteria = new FilterCriteria
+            {
+                SearchText = vm.NodeSearchText.Trim(),
+                KeyStatus = vm.NodeKeyFilter,
+                LocationStatus = vm.NodeLocationFilter,
+                HideInvalidLocations = vm.HideInvalidNodeLocations,
+                IgnoredStatus = vm.NodeIgnoredFilter,
+                MqttStatus = vm.NodeMqttFilter,
+                TemperatureStatus = vm.NodeTemperatureFilter,
+                HumidityStatus = vm.NodeHumidityFilter,
+                PressureStatus = vm.NodePressureFilter,
+            };
+
+            // Parse hops filter
+            criteria.MaxHops = vm.NodeHopsFilter switch
+            {
+                "Direct" => 0,
+                "≤1 hop" => 1,
+                "≤2 hops" => 2,
+                "≤3 hops" => 3,
+                "≤4 hops" => 4,
+                _ => -1,
+            };
+
+            // Parse distance filter
+            if (!string.IsNullOrWhiteSpace(vm.NodeDistanceKmText)
+                && double.TryParse(vm.NodeDistanceKmText, NumberStyles.Float,
+                                   CultureInfo.CurrentCulture, out double maxDist)
+                && maxDist > 0
+                && vm.HomeLatitude is double hlat && vm.HomeLongitude is double hlon)
+            {
+                criteria.MaxDistanceKm = DisplayUnits.ConvertDistanceInputToKm(maxDist, vm.CurrentUnitSystem);
+                criteria.HomeLatitude = hlat;
+                criteria.HomeLongitude = hlon;
+            }
+
+            // Parse max age filter
+            if (!string.IsNullOrWhiteSpace(vm.NodeMaxAgeMinutesText)
+                && int.TryParse(vm.NodeMaxAgeMinutesText, out int maxAge) && maxAge > 0)
+            {
+                criteria.MaxAgeMinutes = maxAge;
+            }
+
+            return criteria;
+        }
+
+        public static FilterCriteria CreateEmpty() => new();
+    }
+
+    /// <summary>Called on debounce timer tick to apply batched filter changes.</summary>
+    private void OnFilterChangeDebounceTimerTick(object? sender, EventArgs e)
+    {
+        _filterChangeDebounceTimer.Stop();
+        
+        // Compute new filter on background thread and then update UI on main thread
+        _ = ComputeFilterCriteriaAsync();
+    }
+
+    /// <summary>Asynchronously computes which nodes pass the current filter criteria.</summary>
+    private async Task ComputeFilterCriteriaAsync()
+    {
+        // Cancel any previous pending filter computation
+        _filterComputeCts?.Cancel();
+        _filterComputeCts = new CancellationTokenSource();
+        var cts = _filterComputeCts;
+
+        try
+        {
+            // Create filter criteria on UI thread
+            var newCriteria = FilterCriteria.Create(this, _nodeLocationHistoryCounts);
+            var nodesToTest = _nodesByNum.Values.ToList();
+
+            // Compute filtered set on thread pool using Parallel.ForEach for parallelism
+            var filteredSet = new HashSet<uint>();
+            var lockObj = new object();
+
+            await Task.Run(() =>
+            {
+                Parallel.ForEach(nodesToTest, new ParallelOptions
+                {
+                    CancellationToken = cts.Token,
+                    MaxDegreeOfParallelism = Environment.ProcessorCount,
+                }, node =>
+                {
+                    if (cts.Token.IsCancellationRequested)
+                        return;
+
+                    if (NodePassesFilterWithCriteria(node, newCriteria))
+                    {
+                        lock (lockObj)
+                        {
+                            filteredSet.Add(node.NodeNum);
+                        }
+                    }
+                });
+            }, cts.Token).ConfigureAwait(true);
+
+            if (cts.Token.IsCancellationRequested)
+                return;
+
+            // Update cache on UI thread
+            lock (_filterCriteriaSyncLock)
+            {
+                _currentFilterCriteria = newCriteria;
+                _nodeFilterCache.Clear();
+                foreach (var nodeNum in filteredSet)
+                    _nodeFilterCache.Add(nodeNum);
+            }
+
+            // Refresh UI elements
+            var uiDispatcher = Application.Current?.Dispatcher;
+            if (uiDispatcher != null)
+            {
+                uiDispatcher.Invoke(() =>
+                {
+                    if (cts.Token.IsCancellationRequested)
+                        return;
+
+                    NodesView?.Refresh();
+                    RebuildNodeMapStateSignaturesOptimized();
+                    MapDataChanged?.Invoke(this, EventArgs.Empty);
+                }, DispatcherPriority.Background);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Filter computation was canceled, which is fine
+        }
+    }
+
+    /// <summary>Debounced version of RefreshNodesFilter that batches multiple filter changes.</summary>
+    private void RefreshNodesFilter()
+    {
+        if (!_filterChangeDebounceTimer.IsEnabled)
+            _filterChangeDebounceTimer.Start();
+    }
+
+    /// <summary>Optimized filter evaluation using cached criteria to avoid repeated parsing.</summary>
+    private bool NodePassesFilterWithCriteria(NodeRecord n, FilterCriteria criteria)
+    {
+        // Text search across long name, short name, user ID.
+        if (!string.IsNullOrWhiteSpace(criteria.SearchText))
+        {
+            if (!n.LongName.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase)
+             && !n.ShortName.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase)
+             && !n.DisplayId.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase)
+             && !n.UserId.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        // Hops filter.
+        if (criteria.MaxHops >= 0)
+        {
+            if (n.HopsAway is not byte h || h > criteria.MaxHops)
+                return false;
+        }
+
+        // Key status filter.
+        switch (criteria.KeyStatus)
+        {
+            case "Good key": if (!n.HasPublicKey || n.HasKeyMismatch) return false; break;
+            case "Mismatch": if (!n.HasKeyMismatch) return false; break;
+            case "No key": if (n.HasPublicKey) return false; break;
+        }
+
+        // Location filter.
+        bool hasPos = n.HasLocation;
+        bool hasPosHistory = _nodeLocationHistoryCounts.TryGetValue(n.NodeNum, out int historyCount)
+            && historyCount > 1;
+        switch (criteria.LocationStatus)
+        {
+            case "Has position": if (!hasPos) return false; break;
+            case "Has position history (>1)": if (!hasPosHistory) return false; break;
+            case "No position": if (hasPos) return false; break;
+        }
+
+        if (criteria.HideInvalidLocations && n.HasInvalidLocation)
+            return false;
+
+        // Ignored filter.
+        switch (criteria.IgnoredStatus)
+        {
+            case "Hide ignored": if (n.Ignored) return false; break;
+            case "Only ignored": if (!n.Ignored) return false; break;
+        }
+
+        // MQTT filter.
+        switch (criteria.MqttStatus)
+        {
+            case "Hide via MQTT": if (n.SeenViaMqtt) return false; break;
+            case "Only via MQTT": if (!n.SeenViaMqtt) return false; break;
+        }
+
+        // Telemetry presence filters.
+        switch (criteria.TemperatureStatus)
+        {
+            case "Has value": if (n.TemperatureC is null) return false; break;
+            case "No value": if (n.TemperatureC is not null) return false; break;
+        }
+        switch (criteria.HumidityStatus)
+        {
+            case "Has value": if (n.RelativeHumidityPct is null) return false; break;
+            case "No value": if (n.RelativeHumidityPct is not null) return false; break;
+        }
+        switch (criteria.PressureStatus)
+        {
+            case "Has value": if (n.BarometricPressureHpa is null) return false; break;
+            case "No value": if (n.BarometricPressureHpa is not null) return false; break;
+        }
+
+        // Distance from home
+        if (criteria.MaxDistanceKm > 0)
+        {
+            if (n.Latitude is not double nlat || n.Longitude is not double nlon)
+                return false;
+            if (HaversineKm(criteria.HomeLatitude, criteria.HomeLongitude, nlat, nlon) > criteria.MaxDistanceKm)
+                return false;
+        }
+
+        // Max age (minutes since last heard)
+        if (criteria.MaxAgeMinutes > 0)
+        {
+            if (n.LastHeardEpoch == 0) return false;
+            double ageMin = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - n.LastHeardEpoch) / 60.0;
+            if (ageMin > criteria.MaxAgeMinutes) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Optimized RebuildNodeMapStateSignatures that only updates changed nodes.</summary>
+    private void RebuildNodeMapStateSignaturesOptimized()
+    {
+        lock (_filterCriteriaSyncLock)
+        {
+            foreach (var n in _nodesByNum.Values)
+                UpdateNodeMapStateSignature(n.NodeNum, n);
+        }
+    }
+
+    /// <summary>Override of NodePassesFilter that uses the cached filter cache when available.</summary>
+    private bool NodePassesFilter(NodeRecord n)
+    {
+        lock (_filterCriteriaSyncLock)
+        {
+            return _nodeFilterCache.Contains(n.NodeNum);
+        }
+    }
+
     public void Dispose()
     {
         StopPayloadRecording();
+        _filterComputeCts?.Cancel();
+        _filterChangeDebounceTimer?.Stop();
         _gpsService.Stop();
         _gpsService.StatusChanged -= HandleGpsStatusChanged;
         _gpsService.FixReceived -= HandleGpsFixReceived;
