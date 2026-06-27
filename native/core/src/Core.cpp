@@ -27,12 +27,82 @@ namespace mrf {
 namespace {
 constexpr std::size_t kSpectrumFftSize = 1024;
 constexpr std::size_t kMaxQueuedEvents = 256;
-// Device sample rate used for live RX and raw IQ capture. 2.4 MS/s matches
-// SDRangel's HackRF setup (2.4 MHz, decimation 2 -> 1.2 MHz channel) so a raw
-// capture is directly comparable to an SDRangel .sdriq recording. The minimum
-// legal HackRF rate is 2 MS/s; 2.4 MS/s keeps a clean guard band around the
-// 250 kHz LoRa channel.
-constexpr std::uint32_t kDeviceRateHz = 2'400'000u;
+constexpr std::uint32_t kDefaultDeviceRateHz = 2'400'000u;
+constexpr std::uint32_t kWaterfallTargetFps = 60u;
+constexpr std::uint32_t kWaterfallMaxFramesToPull = 64u;
+constexpr std::uint32_t kHackRfStableMaxRateHz = 16'000'000u;
+constexpr std::uint32_t kRtlSdrDecodeSafeMaxRateHz = 2'560'000u;
+constexpr std::uint32_t kHackRfRatesHz[] = {
+    2'000'000u,
+    2'400'000u,
+    4'000'000u,
+    8'000'000u,
+    10'000'000u,
+    12'500'000u,
+    16'000'000u,
+    20'000'000u,
+};
+constexpr std::uint32_t kRtlSdrRatesHz[] = {
+    960'000u,
+    1'024'000u,
+    1'200'000u,
+    1'440'000u,
+    1'600'000u,
+    1'800'000u,
+    1'920'000u,
+    2'048'000u,
+    2'400'000u,
+    2'560'000u,
+    2'880'000u,
+    3'200'000u,
+};
+
+constexpr std::uint32_t kWaterfallHistoryMaxFrameRate =
+    kWaterfallMaxFramesToPull * kWaterfallTargetFps;
+
+std::size_t compute_history_frame_stride(std::uint32_t sample_rate_hz) {
+    const std::uint32_t raw_frame_rate =
+        std::max<std::uint32_t>(1u, sample_rate_hz / static_cast<std::uint32_t>(kSpectrumFftSize));
+    return std::max<std::size_t>(
+        1u,
+        (raw_frame_rate + kWaterfallHistoryMaxFrameRate - 1u) / kWaterfallHistoryMaxFrameRate);
+}
+
+std::uint32_t nearest_supported_rate(std::span<const std::uint32_t> rates,
+                                     std::uint32_t requested,
+                                     std::uint32_t minimum) {
+    std::uint32_t best = 0;
+    std::uint64_t best_delta = 0;
+    for (std::uint32_t rate : rates) {
+        if (rate < minimum) continue;
+        const std::uint64_t delta = rate >= requested
+            ? static_cast<std::uint64_t>(rate - requested)
+            : static_cast<std::uint64_t>(requested - rate);
+        if (best == 0 || delta < best_delta) {
+            best = rate;
+            best_delta = delta;
+        }
+    }
+    return best != 0 ? best : std::max(minimum, rates.empty() ? requested : rates.back());
+}
+
+std::uint32_t normalize_rx_sample_rate(hal::DeviceKind kind,
+                                       std::uint32_t requested,
+                                       std::uint32_t minimum) {
+    if (requested == 0) requested = kDefaultDeviceRateHz;
+    switch (kind) {
+    case hal::DeviceKind::HackRf:
+        return nearest_supported_rate(kHackRfRatesHz,
+                                      std::min(requested, kHackRfStableMaxRateHz),
+                                      minimum);
+    case hal::DeviceKind::RtlSdr:
+        return nearest_supported_rate(kRtlSdrRatesHz,
+                                      std::min(requested, kRtlSdrDecodeSafeMaxRateHz),
+                                      minimum);
+    default:
+        return std::max(requested, minimum);
+    }
+}
 }
 
 struct Core::Impl {
@@ -46,6 +116,7 @@ struct Core::Impl {
     std::uint8_t vga_db{20};
     bool         amp_enable{false};
     bool         bias_tee{false};
+    std::uint32_t requested_rx_sample_rate_hz{kDefaultDeviceRateHz};
     std::unique_ptr<modem::ILoraModem> modem;
     std::unique_ptr<dsp::Resampler> resampler;
     dsp::DcBlocker dc_blocker;
@@ -131,14 +202,16 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
     rx.vga_gain_db = impl_->vga_db;
     rx.amp_enable  = impl_->amp_enable;
     const std::uint32_t target = impl_->modem->working_sample_rate_hz();
-    // Run the radio at SDRangel's rate (2.4 MS/s) so a raw capture is directly
-    // comparable to an SDRangel .sdriq. Never go below the modem rate.
-    rx.sample_rate_hz = std::max(kDeviceRateHz, target);
+    // Keep the radio at a supported device rate chosen by the user, but never
+    // below the modem's working rate.
+    rx.sample_rate_hz = normalize_rx_sample_rate(
+        impl_->rx_radio->kind(), impl_->requested_rx_sample_rate_hz, target);
 
     impl_->resampler = std::make_unique<dsp::Resampler>(rx.sample_rate_hz, target);
     impl_->dc_blocker.reset();
     impl_->stats.reset();
     impl_->spectrum = std::make_unique<dsp::Spectrum>(kSpectrumFftSize);
+    impl_->spectrum->set_history_frame_stride(compute_history_frame_stride(rx.sample_rate_hz));
     impl_->last_drops_reported = 0;
     // Allocate enough modem-rate IQ history for full-frame packet snapshots.
     // Long SF12 frames can run ~10 seconds for max-length packets, and the UI
@@ -159,8 +232,8 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
     impl_->device_rate = rx.sample_rate_hz;
     // Optional raw IQ capture for offline replay/debugging. The path can come
     // from the MRF_IQ_CAPTURE env var (auto-start) or be toggled at runtime
-    // via start_capture(). Capture is the raw post-mix stream at the DEVICE
-    // rate (kDeviceRateHz, 2.4 MS/s) so it matches an SDRangel recording.
+    // via start_capture(). Capture is the raw post-mix stream at the selected
+    // device rate so it matches the live RX stream.
     if (const char* path = std::getenv("MRF_IQ_CAPTURE"); path && *path) {
         start_capture(path);
     }
@@ -281,7 +354,7 @@ bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_h
     if (iq.empty()) return false;
 
     const std::uint32_t modem_rate = modem->working_sample_rate_hz();
-    const std::uint32_t dev_rate = std::max(kDeviceRateHz, modem_rate);
+    const std::uint32_t dev_rate = std::max(kDefaultDeviceRateHz, modem_rate);
 
     // Pad the modem-rate frame with leading + trailing zeros.
     //   * Lead-in (~20 ms): hackrf_start_tx primes the USB pipe and the PA/VGA
@@ -424,7 +497,7 @@ bool Core::start_capture(const char* path) {
     }
     // Cap the capture to ~60 s at the device (raw) rate so a forgotten
     // capture can't fill the disk. device_rate is set when RX starts.
-    const std::uint32_t rate = impl_->device_rate ? impl_->device_rate : kDeviceRateHz;
+    const std::uint32_t rate = impl_->device_rate ? impl_->device_rate : kDefaultDeviceRateHz;
     impl_->capture_remaining = static_cast<std::size_t>(rate) * 60u;
     return true;
 }
@@ -459,6 +532,12 @@ void Core::set_gains(std::uint8_t lna_db, std::uint8_t vga_db, bool amp) {
 void Core::set_device_option(std::string_view key, int value) {
     // Cache so the option survives a stop/start cycle, then push live.
     if (key == "bias_tee")   impl_->bias_tee          = (value != 0);
+    if (key == "rx_sample_rate_hz") {
+        impl_->requested_rx_sample_rate_hz = value > 0
+            ? static_cast<std::uint32_t>(value)
+            : kDefaultDeviceRateHz;
+        return;
+    }
     if (key == "dc_block")  { impl_->dc_block_enabled  = (value != 0);
                               impl_->dc_blocker.reset(); return; }
     if (impl_->rx_radio) impl_->rx_radio->set_rx_option(key, value);

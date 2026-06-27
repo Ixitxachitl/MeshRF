@@ -34,6 +34,15 @@ public sealed class AppSettings
     /// Matches <see cref="MeshRF.RadioDeviceKind"/>.</summary>
     public string RxDeviceKind { get; set; } = "Null";
 
+    /// <summary>Legacy shared RX sample rate used by older builds; kept for migration.</summary>
+    public uint RxSampleRateHz { get; set; } = 2_400_000;
+
+    /// <summary>Requested HackRF RX device sample rate in Hz.</summary>
+    public uint HackRfRxSampleRateHz { get; set; } = 2_400_000;
+
+    /// <summary>Requested RTL-SDR RX device sample rate in Hz.</summary>
+    public uint RtlSdrRxSampleRateHz { get; set; } = 2_400_000;
+
     /// <summary>Selected TX radio backend. HackRF can transmit; RTL-SDR cannot.</summary>
     public string TxDeviceKind { get; set; } = "HackRf";
 
@@ -50,6 +59,8 @@ public sealed class AppSettings
 
     /// <summary>RTL-SDR manual tuner gain in dB (0..49).</summary>
     public byte RtlGainDb { get; set; } = 30;
+    /// <summary>RTL-SDR tuner automatic gain control.</summary>
+    public bool RtlAgcEnable { get; set; } = false;
     /// <summary>RTL-SDR 5 V bias-T on the antenna port. Off by default.</summary>
     public bool BiasTee { get; set; } = false;
     /// <summary>When true (default), the single-pole IIR DC blocker runs before

@@ -25,6 +25,10 @@ public:
 
     [[nodiscard]] std::size_t fft_size() const noexcept { return n_; }
 
+    // Sets how many raw FFT frames are collapsed into one stored history frame
+    // for pull_frames()/frame_count(). latest() still updates every FFT.
+    void set_history_frame_stride(std::size_t stride);
+
     // Push samples. Computes a frame whenever `fft_size` new samples have
     // accumulated since the last frame.
     void push(std::span<const sample_t> samples);
@@ -59,8 +63,11 @@ private:
 
     mutable std::mutex mu_;
     std::vector<float> latest_db_;    // length n_, FFT-shifted
-    std::uint64_t frames_{0};
+    std::uint64_t latest_frames_{0};
+    std::uint64_t history_frames_{0};
     std::vector<sample_t> scratch_;   // FFT working buffer
+    std::size_t history_frame_stride_{1};
+    std::size_t history_frame_accum_{0};
 
     // Ring buffer of individual (non-max-held) frames. Holds the last 256
     // frames. Each frame is n_ floats (FFT-shifted dBFS). Used by pull_frames().

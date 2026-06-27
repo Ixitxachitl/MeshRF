@@ -44,6 +44,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Serializes all transmit calls so concurrent sends (user + auto-reply)
     // don't race on the shared native Core handle.
     private readonly SemaphoreSlim _txSemaphore = new(1, 1);
+    private int _sharedHackRfTxStatusDepth;
 
     // Set when a received packet updates node state; consumed by the 20 Hz
     // timer tick so ReloadNodes() runs at most once per tick rather than once
@@ -143,6 +144,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// HackRF LNA/VGA controls so each device remembers its own setting.</summary>
     [ObservableProperty]
     private byte _rtlGainDb = 30;
+
+    /// <summary>RTL-SDR tuner automatic gain control.</summary>
+    [ObservableProperty]
+    private bool _rtlAgcEnable;
 
     /// <summary>RTL-SDR 5 V bias-T on the antenna port. Off by default.</summary>
     [ObservableProperty]
@@ -254,6 +259,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>An entry in the device-backend selector.</summary>
     public sealed record DeviceOption(RadioDeviceKind Kind, string Label);
 
+    /// <summary>An entry in the RX sample-rate selector.</summary>
+    public sealed record SampleRateOption(uint Hz, string Label);
+
     /// <summary>An entry in the home-location source selector.</summary>
     public sealed record LocationSourceOption(string Value, string Label);
 
@@ -265,13 +273,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<DeviceOption> TxDeviceOptions { get; private set; } =
         Array.Empty<DeviceOption>();
 
+    public IReadOnlyList<SampleRateOption> SampleRateOptions { get; private set; } =
+        Array.Empty<SampleRateOption>();
+
     [ObservableProperty]
     private DeviceOption? _selectedDevice;
 
     [ObservableProperty]
     private DeviceOption? _selectedTxDevice;
 
+    [ObservableProperty]
+    private SampleRateOption? _selectedRxSampleRate;
+
     private bool _suppressDeviceUpdate;
+    private bool _suppressSampleRateUpdate;
 
     /// <summary>True when the selected RX backend is an RTL-SDR (drives which
     /// receiver controls the toolbar shows).</summary>
@@ -286,6 +301,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>The device selectors are only editable while RX is stopped.</summary>
     public bool CanSelectDevice => !IsRunning;
+
+    public bool CanSelectRxSampleRate =>
+        !IsRunning && SelectedDevice?.Kind != RadioDeviceKind.Null && SampleRateOptions.Count > 0;
 
     [ObservableProperty]
     private float _rssiDbfs = float.NegativeInfinity;
@@ -316,6 +334,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _isRecordingPayloads;
+
+    private const uint HackRfStableMaxRateHz = 16_000_000;
+    private const uint HackRfMaxSelectableRateHz = 20_000_000;
+    private const uint RtlSdrDecodeSafeMaxRateHz = 2_560_000;
+
+    private static readonly uint[] HackRfSampleRatesHz =
+    [
+        2_000_000,
+        2_400_000,
+        4_000_000,
+        8_000_000,
+        10_000_000,
+        12_500_000,
+        16_000_000,
+        20_000_000,
+    ];
+
+    private static readonly uint[] RtlSdrSampleRatesHz =
+    [
+        960_000,
+        1_024_000,
+        1_200_000,
+        1_440_000,
+        1_600_000,
+        1_800_000,
+        1_920_000,
+        2_048_000,
+        2_400_000,
+        2_560_000,
+        2_880_000,
+        3_200_000,
+    ];
 
     public IReadOnlyList<LoraPreset> Presets { get; } = Enum.GetValues<LoraPreset>();
     public IReadOnlyList<Region> Regions { get; } = Enum.GetValues<Region>();
@@ -1229,6 +1279,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AgcEnable = _settings.AgcEnable;
         AgcTargetDbfs = _settings.AgcTargetDbfs;
         RtlGainDb = _settings.RtlGainDb;
+        RtlAgcEnable = _settings.RtlAgcEnable;
         BiasTee = _settings.BiasTee;
         DcBlockEnable = _settings.DcBlockEnable;
         Theme = _settings.Theme;
@@ -1367,6 +1418,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                              ?? TxDeviceOptions.FirstOrDefault(o => o.Kind == RadioDeviceKind.HackRf)
                              ?? TxDeviceOptions[0];
         _suppressDeviceUpdate = false;
+        RefreshSampleRateSelection(rxDeviceKind, GetSavedRxSampleRateHz(rxDeviceKind));
 
         // Now that the backend is known, push the gains appropriate for it and
         // apply the RTL-SDR bias-T option.
@@ -1901,6 +1953,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task<bool> TransmitAsync(LoraPreset preset, ulong hz, byte[] frame,
                                            byte gain, bool amp)
     {
+        bool showPausedStatus = IsSharedHackRfRxTxActive();
+        if (showPausedStatus)
+            await SetSharedHackRfTxStatusAsync(active: true).ConfigureAwait(false);
+
         await _txSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -1914,6 +1970,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             _txSemaphore.Release();
+            if (showPausedStatus)
+                await SetSharedHackRfTxStatusAsync(active: false).ConfigureAwait(false);
         }
     }
 
@@ -1937,6 +1995,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             catch { /* best-effort */ }
             finally { _txSemaphore.Release(); }
+        });
+    }
+
+    private bool IsSharedHackRfRxTxActive() =>
+        IsRunning &&
+        SelectedDevice?.Kind == RadioDeviceKind.HackRf &&
+        SelectedTxDevice?.Kind == RadioDeviceKind.HackRf;
+
+    private async Task SetSharedHackRfTxStatusAsync(bool active)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null) return;
+
+        if (active)
+        {
+            if (System.Threading.Interlocked.Increment(ref _sharedHackRfTxStatusDepth) != 1)
+                return;
+
+            await dispatcher.InvokeAsync(() =>
+            {
+                Status = "TX (RX paused)";
+            });
+            return;
+        }
+
+        if (System.Threading.Interlocked.Decrement(ref _sharedHackRfTxStatusDepth) != 0)
+            return;
+
+        await dispatcher.InvokeAsync(() =>
+        {
+            if (Status == "TX (RX paused)")
+                Status = IsRunning ? BuildRxStatus() : "Stopped";
         });
     }
 
@@ -2735,11 +2825,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnLnaGainDbChanged(byte value) { _core.SetGains(value, VgaGainDb, AmpEnable); SaveSettings(); }
     partial void OnVgaGainDbChanged(byte value) { _core.SetGains(LnaGainDb, value, AmpEnable); SaveSettings(); }
     partial void OnAmpEnableChanged(bool value) { PushGains(); SaveSettings(); }
-    partial void OnIsRunningChanged(bool value) => OnPropertyChanged(nameof(CanSelectDevice));
+    partial void OnIsRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanSelectDevice));
+        OnPropertyChanged(nameof(CanSelectRxSampleRate));
+    }
     partial void OnSelectedDeviceChanged(DeviceOption? value)
     {
         OnPropertyChanged(nameof(IsRtlSdr));
         OnPropertyChanged(nameof(IsHackRf));
+        OnPropertyChanged(nameof(CanSelectRxSampleRate));
+        if (value is not null)
+            RefreshSampleRateSelection(value.Kind, GetSavedRxSampleRateHz(value.Kind));
         if (_suppressDeviceUpdate || value is null) return;
         ApplyRxDevice(value.Kind);
     }
@@ -2749,9 +2846,43 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_suppressDeviceUpdate || value is null) return;
         ApplyTxDevice(value.Kind);
     }
+    private uint GetSavedRxSampleRateHz(RadioDeviceKind kind) => kind switch
+    {
+        RadioDeviceKind.HackRf => _settings.HackRfRxSampleRateHz != 2_400_000u || _settings.RxSampleRateHz == 2_400_000u
+            ? _settings.HackRfRxSampleRateHz
+            : _settings.RxSampleRateHz,
+        RadioDeviceKind.RtlSdr => _settings.RtlSdrRxSampleRateHz != 2_400_000u || _settings.RxSampleRateHz == 2_400_000u
+            ? _settings.RtlSdrRxSampleRateHz
+            : _settings.RxSampleRateHz,
+        _ => _settings.RxSampleRateHz,
+    };
+
+    private void StoreSavedRxSampleRateHz(RadioDeviceKind kind, uint hz)
+    {
+        switch (kind)
+        {
+            case RadioDeviceKind.HackRf:
+                _settings.HackRfRxSampleRateHz = hz;
+                break;
+            case RadioDeviceKind.RtlSdr:
+                _settings.RtlSdrRxSampleRateHz = hz;
+                break;
+        }
+    }
+
+    private RadioDeviceKind CurrentRxDeviceKind => SelectedDevice?.Kind ?? RadioDeviceKind.Null;
+
+    partial void OnSelectedRxSampleRateChanged(SampleRateOption? value)
+    {
+        if (_suppressSampleRateUpdate || value is null) return;
+        _core.SetDeviceOption("rx_sample_rate_hz", checked((int)value.Hz));
+        StoreSavedRxSampleRateHz(CurrentRxDeviceKind, value.Hz);
+        SaveSettings();
+    }
     partial void OnAgcEnableChanged(bool value) { SaveSettings(); }
     partial void OnAgcTargetDbfsChanged(double value) { SaveSettings(); }
     partial void OnRtlGainDbChanged(byte value) { PushGains(); SaveSettings(); }
+    partial void OnRtlAgcEnableChanged(bool value) { PushGains(); SaveSettings(); }
     partial void OnTxGainDbChanged(byte value) { SaveSettings(); }
     partial void OnTxAmpEnableChanged(bool value) { SaveSettings(); }
     partial void OnBiasTeeChanged(bool value) { _core.SetDeviceOption("bias_tee", value ? 1 : 0); SaveSettings(); }
@@ -2763,7 +2894,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void PushGains()
     {
         if (IsRtlSdr)
-            _core.SetGains(RtlGainDb, 0, AmpEnable);
+            _core.SetGains(RtlGainDb, 0, RtlAgcEnable);
         else
             _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
     }
@@ -2816,12 +2947,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.AmpEnable = AmpEnable;
         _settings.DeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
         _settings.RxDeviceKind = SelectedDevice?.Kind.ToString() ?? "Auto";
+        var selectedRxKind = CurrentRxDeviceKind;
+        var selectedRxSampleRateHz = SelectedRxSampleRate?.Hz ?? GetSavedRxSampleRateHz(selectedRxKind);
+        _settings.RxSampleRateHz = selectedRxSampleRateHz;
+        StoreSavedRxSampleRateHz(selectedRxKind, selectedRxSampleRateHz);
         _settings.TxDeviceKind = SelectedTxDevice?.Kind.ToString() ?? "HackRf";
         _settings.TxGainDb = TxGainDb;
         _settings.TxAmpEnable = TxAmpEnable;
         _settings.AgcEnable = AgcEnable;
         _settings.AgcTargetDbfs = AgcTargetDbfs;
         _settings.RtlGainDb = RtlGainDb;
+        _settings.RtlAgcEnable = RtlAgcEnable;
         _settings.BiasTee = BiasTee;
         _settings.DcBlockEnable = DcBlockEnable;
         _settings.Theme = Theme;
@@ -3342,18 +3478,101 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
     }
 
+    private IReadOnlyList<SampleRateOption> BuildRxSampleRateOptions(RadioDeviceKind kind)
+    {
+        uint[] baseRates = kind switch
+        {
+            RadioDeviceKind.HackRf => HackRfSampleRatesHz,
+            RadioDeviceKind.RtlSdr => RtlSdrSampleRatesHz,
+            _ => Array.Empty<uint>(),
+        };
+
+        uint maxRateHz = kind switch
+        {
+            RadioDeviceKind.HackRf => HackRfMaxSelectableRateHz,
+            RadioDeviceKind.RtlSdr => RtlSdrDecodeSafeMaxRateHz,
+            _ => 0u,
+        };
+
+        IEnumerable<uint> rates = maxRateHz > 0
+            ? baseRates.Where(rate => rate <= maxRateHz)
+            : baseRates;
+
+        return rates.Select(rate => new SampleRateOption(rate, FormatSampleRateLabel(kind, rate))).ToArray();
+    }
+
+    private void RefreshSampleRateSelection(RadioDeviceKind kind, uint requestedHz)
+    {
+        SampleRateOptions = BuildRxSampleRateOptions(kind);
+        OnPropertyChanged(nameof(SampleRateOptions));
+
+        _suppressSampleRateUpdate = true;
+        try
+        {
+            SelectedRxSampleRate = SelectNearestSampleRate(SampleRateOptions, requestedHz);
+        }
+        finally
+        {
+            _suppressSampleRateUpdate = false;
+        }
+
+        if (SelectedRxSampleRate is not null)
+        {
+            _core.SetDeviceOption("rx_sample_rate_hz", checked((int)SelectedRxSampleRate.Hz));
+            SpectrumSpanHz = SelectedRxSampleRate.Hz;
+        }
+        else if (!IsRunning)
+        {
+            SpectrumSpanHz = 0.0;
+        }
+        OnPropertyChanged(nameof(CanSelectRxSampleRate));
+    }
+
+    private static SampleRateOption? SelectNearestSampleRate(IReadOnlyList<SampleRateOption> options, uint requestedHz)
+    {
+        if (options.Count == 0) return null;
+        if (requestedHz == 0)
+            return options.FirstOrDefault(o => o.Hz == 2_400_000u) ?? options[0];
+
+        SampleRateOption best = options[0];
+        ulong bestDelta = AbsDiff(best.Hz, requestedHz);
+        for (int i = 1; i < options.Count; i++)
+        {
+            ulong delta = AbsDiff(options[i].Hz, requestedHz);
+            if (delta < bestDelta)
+            {
+                best = options[i];
+                bestDelta = delta;
+            }
+        }
+        return best;
+    }
+
+    private static ulong AbsDiff(uint left, uint right) =>
+        left >= right ? (ulong)(left - right) : (ulong)(right - left);
+
+    private static string FormatSampleRateLabel(RadioDeviceKind kind, uint hz)
+    {
+        string label = $"{(hz / 1_000_000.0).ToString("0.###", CultureInfo.InvariantCulture)} MS/s";
+        if (kind == RadioDeviceKind.HackRf && hz > HackRfStableMaxRateHz)
+            label += " (experimental)";
+        return label;
+    }
+
     /// <summary>Switch the RX radio backend (only valid while stopped) and
     /// refresh the device badge / status.</summary>
     private void ApplyRxDevice(RadioDeviceKind kind)
     {
         if (IsRunning) return;
         _core.SetRxDevice(kind);
+        RefreshSampleRateSelection(kind, GetSavedRxSampleRateHz(kind));
         OnPropertyChanged(nameof(DeviceName));
         OnPropertyChanged(nameof(TxDeviceName));
         OnPropertyChanged(nameof(DeviceStatus));
         OnPropertyChanged(nameof(HasRealRadio));
         OnPropertyChanged(nameof(DeviceBadge));
         OnPropertyChanged(nameof(CanTransmit));
+        OnPropertyChanged(nameof(CanSelectRxSampleRate));
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
@@ -3425,9 +3644,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _core.Stop();
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             StartRxWithCurrentParams(hz);
-            Status = IsCustomLoraParams
-                ? $"RX @ {CenterFreqMHz:F3} MHz / SF{OverrideSf} BW{OverrideBwKhz:G}kHz CR4/{OverrideCr}"
-                : $"RX @ {CenterFreqMHz:F3} MHz / {SelectedPreset}";
+            Status = BuildRxStatus();
             Log($"retuned \u2192 {Status}");
         }
         catch (Exception ex)
@@ -3502,9 +3719,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             StartRxWithCurrentParams(hz);
             IsRunning = true;
             _lastRxPlayUtc = DateTime.UtcNow;
-            Status = IsCustomLoraParams
-                ? $"RX @ {CenterFreqMHz:F3} MHz / SF{OverrideSf} BW{OverrideBwKhz:G}kHz CR4/{OverrideCr}"
-                : $"RX @ {CenterFreqMHz:F3} MHz / {SelectedPreset}";
+            Status = BuildRxStatus();
             Log(Status);
         }
         catch (Exception ex)
@@ -3513,6 +3728,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Status = $"Error: {ex.Message}";
             Log(Status);
         }
+    }
+
+    private string BuildRxStatus()
+    {
+        string modem = IsCustomLoraParams
+            ? $"SF{OverrideSf} BW{OverrideBwKhz:G}kHz CR4/{OverrideCr}"
+            : SelectedPreset.ToString();
+        string rate = SelectedRxSampleRate is null
+            ? string.Empty
+            : $" / {FormatSampleRateLabel(SelectedDevice?.Kind ?? RadioDeviceKind.Null, SelectedRxSampleRate.Hz)}";
+        return $"RX @ {CenterFreqMHz:F3} MHz / {modem}{rate}";
     }
 
     [RelayCommand]

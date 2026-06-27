@@ -267,6 +267,12 @@ public partial class MapView : UserControl
         // (home/node markers wouldn't refresh until a manual pan/zoom).
         if (_vm is null) _vm = DataContext as MainViewModel;
         Subscribe();
+        if (_hasRestoredViewport)
+        {
+            Render();
+            return;
+        }
+
         if (FitToMarkers())
             _userMovedView = true;
         Render();
@@ -2140,6 +2146,8 @@ public partial class MapView : UserControl
             _userMovedView = true;
             _hasRestoredViewport = true;
             InvalidateCoordinateCache();
+            if (IsLoaded)
+                Render();
         }
     }
 

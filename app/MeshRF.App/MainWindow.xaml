@@ -40,6 +40,13 @@
                       SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                       IsEnabled="{Binding CanSelectDevice}"
                       ToolTip="Receive SDR backend (selectable when stopped)" />
+            <TextBlock Text="Rate" VerticalAlignment="Center" Margin="8,0,4,0" />
+            <ComboBox Width="110"
+                      ItemsSource="{Binding SampleRateOptions}"
+                      DisplayMemberPath="Label"
+                      SelectedItem="{Binding SelectedRxSampleRate, Mode=TwoWay}"
+                      IsEnabled="{Binding CanSelectRxSampleRate}"
+                      ToolTip="RX sample rate in MS/s; choices are limited to the selected receiver's supported rates" />
             <TextBlock Text="TX" VerticalAlignment="Center" Margin="8,0,4,0" />
             <ComboBox Width="150"
                       ItemsSource="{Binding TxDeviceOptions}"
@@ -249,13 +256,13 @@
                     SmallChange="1" LargeChange="5"
                     Value="{Binding RtlGainDb, Mode=TwoWay}"
                     VerticalAlignment="Center"
-                    IsEnabled="{Binding AmpEnable, Converter={StaticResource InverseBool}}" />
+                    IsEnabled="{Binding RtlAgcEnable, Converter={StaticResource InverseBool}}" />
                  <TextBlock Width="40" VerticalAlignment="Center"
                       Text="{Binding RtlGainDb, StringFormat={}{0} dB}" />
 
                  <Separator />
                  <CheckBox Content="AGC"
-                     IsChecked="{Binding AmpEnable, Mode=TwoWay}"
+                     IsChecked="{Binding RtlAgcEnable, Mode=TwoWay}"
                      VerticalAlignment="Center"
                      ToolTip="Tuner automatic gain control (overrides the manual gain slider)" />
                  <Separator />

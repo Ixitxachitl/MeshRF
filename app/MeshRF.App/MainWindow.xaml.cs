@@ -512,10 +512,15 @@ public partial class MainWindow : Window
         long spectrumTicks = 0;
         long waterfallTicks = 0;
 
-        // Don't pull spectrum when stopped — the native side caches the
-        // last frame and would keep scrolling the waterfall.
-        if (!vm.IsRunning)
+        // Don't pull spectrum when the native RX pipeline is stopped. During a
+        // shared-radio HackRF transmit, the view-model still considers RX
+        // logically running, but the core pauses RX underneath us. Freeze the
+        // current display and drop any partial row accumulation so RX resumes
+        // cleanly after the transmit restart.
+        if (!vm.IsRunning || !vm.Core.IsRunning)
         {
+            _wfRowAccumValid = false;
+            _wfAccumFrames = 0;
             long idleEnd = Stopwatch.GetTimestamp();
             _perfUiTickCount++;
             _perfUiTickMs += TicksToMilliseconds(idleEnd - now);
@@ -583,6 +588,8 @@ public partial class MainWindow : Window
         if (_wfLastFrameCount == 0 || frameCount < _wfLastFrameCount)
         {
             _wfLastFrameCount = frameCount;
+            _wfRowAccumValid = false;
+            _wfAccumFrames = 0;
             return;
         }
 

@@ -27,6 +27,12 @@ Spectrum::Spectrum(std::size_t fft_size)
         frame.assign(n_, -200.0f);
 }
 
+void Spectrum::set_history_frame_stride(std::size_t stride) {
+    std::lock_guard<std::mutex> lk(mu_);
+    history_frame_stride_ = std::max<std::size_t>(1u, stride);
+    history_frame_accum_ = 0;
+}
+
 void Spectrum::push(std::span<const sample_t> samples) {
     for (auto s : samples) {
         ring_[ring_pos_] = s;
@@ -40,6 +46,10 @@ void Spectrum::push(std::span<const sample_t> samples) {
 }
 
 void Spectrum::compute_frame_locked() {
+    const bool store_history = (++history_frame_accum_ >= history_frame_stride_);
+    if (store_history)
+        history_frame_accum_ = 0;
+
     // Copy ring into scratch in chronological order, then window.
     for (std::size_t i = 0; i < n_; ++i) {
         const std::size_t src = (ring_pos_ + i) % n_;
@@ -62,19 +72,23 @@ void Spectrum::compute_frame_locked() {
             : -200.0f;
         latest_db_[shifted] = db;
 
-        // Store this frame in the rolling frame ring.
-        frame_ring_[frame_ring_pos_][shifted] = db;
+        // Store only decimated history frames for the waterfall pull path.
+        if (store_history)
+            frame_ring_[frame_ring_pos_][shifted] = db;
     }
-    ++frames_;
+    ++latest_frames_;
 
-    // Advance frame ring position for the next frame.
-    frame_ring_pos_ = (frame_ring_pos_ + 1) % kFrameRingCapacity;
+    if (store_history) {
+        ++history_frames_;
+        // Advance frame ring position for the next stored history frame.
+        frame_ring_pos_ = (frame_ring_pos_ + 1) % kFrameRingCapacity;
+    }
 }
 
 bool Spectrum::latest(std::span<float> out_dbfs) const {
     if (out_dbfs.size() < n_) return false;
     std::lock_guard<std::mutex> lk(mu_);
-    if (frames_ == 0) return false;
+    if (latest_frames_ == 0) return false;
     // Always return the latest instantaneous frame. The UI-side EMA smoothing
     // provides visual stability; max-hold here caused bouncing when UI frame
     // rate didn't align with native FFT frame rate.
@@ -88,14 +102,14 @@ std::uint32_t Spectrum::pull_frames(
     std::span<float> out_frames) const {
     std::lock_guard<std::mutex> lk(mu_);
 
-    if (after_frame_index >= frames_ || max_count == 0)
+    if (after_frame_index >= history_frames_ || max_count == 0)
         return 0;
 
     // Requested frames are those with index > after_frame_index, up to max_count.
     std::uint64_t first_idx = after_frame_index + 1;
     std::uint32_t avail = static_cast<std::uint32_t>(
         std::min(static_cast<std::uint64_t>(max_count),
-                 frames_ - first_idx));
+                 history_frames_ - first_idx));
 
     // Check if output buffer is large enough.
     if (out_frames.size() < avail * n_)
@@ -108,7 +122,7 @@ std::uint32_t Spectrum::pull_frames(
     for (std::uint32_t i = 0; i < avail; ++i) {
         std::uint64_t frame_idx = first_idx + i;
         // Compute position in the frame ring.
-        std::uint64_t age = frames_ - frame_idx;  // how old is this frame?
+        std::uint64_t age = history_frames_ - frame_idx;  // how old is this frame?
         if (age >= kFrameRingCapacity) {
             // Frame has cycled out of the ring; fill with silence.
             std::fill_n(out_frames.begin() + i * n_, n_, -200.0f);
@@ -125,7 +139,7 @@ std::uint32_t Spectrum::pull_frames(
 
 std::uint64_t Spectrum::frame_count() const noexcept {
     std::lock_guard<std::mutex> lk(mu_);
-    return frames_;
+    return history_frames_;
 }
 
 } // namespace mrf::dsp
