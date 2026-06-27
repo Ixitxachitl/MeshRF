@@ -270,6 +270,13 @@ public partial class MainWindow : Window
         if (sender is not TabItem tabItem)
             return;
 
+        if (e.OriginalSource is DependencyObject source &&
+            FindAncestor<ButtonBase>(source, tabItem) is not null)
+        {
+            _tabDragSource = null;
+            return;
+        }
+
         _tabDragStart = e.GetPosition(MainTabs);
         _tabDragSource = tabItem.DataContext;
     }
@@ -1421,6 +1428,23 @@ public partial class MainWindow : Window
                 return typed;
             current = VisualTreeHelper.GetParent(current);
         }
+        return null;
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? start, DependencyObject? stopAt = null)
+        where T : DependencyObject
+    {
+        var current = start;
+        while (current is not null && !ReferenceEquals(current, stopAt))
+        {
+            if (current is T typed)
+                return typed;
+
+            current = current is Visual || current is System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
+        }
+
         return null;
     }
 
