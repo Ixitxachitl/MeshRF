@@ -259,6 +259,9 @@ public sealed class AppSettings
     /// <summary>Persisted selected channel index; -1 when a DM tab was active.</summary>
     public int SelectedChannelIndex { get; set; } = -1;
 
+    /// <summary>Most recently selected channel index, used as fallback when a DM tab closes.</summary>
+    public int LastSelectedChannelIndex { get; set; } = -1;
+
     /// <summary>Persisted selected DM conversation node number; 0 when not applicable.</summary>
     public uint SelectedConversationNode { get; set; }
 
@@ -344,6 +347,12 @@ public sealed class AppSettings
 
     /// <summary>Persisted display widths (in DIP) for the Waypoints grid columns.</summary>
     public List<double> WaypointColumnWidths { get; set; } = new();
+
+    /// <summary>Persisted display widths (in DIP) for the Nodes grid columns.</summary>
+    public List<double> NodeColumnWidths { get; set; } = new();
+
+    /// <summary>Persisted Nodes grid column order by SortMemberPath.</summary>
+    public List<string> NodeColumnDisplayOrder { get; set; } = new();
 
     private static readonly JsonSerializerOptions s_opts = new()
     {

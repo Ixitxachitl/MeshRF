@@ -480,6 +480,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private object? _selectedTab;
 
+    private int _lastSelectedChannelIndex = -1;
+
+    /// <summary>Most recently selected channel index, used as fallback when closing DM tabs.</summary>
+    public int LastSelectedChannelIndex => _lastSelectedChannelIndex;
+
     /// <summary>The selected tab when it is a channel (null for DM tabs).</summary>
     public ChannelViewModel? SelectedChannel => SelectedTab as ChannelViewModel;
 
@@ -487,6 +492,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (value is ITabItem tab)
             tab.TabNeedsAttention = false;
+
+        if (value is ChannelViewModel channel)
+        {
+            _lastSelectedChannelIndex = channel.Config.Index;
+            OnPropertyChanged(nameof(LastSelectedChannelIndex));
+        }
 
         OnPropertyChanged(nameof(SelectedChannel));
         SendMessageCommand.NotifyCanExecuteChanged();
@@ -500,6 +511,95 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (tab is null) return;
         if (ReferenceEquals(SelectedTab, tab)) return;
         tab.TabNeedsAttention = true;
+    }
+
+    public bool CanReorderTabPair(object? dragged, object? target)
+    {
+        if (dragged is null || target is null || ReferenceEquals(dragged, target))
+            return false;
+
+        if (dragged is ChannelViewModel dragChannel && target is ChannelViewModel targetChannel)
+            return dragChannel.Config.Role != ChannelRole.Primary &&
+                   targetChannel.Config.Role != ChannelRole.Primary;
+
+        return dragged is ConversationViewModel && target is ConversationViewModel;
+    }
+
+    /// <summary>True when hover-time reordering is safe and cheap (DM tabs only).</summary>
+    public bool CanLiveReorderTabPair(object? dragged, object? target)
+    {
+        return dragged is ConversationViewModel && target is ConversationViewModel &&
+               CanReorderTabPair(dragged, target);
+    }
+
+    public bool ReorderTabPair(object? dragged, object? target)
+    {
+        if (!CanReorderTabPair(dragged, target))
+            return false;
+
+        if (dragged is ChannelViewModel dragChannel && target is ChannelViewModel targetChannel)
+            return ReorderChannelsByDrag(dragChannel, targetChannel);
+
+        if (dragged is ConversationViewModel dragConvo && target is ConversationViewModel targetConvo)
+            return ReorderConversationsByDrag(dragConvo, targetConvo);
+
+        return false;
+    }
+
+    private bool ReorderConversationsByDrag(ConversationViewModel dragged, ConversationViewModel target)
+    {
+        int dragIndex = Tabs.IndexOf(dragged);
+        int targetIndex = Tabs.IndexOf(target);
+        if (dragIndex < 0 || targetIndex < 0 || dragIndex == targetIndex)
+            return false;
+
+        // Conversations are always grouped after channels.
+        if (dragIndex < Channels.Count || targetIndex < Channels.Count)
+            return false;
+
+        Tabs.Move(dragIndex, targetIndex);
+        SelectedTab = dragged;
+        SaveSettings();
+        return true;
+    }
+
+    private bool ReorderChannelsByDrag(ChannelViewModel dragged, ChannelViewModel target)
+    {
+        if (dragged.Config.Role == ChannelRole.Primary || target.Config.Role == ChannelRole.Primary)
+            return false;
+
+        var allConfigs = _channelStore.All().ToList();
+        var secondaries = allConfigs
+            .Where(c => c.Role != ChannelRole.Primary)
+            .OrderBy(c => c.Index)
+            .ToList();
+        if (secondaries.Count < 2)
+            return false;
+
+        int dragPos = secondaries.FindIndex(c => c.Index == dragged.Config.Index);
+        int targetPos = secondaries.FindIndex(c => c.Index == target.Config.Index);
+        if (dragPos < 0 || targetPos < 0 || dragPos == targetPos)
+            return false;
+
+        var availableIndices = secondaries.Select(c => c.Index).OrderBy(i => i).ToList();
+        var draggedConfig = secondaries[dragPos];
+        secondaries.RemoveAt(dragPos);
+        secondaries.Insert(targetPos, draggedConfig);
+
+        foreach (var idx in availableIndices)
+            _channelStore.Delete(idx);
+
+        for (int i = 0; i < secondaries.Count; i++)
+        {
+            secondaries[i].Index = availableIndices[i];
+            _channelStore.Upsert(secondaries[i]);
+        }
+
+        ReloadChannels();
+        LoadChatHistory();
+        SelectedTab = Channels.FirstOrDefault(c => c.Config.Index == draggedConfig.Index)
+                      ?? (object?)Channels.FirstOrDefault();
+        return true;
     }
 
     // -- Local node identity -------------------------------------------------
@@ -1243,6 +1343,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _filterChangeDebounceTimer.Tick += OnFilterChangeDebounceTimerTick;
 
         _settings = AppSettings.Load();
+        _lastSelectedChannelIndex = _settings.LastSelectedChannelIndex >= 0
+            ? _settings.LastSelectedChannelIndex
+            : _settings.SelectedChannelIndex;
         var soon = DateTime.Now.AddHours(1);
         WaypointExpiryHour12 = ((soon.Hour + 11) % 12 + 1).ToString("00", CultureInfo.InvariantCulture);
         WaypointExpiryMinute = soon.Minute.ToString("00", CultureInfo.InvariantCulture);
@@ -2141,8 +2244,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        // Restoring DM tabs moves selection; leave the primary channel focused.
-        SelectedTab = Channels.FirstOrDefault();
+        // Restoring DM tabs moves selection. Return focus to the most recently
+        // selected channel when possible.
+        int preferredChannel = _settings.LastSelectedChannelIndex >= 0
+            ? _settings.LastSelectedChannelIndex
+            : _settings.SelectedChannelIndex;
+        SelectedTab = Channels.FirstOrDefault(c => c.Config.Index == preferredChannel)
+            ?? Channels.FirstOrDefault();
     }
 
     /// <summary>Load the full persisted history for a peer into a conversation
@@ -3005,6 +3113,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.OpenConversations = Tabs.OfType<ConversationViewModel>()
                                           .Select(c => c.NodeNum)
                                           .ToList();
+        _settings.LastSelectedChannelIndex = _lastSelectedChannelIndex;
         _settings.Save();
     }
 
@@ -3424,9 +3533,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             int idx = Tabs.IndexOf(convo);
             Tabs.Remove(convo);
             if (ReferenceEquals(SelectedTab, convo))
-                SelectedTab = Tabs.Count > 0
-                    ? Tabs[Math.Min(idx, Tabs.Count - 1)]
-                    : null;
+            {
+                var preferredChannel = Channels.FirstOrDefault(c =>
+                    c.Config.Index == _lastSelectedChannelIndex);
+                SelectedTab = preferredChannel
+                    ?? (Tabs.Count > 0 ? Tabs[Math.Min(idx, Tabs.Count - 1)] : null);
+            }
             // Closing a DM tab means it should not reopen next launch.
             SaveSettings();
         }

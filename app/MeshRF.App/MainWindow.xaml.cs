@@ -78,6 +78,8 @@ public partial class MainWindow : Window
     private double _perfWaterfallMs;
     private int _perfStatsTickCount;
     private double _perfStatsMs;
+    private Point _tabDragStart;
+    private object? _tabDragSource;
 
     public MainWindow()
     {
@@ -96,7 +98,12 @@ public partial class MainWindow : Window
             HookRendering(false);
             _statsTimer.Stop();
         };
-        MainTabs.SelectionChanged += (_, _) => ApplyConversationPaneLayoutToCurrentTab();
+        MainTabs.SelectionChanged += (_, _) =>
+        {
+            ApplyConversationPaneLayoutToCurrentTab();
+            UpdateMainTabsDividerOverlay();
+        };
+        MainTabs.LayoutUpdated += (_, _) => UpdateMainTabsDividerOverlay();
     }
 
     private void HookRendering(bool hook)
@@ -204,6 +211,8 @@ public partial class MainWindow : Window
 
             vm.RemoveWaypoints(new[] { wp });
         };
+
+        UpdateMainTabsDividerOverlay();
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -254,6 +263,157 @@ public partial class MainWindow : Window
         NodesGrid.Focus();
         if (System.Windows.Input.ApplicationCommands.Copy.CanExecute(null, NodesGrid))
             System.Windows.Input.ApplicationCommands.Copy.Execute(null, NodesGrid);
+    }
+
+    private void MainTabsTab_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not TabItem tabItem)
+            return;
+
+        _tabDragStart = e.GetPosition(MainTabs);
+        _tabDragSource = tabItem.DataContext;
+    }
+
+    private void MainTabs_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
+            return;
+        if (_tabDragSource is null)
+            return;
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        var pos = e.GetPosition(MainTabs);
+        if (Math.Abs(pos.X - _tabDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(pos.Y - _tabDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        var dragged = _tabDragSource;
+        _tabDragSource = null;
+        DragDrop.DoDragDrop(MainTabs, new DataObject("MeshRFTab", dragged), DragDropEffects.Move);
+        HideMainTabsDragIndicator();
+    }
+
+    private void MainTabsTab_DragOver(object sender, System.Windows.DragEventArgs e)
+    {
+        if (sender is not TabItem tabItem || DataContext is not MainViewModel vm)
+            return;
+
+        var dragged = e.Data.GetData("MeshRFTab");
+        var target = tabItem.DataContext;
+        bool canReorder = vm.CanReorderTabPair(dragged, target);
+        if (canReorder)
+        {
+            e.Effects = DragDropEffects.Move;
+            UpdateMainTabsDragIndicator(tabItem, dragged, target);
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+            HideMainTabsDragIndicator();
+        }
+
+        e.Handled = true;
+    }
+
+    private void MainTabsTab_DragLeave(object sender, System.Windows.DragEventArgs e)
+    {
+        HideMainTabsDragIndicator();
+    }
+
+    private void MainTabsTab_Drop(object sender, System.Windows.DragEventArgs e)
+    {
+        if (sender is not TabItem tabItem || DataContext is not MainViewModel vm)
+            return;
+
+        var dragged = e.Data.GetData("MeshRFTab");
+        var target = tabItem.DataContext;
+        if (vm.ReorderTabPair(dragged, target))
+            e.Handled = true;
+
+        _tabDragSource = null;
+        HideMainTabsDragIndicator();
+    }
+
+    private void UpdateMainTabsDividerOverlay()
+    {
+        if (DataContext is not MainViewModel vm)
+        {
+            MainTabsDividerOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var firstConversation = vm.Tabs.OfType<ConversationViewModel>().FirstOrDefault();
+        if (firstConversation is null)
+        {
+            MainTabsDividerOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (MainTabs.ItemContainerGenerator.ContainerFromItem(firstConversation) is not TabItem tabItem)
+        {
+            MainTabsDividerOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        try
+        {
+            var topLeft = tabItem.TransformToVisual(MainTabsHost).Transform(new Point(0, 0));
+            MainTabsDividerOverlay.Height = Math.Max(12.0, tabItem.ActualHeight - 8.0);
+            double dividerX = topLeft.X - (MainTabsDividerOverlay.Width * 0.5);
+            MainTabsDividerOverlay.Margin = new Thickness(
+                Math.Max(0.0, dividerX),
+                Math.Max(0.0, topLeft.Y + 4.0),
+                0,
+                0);
+            MainTabsDividerOverlay.Visibility = Visibility.Visible;
+        }
+        catch
+        {
+            MainTabsDividerOverlay.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateMainTabsDragIndicator(TabItem targetTab, object? dragged, object? target)
+    {
+        if (dragged is null || target is null)
+        {
+            HideMainTabsDragIndicator();
+            return;
+        }
+
+        int sourceIndex = MainTabs.Items.IndexOf(dragged);
+        int targetIndex = MainTabs.Items.IndexOf(target);
+        if (sourceIndex < 0 || targetIndex < 0)
+        {
+            HideMainTabsDragIndicator();
+            return;
+        }
+
+        try
+        {
+            var topLeft = targetTab.TransformToVisual(MainTabsHost).Transform(new Point(0, 0));
+            double x = sourceIndex < targetIndex
+                ? topLeft.X + targetTab.ActualWidth
+                : topLeft.X;
+
+            MainTabsDragIndicator.Height = Math.Max(12.0, targetTab.ActualHeight - 6.0);
+            MainTabsDragIndicator.Margin = new Thickness(
+                Math.Max(0.0, x - 1.0),
+                Math.Max(0.0, topLeft.Y + 3.0),
+                0,
+                0);
+            MainTabsDragIndicator.Visibility = Visibility.Visible;
+        }
+        catch
+        {
+            HideMainTabsDragIndicator();
+        }
+    }
+
+    private void HideMainTabsDragIndicator()
+    {
+        MainTabsDragIndicator.Visibility = Visibility.Collapsed;
     }
 
     private void WaypointsGrid_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -972,6 +1132,8 @@ public partial class MainWindow : Window
         _conversationLocationHistoryPaneStar = settings.ConversationLocationHistoryPaneStar;
 
         ApplyWaypointsColumnWidths(settings.WaypointColumnWidths);
+        ApplyNodesColumnWidths(settings.NodeColumnWidths);
+        ApplyNodesColumnDisplayOrder(settings.NodeColumnDisplayOrder);
         ApplyNodesGridSort(settings);
 
         IdentityExpander.IsExpanded = settings.IdentityExpanded;
@@ -1055,10 +1217,14 @@ public partial class MainWindow : Window
             }
         }
 
-        if (settings.SelectedChannelIndex >= 0)
+        var preferredChannelIndex = settings.SelectedChannelIndex >= 0
+            ? settings.SelectedChannelIndex
+            : settings.LastSelectedChannelIndex;
+
+        if (preferredChannelIndex >= 0)
         {
             var channel = vm.Tabs.OfType<ChannelViewModel>()
-                                .FirstOrDefault(t => t.Config.Index == settings.SelectedChannelIndex);
+                                .FirstOrDefault(t => t.Config.Index == preferredChannelIndex);
             if (channel is not null)
                 vm.SelectedTab = channel;
         }
@@ -1111,6 +1277,8 @@ public partial class MainWindow : Window
         settings.ConversationLocationHistoryPaneStar = _conversationLocationHistoryPaneStar;
 
         settings.WaypointColumnWidths = SaveWaypointsColumnWidths();
+        settings.NodeColumnWidths = SaveNodesColumnWidths();
+        settings.NodeColumnDisplayOrder = SaveNodesColumnDisplayOrder();
 
         settings.IdentityExpanded = IdentityExpander.IsExpanded;
 
@@ -1118,10 +1286,12 @@ public partial class MainWindow : Window
         settings.SelectedConversationNode = 0;
         if (DataContext is MainViewModel vm)
         {
+            settings.LastSelectedChannelIndex = vm.LastSelectedChannelIndex;
             switch (vm.SelectedTab)
             {
                 case ChannelViewModel channel:
                     settings.SelectedChannelIndex = channel.Config.Index;
+                    settings.LastSelectedChannelIndex = channel.Config.Index;
                     break;
                 case ConversationViewModel conversation:
                     settings.SelectedConversationNode = conversation.NodeNum;
@@ -1326,6 +1496,63 @@ public partial class MainWindow : Window
             widths.Add(w);
         }
         return widths;
+    }
+
+    private void ApplyNodesColumnWidths(IReadOnlyList<double>? widths)
+    {
+        if (widths is null || widths.Count == 0) return;
+        var cols = NodesGrid.Columns;
+        int n = Math.Min(widths.Count, cols.Count);
+        for (int i = 0; i < n; i++)
+        {
+            double w = widths[i];
+            if (double.IsNaN(w) || double.IsInfinity(w) || w < 24.0) continue;
+            cols[i].Width = new System.Windows.Controls.DataGridLength(
+                w,
+                System.Windows.Controls.DataGridLengthUnitType.Pixel);
+        }
+    }
+
+    private List<double> SaveNodesColumnWidths()
+    {
+        var cols = NodesGrid.Columns;
+        var widths = new List<double>(cols.Count);
+        for (int i = 0; i < cols.Count; i++)
+        {
+            var col = cols[i];
+            double w = col.ActualWidth;
+            if (double.IsNaN(w) || double.IsInfinity(w) || w < 24.0)
+                w = 24.0;
+            widths.Add(w);
+        }
+        return widths;
+    }
+
+    private void ApplyNodesColumnDisplayOrder(IReadOnlyList<string>? order)
+    {
+        if (order is null || order.Count == 0) return;
+
+        var bySortMember = NodesGrid.Columns
+            .Where(c => !string.IsNullOrWhiteSpace(c.SortMemberPath))
+            .ToDictionary(c => c.SortMemberPath, StringComparer.Ordinal);
+
+        int displayIndex = 0;
+        foreach (var key in order)
+        {
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            if (!bySortMember.TryGetValue(key, out var column)) continue;
+            if (displayIndex >= NodesGrid.Columns.Count) break;
+            column.DisplayIndex = displayIndex++;
+        }
+    }
+
+    private List<string> SaveNodesColumnDisplayOrder()
+    {
+        return NodesGrid.Columns
+            .Where(c => !string.IsNullOrWhiteSpace(c.SortMemberPath))
+            .OrderBy(c => c.DisplayIndex)
+            .Select(c => c.SortMemberPath)
+            .ToList();
     }
 
     private void ApplyNodesGridSort(AppSettings settings)
