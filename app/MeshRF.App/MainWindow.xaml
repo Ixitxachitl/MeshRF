@@ -1288,6 +1288,7 @@
                     <TabControl x:Name="MainTabs"
                                 ItemsSource="{Binding Tabs}"
                                 SelectedItem="{Binding SelectedTab, Mode=TwoWay}"
+                                PreviewMouseLeftButtonUp="MainTabs_PreviewMouseLeftButtonUp"
                                 PreviewMouseMove="MainTabs_PreviewMouseMove">
                         <TabControl.ItemContainerStyle>
                             <Style TargetType="TabItem" BasedOn="{StaticResource {x:Type TabItem}}">

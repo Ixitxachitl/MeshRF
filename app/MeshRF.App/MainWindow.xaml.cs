@@ -274,10 +274,19 @@ public partial class MainWindow : Window
         _tabDragSource = tabItem.DataContext;
     }
 
+    private void MainTabs_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        _tabDragSource = null;
+        HideMainTabsDragIndicator();
+    }
+
     private void MainTabs_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
+        {
+            _tabDragSource = null;
             return;
+        }
         if (_tabDragSource is null)
             return;
         if (DataContext is not MainViewModel vm)
@@ -290,7 +299,14 @@ public partial class MainWindow : Window
 
         var dragged = _tabDragSource;
         _tabDragSource = null;
-        DragDrop.DoDragDrop(MainTabs, new DataObject("MeshRFTab", dragged), DragDropEffects.Move);
+        try
+        {
+            DragDrop.DoDragDrop(MainTabs, new DataObject("MeshRFTab", dragged), DragDropEffects.Move);
+        }
+        catch (InvalidOperationException)
+        {
+            // If WPF is in a transient dispatcher/modal drag state, skip this drag.
+        }
         HideMainTabsDragIndicator();
     }
 
