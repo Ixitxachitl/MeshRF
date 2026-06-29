@@ -405,6 +405,17 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             EnvironmentalTelemetryHistory.Add(point);
     }
 
+    public void AppendTelemetryHistoryRecord(NodeTelemetryHistoryRecord record)
+    {
+        var point = BuildTelemetryHistoryPoint(record);
+        AddTelemetryHistoryPoint(point);
+
+        if (TelemetryHistory.Count > 500)
+            RemoveTelemetryHistoryPoint(TelemetryHistory[0]);
+
+        OnPropertyChanged(nameof(HasTelemetryHistory));
+    }
+
     private void RemoveTelemetryHistoryPoint(TelemetryHistoryPoint point)
     {
         TelemetryHistory.Remove(point);

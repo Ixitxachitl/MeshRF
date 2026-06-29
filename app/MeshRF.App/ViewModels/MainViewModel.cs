@@ -2,10 +2,12 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -58,6 +60,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
     private readonly Dictionary<uint, string> _nodeTooltipCache = new();
+    private readonly Dictionary<uint, byte[]> _pkcSenderPublicKeyBytes = new();
     private readonly Queue<ulong> _recentUndecodedPacketOrder = new();
     private readonly HashSet<ulong> _recentUndecodedPacketKeys = new();
     
@@ -73,6 +76,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan NodesViewRefreshInterval = TimeSpan.FromMilliseconds(250);
     private const int MaxDirtyNodeUpdatesPerTick = 64;
     private const int MaxRxEventsPerTick = 8;
+    private const double MaxRxDrainMsPerTick = 4.0;
     private const int RecentUndecodedPacketLimit = 512;
     private bool _nodesViewRefreshPending;
     private readonly DispatcherTimer _nodesViewRefreshTimer;
@@ -633,6 +637,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _rebroadcastMode = "ALL";
     [ObservableProperty] private string _myPublicKey = string.Empty;
     [ObservableProperty] private string _myPrivateKey = string.Empty;
+    private byte[] _myPrivateKeyBytes = Array.Empty<byte>();
 
     /// <summary>Default hop limit for transmitted packets (1..7). Mirrors the
     /// firmware LoRa config; broadcasts and DMs are sent with this many hops.</summary>
@@ -665,6 +670,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _rxBusyUntilUtc = DateTime.MinValue;
     private readonly object _relayScheduleLock = new();
     private readonly Dictionary<ulong, CancellationTokenSource> _pendingRelayCancels = new();
+    private readonly Dispatcher _uiDispatcher;
+    private readonly Channel<PkcDecodeWorkItem> _pkcDecodeQueue;
+    private readonly CancellationTokenSource _pkcDecodeCts = new();
+    private const int MaxQueuedPkcDecodes = 256;
+
+    private sealed record PkcDecodeWorkItem(
+        byte[] Frame,
+        MeshHeader Header,
+        long RxEpoch,
+        float? SnrDb,
+        float? PacketRssiDbm,
+        byte HopsAway,
+        byte[] MyPrivateKey,
+        byte[] SenderPublicKey);
 
     private void UpdateAutoReportLastSentSummary()
     {
@@ -1330,6 +1349,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public MainViewModel()
     {
+        _uiDispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+        _pkcDecodeQueue = Channel.CreateBounded<PkcDecodeWorkItem>(new BoundedChannelOptions(MaxQueuedPkcDecodes)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+        _ = Task.Run(RunPkcDecodeWorkerAsync);
+
         _nodesViewRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = NodesViewRefreshInterval,
@@ -1437,6 +1465,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             MyPrivateKey = Convert.ToBase64String(priv);            // derives + saves public key
             MyPublicKey = Convert.ToBase64String(Curve25519.GetPublicKey(priv));
         }
+        RefreshMyPrivateKeyCache();
 
         _manualHomeLatitude  = _settings.HomeLatitude;
         _manualHomeLongitude = _settings.HomeLongitude;
@@ -1556,6 +1585,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _dirtyNodeNums.Clear();
         _nodesByNum.Clear();
+        _pkcSenderPublicKeyBytes.Clear();
         _nodeLocationHistoryCounts.Clear();
         foreach (var pair in _nodeStore.LocationHistoryCounts())
             _nodeLocationHistoryCounts[pair.Key] = pair.Value;
@@ -1680,6 +1710,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var nodeNum in changedNodeNums)
         {
+            _pkcSenderPublicKeyBytes.Remove(nodeNum);
             var latest = _nodeStore.Get(nodeNum);
             var existing = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
 
@@ -3247,7 +3278,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             catch { /* not valid base64 / wrong length — leave public key as-is */ }
         }
+        RefreshMyPrivateKeyCache();
         SaveSettings();
+    }
+
+    private void RefreshMyPrivateKeyCache()
+    {
+        var parsed = TryParseKeyBase64(MyPrivateKey);
+        _myPrivateKeyBytes = parsed.Length == 32 ? parsed : Array.Empty<byte>();
     }
 
     partial void OnHomeLatitudeTextChanged(string value)
@@ -5226,15 +5264,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private MeshDecodeResult? TryDecodePkc(byte[] frame, MeshHeader header)
     {
-        var myPriv = TryParseKeyBase64(MyPrivateKey);
-        if (myPriv.Length != 32) return null;
+        if (_myPrivateKeyBytes.Length != 32) return null;
 
-        var sender = _nodeStore.Get(header.From);
-        var senderPub = TryParseHex(sender?.PublicKey);
+        var senderPub = GetSenderPublicKeyBytes(header.From);
         if (senderPub.Length != 32) return null;
 
-        try { return MeshDecoder.DecodePkc(frame, myPriv, senderPub); }
-        catch { return null; }
+        return MeshDecoder.DecodePkc(frame, _myPrivateKeyBytes, senderPub);
+    }
+
+    private byte[] GetSenderPublicKeyBytes(uint nodeNum)
+    {
+        if (_pkcSenderPublicKeyBytes.TryGetValue(nodeNum, out var cached))
+            return cached;
+
+        var sender = _nodesByNum.GetValueOrDefault(nodeNum)
+            ?? _nodeStore.Get(nodeNum);
+        var parsed = TryParsePublicKeyHexFast(sender?.PublicKey);
+        var value = parsed.Length == 32 ? parsed : Array.Empty<byte>();
+        _pkcSenderPublicKeyBytes[nodeNum] = value;
+        return value;
+    }
+
+    private static byte[] TryParsePublicKeyHexFast(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return Array.Empty<byte>();
+        var s = hex.Trim();
+        if (s.Length != 64) return Array.Empty<byte>();
+        try
+        {
+            var bytes = Convert.FromHexString(s);
+            return bytes.Length == 32 ? bytes : Array.Empty<byte>();
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
     }
 
     /// <summary>Single bound command for the toolbar toggle button.</summary>
@@ -5704,6 +5768,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var rxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        // SNR estimate captured from this frame's preamble (peak above noise).
+        float? snrDb = float.IsNaN(_lastPreamblePeakDb) ? null : _lastPreamblePeakDb;
+        _lastPreamblePeakDb = float.NaN; // consume it so it can't bleed to the next
+
+        byte hopsAway = (byte)(header.HopStart >= header.HopLimit
+            ? header.HopStart - header.HopLimit
+            : 0);
+        float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
+
         var channels = Channels.Select(c => c.Config).ToList();
         var result = MeshDecoder.Decode(frame, channels);
 
@@ -5716,17 +5789,93 @@ public partial class MainViewModel : ObservableObject, IDisposable
             header.To == _myNodeNum && !header.IsBroadcast &&
             header.ChannelHash == 0x00)
         {
+            if (TryQueuePkcDecode(frame, header, rxEpoch, snrDb, packetRssiDbm, hopsAway))
+                return;
+
             result = TryDecodePkc(frame, header);
         }
 
-        // SNR estimate captured from this frame's preamble (peak above noise).
-        float? snrDb = float.IsNaN(_lastPreamblePeakDb) ? null : _lastPreamblePeakDb;
-        _lastPreamblePeakDb = float.NaN; // consume it so it can't bleed to the next
+        ApplyDecodedPayloadResult(frame, header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway);
+    }
 
-        byte hopsAway = (byte)(header.HopStart >= header.HopLimit
-            ? header.HopStart - header.HopLimit
-            : 0);
-        float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
+    private bool TryQueuePkcDecode(
+        byte[] frame,
+        MeshHeader header,
+        long rxEpoch,
+        float? snrDb,
+        float? packetRssiDbm,
+        byte hopsAway)
+    {
+        if (_pkcDecodeCts.IsCancellationRequested) return false;
+        if (_myPrivateKeyBytes.Length != 32) return false;
+
+        var senderPub = GetSenderPublicKeyBytes(header.From);
+        if (senderPub.Length != 32) return false;
+
+        var myPrivCopy = _myPrivateKeyBytes.ToArray();
+        var senderPubCopy = senderPub.ToArray();
+
+        return _pkcDecodeQueue.Writer.TryWrite(new PkcDecodeWorkItem(
+            frame,
+            header,
+            rxEpoch,
+            snrDb,
+            packetRssiDbm,
+            hopsAway,
+            myPrivCopy,
+            senderPubCopy));
+    }
+
+    private async Task RunPkcDecodeWorkerAsync()
+    {
+        try
+        {
+            var reader = _pkcDecodeQueue.Reader;
+            while (await reader.WaitToReadAsync(_pkcDecodeCts.Token).ConfigureAwait(false))
+            {
+                while (reader.TryRead(out var item))
+                {
+                    MeshDecodeResult? result = null;
+                    try
+                    {
+                        result = MeshDecoder.DecodePkc(item.Frame, item.MyPrivateKey, item.SenderPublicKey);
+                    }
+                    catch
+                    {
+                        result = null;
+                    }
+
+                    if (_pkcDecodeCts.IsCancellationRequested)
+                        return;
+
+                    await _uiDispatcher.InvokeAsync(
+                        () => ApplyDecodedPayloadResult(
+                            item.Frame,
+                            item.Header,
+                            result,
+                            item.RxEpoch,
+                            item.SnrDb,
+                            item.PacketRssiDbm,
+                            item.HopsAway),
+                        DispatcherPriority.Background);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown path.
+        }
+    }
+
+    private void ApplyDecodedPayloadResult(
+        byte[] frame,
+        MeshHeader header,
+        MeshDecodeResult? result,
+        long rxEpoch,
+        float? snrDb,
+        float? packetRssiDbm,
+        byte hopsAway)
+    {
         bool nodeInfoRecord = result is { Port: PortNum.NodeInfo, User: not null } && result.AppPayload.Length != 0;
 
         // Always record the sender sighting (RSSI/last-heard), decoded or not.
@@ -5759,13 +5908,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!RememberUndecodedPacket(header))
             {
                 CancelPendingRelay(header.From, header.PacketId);
+                Log($"  (dup) rx undecoded from {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2}) [hint: {BuildPacketHint(header, result)}]");
                 MarkNodeDirty(header.From);
-                Log($"  (dup undecoded) {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2})");
                 return;
             }
 
             RelayIfEligible(frame, header, result);
-            Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
+            Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2}) [hint: {BuildPacketHint(header, result)}]");
             MarkNodeDirty(header.From);
             return;
         }
@@ -5804,7 +5953,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CancelPendingRelay(header.From, header.PacketId);
             // Still refresh the sighting timestamp (done above), but don't echo.
             MarkNodeDirty(header.From);
-            Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
+            Log($"  (dup) {header.FromId} pkt {header.PacketId:x8} [hint: {BuildPacketHint(header, result)}]");
             return;
         }
 
@@ -6023,6 +6172,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             HopsAway = hopsAway,
                         });
 
+                        _pkcSenderPublicKeyBytes.Remove(header.From);
+
                         if (keyMismatch)
                             Log($"  nodeinfo {header.FromId}: KEY MISMATCH — public key changed; "
                                 + "keeping the old key. Right-click the node → Request new keys to accept it.");
@@ -6069,34 +6220,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         break;
                     }
                     nodeChanged = true;
-                    var existingPositionNode = _nodeStore.Get(header.From);
+                    var existingPositionNode = _nodesByNum.GetValueOrDefault(header.From)
+                        ?? _nodeStore.Get(header.From);
                     bool positionChanged = existingPositionNode?.Latitude is not double oldLat
                         || existingPositionNode.Longitude is not double oldLon
                         || Math.Abs(oldLat - result.Position.Latitude) > 1e-7
                         || Math.Abs(oldLon - result.Position.Longitude) > 1e-7
                         || existingPositionNode.AltitudeM != result.Position.AltitudeM;
-                    _nodeStore.Upsert(new NodeRecord
-                    {
-                        NodeNum = header.From,
-                        Latitude = result.Position.Latitude,
-                        Longitude = result.Position.Longitude,
-                        AltitudeM = result.Position.AltitudeM,
-                        LastHeardEpoch = rxEpoch,
-                        SeenViaMqtt = header.ViaMqtt,
-                    });
                     if (positionChanged)
+                    {
+                        // Sighting telemetry (last-heard/RSSI/SNR) was already
+                        // recorded earlier for this packet; only persist
+                        // coordinates when they actually changed.
+                        _nodeStore.Upsert(new NodeRecord
+                        {
+                            NodeNum = header.From,
+                            Latitude = result.Position.Latitude,
+                            Longitude = result.Position.Longitude,
+                            AltitudeM = result.Position.AltitudeM,
+                        });
                         _nodeStore.AddLocationHistory(
                             header.From,
                             DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime,
                             result.Position.Latitude,
                             result.Position.Longitude,
                             result.Position.AltitudeM);
+                    }
                     if (positionChanged)
                         _nodeLocationHistoryCounts[header.From] = _nodeStore.LocationHistoryCount(header.From);
                     if (positionChanged)
                         Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
-                    else
-                        Log($"  position {header.FromId}: unchanged");
                     // Android's "exchange position" can include coordinates while
                     // still setting want_response on a directed packet.
                     if (directedPositionResponseRequest)
@@ -6190,15 +6343,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
     }
 
+    private static string BuildPacketHint(MeshHeader header, MeshDecodeResult? result)
+    {
+        string delivery = header.IsBroadcast ? "broadcast" : "direct";
+        if (result is null)
+            return $"encrypted or unknown packet ({delivery}, chan hash {header.ChannelHash:X2})";
+
+        string channel = string.IsNullOrWhiteSpace(result.ChannelName)
+            ? "unknown-channel"
+            : result.ChannelName;
+
+        if (result.Port == PortNum.TextMessage)
+        {
+            if (result.ReplyId != 0 && result.Emoji != 0)
+                return $"text reaction on {channel} ({delivery})";
+            if (result.ReplyId != 0)
+                return $"reply-linked text on {channel} ({delivery})";
+            return $"text message on {channel} ({delivery})";
+        }
+
+        if (result.Port == PortNum.Routing)
+            return result.RoutingError == 0
+                ? $"routing ACK on {channel} ({delivery})"
+                : $"routing NAK ({result.RoutingError}) on {channel} ({delivery})";
+
+        return $"{result.Port} on {channel} ({delivery})";
+    }
+
     private void PersistTelemetryHistory(uint nodeNum, long rxEpoch, MeshTelemetry telemetry)
     {
         if (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics)
             return;
 
+        string kind = telemetry switch
+        {
+            { HasDeviceMetrics: true, HasEnvironmentMetrics: true } => "DE",
+            { HasDeviceMetrics: true } => "D",
+            { HasEnvironmentMetrics: true } => "E",
+            _ => string.Empty,
+        };
         string signature = BuildTelemetryHistorySignature(telemetry);
-        var lastSameKind = _nodeStore.TelemetryHistory(nodeNum)
-            .LastOrDefault(row => SameTelemetryHistoryKind(row.Signature, signature));
-        if (lastSameKind?.Signature == signature)
+        var lastSignature = _nodeStore.LatestTelemetrySignature(nodeNum, kind);
+        if (string.Equals(lastSignature, signature, StringComparison.Ordinal))
             return;
 
         DateTime timestampUtc = rxEpoch > 0
@@ -6221,11 +6407,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             telemetry.HasEnvironmentMetrics ? telemetry.Iaq : null,
             signature);
 
-        _nodeStore.AddTelemetryHistory(record);
+        long id = _nodeStore.AddTelemetryHistory(record);
+        var withId = record with { Id = id };
 
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             if (convo.NodeNum == nodeNum)
-                convo.LoadNodeHistories();
+            convo.AppendTelemetryHistoryRecord(withId);
     }
 
     private static string BuildTelemetryHistorySignature(MeshTelemetry telemetry)
@@ -6518,8 +6705,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Drain any queued demodulator events into the log. Cap per tick so a
         // burst can't lock up the UI thread.
+        long rxDrainStart = Stopwatch.GetTimestamp();
         for (int i = 0; i < MaxRxEventsPerTick; i++)
         {
+            double elapsedMs = (Stopwatch.GetTimestamp() - rxDrainStart) * 1000.0 / Stopwatch.Frequency;
+            if (elapsedMs >= MaxRxDrainMsPerTick)
+                break;
+
             var ev = _core.PullEvent();
             if (ev is null) break;
             var nowUtc = DateTime.UtcNow;
@@ -6984,6 +7176,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         StopPayloadRecording();
+        _pkcDecodeQueue.Writer.TryComplete();
+        _pkcDecodeCts.Cancel();
+        _pkcDecodeCts.Dispose();
         _filterComputeCts?.Cancel();
         _filterChangeDebounceTimer?.Stop();
         _gpsService.Stop();

@@ -465,6 +465,29 @@ public sealed class NodeStore : IDisposable
         return rows;
     }
 
+    public string? LatestTelemetrySignature(uint nodeNum, string kindPrefix)
+    {
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(kindPrefix))
+            return null;
+
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT signature
+            FROM node_telemetry_history
+            WHERE node_num = $n
+              AND signature LIKE ($kind || '|%')
+            ORDER BY timestamp_epoch DESC, id DESC
+            LIMIT 1
+            """;
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.Parameters.AddWithValue("$kind", kindPrefix);
+        var scalar = cmd.ExecuteScalar();
+        return scalar is string s && !string.IsNullOrWhiteSpace(s)
+            ? s
+            : null;
+    }
+
     public long AddTelemetryHistory(NodeTelemetryHistoryRecord rec)
     {
         ThrowIfDisposed();

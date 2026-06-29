@@ -1015,7 +1015,7 @@ public partial class MainWindow : Window
             LastPacket.FloorDb = floor;
             LastPacket.CeilDb = ceil;
             LastPacket.Colormap = ParseColormap(vm.WaterfallColormap);
-            LastPacket.ReplaceFrames(grid.AsSpan(0, sampleCount), rows, nFreq);
+            LastPacket.ReplaceFramesOwned(grid, rows, nFreq);
             LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
         }
         finally

@@ -606,6 +606,37 @@ public sealed class WaterfallView : Image
         Render();
     }
 
+    /// <summary>
+    /// Replaces frames while taking ownership of <paramref name="frames"/> when
+    /// <see cref="ScaleToFit"/> is enabled, avoiding an extra large copy on the
+    /// UI thread for frozen packet snapshots.
+    /// </summary>
+    public void ReplaceFramesOwned(float[] frames, int frameCount, int bins)
+    {
+        if (frameCount <= 0 || bins <= 0)
+        {
+            Clear();
+            return;
+        }
+        if (frames is null) return;
+
+        long required = (long)frameCount * bins;
+        if (required > frames.Length) return;
+
+        if (_bmp is null) EnsureBitmap();
+
+        if (ScaleToFit)
+        {
+            _scaleBinCount = bins;
+            _scaleFrameCount = frameCount;
+            _scaleFrames = frames;
+            Render();
+            return;
+        }
+
+        ReplaceFrames(frames.AsSpan(0, (int)required), frameCount, bins);
+    }
+
     private void UpdateAutoLevels(ReadOnlySpan<float> latest)
     {
         // Sample-quantile estimate over the most recent frame. We pick:
