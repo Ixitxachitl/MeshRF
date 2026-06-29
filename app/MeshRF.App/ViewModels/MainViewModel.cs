@@ -394,7 +394,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _nodeTemperatureFilter = "Any";
     [ObservableProperty] private string _nodeHumidityFilter    = "Any";
     [ObservableProperty] private string _nodePressureFilter    = "Any";
-    [ObservableProperty] private string _mapNodeLabelMode      = "Short name";
+    [ObservableProperty] private string _mapNodeLabelMode      = "Node Number";
     [ObservableProperty] private string _nodeDistanceKmText    = string.Empty;
     [ObservableProperty] private string _nodeMaxAgeMinutesText = string.Empty;
 
@@ -1482,7 +1482,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeHumidityFilter    = _settings.NodeFilterHumidity;
         NodePressureFilter    = _settings.NodeFilterPressure;
         MapNodeLabelMode      = string.IsNullOrWhiteSpace(_settings.MapNodeLabelMode)
-            ? "Short name"
+            ? "Node Number"
             : _settings.MapNodeLabelMode;
         NodeDistanceKmText    = _settings.NodeFilterDistanceKm;
         NodeMaxAgeMinutesText = _settings.NodeFilterMaxAgeMinutes;
@@ -3200,6 +3200,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (clamped != value) { HopLimit = clamped; return; }
         SaveSettings();
     }
+
+    [RelayCommand]
+    private void GenerateNodeIdFromKey()
+    {
+        if (!PkiNodeNumber.TryFromPublicKey(TryParseKeyBase64(MyPublicKey), out var nodeNum))
+            return;
+
+        MyNodeIdText = $"!{nodeNum:x8}";
+    }
+
     partial void OnMyPublicKeyChanged(string value) => SaveSettings();
 
     partial void OnMyPrivateKeyChanged(string value)

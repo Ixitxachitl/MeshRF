@@ -337,7 +337,7 @@ public sealed class AppSettings
     public bool NodeSortDescending { get; set; } = false;
 
     /// <summary>Persisted map node label mode.</summary>
-    public string MapNodeLabelMode { get; set; } = "Short name";
+    public string MapNodeLabelMode { get; set; } = "Node Number";
 
     /// <summary>Persisted max-distance filter in km (empty = off).</summary>
     public string NodeFilterDistanceKm { get; set; } = string.Empty;

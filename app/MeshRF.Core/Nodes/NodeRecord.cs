@@ -63,6 +63,12 @@ public sealed class NodeRecord
     /// state and should be shown as suspect (red key icon).</summary>
     public bool HasKeyMismatch => KeyMismatch == true;
 
+    /// <summary>True when this node's stored public key hashes back to the
+    /// same node number Meshtastic derives from PKI identity.</summary>
+    public bool HasDerivedNodeNumMatch =>
+        PkiNodeNumber.TryFromHexPublicKey(PublicKey, out var derivedNodeNum)
+        && derivedNodeNum == NodeNum;
+
     /// <summary>True when both latitude and longitude are present.</summary>
     public bool HasLocation => Latitude.HasValue && Longitude.HasValue;
 

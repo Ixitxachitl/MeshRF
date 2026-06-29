@@ -501,6 +501,10 @@
                                             Margin="6,0,0,0" Padding="8,2"
                                             Command="{Binding GenerateRandomNodeIdCommand}"
                                             ToolTip="Generate a random node ID" />
+                                    <Button DockPanel.Dock="Right" Content="From Key"
+                                        Margin="6,0,0,0" Padding="8,2"
+                                        Command="{Binding GenerateNodeIdFromKeyCommand}"
+                                        ToolTip="Derive the node ID from the current PKI public key the same way Meshtastic firmware does" />
                                     <TextBox FontFamily="Consolas"
                                              ToolTip="!a1b2c3d4, 0xA1B2C3D4 or decimal"
                                              Text="{Binding MyNodeIdText, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
@@ -1096,6 +1100,10 @@
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="ToolTip" Value="Has encryption key (PKC direct messages enabled)" />
                                                         <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasDerivedNodeNumMatch}" Value="True">
+                                                                <Setter Property="Foreground" Value="#2E7D32" />
+                                                                <Setter Property="ToolTip" Value="Public key matches this node's Meshtastic PKI-derived node number" />
+                                                            </DataTrigger>
                                                             <DataTrigger Binding="{Binding HasKeyMismatch}" Value="True">
                                                                 <Setter Property="Foreground" Value="#E53935" />
                                                                 <Setter Property="ToolTip" Value="Key mismatch — this node's public key changed. Right-click → Request new keys to accept it." />
