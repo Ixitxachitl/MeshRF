@@ -1698,6 +1698,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
             }
 
+            lock (_filterCriteriaSyncLock)
+            {
+                if (NodePassesFilterWithCriteria(latest, _currentFilterCriteria))
+                    _nodeFilterCache.Add(nodeNum);
+                else
+                    _nodeFilterCache.Remove(nodeNum);
+            }
+
             bool keepDefaultOrder = ShouldKeepDefaultNodeOrder();
             if (existing is null)
             {
@@ -1735,13 +1743,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             _nodesByNum[nodeNum] = latest;
-            lock (_filterCriteriaSyncLock)
-            {
-                if (NodePassesFilterWithCriteria(latest, _currentFilterCriteria))
-                    _nodeFilterCache.Add(nodeNum);
-                else
-                    _nodeFilterCache.Remove(nodeNum);
-            }
             if (UpdateNodeMapStateSignature(nodeNum, latest))
                 mapChangedNodeNums.Add(nodeNum);
 
