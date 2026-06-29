@@ -6934,10 +6934,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Distance from home
         if (criteria.MaxDistanceKm > 0)
         {
-            if (n.Latitude is not double nlat || n.Longitude is not double nlon)
-                return false;
-            if (HaversineKm(criteria.HomeLatitude, criteria.HomeLongitude, nlat, nlon) > criteria.MaxDistanceKm)
-                return false;
+            // Only apply the distance gate when this node has coordinates.
+            // Nodes with unknown position should remain visible.
+            if (n.Latitude is double nlat && n.Longitude is double nlon)
+            {
+                if (HaversineKm(criteria.HomeLatitude, criteria.HomeLongitude, nlat, nlon) > criteria.MaxDistanceKm)
+                    return false;
+            }
         }
 
         // Max age (minutes since last heard)
@@ -6961,12 +6964,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Override of NodePassesFilter that uses the cached filter cache when available.</summary>
+    /// <summary>
+    /// Filter predicate used by the node grid/map. Prefer the precomputed cache,
+    /// but fall back to a live criteria check on cache misses so newly
+    /// discovered/updated nodes can appear immediately even if the async cache
+    /// recompute has not completed yet.
+    /// </summary>
     private bool NodePassesFilter(NodeRecord n)
     {
         lock (_filterCriteriaSyncLock)
         {
-            return _nodeFilterCache.Contains(n.NodeNum);
+            if (_nodeFilterCache.Contains(n.NodeNum))
+                return true;
+
+            return NodePassesFilterWithCriteria(n, _currentFilterCriteria);
         }
     }
 
