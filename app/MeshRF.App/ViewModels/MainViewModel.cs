@@ -1574,6 +1574,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Keep any open DM tabs' telemetry panels in sync with the latest data.
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
             convo.Node = _nodesByNum.GetValueOrDefault(convo.NodeNum);
+
+        // Keep the filter membership cache aligned with the currently loaded
+        // node set so view filtering remains accurate after full reloads.
+        lock (_filterCriteriaSyncLock)
+        {
+            _nodeFilterCache.Clear();
+            foreach (var n in _nodesByNum.Values)
+                if (NodePassesFilterWithCriteria(n, _currentFilterCriteria))
+                    _nodeFilterCache.Add(n.NodeNum);
+        }
+
         RebuildNodeMapStateSignatures();
         NodesView?.Refresh();
         MapDataChanged?.Invoke(this, EventArgs.Empty);
@@ -1677,6 +1688,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (existing is not null)
                     Nodes.Remove(existing);
                 _nodesByNum.Remove(nodeNum);
+                lock (_filterCriteriaSyncLock)
+                    _nodeFilterCache.Remove(nodeNum);
                 if (UpdateNodeMapStateSignature(nodeNum, null))
                     mapChangedNodeNums.Add(nodeNum);
                 _nodeTooltipSignatures.Remove(nodeNum);
@@ -1722,6 +1735,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             _nodesByNum[nodeNum] = latest;
+            lock (_filterCriteriaSyncLock)
+            {
+                if (NodePassesFilterWithCriteria(latest, _currentFilterCriteria))
+                    _nodeFilterCache.Add(nodeNum);
+                else
+                    _nodeFilterCache.Remove(nodeNum);
+            }
             if (UpdateNodeMapStateSignature(nodeNum, latest))
                 mapChangedNodeNums.Add(nodeNum);
 
