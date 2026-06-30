@@ -942,7 +942,7 @@
                                       ResizeDirection="Rows"
                                       ResizeBehavior="PreviousAndNext"
                                       Background="{DynamicResource BrushSplitter}"
-                                      ShowsPreview="True" />
+                                      ShowsPreview="False" />
 
                         <DataGrid x:Name="NodesGrid"
                                   Grid.Row="0"
