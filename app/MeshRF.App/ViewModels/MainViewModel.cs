@@ -4996,7 +4996,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             PersistDelivery(pending.Message);
             Log(ack
                 ? $"  ACK from {NodeDisplayName(header.From)} for id {result.RequestId:x8}"
-                : $"  NAK ({result.RoutingError}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
+                : $"  NAK ({RoutingErrorName(result.RoutingError)}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
             return;
         }
 
@@ -5006,9 +5006,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Log(ack
             ? $"  routing ACK {NodeDisplayName(header.From)} -> {target}"
                 + (result.RequestId != 0 ? $" for id {result.RequestId:x8}" : string.Empty)
-            : $"  routing NAK ({result.RoutingError}) {NodeDisplayName(header.From)} -> {target}"
+            : $"  routing NAK ({RoutingErrorName(result.RoutingError)}) {NodeDisplayName(header.From)} -> {target}"
                 + (result.RequestId != 0 ? $" for id {result.RequestId:x8}" : string.Empty));
     }
+
+    private static string RoutingErrorName(int error) => error switch
+    {
+        1  => "NO_ROUTE",
+        2  => "GOT_NAK",
+        3  => "TIMEOUT",
+        4  => "NO_INTERFACE",
+        5  => "MAX_RETRANSMIT",
+        6  => "NO_CHANNEL",
+        7  => "TOO_LARGE",
+        8  => "NO_RESPONSE",
+        32 => "DUTY_CYCLE_LIMIT",
+        33 => "BAD_REQUEST",
+        34 => "NOT_AUTHORIZED",
+        35 => "PKI_FAILED",
+        36 => "PKI_UNKNOWN_PUBKEY",
+        _  => error.ToString(),
+    };
 
     /// <summary>Handle an inbound TRACEROUTE_APP packet: a reply to a request we
     /// sent (render the path), a request directed at us (reply with the route so
