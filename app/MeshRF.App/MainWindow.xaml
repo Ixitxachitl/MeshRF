@@ -574,22 +574,22 @@
 
                                 <TextBlock Grid.Row="7" Grid.Column="0" Text="Public key"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="7" Grid.Column="1" Margin="0,4,0,4">
-                                    <Button DockPanel.Dock="Right" Content="Generate"
-                                            Margin="6,0,0,0" Padding="8,2"
-                                            Command="{Binding GenerateKeyPairCommand}"
-                                            ToolTip="Generate a new private key" />
-                                    <TextBox FontFamily="Consolas"
-                                             ToolTip="Base64 X25519 public key (TX/PKI)"
-                                             Text="{Binding MyPublicKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-                                </DockPanel>
+                                <TextBox Grid.Row="7" Grid.Column="1" Margin="0,4,0,4"
+                                         FontFamily="Consolas" IsReadOnly="True"
+                                         ToolTip="Derived from private key — not editable"
+                                         Text="{Binding MyPublicKey, Mode=OneWay}" />
 
                                 <TextBlock Grid.Row="8" Grid.Column="0" Text="Private key"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <TextBox Grid.Row="8" Grid.Column="1" Margin="0,4,0,4"
-                                         FontFamily="Consolas"
-                                         ToolTip="Base64 X25519 private key (kept locally)"
-                                         Text="{Binding MyPrivateKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                <DockPanel Grid.Row="8" Grid.Column="1" Margin="0,4,0,4">
+                                    <Button DockPanel.Dock="Right" Content="Generate"
+                                            Margin="6,0,0,0" Padding="8,2"
+                                            Command="{Binding GenerateKeyPairCommand}"
+                                            ToolTip="Generate a new random key pair" />
+                                    <TextBox FontFamily="Consolas"
+                                             ToolTip="Base64 X25519 private key (kept locally)"
+                                             Text="{Binding MyPrivateKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                </DockPanel>
 
                                 <TextBlock Grid.Row="9" Grid.Column="0" Text="Location source"
                                            Margin="0,4,8,4" VerticalAlignment="Center" />
