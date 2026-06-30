@@ -56,6 +56,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _suspendNodeReload;
     private readonly HashSet<uint> _dirtyNodeNums = new();
     private readonly Dictionary<uint, NodeRecord> _nodesByNum = new();
+    // Sighting data (epoch, snr, rssi, hops, viaMqtt) written by EnqueueDbWrite but
+    // not yet committed to _nodeStore when the dirty flush reads. Overlay ensures
+    // the node list reflects the correct last-heard time immediately.
+    private readonly Dictionary<uint, (long Epoch, float? Snr, float? Rssi, byte? Hops, bool ViaMqtt)> _pendingNodeSightings = new();
     private readonly Dictionary<uint, int> _nodeLocationHistoryCounts = new();
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
@@ -1616,6 +1620,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void ReloadNodes()
     {
         _dirtyNodeNums.Clear();
+        _pendingNodeSightings.Clear();
         _nodesByNum.Clear();
         _pkcSenderPublicKeyBytes.Clear();
         _nodeLocationHistoryCounts.Clear();
@@ -1744,6 +1749,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _pkcSenderPublicKeyBytes.Remove(nodeNum);
             var latest = _nodeStore.Get(nodeNum);
+
+            // Apply the optimistic sighting overlay: the async DB write may not
+            // have committed yet, so patch the fields we know are fresh.
+            if (_pendingNodeSightings.TryGetValue(nodeNum, out var pending))
+            {
+                if (latest is not null && pending.Epoch > latest.LastHeardEpoch)
+                {
+                    latest.LastHeardEpoch = pending.Epoch;
+                    latest.SnrDb    = pending.Snr  ?? latest.SnrDb;
+                    latest.RssiDbm  = pending.Rssi ?? latest.RssiDbm;
+                    latest.HopsAway = pending.Hops ?? latest.HopsAway;
+                    if (pending.ViaMqtt) latest.SeenViaMqtt = true;
+                }
+                _pendingNodeSightings.Remove(nodeNum);
+            }
+
             var existing = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
 
             if (latest is null)
@@ -5995,6 +6016,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     snrDb: snrDb,
                     hopsAway: hopsAway,
                     seenViaMqtt: header.ViaMqtt));
+            // Optimistic in-memory overlay: the async write may not commit before
+            // the next dirty flush reads _nodeStore; record sighting here so the
+            // UI always shows a fresh last-heard time regardless of timing.
+            _pendingNodeSightings[header.From] = (rxEpoch, snrDb, packetRssiDbm, hopsAway, header.ViaMqtt);
         }
 
         uint normalizedReplyId = 0;
@@ -6275,6 +6300,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             HopsAway = hopsAway,
                         };
                         EnqueueDbWrite((nodes, _) => nodes.Upsert(nodeInfoUpsert));
+                        _pendingNodeSightings[header.From] = (rxEpoch, snrDb, packetRssiDbm, hopsAway, header.ViaMqtt);
 
                         _pkcSenderPublicKeyBytes.Remove(header.From);
 
