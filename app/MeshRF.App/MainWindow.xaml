@@ -534,7 +534,7 @@
                                 <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4"
                                          FontFamily="Consolas"
                                          IsReadOnly="True"
-                                         Foreground="{DynamicResource BrushSecondaryText}"
+                                         Foreground="{DynamicResource BrushSubtle}"
                                          ToolTip="Derived from node ID (02:00 + last 4 bytes). Set the node ID to change this."
                                          Text="{Binding MyMacAddress, Mode=OneWay}" />
 
@@ -614,7 +614,7 @@
                                                  Text="{Binding GpsBaudRateText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                     </Grid>
                                     <TextBlock Margin="0,4,0,0"
-                                               Foreground="{DynamicResource BrushSecondaryText}"
+                                               Foreground="{DynamicResource BrushSubtle}"
                                                Text="{Binding GpsStatus}"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
@@ -707,7 +707,7 @@
                                 <TextBlock Grid.Row="16" Grid.Column="1" Margin="0,2,0,0"
                                            FontFamily="Consolas"
                                            FontSize="11"
-                                           Foreground="{DynamicResource BrushSecondaryText}"
+                                           Foreground="{DynamicResource BrushSubtle}"
                                            Text="{Binding AutoReportLastSentSummary}"
                                            ToolTip="Last successful auto-send times for NodeInfo, Position, and Device Metrics." />
 
