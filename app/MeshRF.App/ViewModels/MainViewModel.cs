@@ -5942,6 +5942,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         float? packetRssiDbm,
         byte hopsAway)
     {
+        Log($"  from={header.FromId}  to=!{header.To:x8}  id={header.PacketId:x8}  chanHash=0x{header.ChannelHash:X2}  hopLimit={header.HopLimit}  hopStart={header.HopStart}");
+
         bool nodeInfoRecord = result is { Port: PortNum.NodeInfo, User: not null } && result.AppPayload.Length != 0;
 
         // Always record the sender sighting (RSSI/last-heard), decoded or not.
@@ -6321,6 +6323,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             : 1;
                     if (positionChanged)
                         Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
+                    else
+                        Log($"  position {header.FromId}: unchanged ({result.Position.Latitude:F5}, {result.Position.Longitude:F5})");
                     // Android's "exchange position" can include coordinates while
                     // still setting want_response on a directed packet.
                     if (directedPositionResponseRequest)
