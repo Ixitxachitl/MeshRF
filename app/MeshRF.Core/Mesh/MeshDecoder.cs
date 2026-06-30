@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text;
+using Google.Protobuf;
 using MeshRF.Channels;
 
 namespace MeshRF.Mesh;
@@ -43,6 +44,30 @@ public sealed class MeshDecodeResult
     /// <summary>Data.bitfield (field 9) bit 0 (ok_to_mqtt): the sender permits
     /// gateways to uplink this packet to public MQTT.</summary>
     public bool OkToMqtt { get; init; }
+
+    /// <summary>Data.dest (field 4): destination nodenum when populated.</summary>
+    public uint DataDest { get; init; }
+
+    /// <summary>Data.source (field 5): original sender nodenum when populated.</summary>
+    public uint DataSource { get; init; }
+
+    /// <summary>Data.bitfield raw numeric value (field 9).</summary>
+    public uint DataBitfield { get; init; }
+
+    /// <summary>
+    /// Data.xeddsa_signature (field 10, bytes), used by newer Meshtastic
+    /// builds for payload authentication metadata.
+    /// Empty when absent.
+    /// </summary>
+    public byte[] DataField10 { get; init; } = Array.Empty<byte>();
+
+    /// <summary>Full Data protobuf JSON (generated class), including fields not
+    /// mapped to the strongly-typed properties above.</summary>
+    public string? DataProtoJson { get; init; }
+
+    /// <summary>Full application payload protobuf JSON when this port has a
+    /// known protobuf schema and parsing succeeds.</summary>
+    public string? AppProtoJson { get; init; }
 
     /// <summary>For a ROUTING_APP packet, the Routing.error_reason value: 0 = ACK
     /// (NONE), non-zero = NAK reason. -1 when this isn't a routing packet.</summary>
@@ -230,6 +255,8 @@ public sealed class MeshStoreForward
 /// </summary>
 public static class MeshDecoder
 {
+    private static readonly JsonFormatter ProtoJson = new(new JsonFormatter.Settings(formatDefaultValues: false));
+
     /// <summary>
     /// Attempt to decode <paramref name="frame"/> using the supplied channels.
     /// Returns null if the frame is malformed or no channel key produces a
@@ -266,11 +293,18 @@ public static class MeshDecoder
 
             if (TryParseData(plain, out var port, out var appPayload,
                              out var wantResp, out var reqId, out var replyId,
-                             out var emoji, out var okMqtt) &&
+                             out var emoji, out var okMqtt,
+                             out var dataDest, out var dataSource,
+                             out var dataBitfield,
+                             out var dataField10,
+                             out var dataProtoJson,
+                             out var appProtoJson) &&
                 IsPlausible(port, appPayload, replyId, emoji))
             {
                 return Build(header, ch.Name, port, appPayload, wantResp,
-                             reqId, replyId, emoji, okMqtt);
+                             reqId, replyId, emoji, okMqtt,
+                             dataDest, dataSource, dataBitfield,
+                             dataField10, dataProtoJson, appProtoJson);
             }
         }
         return null;
@@ -308,23 +342,34 @@ public static class MeshDecoder
 
         if (TryParseData(plain, out var port, out var appPayload,
                          out var wantResp, out var reqId, out var replyId,
-                         out var emoji, out var okMqtt) &&
+                         out var emoji, out var okMqtt,
+                         out var dataDest, out var dataSource,
+                         out var dataBitfield,
+                         out var dataField10,
+                         out var dataProtoJson,
+                         out var appProtoJson) &&
             IsPlausible(port, appPayload, replyId, emoji))
         {
             return Build(header, "PKC", port, appPayload, wantResp,
-                         reqId, replyId, emoji, okMqtt);
+                         reqId, replyId, emoji, okMqtt,
+                         dataDest, dataSource, dataBitfield,
+                         dataField10, dataProtoJson, appProtoJson);
         }
         return null;
     }
 
-    // -- Data protobuf: 1 = portnum (varint), 2 = payload (bytes),
-    //    3 = want_response (varint bool), 6 = request_id (uint32),
-    //    7 = reply_id (uint32), 8 = emoji (uint32/varint),
-    //    9 = bitfield (varint, bit 0 = ok_to_mqtt) --
+    // Parse Meshtastic Data with generated protobuf classes so new upstream
+    // fields are decoded automatically as the schema evolves.
     private static bool TryParseData(byte[] data, out PortNum port, out byte[] payload,
                                      out bool wantResponse, out uint requestId,
                                      out uint replyId, out uint emoji,
-                                     out bool okToMqtt)
+                                     out bool okToMqtt,
+                                     out uint dataDest,
+                                     out uint dataSource,
+                                     out uint dataBitfield,
+                                     out byte[] dataField10,
+                                     out string? dataProtoJson,
+                                     out string? appProtoJson)
     {
         port = PortNum.Unknown;
         payload = Array.Empty<byte>();
@@ -333,52 +378,67 @@ public static class MeshDecoder
         replyId = 0;
         emoji = 0;
         okToMqtt = false;
-        var rdr = new ProtoReader(data);
-        bool sawPort = false;
-        while (rdr.TryReadTag(out int field, out var wt))
+        dataDest = 0;
+        dataSource = 0;
+        dataBitfield = 0;
+        dataField10 = Array.Empty<byte>();
+        dataProtoJson = null;
+        appProtoJson = null;
+
+        Meshtastic.Protobufs.Data parsed;
+        try
         {
-            switch (field)
-            {
-                case 1 when wt == ProtoReader.WireType.Varint:
-                    port = (PortNum)rdr.ReadVarint();
-                    sawPort = true;
-                    break;
-                case 2 when wt == ProtoReader.WireType.Len:
-                    payload = rdr.ReadLengthDelimited().ToArray();
-                    break;
-                case 3 when wt == ProtoReader.WireType.Varint:
-                    wantResponse = rdr.ReadVarint() != 0;
-                    break;
-                case 6 when wt == ProtoReader.WireType.I32:
-                    requestId = rdr.ReadFixed32();
-                    break;
-                case 6 when wt == ProtoReader.WireType.Varint:
-                    requestId = (uint)rdr.ReadVarint();
-                    break;
-                case 7 when wt == ProtoReader.WireType.I32:
-                    replyId = rdr.ReadFixed32();
-                    break;
-                case 7 when wt == ProtoReader.WireType.Varint:
-                    replyId = (uint)rdr.ReadVarint();
-                    break;
-                case 8 when wt == ProtoReader.WireType.Varint:
-                    emoji = (uint)rdr.ReadVarint();
-                    break;
-                case 8 when wt == ProtoReader.WireType.I32:
-                    emoji = rdr.ReadFixed32();
-                    break;
-                case 9 when wt == ProtoReader.WireType.Varint:
-                    { var bf = rdr.ReadVarint();
-                      okToMqtt     = (bf & 0x01) != 0;  // bit 0
-                      wantResponse = wantResponse || (bf & 0x02) != 0; } // bit 1 mirrors want_response
-                    break;
-                default:
-                    rdr.SkipField(wt);
-                    break;
-            }
+            parsed = Meshtastic.Protobufs.Data.Parser.ParseFrom(data);
         }
-        // A valid Data message that consumed the whole buffer cleanly.
-        return sawPort && rdr.End;
+        catch
+        {
+            return false;
+        }
+
+        port = (PortNum)(int)parsed.Portnum;
+        payload = parsed.Payload.ToByteArray();
+        wantResponse = parsed.WantResponse;
+        requestId = parsed.RequestId;
+        replyId = parsed.ReplyId;
+        emoji = parsed.Emoji;
+        dataDest = parsed.Dest;
+        dataSource = parsed.Source;
+        dataBitfield = parsed.HasBitfield ? parsed.Bitfield : 0u;
+        okToMqtt = (dataBitfield & 0x01) != 0;
+        wantResponse = wantResponse || (dataBitfield & 0x02) != 0;
+        dataField10 = parsed.XeddsaSignature.ToByteArray();
+
+        try { dataProtoJson = ProtoJson.Format(parsed); } catch { dataProtoJson = null; }
+        try { appProtoJson = TryFormatAppPayloadProtoJson(port, payload); } catch { appProtoJson = null; }
+
+        return true;
+    }
+
+    private static string? TryFormatAppPayloadProtoJson(PortNum port, byte[] payload)
+    {
+        if (payload.Length == 0) return null;
+
+        IMessage? msg = port switch
+        {
+            PortNum.NodeInfo => Meshtastic.Protobufs.User.Parser.ParseFrom(payload),
+            PortNum.Position => Meshtastic.Protobufs.Position.Parser.ParseFrom(payload),
+            PortNum.Waypoint => Meshtastic.Protobufs.Waypoint.Parser.ParseFrom(payload),
+            PortNum.Telemetry => Meshtastic.Protobufs.Telemetry.Parser.ParseFrom(payload),
+            PortNum.Routing => Meshtastic.Protobufs.Routing.Parser.ParseFrom(payload),
+            PortNum.Traceroute => Meshtastic.Protobufs.RouteDiscovery.Parser.ParseFrom(payload),
+            PortNum.NeighborInfo => Meshtastic.Protobufs.NeighborInfo.Parser.ParseFrom(payload),
+            PortNum.StoreForward => Meshtastic.Protobufs.StoreAndForward.Parser.ParseFrom(payload),
+            PortNum.Admin => Meshtastic.Protobufs.AdminMessage.Parser.ParseFrom(payload),
+            PortNum.KeyVerification => Meshtastic.Protobufs.KeyVerification.Parser.ParseFrom(payload),
+            PortNum.MapReport => Meshtastic.Protobufs.MapReport.Parser.ParseFrom(payload),
+            PortNum.AtakPlugin => Meshtastic.Protobufs.TAKPacket.Parser.ParseFrom(payload),
+            PortNum.RemoteHardware => Meshtastic.Protobufs.HardwareMessage.Parser.ParseFrom(payload),
+            PortNum.PaxCounter => Meshtastic.Protobufs.Paxcount.Parser.ParseFrom(payload),
+            PortNum.Audio => Meshtastic.Protobufs.Compressed.Parser.ParseFrom(payload),
+            _ => null,
+        };
+
+        return msg is null ? null : ProtoJson.Format(msg);
     }
 
     // Reject obviously-wrong decrypts (wrong key -> garbage portnum / payload).
@@ -399,7 +459,13 @@ public static class MeshDecoder
                                           PortNum port, byte[] payload,
                                           bool wantResponse = false, uint requestId = 0,
                                           uint replyId = 0, uint emoji = 0,
-                                          bool okToMqtt = false)
+                                          bool okToMqtt = false,
+                                          uint dataDest = 0,
+                                          uint dataSource = 0,
+                                          uint dataBitfield = 0,
+                                          byte[]? dataField10 = null,
+                                          string? dataProtoJson = null,
+                                          string? appProtoJson = null)
     {
         string? text = null;
         MeshUser? user = null;
@@ -460,6 +526,12 @@ public static class MeshDecoder
             ReplyId = replyId,
             Emoji = emoji,
             OkToMqtt = okToMqtt,
+            DataDest = dataDest,
+            DataSource = dataSource,
+            DataBitfield = dataBitfield,
+            DataField10 = dataField10 ?? Array.Empty<byte>(),
+            DataProtoJson = dataProtoJson,
+            AppProtoJson = appProtoJson,
             RoutingError = routingError,
             AppPayload = payload,
         };

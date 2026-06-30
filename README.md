@@ -7,7 +7,7 @@ and performs LoRa demodulation/modulation in software on the host CPU. It
 decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-Current release line: **v0.9.9**
+Current release line: **v1.0.0**
 
 <img width="1386" height="993" alt="image" src="https://github.com/user-attachments/assets/108e4d84-f767-44c0-a9bb-2750e67c33d7" />
 
@@ -97,8 +97,24 @@ Notes:
 
 - Native runtime DLLs are vendored under `third_party/` and copied next to app
   outputs.
+- Meshtastic protobuf schemas are linked via git submodule at
+  `third_party/meshtastic_protobufs`.
 - Default development flow expects native `RelWithDebInfo` for practical SDR
   throughput.
+
+### Submodules
+
+Initialize linked dependencies after clone:
+
+```powershell
+git submodule update --init --recursive
+```
+
+Update Meshtastic protobuf schemas later:
+
+```powershell
+git submodule update --remote -- third_party/meshtastic_protobufs
+```
 
 ## Build
 
@@ -177,6 +193,7 @@ The release bundle includes:
 | `tests/managed/` | Managed unit tests |
 | `tests/native/` | Native unit tests |
 | `scripts/` | Utility and release scripts |
+| `third_party/meshtastic_protobufs/` | Meshtastic protobuf schema submodule |
 | `third_party/hackrf/` | Vendored HackRF runtime bits |
 | `third_party/rtlsdr/` | Vendored RTL-SDR runtime bits |
 

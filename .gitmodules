@@ -1,0 +1,4 @@
+[submodule "meshtastic-protobufs"]
+	path = third_party/meshtastic_protobufs
+	url = https://github.com/meshtastic/protobufs.git
+	shallow = true

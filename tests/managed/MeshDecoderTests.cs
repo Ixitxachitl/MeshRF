@@ -218,6 +218,56 @@ public class MeshDecoderTests
     }
 
     [Fact]
+    public void DecodesDataField10MetadataBytes()
+    {
+        const uint from = 0xF1B87EB8u;
+        const uint id = 0xD636B378u;
+
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "MediumFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+
+        // Telemetry payload (27 B) from the captured packet.
+        byte[] appPayload = Convert.FromHexString("0D0803446A1214085B150E2D82401D00000000255CFC4F3C28F90A");
+
+        // Example field 10 blob (64 B) from captured long duplicate.
+        byte[] field10 = Convert.FromHexString("6D0870E179D0291051182175C4483EE06CFCF68782B5A9B2F8EE61BC0D4C8021D256BB405F7346181D2BCC7725F838F67622D3629CC1BF5326CB43FFE181220E");
+
+        var data = new List<byte>
+        {
+            0x08, 67,                     // field 1: portnum=Telemetry
+            0x12, (byte)appPayload.Length // field 2: payload
+        };
+        data.AddRange(appPayload);
+        data.Add(0x48); // field 9, varint
+        data.Add(0x01); // ok_to_mqtt = true
+        data.Add(0x52); // field 10, len
+        data.Add((byte)field10.Length);
+        data.AddRange(field10);
+
+        var cipher = MeshCrypto.Ctr(data.ToArray(), ChannelConfig.DefaultPsk, from, id);
+        var frame = new byte[MeshHeader.Size + cipher.Length];
+        frame[0] = frame[1] = frame[2] = frame[3] = 0xFF;
+        BitConverter.GetBytes(from).CopyTo(frame, 4);
+        BitConverter.GetBytes(id).CopyTo(frame, 8);
+        frame[12] = 0xE7;         // hopStart=7, hopLimit=7
+        frame[13] = channel.Hash; // 0x1F for MediumFast/default key
+        cipher.CopyTo(frame, MeshHeader.Size);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.Telemetry, result!.Port);
+        Assert.Equal(appPayload, result.AppPayload);
+        Assert.True(result.OkToMqtt);
+        Assert.Equal(field10, result.DataField10);
+    }
+
+    [Fact]
     public void DecodesNodeInfoRoleRouter()
     {
         const uint from = 0x1A2B3C4Du;

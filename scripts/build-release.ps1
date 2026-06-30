@@ -28,6 +28,12 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $repoRoot
 
+# --- Preflight: ensure linked protobuf schemas are present --------------
+$protoSentinel = Join-Path $repoRoot 'third_party/meshtastic_protobufs/meshtastic/mesh.proto'
+if (-not (Test-Path $protoSentinel)) {
+    throw 'Missing Meshtastic protobuf schema files in third_party/meshtastic_protobufs. Initialize submodules with: git submodule update --init --recursive'
+}
+
 # --- Resolve tools -------------------------------------------------------
 function Resolve-Cmake {
     $cmd = Get-Command cmake -ErrorAction SilentlyContinue

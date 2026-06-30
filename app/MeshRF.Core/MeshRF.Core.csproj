@@ -15,7 +15,25 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+    <PackageReference Include="Grpc.Tools" Version="2.67.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\..\third_party\meshtastic_protobufs\meshtastic\*.proto"
+              ProtoRoot="..\..\third_party\meshtastic_protobufs"
+              GrpcServices="None" />
+    <Protobuf Include="..\..\third_party\meshtastic_protobufs\nanopb.proto"
+              ProtoRoot="..\..\third_party\meshtastic_protobufs"
+              GrpcServices="None" />
+  </ItemGroup>
+
+  <Target Name="EnsureMeshtasticProtobufSubmodule"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!Exists('..\..\third_party\meshtastic_protobufs\meshtastic\mesh.proto')"
+           Text="Missing Meshtastic protobuf schema files in third_party/meshtastic_protobufs. Initialize submodules with: git submodule update --init --recursive" />
+  </Target>
 
 </Project>
