@@ -485,12 +485,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private object? _selectedTab;
 
     private int _lastSelectedChannelIndex = -1;
+    private ChannelViewModel? _lastSelectedChannel;
+    private object? _previousTab;
 
     /// <summary>Most recently selected channel index, used as fallback when closing DM tabs.</summary>
     public int LastSelectedChannelIndex => _lastSelectedChannelIndex;
 
     /// <summary>The selected tab when it is a channel (null for DM tabs).</summary>
     public ChannelViewModel? SelectedChannel => SelectedTab as ChannelViewModel;
+
+    partial void OnSelectedTabChanging(object? value)
+    {
+        // Capture the current tab as "previous" before the switch happens,
+        // so CloseTab can return to it (works for both channels and DMs).
+        if (SelectedTab is not null && !ReferenceEquals(SelectedTab, value))
+            _previousTab = SelectedTab;
+    }
 
     partial void OnSelectedTabChanged(object? value)
     {
@@ -500,6 +510,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (value is ChannelViewModel channel)
         {
             _lastSelectedChannelIndex = channel.Config.Index;
+            _lastSelectedChannel = channel;
             OnPropertyChanged(nameof(LastSelectedChannelIndex));
         }
 
@@ -2441,6 +2452,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var msg = messages[i];
             if (msg.PacketId != replyId) continue;
             msg.AddReaction(glyph, NodeDisplayName(fromNode));
+            // Fire a Replace notification on the last item so the AutoScroll
+            // behavior sees the content-height change and scrolls to bottom.
+            if (i == messages.Count - 1)
+                messages[i] = msg;
             return true;
         }
 
@@ -3620,15 +3635,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (tab is ConversationViewModel convo)
         {
-            int idx = Tabs.IndexOf(convo);
-            Tabs.Remove(convo);
             if (ReferenceEquals(SelectedTab, convo))
             {
-                var preferredChannel = Channels.FirstOrDefault(c =>
-                    c.Config.Index == _lastSelectedChannelIndex);
-                SelectedTab = preferredChannel
-                    ?? (Tabs.Count > 0 ? Tabs[Math.Min(idx, Tabs.Count - 1)] : null);
+                // Switch BEFORE removing so TabControl never auto-selects.
+                // Prefer the tab we were on before opening this DM (could be
+                // a channel or another DM); fall back to last known channel.
+                var restoreTo = _previousTab is not null
+                                && !ReferenceEquals(_previousTab, convo)
+                                && Tabs.Contains(_previousTab)
+                    ? _previousTab
+                    : (object?)(_lastSelectedChannel ?? Channels.FirstOrDefault());
+                if (restoreTo is not null)
+                    SelectedTab = restoreTo;
             }
+            Tabs.Remove(convo);
             // Closing a DM tab means it should not reopen next launch.
             SaveSettings();
         }
