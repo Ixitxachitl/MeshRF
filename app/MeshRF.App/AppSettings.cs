@@ -214,6 +214,9 @@ public sealed class AppSettings
     /// <summary>Width of the frozen last-packet popup in device-independent pixels.</summary>
     public double? LastPacketPanelWidth { get; set; }
 
+    /// <summary>Whether the frozen last-packet panel is expanded.</summary>
+    public bool LastPacketExpanded { get; set; } = true;
+
     /// <summary>Messages panel star height above the log.</summary>
     public double? MessagesTopPaneStar { get; set; }
 

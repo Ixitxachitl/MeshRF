@@ -54,6 +54,8 @@ public partial class MainWindow : Window
     private long _wfAccumFrames;
     private bool _layoutApplied;
     private int _snapshotInFlight;
+    private bool _lastPacketExpanded = true;
+    private GridLength _lastPacketSavedHeight = new GridLength(84);
     private double? _conversationMessagesPaneStar;
     private double? _conversationRightPaneStar;
     private double? _conversationTelemetryPaneStar;
@@ -228,9 +230,40 @@ public partial class MainWindow : Window
     // far end of the ring and risks the preamble scrolling out.
     private void OnPacketDecoded()
     {
+        if (!_lastPacketExpanded) return;
         if (System.Threading.Interlocked.Exchange(ref _snapshotInFlight, 1) != 0)
             return;
         _ = FreezeLastPacketAsync();
+    }
+
+    private void OnLastPacketToggle(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        ApplyLastPacketExpandedState(!_lastPacketExpanded, persist: true);
+    }
+
+    private void ApplyLastPacketExpandedState(bool expanded, bool persist)
+    {
+        _lastPacketExpanded = expanded;
+        if (_lastPacketExpanded)
+        {
+            LastPacket.Visibility = Visibility.Visible;
+            LastPacketRow.Height = _lastPacketSavedHeight;
+            LastPacketRow.MinHeight = 64;
+            LastPacketToggleIcon.Text = "▼";
+        }
+        else
+        {
+            _lastPacketSavedHeight = LastPacketRow.Height;
+            LastPacketRow.Height = GridLength.Auto;
+            LastPacketRow.MinHeight = 0;
+            LastPacket.Visibility = Visibility.Collapsed;
+            LastPacketToggleIcon.Text = "▶";
+        }
+
+        if (!persist) return;
+        var settings = AppSettings.Load();
+        settings.LastPacketExpanded = _lastPacketExpanded;
+        settings.Save();
     }
 
     // Double-clicking a node row opens (or focuses) a DM conversation tab.
@@ -965,7 +998,6 @@ public partial class MainWindow : Window
             int nTime = Math.Max(2048, (int)Math.Ceiling((maxSamples - kFft) / kHop) + 1);
             nTime = Math.Min(nTime, 16384); // Cap at 16K to avoid huge allocations
 
-            // Pull spectrogram and compute contrast off the UI thread.
             (int rows, float[] grid, double floor, double ceil) PullAndComputeContrast()
             {
                 var grid = new float[nTime * nFreq];
@@ -1011,7 +1043,6 @@ public partial class MainWindow : Window
                 return;
             }
 
-            int sampleCount = rows * nFreq;
             LastPacket.FloorDb = floor;
             LastPacket.CeilDb = ceil;
             LastPacket.Colormap = ParseColormap(vm.WaterfallColormap);
@@ -1160,6 +1191,7 @@ public partial class MainWindow : Window
         ApplyNodesGridSort(settings);
 
         IdentityExpander.IsExpanded = settings.IdentityExpanded;
+        ApplyLastPacketExpandedState(settings.LastPacketExpanded, persist: false);
         RestoreSelectedTab(settings);
         Map.LoadFromSettings(settings);
         ApplyConversationPaneLayoutToCurrentTab();
@@ -1304,6 +1336,7 @@ public partial class MainWindow : Window
         settings.NodeColumnDisplayOrder = SaveNodesColumnDisplayOrder();
 
         settings.IdentityExpanded = IdentityExpander.IsExpanded;
+        settings.LastPacketExpanded = _lastPacketExpanded;
 
         settings.SelectedChannelIndex = -1;
         settings.SelectedConversationNode = 0;

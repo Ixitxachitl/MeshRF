@@ -1215,7 +1215,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="22" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="84" MinHeight="64" />
+                        <RowDefinition x:Name="LastPacketRow" Height="84" MinHeight="64" />
                     </Grid.RowDefinitions>
 
                     <views:FrequencyAxis Grid.Row="0"
@@ -1237,13 +1237,24 @@
                             BorderBrush="{DynamicResource BrushPanelBorder}"
                             BorderThickness="1">
                         <DockPanel>
-                            <TextBlock x:Name="LastPacketTitle"
-                                       DockPanel.Dock="Top"
-                                       Margin="4,2,2,2"
-                                       Text="Last packet"
-                                       Foreground="#F0F0F0"
-                                       FontWeight="SemiBold" FontSize="11"
-                                       VerticalAlignment="Center" />
+                            <DockPanel DockPanel.Dock="Top"
+                                       Cursor="Hand"
+                                       Background="Transparent"
+                                       MouseLeftButtonUp="OnLastPacketToggle">
+                                <TextBlock x:Name="LastPacketToggleIcon"
+                                           DockPanel.Dock="Right"
+                                           Margin="4,0,4,0"
+                                           Text="&#x25BC;"
+                                           Foreground="#888888"
+                                           FontSize="8"
+                                           VerticalAlignment="Center" />
+                                <TextBlock x:Name="LastPacketTitle"
+                                           Margin="4,2,2,2"
+                                           Text="Last packet"
+                                           Foreground="#F0F0F0"
+                                           FontWeight="SemiBold" FontSize="11"
+                                           VerticalAlignment="Center" />
+                            </DockPanel>
                             <views:WaterfallView x:Name="LastPacket"
                                                  AutoLevels="True"
                                                  SmoothPixels="True"
@@ -1910,7 +1921,7 @@
                         </DockPanel>
                         <ListBox ItemsSource="{Binding LogLines}"
                                  FontFamily="Consolas"
-                                 ScrollViewer.CanContentScroll="False"
+                                 ScrollViewer.CanContentScroll="True"
                                  VirtualizingPanel.ScrollUnit="Pixel"
                                  beh:AutoScroll.IsEnabled="True">
                             <ListBox.ItemTemplate>

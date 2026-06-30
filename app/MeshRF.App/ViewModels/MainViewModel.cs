@@ -675,6 +675,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly CancellationTokenSource _pkcDecodeCts = new();
     private const int MaxQueuedPkcDecodes = 256;
 
+    // Dedicated async DB writer for receive-path node/waypoint writes.
+    // Uses its own SQLite connections so UI-thread store instances never
+    // execute cross-thread, while expensive writes are removed from the 10 Hz
+    // stats tick critical path.
+    private readonly Channel<Action<NodeStore, WaypointStore>> _dbWriteQueue;
+    private readonly CancellationTokenSource _dbWriteCts = new();
+    private readonly NodeStore _dbWriteNodeStore;
+    private readonly WaypointStore _dbWriteWaypointStore;
+    private readonly Task _dbWriteWorkerTask;
+    private const int MaxQueuedDbWrites = 1024;
+
     private sealed record PkcDecodeWorkItem(
         byte[] Frame,
         MeshHeader Header,
@@ -1357,6 +1368,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             FullMode = BoundedChannelFullMode.Wait,
         });
         _ = Task.Run(RunPkcDecodeWorkerAsync);
+
+        _dbWriteNodeStore = new NodeStore(NodeStore.DefaultPath);
+        _dbWriteWaypointStore = new WaypointStore(NodeStore.DefaultPath);
+        _dbWriteQueue = Channel.CreateBounded<Action<NodeStore, WaypointStore>>(new BoundedChannelOptions(MaxQueuedDbWrites)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+        _dbWriteWorkerTask = Task.Run(RunDbWriteWorkerAsync);
 
         _nodesViewRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -5867,6 +5888,51 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void EnqueueDbWrite(Action<NodeStore, WaypointStore> write)
+    {
+        if (_dbWriteCts.IsCancellationRequested) return;
+        if (_dbWriteQueue.Writer.TryWrite(write))
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _dbWriteQueue.Writer.WriteAsync(write, _dbWriteCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown path.
+            }
+        });
+    }
+
+    private async Task RunDbWriteWorkerAsync()
+    {
+        try
+        {
+            var reader = _dbWriteQueue.Reader;
+            while (await reader.WaitToReadAsync(_dbWriteCts.Token).ConfigureAwait(false))
+            {
+                while (reader.TryRead(out var write))
+                {
+                    try
+                    {
+                        write(_dbWriteNodeStore, _dbWriteWaypointStore);
+                    }
+                    catch
+                    {
+                        // Best-effort: write failures should not block RX/UI.
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
+    }
+
     private void ApplyDecodedPayloadResult(
         byte[] frame,
         MeshHeader header,
@@ -5883,15 +5949,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // key-bearing NodeInfo doesn't do two SQLite writes on the UI tick.
         if (!nodeInfoRecord)
         {
-            try
-            {
-                _nodeStore.RecordSighting(header.From,
+            EnqueueDbWrite((nodes, _) =>
+                nodes.RecordSighting(header.From,
                     rssiDbm: packetRssiDbm,
                     snrDb: snrDb,
                     hopsAway: hopsAway,
-                    seenViaMqtt: header.ViaMqtt);
-            }
-            catch { /* DB best-effort */ }
+                    seenViaMqtt: header.ViaMqtt));
         }
 
         uint normalizedReplyId = 0;
@@ -5908,13 +5971,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!RememberUndecodedPacket(header))
             {
                 CancelPendingRelay(header.From, header.PacketId);
-                Log($"  (dup) rx undecoded from {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2}) [hint: {BuildPacketHint(header, result)}]");
+                Log($"  (dup) rx undecoded from {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2})");
                 MarkNodeDirty(header.From);
                 return;
             }
 
             RelayIfEligible(frame, header, result);
-            Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2}) [hint: {BuildPacketHint(header, result)}]");
+            Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
             MarkNodeDirty(header.From);
             return;
         }
@@ -5953,7 +6016,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CancelPendingRelay(header.From, header.PacketId);
             // Still refresh the sighting timestamp (done above), but don't echo.
             MarkNodeDirty(header.From);
-            Log($"  (dup) {header.FromId} pkt {header.PacketId:x8} [hint: {BuildPacketHint(header, result)}]");
+            Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
             return;
         }
 
@@ -6150,7 +6213,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             && !string.Equals(existingNode!.PublicKey, newKeyHex,
                                                StringComparison.OrdinalIgnoreCase);
 
-                        _nodeStore.Upsert(new NodeRecord
+                        var nodeInfoUpsert = new NodeRecord
                         {
                             NodeNum = header.From,
                             UserId = string.IsNullOrEmpty(result.User.Id) ? header.FromId : result.User.Id,
@@ -6170,7 +6233,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             RssiDbm = packetRssiDbm,
                             SnrDb = snrDb,
                             HopsAway = hopsAway,
-                        });
+                        };
+                        EnqueueDbWrite((nodes, _) => nodes.Upsert(nodeInfoUpsert));
 
                         _pkcSenderPublicKeyBytes.Remove(header.From);
 
@@ -6232,22 +6296,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         // Sighting telemetry (last-heard/RSSI/SNR) was already
                         // recorded earlier for this packet; only persist
                         // coordinates when they actually changed.
-                        _nodeStore.Upsert(new NodeRecord
+                        var positionUpsert = new NodeRecord
                         {
                             NodeNum = header.From,
                             Latitude = result.Position.Latitude,
                             Longitude = result.Position.Longitude,
                             AltitudeM = result.Position.AltitudeM,
+                        };
+                        var positionTimestamp = DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime;
+                        EnqueueDbWrite((nodes, _) =>
+                        {
+                            nodes.Upsert(positionUpsert);
+                            nodes.AddLocationHistory(
+                                header.From,
+                                positionTimestamp,
+                                result.Position.Latitude,
+                                result.Position.Longitude,
+                                result.Position.AltitudeM);
                         });
-                        _nodeStore.AddLocationHistory(
-                            header.From,
-                            DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime,
-                            result.Position.Latitude,
-                            result.Position.Longitude,
-                            result.Position.AltitudeM);
                     }
                     if (positionChanged)
-                        _nodeLocationHistoryCounts[header.From] = _nodeStore.LocationHistoryCount(header.From);
+                        _nodeLocationHistoryCounts[header.From] = _nodeLocationHistoryCounts.TryGetValue(header.From, out int count)
+                            ? count + 1
+                            : 1;
                     if (positionChanged)
                         Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
                     // Android's "exchange position" can include coordinates while
@@ -6266,7 +6337,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         // Some senders omit waypoint id (0). Use packet id as
                         // a stable fallback key per sender.
                         uint waypointId = wp.Id != 0 ? wp.Id : header.PacketId;
-                        _waypointStore.Upsert(new WaypointRecord
+                        var waypointRecord = new WaypointRecord
                         {
                             FromNode = header.From,
                             WaypointId = waypointId,
@@ -6280,9 +6351,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             ExpireEpoch = wp.ExpireEpoch,
                             LockedTo = wp.LockedTo,
                             RxEpoch = rxEpoch,
-                        });
-                        ReloadWaypoints();
-                        _waypointsDirty = false;
+                        };
+                        EnqueueDbWrite((_, waypoints) => waypoints.Upsert(waypointRecord));
+                        _waypointsDirty = true;
                         Log($"  waypoint {header.FromId}: {wp.Latitude:F5}, {wp.Longitude:F5}  {wp.Name}");
                     }
                     break;
@@ -6299,7 +6370,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     }
                     nodeChanged = true;
                     var t = result.Telemetry;
-                    _nodeStore.Upsert(new NodeRecord
+                    var telemetryUpsert = new NodeRecord
                     {
                         NodeNum = header.From,
                         LastHeardEpoch = rxEpoch,
@@ -6314,7 +6385,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         BarometricPressureHpa = t.BarometricPressureHpa,
                         GasResistanceMohm = t.GasResistanceMohm,
                         Iaq = t.Iaq,
-                    });
+                    };
+                    EnqueueDbWrite((nodes, _) => nodes.Upsert(telemetryUpsert));
                     PersistTelemetryHistory(header.From, rxEpoch, t);
                     if (t.HasEnvironmentMetrics)
                     {
@@ -6343,33 +6415,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
     }
 
-    private static string BuildPacketHint(MeshHeader header, MeshDecodeResult? result)
-    {
-        string delivery = header.IsBroadcast ? "broadcast" : "direct";
-        if (result is null)
-            return $"encrypted or unknown packet ({delivery}, chan hash {header.ChannelHash:X2})";
-
-        string channel = string.IsNullOrWhiteSpace(result.ChannelName)
-            ? "unknown-channel"
-            : result.ChannelName;
-
-        if (result.Port == PortNum.TextMessage)
-        {
-            if (result.ReplyId != 0 && result.Emoji != 0)
-                return $"text reaction on {channel} ({delivery})";
-            if (result.ReplyId != 0)
-                return $"reply-linked text on {channel} ({delivery})";
-            return $"text message on {channel} ({delivery})";
-        }
-
-        if (result.Port == PortNum.Routing)
-            return result.RoutingError == 0
-                ? $"routing ACK on {channel} ({delivery})"
-                : $"routing NAK ({result.RoutingError}) on {channel} ({delivery})";
-
-        return $"{result.Port} on {channel} ({delivery})";
-    }
-
     private void PersistTelemetryHistory(uint nodeNum, long rxEpoch, MeshTelemetry telemetry)
     {
         if (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics)
@@ -6383,9 +6428,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _ => string.Empty,
         };
         string signature = BuildTelemetryHistorySignature(telemetry);
-        var lastSignature = _nodeStore.LatestTelemetrySignature(nodeNum, kind);
-        if (string.Equals(lastSignature, signature, StringComparison.Ordinal))
-            return;
 
         DateTime timestampUtc = rxEpoch > 0
             ? DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime
@@ -6407,12 +6449,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             telemetry.HasEnvironmentMetrics ? telemetry.Iaq : null,
             signature);
 
-        long id = _nodeStore.AddTelemetryHistory(record);
-        var withId = record with { Id = id };
+        EnqueueDbWrite((nodes, waypoints) =>
+        {
+            var lastSignature = nodes.LatestTelemetrySignature(nodeNum, kind);
+            if (string.Equals(lastSignature, signature, StringComparison.Ordinal))
+                return;
 
-        foreach (var convo in Tabs.OfType<ConversationViewModel>())
-            if (convo.NodeNum == nodeNum)
-            convo.AppendTelemetryHistoryRecord(withId);
+            long id = nodes.AddTelemetryHistory(record);
+            var withId = record with { Id = id };
+            _ = _uiDispatcher.InvokeAsync(() =>
+            {
+                foreach (var convo in Tabs.OfType<ConversationViewModel>())
+                    if (convo.NodeNum == nodeNum)
+                        convo.AppendTelemetryHistoryRecord(withId);
+            }, DispatcherPriority.Background);
+        });
     }
 
     private static string BuildTelemetryHistorySignature(MeshTelemetry telemetry)
@@ -6715,7 +6766,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var ev = _core.PullEvent();
             if (ev is null) break;
             var nowUtc = DateTime.UtcNow;
-            Log(ev);
+            if (!IsHighRateDemodEvent(ev))
+                Log(CompactDemodEventForUi(ev));
             TrackAirtimeFromEvent(ev);
             // A "preamble: ..." line marks the start of a received frame; grab
             // its peak-above-noise as the SNR for the payload that follows.
@@ -6833,6 +6885,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return m.Success && m.Groups["status"].Success &&
                m.Groups["status"].Value == "OK";
     }
+
+    // Large payload hex strings are expensive to render in the live log and
+    // can stall the UI at end-of-frame. Keep full payload capture in
+    // RecordPayloadIfActive(ev) but compact what we display.
+    private static string CompactDemodEventForUi(string ev)
+    {
+        if (!ev.StartsWith("payload", StringComparison.Ordinal))
+            return ev;
+
+        var m = PayloadLineRegex.Match(ev);
+        if (!m.Success)
+            return ev;
+
+        string status = m.Groups["status"].Success ? m.Groups["status"].Value : "?";
+        string hex = m.Groups["hex"].Success ? m.Groups["hex"].Value : string.Empty;
+        int byteCount = hex.Length / 2;
+
+        string preview = hex.Length <= 24
+            ? hex
+            : $"{hex.AsSpan(0, 12).ToString()}..{hex.AsSpan(hex.Length - 8).ToString()}";
+
+        return $"payload {status} ({byteCount} B) {preview}";
+    }
+
+    // Preamble/payload lines arrive at high cadence and include large payload
+    // strings; pushing each one through ObservableCollection->ListBox causes
+    // measurable UI jank during bursts. Keep decode/recording paths intact and
+    // suppress only these raw demod lines from the live log view.
+    private static bool IsHighRateDemodEvent(string ev) =>
+        ev.StartsWith("preamble", StringComparison.Ordinal) ||
+        ev.StartsWith("payload", StringComparison.Ordinal);
 
     /// <summary>Raised on the UI thread when the demodulator detects a packet
     /// (preamble). The View captures a spectrogram snapshot around it.</summary>
@@ -7176,6 +7259,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         StopPayloadRecording();
+        _dbWriteQueue.Writer.TryComplete();
+        _dbWriteCts.Cancel();
+        try { _dbWriteWorkerTask.Wait(200); } catch { }
+        _dbWriteCts.Dispose();
         _pkcDecodeQueue.Writer.TryComplete();
         _pkcDecodeCts.Cancel();
         _pkcDecodeCts.Dispose();
@@ -7186,6 +7273,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _gpsService.FixReceived -= HandleGpsFixReceived;
         _gpsService.Dispose();
         _core.Dispose();
+        _dbWriteNodeStore.Dispose();
+        _dbWriteWaypointStore.Dispose();
         _nodeStore.Dispose();
         _waypointStore.Dispose();
         _channelStore.Dispose();
