@@ -8,6 +8,7 @@ using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -5040,15 +5041,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 : $"  NAK ({RoutingErrorName(result.RoutingError)}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
             return;
         }
-
-        var target = header.IsBroadcast
-            ? "^all"
-            : addressedToUs ? "us" : NodeDisplayName(header.To);
-        Log(ack
-            ? $"  routing ACK {NodeDisplayName(header.From)} -> {target}"
-                + (result.RequestId != 0 ? $" for id {result.RequestId:x8}" : string.Empty)
-            : $"  routing NAK ({RoutingErrorName(result.RoutingError)}) {NodeDisplayName(header.From)} -> {target}"
-                + (result.RequestId != 0 ? $" for id {result.RequestId:x8}" : string.Empty));
     }
 
     private static string RoutingErrorName(int error) => error switch
@@ -6007,8 +5999,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         float? packetRssiDbm,
         byte hopsAway)
     {
-        Log($"  from={header.FromId}  to=!{header.To:x8}  id={header.PacketId:x8}  chanHash=0x{header.ChannelHash:X2}  hopLimit={header.HopLimit}  hopStart={header.HopStart}");
-
         bool nodeInfoRecord = result is { Port: PortNum.NodeInfo, User: not null } && result.AppPayload.Length != 0;
 
         // Always record the sender sighting (RSSI/last-heard), decoded or not.
@@ -6098,6 +6088,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         bool nodeChanged = false;
         var senderName = NodeDisplayName(header.From);
         bool senderIgnored = IsNodeIgnored(header.From);
+        Log(BuildDecodedPortSummary(header, result, senderName));
         switch (result.Port)
             {
                 case PortNum.TextMessage:
@@ -6110,20 +6101,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     {
                         if (_myNodeNum != 0 && !header.IsBroadcast && header.To == _myNodeNum)
                         {
-                            Log(isReaction
-                                ? $"  DM reaction from {senderName}: {ResolveReactionGlyph(result.Text, result.Emoji)}"
-                                : isReplyLinkedNonReaction
-                                    ? $"  DM reply from {senderName}: {record.Text}"
-                                    : $"  DM from {senderName}: {record.Text}");
                             if (header.WantAck) SendAck(header, result);
-                        }
-                        else
-                        {
-                            Log(isReaction
-                                ? $"  [{result.ChannelName}] {senderName} reacted {ResolveReactionGlyph(result.Text, result.Emoji)}"
-                                : isReplyLinkedNonReaction
-                                    ? $"  [{result.ChannelName}] {senderName} replied: {record.Text}"
-                                    : $"  [{result.ChannelName}] {senderName}: {record.Text}");
                         }
                         break;
                     }
@@ -6151,16 +6129,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 convo.Add(BuildStandaloneReactionMessage(record));
                                 MarkTabNeedsAttention(convo);
                             }
-                            Log(applied
-                                ? $"  DM reaction from {senderName}: {ResolveReactionGlyph(result.Text, result.Emoji)}"
-                                : $"  DM reaction from {senderName}: target id {reactionTargetId:x8} not found");
                         }
                         else if (isReplyLinkedNonReaction)
                         {
                             if (existed)
                                 convo.Add(BuildReplyLinkedMessage(record, convo.Messages));
                             MarkTabNeedsAttention(convo);
-                            Log($"  DM reply from {senderName}: {record.Text}");
                         }
                         else if (existed)
                             convo.Add(new ChannelMessage
@@ -6176,7 +6150,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         if (!isReaction && !isReplyLinkedNonReaction)
                         {
                             MarkTabNeedsAttention(convo);
-                            Log($"  DM from {senderName}: {record.Text}");
                         }
                         // Acknowledge if the sender asked for one (firmware does
                         // this for any unicast packet addressed to it).
@@ -6207,9 +6180,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                     chanVm.Messages.RemoveAt(0);
                                 MarkTabNeedsAttention(chanVm);
                             }
-                            Log(applied
-                                ? $"  [{result.ChannelName}] {senderName} reacted {ResolveReactionGlyph(result.Text, result.Emoji)}"
-                                : $"  [{result.ChannelName}] {senderName} reaction target {reactionTargetId:x8} not found");
                             shouldRing = chanVm?.MuteRtttl != true;
                         }
                         else if (isReplyLinkedNonReaction)
@@ -6221,7 +6191,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                     chanVm.Messages.RemoveAt(0);
                                 MarkTabNeedsAttention(chanVm);
                             }
-                            Log($"  [{result.ChannelName}] {senderName} replied: {record.Text}");
                             shouldRing = chanVm?.MuteRtttl != true;
                         }
                         else
@@ -6239,7 +6208,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             MarkTabNeedsAttention(chanVm);
                             if (chanVm is not null && chanVm.Messages.Count > 1000)
                                 chanVm.Messages.RemoveAt(0);
-                            Log($"  [{result.ChannelName}] {senderName}: {record.Text}");
                             shouldRing = !senderIgnored && chanVm?.MuteRtttl != true;
                         }
 
@@ -6313,10 +6281,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         if (keyMismatch)
                             Log($"  nodeinfo {header.FromId}: KEY MISMATCH — public key changed; "
                                 + "keeping the old key. Right-click the node → Request new keys to accept it.");
-                        else
-                            Log($"  nodeinfo {header.FromId}: {result.User.LongName} ({result.User.ShortName})"
-                                + (string.IsNullOrEmpty(result.User.Role) ? string.Empty : $" role={result.User.Role}")
-                                + (newKeyHex.Length > 0 ? " [PKC key]" : string.Empty));
                     }
                     // If they directed a NodeInfo request at us (want_response),
                     // reply with ours so they learn our public key. Firmware does
@@ -6391,10 +6355,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         _nodeLocationHistoryCounts[header.From] = _nodeLocationHistoryCounts.TryGetValue(header.From, out int count)
                             ? count + 1
                             : 1;
-                    if (positionChanged)
-                        Log($"  position {header.FromId}: {result.Position.Latitude:F5}, {result.Position.Longitude:F5}");
-                    else
-                        Log($"  position {header.FromId}: unchanged ({result.Position.Latitude:F5}, {result.Position.Longitude:F5})");
                     // Android's "exchange position" can include coordinates while
                     // still setting want_response on a directed packet.
                     if (directedPositionResponseRequest)
@@ -6428,7 +6388,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         };
                         EnqueueDbWrite((_, waypoints) => waypoints.Upsert(waypointRecord));
                         _waypointsDirty = true;
-                        Log($"  waypoint {header.FromId}: {wp.Latitude:F5}, {wp.Longitude:F5}  {wp.Name}");
                     }
                     break;
                 case PortNum.Telemetry when result.Telemetry is not null:
@@ -6462,14 +6421,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     };
                     EnqueueDbWrite((nodes, _) => nodes.Upsert(telemetryUpsert));
                     PersistTelemetryHistory(header.From, rxEpoch, t);
-                    if (t.HasEnvironmentMetrics)
-                    {
-                        var temp = t.TemperatureC is float tempC ? FormatTemperature(tempC) : "n/a";
-                        var pressure = t.BarometricPressureHpa is float pressureHpa ? FormatPressure(pressureHpa) : "n/a";
-                        Log($"  telemetry {header.FromId}: {temp} {t.RelativeHumidityPct:F0}% {pressure}");
-                    }
-                    else
-                        Log($"  telemetry {header.FromId}: batt {t.BatteryLevel}% {t.Voltage:F2}V");
                     break;
                 case PortNum.Traceroute:
                     HandleTraceroute(header, result, snrDb);
@@ -6478,15 +6429,71 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     HandleNeighborInfo(header, result.NeighborInfo);
                     break;
                 case PortNum.StoreForward when result.StoreForward is not null:
-                    LogStoreForward(header, result.StoreForward);
                     break;
                 default:
-                    Log($"  [{result.ChannelName}] {header.FromId} {result.Port} ({result.AppPayload.Length} B)");
                     break;
             }
 
         MarkNodeDirty(header.From);
         if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
+    }
+
+    private string BuildDecodedPortSummary(MeshHeader header, MeshDecodeResult result, string senderName)
+    {
+        string prefix = $"  [{result.ChannelName}] {senderName} {result.Port}";
+        string size = $" ({result.AppPayload.Length} B)";
+        string meta = BuildDecodedMetaSuffix(result);
+
+        return result.Port switch
+        {
+            PortNum.TextMessage when result.ReplyId != 0 && result.Emoji != 0
+                => $"{prefix}: reaction {ResolveReactionGlyph(result.Text, result.Emoji)} -> {result.ReplyId:x8}{size}{meta}",
+
+            PortNum.TextMessage
+                => $"{prefix}: \"{TrimForReplyPreview(result.Text)}\"{size}{meta}",
+
+            PortNum.NodeInfo when result.User is not null
+                => $"{prefix}: user={result.User.LongName} ({result.User.ShortName}){size}{meta}",
+
+            PortNum.Position when result.Position is not null
+                => $"{prefix}: lat={result.Position.Latitude:F5} lon={result.Position.Longitude:F5}{size}{meta}",
+
+            PortNum.Waypoint when result.Waypoint is not null
+                => $"{prefix}: waypoint={result.Waypoint.Name} lat={result.Waypoint.Latitude:F5} lon={result.Waypoint.Longitude:F5}{size}{meta}",
+
+            PortNum.Telemetry when result.Telemetry is not null
+                => $"{prefix}: telemetry {(result.Telemetry.HasEnvironmentMetrics ? "env" : string.Empty)}{(result.Telemetry.HasDeviceMetrics ? "dev" : string.Empty)}{size}{meta}",
+
+            PortNum.Routing when result.RoutingError >= 0
+                => $"{prefix}: {(result.RoutingError == 0 ? "ACK" : $"NAK reason={RoutingErrorName(result.RoutingError)} ({result.RoutingError})")}{size}{meta}",
+
+            PortNum.Traceroute when result.RouteDiscovery is not null
+                => $"{prefix}: route={result.RouteDiscovery.Route.Count} back={result.RouteDiscovery.RouteBack.Count}{size}{meta}",
+
+            PortNum.NeighborInfo when result.NeighborInfo is not null
+                => $"{prefix}: node=!{result.NeighborInfo.NodeId:x8} neighbors={result.NeighborInfo.Neighbors.Count}{size}{meta}",
+
+            PortNum.StoreForward when result.StoreForward is not null
+                => $"{prefix}: type={result.StoreForward.Type}{size}{meta}",
+
+            _ => $"{prefix}: to={header.ToId}{size}{meta}",
+        };
+    }
+
+    private static string BuildDecodedMetaSuffix(MeshDecodeResult result)
+    {
+        var sb = new StringBuilder();
+        if (result.WantResponse) sb.Append(" want_response");
+        if (result.RequestId != 0) sb.Append($" req={result.RequestId:x8}");
+        if (result.ReplyId != 0) sb.Append($" reply={result.ReplyId:x8}");
+        if (result.Emoji != 0) sb.Append($" emoji=U+{result.Emoji:X}");
+        if (result.DataDest != 0) sb.Append($" data_dest=!{result.DataDest:x8}");
+        if (result.DataSource != 0) sb.Append($" data_src=!{result.DataSource:x8}");
+        if (result.DataBitfield != 0) sb.Append($" data_bf=0x{result.DataBitfield:X}");
+        if (result.DataField10.Length != 0) sb.Append($" sig={result.DataField10.Length}B");
+        if (!string.IsNullOrWhiteSpace(result.AppProtoJson)) sb.Append(" app_proto");
+        else if (!string.IsNullOrWhiteSpace(result.DataProtoJson)) sb.Append(" data_proto");
+        return sb.ToString();
     }
 
     private void PersistTelemetryHistory(uint nodeNum, long rxEpoch, MeshTelemetry telemetry)
