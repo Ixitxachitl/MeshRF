@@ -189,10 +189,13 @@
             </Grid>
         </Border>
 
-        <Border DockPanel.Dock="Top"
-            Background="{DynamicResource BrushPanelBackground}"
-            Padding="4,2">
-              <StackPanel Orientation="Horizontal">
+                <Border DockPanel.Dock="Top"
+                        Background="{DynamicResource BrushPanelBackground}"
+                        BorderBrush="{DynamicResource BrushPanelBorder}"
+                        BorderThickness="0"
+                        Padding="4,2">
+                            <Grid>
+                            <ToolBar HorizontalAlignment="Stretch">
                   <StackPanel
                         Orientation="Horizontal"
                         HorizontalAlignment="Left"
@@ -222,15 +225,17 @@
                           Text="{Binding VgaGainDb, StringFormat={}{0} dB}" />
 
                  <Separator />
-                 <CheckBox Content="AMP (+14 dB)"
-                         IsChecked="{Binding AmpEnable, Mode=TwoWay}"
-                         VerticalAlignment="Center"
-                         ToolTip="Enable HackRF front-end RF amplifier" />
+                 <ToggleButton Content="AMP (+14 dB)"
+                               Style="{StaticResource {x:Type ToggleButton}}"
+                           IsChecked="{Binding AmpEnable, Mode=TwoWay}"
+                           VerticalAlignment="Center"
+                           ToolTip="Enable HackRF front-end RF amplifier" />
                  <Separator />
-                 <CheckBox Content="AGC"
-                         IsChecked="{Binding AgcEnable, Mode=TwoWay}"
-                         VerticalAlignment="Center"
-                         ToolTip="Auto-Gain-Control: keep peak power near target by nudging LNA/VGA" />
+                 <ToggleButton Content="AGC"
+                               Style="{StaticResource {x:Type ToggleButton}}"
+                           IsChecked="{Binding AgcEnable, Mode=TwoWay}"
+                           VerticalAlignment="Center"
+                           ToolTip="Auto-Gain-Control: keep peak power near target by nudging LNA/VGA" />
                  <TextBlock Text="target" VerticalAlignment="Center" Margin="6,0,4,0" />
                  <Slider Width="90"
                         Minimum="-40" Maximum="-3"
@@ -261,15 +266,18 @@
                       Text="{Binding RtlGainDb, StringFormat={}{0} dB}" />
 
                  <Separator />
-                 <CheckBox Content="AGC"
-                     IsChecked="{Binding RtlAgcEnable, Mode=TwoWay}"
-                     VerticalAlignment="Center"
-                     ToolTip="Tuner automatic gain control (overrides the manual gain slider)" />
+                 <ToggleButton Content="AGC"
+                               Style="{StaticResource {x:Type ToggleButton}}"
+                               IsChecked="{Binding RtlAgcEnable, Mode=TwoWay}"
+                               VerticalAlignment="Center"
+                               ToolTip="Tuner automatic gain control (overrides the manual gain slider)" />
                  <Separator />
-                 <CheckBox Content="Bias-T"
-                     IsChecked="{Binding BiasTee, Mode=TwoWay}"
-                     VerticalAlignment="Center"
-                     ToolTip="Enable 5 V bias-T on the antenna port to power an external LNA/active antenna" />
+                 <ToggleButton Content="Bias-T"
+                               Style="{StaticResource {x:Type ToggleButton}}"
+                               IsChecked="{Binding BiasTee, Mode=TwoWay}"
+                               Margin="6,0,0,0"
+                               VerticalAlignment="Center"
+                               ToolTip="Enable 5 V bias-T on the antenna port to power an external LNA/active antenna" />
                   </StackPanel>
 
                       <Border Width="1"
@@ -296,12 +304,14 @@
                           Text="{Binding TxGainDb, StringFormat={}{0} dB}" />
 
                  <Separator />
-                 <CheckBox Content="AMP (+14 dB)"
-                         IsChecked="{Binding TxAmpEnable, Mode=TwoWay}"
-                         VerticalAlignment="Center"
-                         ToolTip="Enable the HackRF RF amplifier for transmit output" />
+                 <ToggleButton Content="AMP (+14 dB)"
+                               Style="{StaticResource {x:Type ToggleButton}}"
+                           IsChecked="{Binding TxAmpEnable, Mode=TwoWay}"
+                           VerticalAlignment="Center"
+                           ToolTip="Enable the HackRF RF amplifier for transmit output" />
               </StackPanel>
-              </StackPanel>
+              </ToolBar>
+              </Grid>
           </Border>
 
         <Border DockPanel.Dock="Top"
@@ -311,11 +321,6 @@
             Padding="4,2">
             <Grid>
             <ToolBar HorizontalAlignment="Stretch">
-                <CheckBox Content="DC block"
-                      IsChecked="{Binding DcBlockEnable, Mode=TwoWay}"
-                      VerticalAlignment="Center"
-                      ToolTip="IIR high-pass to remove the LO leakage spike at the tuned centre frequency. Leave on for normal use; disable only for diagnostics." />
-                <Separator />
                 <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,4,0" />
                 <ComboBox Width="90"
                       ItemsSource="{Binding Themes}"
@@ -365,37 +370,51 @@
                     ToolTip="Waterfall scroll speed in rows per second (time resolution). Higher = faster, finer time detail; does not affect frequency resolution." />
                 <TextBlock Width="48" VerticalAlignment="Center"
                        Text="{Binding WaterfallRowsPerSecond, StringFormat={}{0:F0}/s}" />
+                <Separator />
+                <ToggleButton Content="DC block"
+                              Style="{StaticResource {x:Type ToggleButton}}"
+                              IsChecked="{Binding DcBlockEnable, Mode=TwoWay}"
+                              VerticalAlignment="Center"
+                              ToolTip="IIR high-pass to remove the LO leakage spike at the tuned centre frequency. Leave on for normal use; disable only for diagnostics." />
             </ToolBar>
             </Grid>
         </Border>
 
-        <ToolBar DockPanel.Dock="Top">
+        <Border DockPanel.Dock="Top"
+            Background="{DynamicResource BrushPanelBackground}"
+            BorderBrush="{DynamicResource BrushPanelBorder}"
+            BorderThickness="0"
+            Padding="4,2">
+            <Grid>
+            <ToolBar HorizontalAlignment="Stretch">
             <TextBlock Text="Ringtone" VerticalAlignment="Center" Margin="0,0,4,0" />
             <ComboBox Width="100"
-                      ItemsSource="{Binding RingtoneModes}"
-                      SelectedItem="{Binding RingtoneMode, Mode=TwoWay}"
-                      ToolTip="How long the alert tone plays when a text message arrives" />
+                  ItemsSource="{Binding RingtoneModes}"
+                  SelectedItem="{Binding RingtoneMode, Mode=TwoWay}"
+                  ToolTip="How long the alert tone plays when a text message arrives" />
 
             <Separator />
             <TextBlock Text="Volume" VerticalAlignment="Center" Margin="0,0,4,0" />
             <Slider Width="120"
-                    Minimum="0" Maximum="100"
-                    TickFrequency="5" IsSnapToTickEnabled="False"
-                    Value="{Binding RingtoneVolume, Mode=TwoWay}"
-                    VerticalAlignment="Center" />
+                Minimum="0" Maximum="100"
+                TickFrequency="5" IsSnapToTickEnabled="False"
+                Value="{Binding RingtoneVolume, Mode=TwoWay}"
+                VerticalAlignment="Center" />
             <TextBlock Width="36" VerticalAlignment="Center"
-                       Text="{Binding RingtoneVolume, StringFormat={}{0:F0}%}" />
+                   Text="{Binding RingtoneVolume, StringFormat={}{0:F0}%}" />
 
             <Separator />
             <TextBlock Text="RTTTL" VerticalAlignment="Center" Margin="0,0,4,0" />
             <TextBox Width="600"
-                     Text="{Binding RingtoneRtttl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                     VerticalAlignment="Center"
-                     ToolTip="Ringtone in Meshtastic RTTTL format" />
-                <Button Content="Preview" Margin="4,0,0,0"
-                    Command="{Binding TestRingtoneCommand}"
-                    ToolTip="Preview the current ringtone" />
-        </ToolBar>
+                 Text="{Binding RingtoneRtttl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                 VerticalAlignment="Center"
+                 ToolTip="Ringtone in Meshtastic RTTTL format" />
+            <Button Content="Preview" Margin="4,0,0,0"
+                Command="{Binding TestRingtoneCommand}"
+                ToolTip="Preview the current ringtone" />
+            </ToolBar>
+            </Grid>
+        </Border>
 
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
