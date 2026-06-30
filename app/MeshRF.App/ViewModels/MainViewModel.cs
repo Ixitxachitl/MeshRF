@@ -1745,6 +1745,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ToArray();
         var mapChangedNodeNums = new List<uint>(changedNodeNums.Length);
         bool waypointTooltipsNeedRefresh = false;
+        List<uint>? retryNodeNums = null;
 
         foreach (var nodeNum in changedNodeNums)
         {
@@ -1753,7 +1754,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             // Apply the optimistic sighting overlay: the async DB write may not
             // have committed yet, so patch the fields we know are fresh.
-            if (_pendingNodeSightings.TryGetValue(nodeNum, out var pending))
+            bool hadPendingSighting = _pendingNodeSightings.TryGetValue(nodeNum, out var pending);
+            if (hadPendingSighting)
             {
                 if (latest is not null && pending.Epoch > latest.LastHeardEpoch)
                 {
@@ -1770,6 +1772,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (latest is null)
             {
+                // If a write was just enqueued for a genuinely new node, the read
+                // store may not see it yet. Schedule one retry so the node appears
+                // on the next stats tick once the background write commits.
+                if (hadPendingSighting && existing is null)
+                {
+                    (retryNodeNums ??= new List<uint>()).Add(nodeNum);
+                    continue;
+                }
                 if (existing is not null)
                     Nodes.Remove(existing);
                 _nodesByNum.Remove(nodeNum);
@@ -1839,6 +1849,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var nodeNum in changedNodeNums)
             _dirtyNodeNums.Remove(nodeNum);
+        // Re-queue new nodes whose write hadn't committed on first check.
+        if (retryNodeNums is not null)
+            foreach (var nodeNum in retryNodeNums)
+                _dirtyNodeNums.Add(nodeNum);
         RefreshNodesViewIfNeeded();
         if (mapChangedNodeNums.Count > 0)
             NodeMarkersChanged?.Invoke(mapChangedNodeNums);
