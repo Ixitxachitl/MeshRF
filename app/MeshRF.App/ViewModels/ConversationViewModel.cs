@@ -271,6 +271,13 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     {
         if (LocationHistory.Count == 0) return;
         _nodeStore?.ClearLocationHistory(NodeNum);
+        _nodeStore?.ClearNodeLocation(NodeNum);
+        if (Node is not null)
+        {
+            Node.Latitude  = null;
+            Node.Longitude = null;
+            Node.AltitudeM = null;
+        }
         LocationHistory.Clear();
         OnPropertyChanged(nameof(HasLocationHistory));
         _onLocationHistoryChanged?.Invoke(this);
@@ -281,9 +288,24 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
     {
         if (TelemetryHistory.Count == 0) return;
         _nodeStore?.ClearTelemetryHistory(NodeNum);
+        _nodeStore?.ClearNodeTelemetry(NodeNum);
+        if (Node is not null)
+        {
+            Node.BatteryPct             = null;
+            Node.VoltageV               = null;
+            Node.ChannelUtilPct         = null;
+            Node.AirUtilTxPct           = null;
+            Node.UptimeSeconds          = null;
+            Node.TemperatureC           = null;
+            Node.RelativeHumidityPct    = null;
+            Node.BarometricPressureHpa  = null;
+            Node.GasResistanceMohm      = null;
+            Node.Iaq                    = null;
+        }
         TelemetryHistory.Clear();
         DeviceTelemetryHistory.Clear();
         EnvironmentalTelemetryHistory.Clear();
+        RebuildTelemetry();
         OnPropertyChanged(nameof(HasTelemetryHistory));
     }
 

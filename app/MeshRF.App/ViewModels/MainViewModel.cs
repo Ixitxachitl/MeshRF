@@ -2840,6 +2840,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _nodeLocationHistoryCounts[convo.NodeNum] = convo.LocationHistory.Count;
         if (NodeLocationFilter == "Has position history (>1)")
             RefreshNodesFilter();
+
+        // NodeRecord is not INotifyPropertyChanged, so WPF never re-evaluates
+        // cell template bindings (e.g. the HasLocation icon) when properties
+        // change directly. Force a full CollectionView refresh to repaint all rows.
+        NodesView?.Refresh();
+
+        // Also refresh the map marker for this node.
+        var node = convo.Node;
+        if (node is not null && UpdateNodeMapStateSignature(convo.NodeNum, node))
+            NodeMarkersChanged?.Invoke(new[] { convo.NodeNum });
     }
 
     /// <summary>

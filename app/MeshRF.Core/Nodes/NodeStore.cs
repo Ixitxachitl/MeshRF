@@ -428,6 +428,20 @@ public sealed class NodeStore : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Wipe the stored position (lat/lon/alt) from the node row itself.</summary>
+    public void ClearNodeLocation(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE nodes
+            SET latitude = NULL, longitude = NULL, altitude_m = NULL
+            WHERE node_num = $n
+            """;
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.ExecuteNonQuery();
+    }
+
     public IReadOnlyList<NodeTelemetryHistoryRecord> TelemetryHistory(uint nodeNum, int limit = 500)
     {
         ThrowIfDisposed();
@@ -536,6 +550,25 @@ public sealed class NodeStore : IDisposable
         ThrowIfDisposed();
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = "DELETE FROM node_telemetry_history WHERE node_num = $n";
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Wipe all telemetry fields from the node row itself.</summary>
+    public void ClearNodeTelemetry(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE nodes
+            SET battery_pct = NULL, voltage_v = NULL,
+                channel_util_pct = NULL, air_util_tx_pct = NULL,
+                uptime_seconds = NULL,
+                temperature_c = NULL, relative_humidity_pct = NULL,
+                barometric_pressure_hpa = NULL, gas_resistance_mohm = NULL,
+                iaq = NULL
+            WHERE node_num = $n
+            """;
         cmd.Parameters.AddWithValue("$n", nodeNum);
         cmd.ExecuteNonQuery();
     }
