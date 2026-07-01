@@ -262,6 +262,7 @@ public partial class MapView : UserControl
         if (MapTileThemeCombo.SelectedItem is string theme)
         {
             _mapTileTheme = theme;
+            ThemeManager.SetMapTileTheme(theme);
             AttributionText.Text = CurrentTiles.Attribution;
             Render();
         }
@@ -2178,6 +2179,7 @@ public partial class MapView : UserControl
 
         _mapTileTheme = settings.MapTileTheme ?? "Auto";
         MapTileThemeCombo.SelectedItem = _mapTileTheme;
+        ThemeManager.SetMapTileTheme(_mapTileTheme);
         AttributionText.Text = CurrentTiles.Attribution;
 
         if (settings.MapCenterLat is double lat && settings.MapCenterLon is double lon

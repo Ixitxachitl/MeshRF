@@ -18,19 +18,41 @@ public partial class LocationHistoryWindow : Window
     private const int TileSize = 256;
     private const int MinZoom = 2;
     private const int MaxZoom = 18;
-    private readonly record struct TileProvider(string Id, string UrlTemplate, string Subdomains);
+    private readonly record struct TileProvider(
+        string Id, string UrlTemplate, string Subdomains,
+        double Brightness = 1.0, double Gamma = 1.0);
 
     private static readonly TileProvider LightTiles = new(
         "osm",
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         "abc");
 
+    private static readonly TileProvider LightCartoTiles = new(
+        "cartopositron",
+        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "abcd");
+
+    private static readonly TileProvider VoyagerTiles = new(
+        "cartovoyager",
+        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "abcd");
+
     private static readonly TileProvider DarkTiles = new(
         "cartodark",
         "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "abcd");
+        "abcd",
+        Gamma: 1.8);
 
-    private static TileProvider CurrentTiles => ThemeManager.IsDark ? DarkTiles : LightTiles;
+    private string _mapTileTheme = "Auto";
+
+    private TileProvider CurrentTiles => _mapTileTheme switch
+    {
+        "Light"         => LightTiles,
+        "Light (CARTO)" => LightCartoTiles,
+        "Voyager"       => VoyagerTiles,
+        "Dark"          => DarkTiles,
+        _               => ThemeManager.IsDark ? DarkTiles : LightTiles,
+    };
 
     private static readonly HttpClient s_http = CreateHttpClient();
     private static readonly string s_cacheDir = Path.Combine(
@@ -51,17 +73,20 @@ public partial class LocationHistoryWindow : Window
     {
         InitializeComponent();
         Directory.CreateDirectory(s_cacheDir);
+        _mapTileTheme = ThemeManager.MapTileTheme;
         ApplySavedLayout();
         _conversation = conversation;
         DataContext = conversation;
         Title = $"Location History - {conversation.TabHeader}";
         conversation.LocationHistory.CollectionChanged += LocationHistory_CollectionChanged;
         ThemeManager.ThemeChanged += OnThemeChanged;
+        ThemeManager.MapTileThemeChanged += OnMapTileThemeChanged;
         Closed += (_, _) =>
         {
             SaveLayout();
             conversation.LocationHistory.CollectionChanged -= LocationHistory_CollectionChanged;
             ThemeManager.ThemeChanged -= OnThemeChanged;
+            ThemeManager.MapTileThemeChanged -= OnMapTileThemeChanged;
         };
         FitMapToHistory();
     }
@@ -167,6 +192,12 @@ public partial class LocationHistoryWindow : Window
     }
 
     private void OnThemeChanged() => DrawMiniMap();
+
+    private void OnMapTileThemeChanged()
+    {
+        _mapTileTheme = ThemeManager.MapTileTheme;
+        DrawMiniMap();
+    }
 
     private void OnLocationHistoryChanged()
     {
@@ -343,8 +374,44 @@ public partial class LocationHistoryWindow : Window
         bitmap.StreamSource = stream;
         bitmap.EndInit();
         bitmap.Freeze();
-        s_memCache[key] = bitmap;
-        return bitmap;
+
+        BitmapSource result = (provider.Brightness == 1.0 && provider.Gamma == 1.0)
+            ? bitmap
+            : PostProcessTile(bitmap, provider.Brightness, provider.Gamma);
+        s_memCache[key] = result;
+        return result;
+    }
+
+    private static BitmapSource PostProcessTile(BitmapSource src, double brightness, double gamma)
+    {
+        var bgra = new System.Windows.Media.Imaging.FormatConvertedBitmap(
+            src, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+        int w = bgra.PixelWidth, h = bgra.PixelHeight;
+        int stride = w * 4;
+        var pixels = new byte[h * stride];
+        bgra.CopyPixels(pixels, stride, 0);
+
+        var lut = new byte[256];
+        double gammaInv = (gamma > 0.0 && gamma != 1.0) ? (1.0 / gamma) : 1.0;
+        for (int i = 0; i < 256; i++)
+        {
+            double v = i / 255.0;
+            if (gammaInv != 1.0) v = Math.Pow(v, gammaInv);
+            lut[i] = (byte)Math.Min(255.0, v * brightness * 255.0);
+        }
+
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i]     = lut[pixels[i]];
+            pixels[i + 1] = lut[pixels[i + 1]];
+            pixels[i + 2] = lut[pixels[i + 2]];
+        }
+
+        var wb = new System.Windows.Media.Imaging.WriteableBitmap(
+            w, h, bgra.DpiX, bgra.DpiY, System.Windows.Media.PixelFormats.Bgra32, null);
+        wb.WritePixels(new System.Windows.Int32Rect(0, 0, w, h), pixels, stride, 0);
+        wb.Freeze();
+        return wb;
     }
 
     private static HttpClient CreateHttpClient()
