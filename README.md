@@ -95,8 +95,11 @@ MeshRF.Native (C++20, built with CMake)
 
 Notes:
 
-- Native runtime DLLs are vendored under `third_party/` and copied next to app
-  outputs.
+- Native SDR dependencies are built from source submodules (`third_party/hackrf`
+  and `third_party/rtlsdr`) during native build; resulting runtime DLLs are
+  copied next to app outputs.
+- On Windows, CMake auto-provisions a repo-local `.vcpkg` and installs required
+  native packages (currently `libusb` and `pthreads`) when needed.
 - Meshtastic protobuf schemas are linked via git submodule at
   `third_party/meshtastic_protobufs`.
 - Default development flow expects native `RelWithDebInfo` for practical SDR
@@ -104,7 +107,10 @@ Notes:
 
 ### Submodules
 
-Initialize linked dependencies after clone:
+If you use VS Code `Build Native` / `Build & Run` tasks, submodules are
+initialized automatically by the `Init Submodules` task.
+
+For CLI/manual workflows, initialize linked dependencies after clone:
 
 ```powershell
 git submodule update --init --recursive
@@ -117,6 +123,18 @@ git submodule update --remote -- third_party/meshtastic_protobufs
 ```
 
 ## Build
+
+### Quick Start (VS Code)
+
+From a fresh clone, run task `Build & Run`.
+
+This task chain will:
+
+- initialize submodules,
+- configure and build native components,
+- deploy native bridge/runtime DLLs into app output,
+- build managed app,
+- run the app.
 
 ### Native (CMake)
 
@@ -194,8 +212,8 @@ The release bundle includes:
 | `tests/native/` | Native unit tests |
 | `scripts/` | Utility and release scripts |
 | `third_party/meshtastic_protobufs/` | Meshtastic protobuf schema submodule |
-| `third_party/hackrf/` | Vendored HackRF runtime bits |
-| `third_party/rtlsdr/` | Vendored RTL-SDR runtime bits |
+| `third_party/hackrf/` | HackRF source submodule (built during native build) |
+| `third_party/rtlsdr/` | RTL-SDR source submodule (built during native build) |
 
 ## Licensing
 
