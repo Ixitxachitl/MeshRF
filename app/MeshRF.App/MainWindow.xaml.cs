@@ -601,15 +601,13 @@ public partial class MainWindow : Window
 
     private ChannelConfig? PromptForRequestChannel(MainViewModel vm, string prompt)
     {
-        var channels = vm.Channels
-            .Where(c => c.Config.Role != ChannelRole.Disabled)
-            .ToList();
+        var channels = vm.Channels.ToList();
         if (channels.Count == 0) return null;
         if (channels.Count == 1) return channels[0].Config;
 
                 var selectedChannel = vm.SelectedChannel;
                 int preferredIndex = selectedChannel is not null &&
-                        selectedChannel.Config.Role != ChannelRole.Disabled
+                        (selectedChannel.Config.Role == ChannelRole.Primary || selectedChannel.Config.Role == ChannelRole.Secondary)
                         ? selectedChannel.Config.Index
                         : channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config.Index
                             ?? channels[0].Config.Index;

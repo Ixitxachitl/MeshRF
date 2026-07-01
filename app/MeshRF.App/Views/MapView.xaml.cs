@@ -1906,18 +1906,16 @@ public partial class MapView : UserControl
 
     private ChannelConfig? PromptForWaypointChannel(MainViewModel vm)
     {
-        var channels = vm.Channels
-            .Where(c => c.Config.Role != ChannelRole.Disabled)
-            .ToList();
+        var channels = vm.Channels.ToList();
         if (channels.Count == 0)
         {
-            vm.Status = "No enabled channel to send waypoint on.";
+            vm.Status = "No channel to send waypoint on.";
             return null;
         }
 
         var selectedChannel = vm.SelectedChannel;
         int preferredIndex = selectedChannel is not null &&
-            selectedChannel.Config.Role != ChannelRole.Disabled
+            (selectedChannel.Config.Role == ChannelRole.Primary || selectedChannel.Config.Role == ChannelRole.Secondary)
             ? selectedChannel.Config.Index
             : channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config.Index
                 ?? channels[0].Config.Index;

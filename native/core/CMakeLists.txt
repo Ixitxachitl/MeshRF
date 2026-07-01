@@ -46,32 +46,8 @@ if(spdlog_FOUND)
     target_compile_definitions(mrf_core PUBLIC MRF_HAVE_SPDLOG=1)
 endif()
 
-# libhackrf is loaded *at runtime* via LoadLibrary (see src/hal/HackRfDynLoad.cpp)
-# so there is no build-time dependency on hackrf.h or hackrf.lib. We just need
-# to locate hackrf.dll and copy it next to the bridge output. Search order
-# matches HackRfDynLoad's runtime search.
-set(_hackrf_dll_candidates
-    "${CMAKE_SOURCE_DIR}/third_party/hackrf/hackrf.dll"
-    "$ENV{HACKRF_DIR}/bin/hackrf.dll"
-    "$ENV{HACKRF_DIR}/hackrf.dll"
-    "$ENV{HACKRF_ROOT}/bin/hackrf.dll"
-    "$ENV{HACKRF_ROOT}/hackrf.dll"
-    "C:/Program Files/SDRangel/hackrf.dll"
-    "C:/Program Files/PothosSDR/bin/hackrf.dll"
-    "C:/Program Files/HackRF/bin/hackrf.dll"
-)
-unset(MRF_HACKRF_DLL CACHE)
-foreach(_p IN LISTS _hackrf_dll_candidates)
-    if(_p AND EXISTS "${_p}")
-        set(MRF_HACKRF_DLL "${_p}" CACHE INTERNAL "Path to hackrf.dll to vendor")
-        break()
-    endif()
-endforeach()
-if(MRF_HACKRF_DLL)
-    message(STATUS "mrf_core: vendoring hackrf.dll from ${MRF_HACKRF_DLL}")
-else()
-    message(STATUS "mrf_core: hackrf.dll not found on this machine; HackRF RX/TX will be unavailable. Install SDRangel/PothosSDR or set HACKRF_DIR.")
-endif()
+# Radio backends are loaded at runtime via LoadLibrary (see hal/*DynLoad.cpp).
+# Runtime DLL staging is handled by native/bridge/CMakeLists.txt.
 
 set_target_properties(mrf_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON

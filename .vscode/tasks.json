@@ -2,6 +2,23 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Init Submodules",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"submodule",
+				"update",
+				"--init",
+				"--recursive"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		},
+		{
 			"label": "Configure Native (CMake)",
 			"type": "shell",
 			"command": "cmake",
@@ -19,6 +36,11 @@
 		{
 			"label": "Build Native",
 			"type": "shell",
+			"dependsOn": [
+				"Init Submodules",
+				"Configure Native (CMake)"
+			],
+			"dependsOrder": "sequence",
 			"command": "cmake",
 			"args": [
 				"--build",

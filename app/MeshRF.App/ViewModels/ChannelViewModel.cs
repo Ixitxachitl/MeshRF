@@ -87,7 +87,11 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     private IReadOnlyList<PositionPrecisionOption> _positionPrecisionOptions = Array.Empty<PositionPrecisionOption>();
     public IReadOnlyList<PositionPrecisionOption> PositionPrecisionOptions => _positionPrecisionOptions;
 
-    public IReadOnlyList<ChannelRole> RoleOptions { get; } = Enum.GetValues<ChannelRole>();
+    public IReadOnlyList<ChannelRole> RoleOptions { get; } = new[]
+    {
+        ChannelRole.Primary,
+        ChannelRole.Secondary,
+    };
 
     public string DisplayName =>
         string.IsNullOrEmpty(Config.Name) ? $"Channel {Config.Index}" : Config.Name;

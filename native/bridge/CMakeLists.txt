@@ -16,39 +16,18 @@ set_target_properties(mrf_bridge PROPERTIES
     FOLDER "native"
 )
 
-# Copy the vendored hackrf runtime (hackrf.dll + transitive deps) next to the
-# bridge DLL so LoadLibrary can resolve everything from one directory.
-set(_mrf_hackrf_runtime_dir "${CMAKE_SOURCE_DIR}/third_party/hackrf")
-foreach(_dll IN ITEMS hackrf.dll libusb-1.0.dll pthreadVC2.dll)
-    set(_src "${_mrf_hackrf_runtime_dir}/${_dll}")
-    if(EXISTS "${_src}")
-        add_custom_command(TARGET mrf_bridge POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_src}"
-                    "$<TARGET_FILE_DIR:mrf_bridge>/${_dll}"
-            VERBATIM)
-    endif()
-endforeach()
-# Also accept a system-installed hackrf.dll from MRF_HACKRF_DLL as a fallback
-# (only if we don't already have a vendored copy).
-if(MRF_HACKRF_DLL AND NOT EXISTS "${_mrf_hackrf_runtime_dir}/hackrf.dll")
-    add_custom_command(TARGET mrf_bridge POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${MRF_HACKRF_DLL}"
-                "$<TARGET_FILE_DIR:mrf_bridge>/hackrf.dll"
-        VERBATIM)
-endif()
+if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES)
+    add_dependencies(mrf_bridge mrf_hackrf_vendor mrf_rtlsdr_vendor)
 
-# Copy the vendored rtlsdr runtime next to the bridge DLL. librtlsdr links
-# libusb-1.0.dll, which we already vendor above for hackrf, so the two backends
-# share that dependency. We ship our own rtlsdr.dll and never probe for
-# third-party SDR installs at runtime.
-set(_mrf_rtlsdr_runtime_dir "${CMAKE_SOURCE_DIR}/third_party/rtlsdr")
-set(_rtlsdr_src "${_mrf_rtlsdr_runtime_dir}/rtlsdr.dll")
-if(EXISTS "${_rtlsdr_src}")
+    # Copy all installed runtime DLLs built from upstream submodule sources.
     add_custom_command(TARGET mrf_bridge POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${_rtlsdr_src}"
-                "$<TARGET_FILE_DIR:mrf_bridge>/rtlsdr.dll"
-        VERBATIM)
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${MRF_HACKRF_INSTALL_DIR}/bin"
+        "$<TARGET_FILE_DIR:mrf_bridge>"
+    VERBATIM)
+    add_custom_command(TARGET mrf_bridge POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${MRF_RTLSDR_INSTALL_DIR}/bin"
+        "$<TARGET_FILE_DIR:mrf_bridge>"
+    VERBATIM)
 endif()

@@ -2,3 +2,18 @@
 	path = third_party/meshtastic_protobufs
 	url = https://github.com/meshtastic/protobufs.git
 	shallow = true
+[submodule "third_party/hackrf"]
+	path = third_party/hackrf
+	url = https://github.com/greatscottgadgets/hackrf
+	shallow = true
+[submodule "third_party/rtlsdr"]
+	path = third_party/rtlsdr
+	url = https://github.com/osmocom/rtl-sdr
+	shallow = true
+[submodule "third_party/libusb"]
+	path = third_party/libusb
+	url = https://github.com/libusb/libusb
+	shallow = true
+[submodule "third_party/libusb"]
+	path = third_party/libusb
+	url = https://github.com/libusb/libusb

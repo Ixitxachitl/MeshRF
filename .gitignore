@@ -57,14 +57,6 @@ artifacts/
 *.o
 *.a
 
-# But keep the vendored hackrf runtime — see third_party/hackrf/README.md
-!third_party/hackrf/hackrf.dll
-!third_party/hackrf/libusb-1.0.dll
-!third_party/hackrf/pthreadVC2.dll
-
-# ...and the vendored rtlsdr runtime — see third_party/rtlsdr/README.md
-!third_party/rtlsdr/rtlsdr.dll
-
 # Test artifacts / IQ captures (large)
 tests/vectors/*.iq
 tests/vectors/*.cf32

@@ -423,8 +423,6 @@
                     <Run Text="{Binding RssiDbfs, StringFormat=F1, Mode=OneWay}" />
                     <Run Text=" dBFS  Peak: " />
                     <Run Text="{Binding PeakDbfs, StringFormat=F1, Mode=OneWay}" />
-                    <Run Text=" dBFS  Samples: " />
-                    <Run Text="{Binding TotalSamples, Mode=OneWay}" />
                     <Run Text="  ChUtil: " />
                     <Run Text="{Binding LiveChannelUtilizationPct, StringFormat=F2, Mode=OneWay}" />
                     <Run Text="%  AirTx: " />
@@ -1940,12 +1938,14 @@
                         </DockPanel>
                         <ListBox ItemsSource="{Binding LogLines}"
                                  FontFamily="Consolas"
+                                 HorizontalContentAlignment="Stretch"
                                  ScrollViewer.CanContentScroll="True"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  VirtualizingPanel.ScrollUnit="Pixel"
                                  beh:AutoScroll.IsEnabled="True">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <emoji:TextBlock Text="{Binding}" FontFamily="Consolas" />
+                                    <emoji:TextBlock Text="{Binding}" FontFamily="Consolas" TextWrapping="Wrap" />
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>

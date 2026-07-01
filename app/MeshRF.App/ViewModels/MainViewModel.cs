@@ -2707,6 +2707,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // collapsed back to the firmware's 1-byte sentinel (0x01 / "AQ==").
         foreach (var c in existing)
         {
+            if (c.Role == ChannelRole.Disabled)
+            {
+                c.Role = ChannelRole.Secondary;
+                _channelStore.Upsert(c);
+            }
+
             if (c.Psk.Length == ChannelConfig.DefaultPsk.Length &&
                 c.Psk.AsSpan().SequenceEqual(ChannelConfig.DefaultPsk))
             {
@@ -4732,7 +4738,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (preferred is not null) return preferred;
         return Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config
-            ?? Channels.FirstOrDefault(c => c.Config.Role != ChannelRole.Disabled)?.Config;
+            ?? Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Secondary)?.Config;
     }
 
     private ChannelConfig? FindChannelByName(string? channelName)
