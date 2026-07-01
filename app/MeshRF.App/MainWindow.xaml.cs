@@ -828,8 +828,13 @@ public partial class MainWindow : Window
         int framesPerRow = 1;
         if (sampleRate > 0 && bins > 0)
         {
-            double nativeFrameRate = (double)sampleRate / bins;
-            framesPerRow = (int)Math.Round(nativeFrameRate / rowsPerSecond);
+            // Pace against the actual history stream consumed by PullSpectrumFrames.
+            // At high sample rates native decimates history frames to bound UI pull
+            // load; using raw sampleRate/bins would otherwise make scroll speed drift.
+            double historyFrameRate = vm.Core.SpectrumHistoryFrameRateHz;
+            if (historyFrameRate <= 0)
+                historyFrameRate = (double)sampleRate / bins;
+            framesPerRow = (int)Math.Round(historyFrameRate / rowsPerSecond);
             if (framesPerRow < 1) framesPerRow = 1;
         }
 

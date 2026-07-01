@@ -96,6 +96,9 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_spectrum_frame_count")]
     public static partial ulong CoreSpectrumFrameCount(nint core);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_spectrum_history_frame_rate_hz")]
+    public static partial uint CoreSpectrumHistoryFrameRateHz(nint core);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_pull_spectrum_frames")]
     public static unsafe partial uint CorePullSpectrumFrames(
         nint core,

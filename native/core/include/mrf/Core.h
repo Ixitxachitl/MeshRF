@@ -129,6 +129,12 @@ public:
     // tied to received data rather than the UI refresh rate. 0 if not running.
     [[nodiscard]] std::uint64_t spectrum_frame_count() const noexcept;
 
+    // Effective frame rate (Hz) of the decimated spectrum-history stream used
+    // by pull_spectrum_frames()/spectrum_frame_count(). This can be lower than
+    // sample_rate_hz()/spectrum_size() when history decimation is enabled to
+    // bound UI pull load at high device sample rates. 0 if not running.
+    [[nodiscard]] std::uint32_t spectrum_history_frame_rate_hz() const noexcept;
+
     // Extract up to max_count individual spectrum frames from the rolling
     // history, starting after after_frame_idx. Fills out_frames row-major as
     // max_count rows of spectrum_size() dBFS values each. Returns the actual

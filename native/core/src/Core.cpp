@@ -565,6 +565,18 @@ std::uint64_t Core::spectrum_frame_count() const noexcept {
     return impl_->spectrum->frame_count();
 }
 
+std::uint32_t Core::spectrum_history_frame_rate_hz() const noexcept {
+    if (!impl_->running || !impl_->spectrum) return 0u;
+    const std::uint32_t bins = static_cast<std::uint32_t>(impl_->spectrum->fft_size());
+    if (bins == 0u) return 0u;
+
+    const std::uint32_t raw_frame_rate =
+        std::max<std::uint32_t>(1u, impl_->device_rate / bins);
+    const std::size_t stride = compute_history_frame_stride(impl_->device_rate);
+    return static_cast<std::uint32_t>(
+        std::max<std::uint64_t>(1u, raw_frame_rate / static_cast<std::uint32_t>(stride)));
+}
+
 std::uint32_t Core::pull_spectrum_frames(
     std::uint64_t after_frame_idx,
     std::uint32_t max_count,

@@ -114,6 +114,13 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum(const mrf_core_t* core,
 // refresh rate. 0 if not running.
 MRF_API uint64_t MRF_CALL mrf_core_spectrum_frame_count(const mrf_core_t* core);
 
+// Returns the effective frame rate in Hz of the history stream used by
+// mrf_core_pull_spectrum_frames()/mrf_core_spectrum_frame_count(). This can
+// be lower than sample_rate_hz/spectrum_size when native history decimation
+// is active at high sample rates. 0 if not running.
+MRF_API uint32_t MRF_CALL mrf_core_spectrum_history_frame_rate_hz(
+    const mrf_core_t* core);
+
 // Extract up to max_count individual spectrum frames from the rolling history,
 // starting after after_frame_idx. Fills out_frames row-major with max_count rows
 // of spectrum_size() floats each. Returns the number of frames actually extracted.

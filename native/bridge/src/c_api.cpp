@@ -164,6 +164,11 @@ MRF_API uint64_t MRF_CALL mrf_core_spectrum_frame_count(const mrf_core_t* core) 
     return core->core.spectrum_frame_count();
 }
 
+MRF_API uint32_t MRF_CALL mrf_core_spectrum_history_frame_rate_hz(const mrf_core_t* core) {
+    if (!core) return 0u;
+    return core->core.spectrum_history_frame_rate_hz();
+}
+
 MRF_API uint32_t MRF_CALL mrf_core_pull_spectrum_frames(
     const mrf_core_t* core,
     uint64_t after_frame_idx,

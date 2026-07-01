@@ -341,6 +341,16 @@ public sealed class MeshtasticCore : IDisposable
         _disposed || _handle == 0 ? 0ul : NativeMethods.CoreSpectrumFrameCount(_handle);
 
     /// <summary>
+    /// Effective frame rate (Hz) of the spectrum history stream used by
+    /// <see cref="PullSpectrumFrames"/> and <see cref="SpectrumFrameCount"/>.
+    /// This reflects native history decimation at high sample rates, so it may
+    /// be lower than <see cref="SampleRateHz"/> / <see cref="SpectrumSize"/>.
+    /// 0 if RX is stopped.
+    /// </summary>
+    public uint SpectrumHistoryFrameRateHz =>
+        _disposed || _handle == 0 ? 0u : NativeMethods.CoreSpectrumHistoryFrameRateHz(_handle);
+
+    /// <summary>
     /// Extracts up to <paramref name="maxCount"/> individual spectrum frames
     /// from the rolling history, starting after <paramref name="afterFrameIdx"/>.
     /// Fills <paramref name="buffer"/> row-major with each spectrum_size() floats
