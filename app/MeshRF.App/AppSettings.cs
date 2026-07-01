@@ -301,6 +301,9 @@ public sealed class AppSettings
     /// <summary>Whether map markers are clustered (true) or always expanded (false).</summary>
     public bool MapClusterNodes { get; set; } = true;
 
+    /// <summary>Map tile provider: "Auto", "Light", "Light (CARTO)", "Voyager", or "Dark". Auto follows the app theme.</summary>
+    public string MapTileTheme { get; set; } = "Auto";
+
     // -- Node list filters -------------------------------------------------
 
     /// <summary>Persisted node text search filter.</summary>

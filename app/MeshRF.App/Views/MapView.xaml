@@ -119,6 +119,15 @@
                                                   ItemsSource="{Binding MapNodeLabelModeOptions}"
                                                   SelectedItem="{Binding MapNodeLabelMode, Mode=TwoWay}"
                                                   ToolTip="Label shown on map markers; falls back to node number when data is unavailable" />
+                                <TextBlock Text="Map tiles"
+                                                   FontSize="11"
+                                                   Margin="0,6,0,3"
+                                                   Foreground="{DynamicResource BrushAppForeground}" />
+                                <ComboBox x:Name="MapTileThemeCombo"
+                                                  Height="24"
+                                                  FontSize="11"
+                                                  SelectionChanged="OnMapTileThemeChanged"
+                                                  ToolTip="Tile provider: Auto follows the app theme; Light/Voyager/Dark override it" />
                         </StackPanel>
                 </Border>
 

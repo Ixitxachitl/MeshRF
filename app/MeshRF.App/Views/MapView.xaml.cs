@@ -30,13 +30,12 @@ public partial class MapView : UserControl
     private const int MinZoom = 2;
     private const int MaxZoom = 19;
 
-    // Tile providers. The dark basemap (CARTO dark_all) is used while the app
-    // is in a dark theme so the map blends in instead of glowing white; the
-    // standard OSM raster is used in light mode. Both are free, key-less, and
-    // attributed to OpenStreetMap.
+    // Tile providers. Multiple basemaps are available; the active one is chosen
+    // by the on-map "Map tiles" selector or by the app theme when set to Auto.
+    // All providers are free, key-less, and attributed to OpenStreetMap / CARTO.
     private readonly record struct TileProvider(
         string Id, string UrlTemplate, string Subdomains, string Attribution,
-        double Brightness = 1.0);
+        double Brightness = 1.0, double Gamma = 1.0);
 
     private static readonly TileProvider LightTiles = new(
         "osm",
@@ -44,17 +43,40 @@ public partial class MapView : UserControl
         "abc",
         "© OpenStreetMap contributors  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location");
 
+    private static readonly TileProvider LightCartoTiles = new(
+        "cartopositron",
+        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "abcd",
+        "© OpenStreetMap · © CARTO  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location");
+
+    private static readonly TileProvider VoyagerTiles = new(
+        "cartovoyager",
+        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "abcd",
+        "© OpenStreetMap · © CARTO  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location");
+
     private static readonly TileProvider DarkTiles = new(
         "cartodark",
         "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
         "abcd",
         "© OpenStreetMap · © CARTO  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location",
-        // CARTO dark_all renders roads/labels very dark; lift them so they read
-        // against the dark theme.
-        Brightness: 1.7);
+        // Gamma correction lifts the low-contrast CARTO dark palette: roads and
+        // labels become clearly readable while the dark background is preserved.
+        Gamma: 1.8);
 
-    private static TileProvider CurrentTiles =>
-        ThemeManager.IsDark ? DarkTiles : LightTiles;
+    public static readonly IReadOnlyList<string> MapTileThemeOptions =
+        ["Auto", "Light", "Light (CARTO)", "Voyager", "Dark"];
+
+    private string _mapTileTheme = "Auto";
+
+    private TileProvider CurrentTiles => _mapTileTheme switch
+    {
+        "Light"        => LightTiles,
+        "Light (CARTO)" => LightCartoTiles,
+        "Voyager"      => VoyagerTiles,
+        "Dark"         => DarkTiles,
+        _              => ThemeManager.IsDark ? DarkTiles : LightTiles, // "Auto"
+    };
 
     private static readonly HttpClient s_http = CreateHttpClient();
     private static readonly string s_cacheDir = Path.Combine(
@@ -221,16 +243,28 @@ public partial class MapView : UserControl
         SizeChanged += (_, _) => Render();
         DataContextChanged += OnDataContextChanged;
         ThemeManager.ThemeChanged += OnThemeChanged;
+        MapTileThemeCombo.ItemsSource = MapTileThemeOptions;
+        MapTileThemeCombo.SelectedItem = _mapTileTheme;
         AttributionText.Text = CurrentTiles.Attribution;
     }
 
     private void OnThemeChanged()
     {
-        // Tile provider follows the theme; drop the on-screen tiles and redraw
-        // with the new basemap. Disk/mem caches are keyed by provider id, so
-        // they don't collide.
+        // When map tiles is "Auto", tile provider follows the app theme; drop
+        // on-screen tiles and redraw with the new basemap. In explicit-theme
+        // mode this only updates the attribution text (provider unchanged).
         AttributionText.Text = CurrentTiles.Attribution;
         Render();
+    }
+
+    private void OnMapTileThemeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (MapTileThemeCombo.SelectedItem is string theme)
+        {
+            _mapTileTheme = theme;
+            AttributionText.Text = CurrentTiles.Attribution;
+            Render();
+        }
     }
 
     private static HttpClient CreateHttpClient()
@@ -1213,14 +1247,15 @@ public partial class MapView : UserControl
         bmp.EndInit();
         bmp.Freeze();
 
-        if (provider.Brightness == 1.0) return bmp;
-        return Brighten(bmp, provider.Brightness);
+        if (provider.Brightness == 1.0 && provider.Gamma == 1.0) return bmp;
+        return PostProcessTile(bmp, provider.Brightness, provider.Gamma);
     }
 
-    /// <summary>Returns a copy of <paramref name="src"/> with each RGB channel
-    /// scaled by <paramref name="factor"/> (clamped to 255). Used to lift the
-    /// very dark roads/labels of the dark basemap so they remain readable.</summary>
-    private static BitmapSource Brighten(BitmapSource src, double factor)
+    /// <summary>Returns a post-processed copy of <paramref name="src"/>: each RGB
+    /// channel is gamma-corrected then brightness-scaled. Gamma &gt; 1 lifts
+    /// the low-contrast CARTO dark palette so roads and labels read clearly
+    /// against the dark background without blowing out bright areas.</summary>
+    private static BitmapSource PostProcessTile(BitmapSource src, double brightness, double gamma)
     {
         var bgra = new FormatConvertedBitmap(src, PixelFormats.Bgra32, null, 0);
         int w = bgra.PixelWidth, h = bgra.PixelHeight;
@@ -1228,10 +1263,16 @@ public partial class MapView : UserControl
         var pixels = new byte[h * stride];
         bgra.CopyPixels(pixels, stride, 0);
 
-        // Precompute the channel lookup table.
+        // Precompute the combined gamma + brightness lookup table.
+        // gamma > 1 raises midtones (roads/labels visible); brightness trims overall level.
         var lut = new byte[256];
+        double gammaInv = (gamma > 0.0 && gamma != 1.0) ? (1.0 / gamma) : 1.0;
         for (int i = 0; i < 256; i++)
-            lut[i] = (byte)Math.Min(255.0, i * factor);
+        {
+            double v = i / 255.0;
+            if (gammaInv != 1.0) v = Math.Pow(v, gammaInv);
+            lut[i] = (byte)Math.Min(255.0, v * brightness * 255.0);
+        }
 
         for (int i = 0; i < pixels.Length; i += 4)
         {
@@ -2135,6 +2176,10 @@ public partial class MapView : UserControl
         _clusterNodes = settings.MapClusterNodes;
         ClusterNodesButton.IsChecked = _clusterNodes;
 
+        _mapTileTheme = settings.MapTileTheme ?? "Auto";
+        MapTileThemeCombo.SelectedItem = _mapTileTheme;
+        AttributionText.Text = CurrentTiles.Attribution;
+
         if (settings.MapCenterLat is double lat && settings.MapCenterLon is double lon
             && settings.MapZoom >= MinZoom && settings.MapZoom <= MaxZoom)
         {
@@ -2156,6 +2201,7 @@ public partial class MapView : UserControl
         settings.MapCenterLon = _centerLon;
         settings.MapZoom = _zoom;
         settings.MapClusterNodes = _clusterNodes;
+        settings.MapTileTheme = _mapTileTheme;
     }
 
     /// <summary>Centers the map on the given location and optionally zooms.</summary>
