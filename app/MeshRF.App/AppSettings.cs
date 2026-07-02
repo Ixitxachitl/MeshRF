@@ -315,6 +315,9 @@ public sealed class AppSettings
     /// <summary>Persisted node key filter.</summary>
     public string NodeFilterKey { get; set; } = "Any";
 
+    /// <summary>Persisted node PKI-derived signed filter.</summary>
+    public string NodeFilterSigned { get; set; } = "Show all";
+
     /// <summary>Persisted node location filter.</summary>
     public string NodeFilterLocation { get; set; } = "Any";
 

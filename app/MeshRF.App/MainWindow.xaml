@@ -768,6 +768,7 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Hops" />
@@ -782,42 +783,48 @@
                                               SelectedItem="{Binding NodeKeyFilter, Mode=TwoWay}"
                                               ToolTip="Key filter" />
 
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Position" />
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Signed" />
                                     <ComboBox Grid.Row="2" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding NodeSignedFilterOptions}"
+                                              SelectedItem="{Binding NodeSignedFilter, Mode=TwoWay}"
+                                              ToolTip="Filter by PKI-derived signed node identity (green key indicator)" />
+
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Position" />
+                                    <ComboBox Grid.Row="3" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding NodeLocationFilterOptions}"
                                               SelectedItem="{Binding NodeLocationFilter, Mode=TwoWay}"
                                               ToolTip="Position filter" />
 
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Invalid pos" />
-                                    <CheckBox Grid.Row="3" Grid.Column="1"
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Invalid pos" />
+                                    <CheckBox Grid.Row="4" Grid.Column="1"
                                               VerticalAlignment="Center"
                                               FontSize="11"
                                               Content="Hide invalid"
                                               IsChecked="{Binding HideInvalidNodeLocations, Mode=TwoWay}"
                                               ToolTip="Hide nodes with out-of-range or near-0,0 positions" />
 
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Ignored nodes" />
-                                    <ComboBox Grid.Row="4" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Ignored nodes" />
+                                    <ComboBox Grid.Row="5" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding NodeIgnoredFilterOptions}"
                                               SelectedItem="{Binding NodeIgnoredFilter, Mode=TwoWay}"
                                               ToolTip="Ignored nodes" />
 
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Via MQTT" />
-                                    <ComboBox Grid.Row="5" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Via MQTT" />
+                                    <ComboBox Grid.Row="6" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding NodeMqttFilterOptions}"
                                               SelectedItem="{Binding NodeMqttFilter, Mode=TwoWay}"
                                               ToolTip="Filter nodes that have been seen via MQTT" />
 
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Heard within" />
-                                    <DockPanel Grid.Row="6" Grid.Column="1" LastChildFill="False">
+                                    <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Heard within" />
+                                    <DockPanel Grid.Row="7" Grid.Column="1" LastChildFill="False">
                                         <TextBox Width="56" Height="22" FontSize="11"
                                                  Text="{Binding NodeMaxAgeMinutesText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                  ToolTip="Show only nodes heard within the last N minutes (blank = any)" />
                                         <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Text="minutes" />
                                     </DockPanel>
 
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Max distance" />
-                                    <DockPanel Grid.Row="7" Grid.Column="1" LastChildFill="False"
+                                    <TextBlock Grid.Row="8" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Max distance" />
+                                    <DockPanel Grid.Row="8" Grid.Column="1" LastChildFill="False"
                                                Opacity="{Binding HasHomeLocation, Converter={StaticResource BoolToOpacity}}">
                                         <TextBox Width="64" Height="22" FontSize="11"
                                                  IsEnabled="{Binding HasHomeLocation}"
@@ -826,20 +833,20 @@
                                         <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Text="{Binding DistanceUnitShort}" />
                                     </DockPanel>
 
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has temperature" />
-                                    <ComboBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="9" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has temperature" />
+                                    <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodeTemperatureFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether temperature telemetry is present" />
 
-                                    <TextBlock Grid.Row="9" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has humidity" />
-                                    <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="10" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has humidity" />
+                                    <ComboBox Grid.Row="10" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodeHumidityFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether humidity telemetry is present" />
 
-                                    <TextBlock Grid.Row="10" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has pressure" />
-                                    <ComboBox Grid.Row="10" Grid.Column="1" Height="22" FontSize="11"
+                                    <TextBlock Grid.Row="11" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has pressure" />
+                                    <ComboBox Grid.Row="11" Grid.Column="1" Height="22" FontSize="11"
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodePressureFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether pressure telemetry is present" />

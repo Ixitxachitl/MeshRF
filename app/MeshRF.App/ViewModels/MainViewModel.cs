@@ -400,6 +400,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _nodeSearchText        = string.Empty;
     [ObservableProperty] private string _nodeHopsFilter        = "Any";
     [ObservableProperty] private string _nodeKeyFilter         = "Any";
+    [ObservableProperty] private string _nodeSignedFilter      = "Show all";
     [ObservableProperty] private string _nodeLocationFilter    = "Any";
     [ObservableProperty] private bool _hideInvalidNodeLocations;
     [ObservableProperty] private string _nodeIgnoredFilter     = "Show all";
@@ -413,6 +414,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<string> NodeHopsFilterOptions     { get; } = ["Any", "Direct", "≤1 hop", "≤2 hops", "≤3 hops", "≤4 hops"];
     public IReadOnlyList<string> NodeKeyFilterOptions      { get; } = ["Any", "Good key", "Mismatch", "No key"];
+    public IReadOnlyList<string> NodeSignedFilterOptions   { get; } = ["Show all", "Signed", "Unsigned"];
     public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "Has position history (>1)", "No position"];
     public IReadOnlyList<string> NodeIgnoredFilterOptions  { get; } = ["Show all", "Hide ignored", "Only ignored"];
     public IReadOnlyList<string> NodeMqttFilterOptions     { get; } = ["Any", "Hide via MQTT", "Only via MQTT"];
@@ -437,6 +439,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnNodeSearchTextChanged(string value)          => RefreshNodesFilter();
     partial void OnNodeHopsFilterChanged(string value)          => RefreshNodesFilter();
     partial void OnNodeKeyFilterChanged(string value)           => RefreshNodesFilter();
+    partial void OnNodeSignedFilterChanged(string value)        => RefreshNodesFilter();
     partial void OnNodeLocationFilterChanged(string value)      => RefreshNodesFilter();
     partial void OnHideInvalidNodeLocationsChanged(bool value)  => RefreshNodesFilter();
     partial void OnNodeIgnoredFilterChanged(string value)
@@ -459,6 +462,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeSearchText        = string.Empty;
         NodeHopsFilter        = "Any";
         NodeKeyFilter         = "Any";
+        NodeSignedFilter      = "Show all";
         NodeLocationFilter    = "Any";
         HideInvalidNodeLocations = false;
         NodeIgnoredFilter     = "Show all";
@@ -1532,6 +1536,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeSearchText        = _settings.NodeFilterSearch;
         NodeHopsFilter        = _settings.NodeFilterHops;
         NodeKeyFilter         = _settings.NodeFilterKey;
+        NodeSignedFilter      = _settings.NodeFilterSigned;
         if (string.Equals(_settings.NodeFilterLocation, "Invalid", StringComparison.Ordinal))
         {
             NodeLocationFilter = "Any";
@@ -1964,6 +1969,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             !string.IsNullOrWhiteSpace(NodeSearchText) ||
             !string.Equals(NodeHopsFilter, "Any", StringComparison.Ordinal) ||
             !string.Equals(NodeKeyFilter, "Any", StringComparison.Ordinal) ||
+            !string.Equals(NodeSignedFilter, "Show all", StringComparison.Ordinal) ||
             !string.Equals(NodeLocationFilter, "Any", StringComparison.Ordinal) ||
             HideInvalidNodeLocations ||
             !string.Equals(NodeIgnoredFilter, "Show all", StringComparison.Ordinal) ||
@@ -3265,6 +3271,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.NodeFilterMqtt = NodeMqttFilter;
+        _settings.NodeFilterSigned = NodeSignedFilter;
         _settings.HomeLocationSource = SelectedLocationSource?.Value ?? ManualLocationSourceValue;
         _settings.HomeLatitude  = _manualHomeLatitude;
         _settings.HomeLongitude = _manualHomeLongitude;
@@ -7096,6 +7103,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         public string SearchText { get; set; }
         public int MaxHops { get; set; }
         public string KeyStatus { get; set; }
+        public string SignedStatus { get; set; }
         public string LocationStatus { get; set; }
         public bool HideInvalidLocations { get; set; }
         public string IgnoredStatus { get; set; }
@@ -7113,6 +7121,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SearchText = string.Empty;
             MaxHops = -1;
             KeyStatus = "Any";
+            SignedStatus = "Show all";
             LocationStatus = "Any";
             HideInvalidLocations = false;
             IgnoredStatus = "Show all";
@@ -7133,6 +7142,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 SearchText = vm.NodeSearchText.Trim(),
                 KeyStatus = vm.NodeKeyFilter,
+                SignedStatus = vm.NodeSignedFilter,
                 LocationStatus = vm.NodeLocationFilter,
                 HideInvalidLocations = vm.HideInvalidNodeLocations,
                 IgnoredStatus = vm.NodeIgnoredFilter,
@@ -7292,6 +7302,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             case "Good key": if (!n.HasPublicKey || n.HasKeyMismatch) return false; break;
             case "Mismatch": if (!n.HasKeyMismatch) return false; break;
             case "No key": if (n.HasPublicKey) return false; break;
+        }
+
+        // Signed status is derived from the PKI key-to-node-id match.
+        switch (criteria.SignedStatus)
+        {
+            case "Signed": if (!n.HasDerivedNodeNumMatch) return false; break;
+            case "Unsigned": if (n.HasDerivedNodeNumMatch) return false; break;
         }
 
         // Location filter.
