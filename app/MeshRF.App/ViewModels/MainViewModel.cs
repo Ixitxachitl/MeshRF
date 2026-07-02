@@ -61,6 +61,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // not yet committed to _nodeStore when the dirty flush reads. Overlay ensures
     // the node list reflects the correct last-heard time immediately.
     private readonly Dictionary<uint, (long Epoch, float? Snr, float? Rssi, byte? Hops, bool ViaMqtt)> _pendingNodeSightings = new();
+    // Identity fields from a just-received NodeInfo that may not yet be committed
+    // to _nodeStore when the dirty flush reads. Overlay ensures the row shows the
+    // new name/role immediately without waiting for the background write to land.
+    private readonly Dictionary<uint, NodeRecord> _pendingNodeInfos = new();
     private readonly Dictionary<uint, int> _nodeLocationHistoryCounts = new();
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
@@ -1622,6 +1626,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _dirtyNodeNums.Clear();
         _pendingNodeSightings.Clear();
+        _pendingNodeInfos.Clear();
         _nodesByNum.Clear();
         _pkcSenderPublicKeyBytes.Clear();
         _nodeLocationHistoryCounts.Clear();
@@ -1766,6 +1771,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     if (pending.ViaMqtt) latest.SeenViaMqtt = true;
                 }
                 _pendingNodeSightings.Remove(nodeNum);
+            }
+
+            // Apply the optimistic NodeInfo overlay: identity fields (LongName,
+            // ShortName, Role, etc.) written by EnqueueDbWrite may not be visible
+            // in _nodeStore yet. Patching here ensures the row updates immediately.
+            bool hadPendingNodeInfo = _pendingNodeInfos.TryGetValue(nodeNum, out var pendingInfo);
+            if (hadPendingNodeInfo && latest is not null)
+            {
+                if (!string.IsNullOrEmpty(pendingInfo!.LongName))  latest.LongName  = pendingInfo.LongName;
+                if (!string.IsNullOrEmpty(pendingInfo.ShortName))  latest.ShortName = pendingInfo.ShortName;
+                if (!string.IsNullOrEmpty(pendingInfo.UserId))     latest.UserId    = pendingInfo.UserId;
+                if (!string.IsNullOrEmpty(pendingInfo.HwModel))    latest.HwModel   = pendingInfo.HwModel;
+                if (!string.IsNullOrEmpty(pendingInfo.Role))       latest.Role      = pendingInfo.Role;
+                if (!string.IsNullOrEmpty(pendingInfo.PublicKey))  latest.PublicKey = pendingInfo.PublicKey;
+                if (pendingInfo.KeyMismatch.HasValue)               latest.KeyMismatch = pendingInfo.KeyMismatch.Value;
+                _pendingNodeInfos.Remove(nodeNum);
             }
 
             var existing = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
@@ -6305,6 +6326,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         };
                         EnqueueDbWrite((nodes, _) => nodes.Upsert(nodeInfoUpsert));
                         _pendingNodeSightings[header.From] = (rxEpoch, snrDb, packetRssiDbm, hopsAway, header.ViaMqtt);
+                        _pendingNodeInfos[header.From] = nodeInfoUpsert;
 
                         _pkcSenderPublicKeyBytes.Remove(header.From);
 
