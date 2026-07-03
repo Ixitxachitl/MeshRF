@@ -89,7 +89,8 @@ public sealed class NodeStore : IDisposable
                 battery_pct      INTEGER,
                 voltage_v        REAL,
                 channel_util_pct REAL,
-                air_util_tx_pct  REAL
+                air_util_tx_pct  REAL,
+                node_status      TEXT    NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_nodes_last_heard
                 ON nodes(last_heard_epoch DESC);
@@ -111,6 +112,7 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("ignored", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("seen_via_mqtt", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("node_status", "TEXT NOT NULL DEFAULT ''");
 
         using var history = _conn.CreateCommand();
         history.CommandText = """
@@ -175,7 +177,7 @@ public sealed class NodeStore : IDisposable
                                uptime_seconds, temperature_c,
                                    relative_humidity_pct, barometric_pressure_hpa,
                                    gas_resistance_mohm, iaq, public_key, key_mismatch,
-                                   mute_rtttl, ignored)
+                                   mute_rtttl, ignored, node_status)
             VALUES ($node_num, $user_id, $long_name, $short_name,
                     $hw_model, $role, $last_heard, $seen_via_mqtt,
                     $snr, $rssi, $hops,
@@ -185,7 +187,7 @@ public sealed class NodeStore : IDisposable
                     $uptime, $temp,
                     $hum, $pres,
                                 $gas, $iaq, $pubkey, $mismatch,
-                                $mute_rtttl, $ignored)
+                                $mute_rtttl, $ignored, $node_status)
             ON CONFLICT(node_num) DO UPDATE SET
                 user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
                 long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
@@ -211,7 +213,8 @@ public sealed class NodeStore : IDisposable
                 gas_resistance_mohm     = COALESCE(excluded.gas_resistance_mohm, gas_resistance_mohm),
                 iaq              = COALESCE(excluded.iaq, iaq),
                 public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key),
-                key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch);
+                key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch),
+                node_status      = COALESCE(NULLIF(excluded.node_status, ''), node_status);
             """;
         cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
         cmd.Parameters.AddWithValue("$user_id", rec.UserId ?? string.Empty);
@@ -242,6 +245,7 @@ public sealed class NodeStore : IDisposable
             rec.KeyMismatch is bool km ? (km ? 1 : 0) : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$mute_rtttl", rec.MuteRtttl ? 1 : 0);
         cmd.Parameters.AddWithValue("$ignored", rec.Ignored ? 1 : 0);
+        cmd.Parameters.AddWithValue("$node_status", rec.NodeStatus ?? string.Empty);
         cmd.ExecuteNonQuery();
     }
 
@@ -665,6 +669,7 @@ public sealed class NodeStore : IDisposable
             BarometricPressureHpa = Nullable<float>("barometric_pressure_hpa"),
             GasResistanceMohm     = Nullable<float>("gas_resistance_mohm"),
             Iaq                   = Nullable<int>("iaq"),
+            NodeStatus            = ReadStringOrEmpty(r, "node_status"),
             PublicKey             = ReadStringOrEmpty(r, "public_key"),
             KeyMismatch           = Nullable<bool>("key_mismatch"),
             MuteRtttl             = Nullable<bool>("mute_rtttl") == true,

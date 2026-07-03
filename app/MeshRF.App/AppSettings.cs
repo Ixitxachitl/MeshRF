@@ -96,6 +96,7 @@ public sealed class AppSettings
 
     public string UserLongName  { get; set; } = string.Empty;
     public string UserShortName { get; set; } = string.Empty;
+    public string UserNodeStatus { get; set; } = string.Empty;
 
     /// <summary>Device role string (Client, Router, etc.) — display only.</summary>
     public string UserRole { get; set; } = "Client";
@@ -124,19 +125,25 @@ public sealed class AppSettings
     public bool AutoReportNodeInfoEnabled { get; set; } = false;
 
     /// <summary>Interval in seconds for automatic NODEINFO_APP transmission.</summary>
-    public int AutoReportNodeInfoSeconds { get; set; } = 300;
+    public int AutoReportNodeInfoSeconds { get; set; } = 3600;
 
     /// <summary>Automatically transmit POSITION_APP at a fixed interval.</summary>
     public bool AutoReportPositionEnabled { get; set; } = false;
 
     /// <summary>Interval in seconds for automatic POSITION_APP transmission.</summary>
-    public int AutoReportPositionSeconds { get; set; } = 300;
+    public int AutoReportPositionSeconds { get; set; } = 3600;
 
     /// <summary>Automatically transmit TELEMETRY device metrics at a fixed interval.</summary>
     public bool AutoReportDeviceMetricsEnabled { get; set; } = false;
 
     /// <summary>Interval in seconds for automatic TELEMETRY device metrics transmission.</summary>
-    public int AutoReportDeviceMetricsSeconds { get; set; } = 300;
+    public int AutoReportDeviceMetricsSeconds { get; set; } = 3600;
+
+    /// <summary>Automatically transmit NODE_STATUS_APP at a fixed interval.</summary>
+    public bool AutoReportNodeStatusEnabled { get; set; } = false;
+
+    /// <summary>Interval in seconds for automatic NODE_STATUS_APP transmission.</summary>
+    public int AutoReportNodeStatusSeconds { get; set; } = 3600;
 
     /// <summary>Base64 X25519 public key for PKI direct messages (TX).</summary>
     public string UserPublicKey  { get; set; } = string.Empty;

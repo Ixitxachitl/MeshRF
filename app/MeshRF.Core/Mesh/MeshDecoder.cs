@@ -27,6 +27,9 @@ public sealed class MeshDecodeResult
     /// <summary>Parsed Telemetry (TELEMETRY_APP); null otherwise.</summary>
     public MeshTelemetry? Telemetry { get; init; }
 
+    /// <summary>Parsed StatusMessage (NODE_STATUS_APP); null otherwise.</summary>
+    public MeshStatusMessage? StatusMessage { get; init; }
+
     /// <summary>Data.want_response (field 3): the sender wants a reply (e.g. a
     /// directed NodeInfo request asking us to send ours back).</summary>
     public bool WantResponse { get; init; }
@@ -147,6 +150,12 @@ public sealed class MeshTelemetry
     public bool HasEnvironmentMetrics =>
         TemperatureC.HasValue || RelativeHumidityPct.HasValue ||
         BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || Iaq.HasValue;
+}
+
+/// <summary>Subset of the Meshtastic <c>StatusMessage</c> protobuf.</summary>
+public sealed class MeshStatusMessage
+{
+    public string Status { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -435,6 +444,7 @@ public static class MeshDecoder
             PortNum.RemoteHardware => Meshtastic.Protobufs.HardwareMessage.Parser.ParseFrom(payload),
             PortNum.PaxCounter => Meshtastic.Protobufs.Paxcount.Parser.ParseFrom(payload),
             PortNum.Audio => Meshtastic.Protobufs.Compressed.Parser.ParseFrom(payload),
+            PortNum.NodeStatus => Meshtastic.Protobufs.StatusMessage.Parser.ParseFrom(payload),
             _ => null,
         };
 
@@ -472,6 +482,7 @@ public static class MeshDecoder
         MeshPosition? pos = null;
         MeshWaypoint? waypoint = null;
         MeshTelemetry? telem = null;
+        MeshStatusMessage? statusMessage = null;
         MeshRouteDiscovery? route = null;
         MeshNeighborInfo? neighborInfo = null;
         MeshStoreForward? storeForward = null;
@@ -493,6 +504,9 @@ public static class MeshDecoder
                 break;
             case PortNum.Telemetry:
                 telem = ParseTelemetry(payload);
+                break;
+            case PortNum.NodeStatus:
+                statusMessage = ParseStatusMessage(payload);
                 break;
             case PortNum.Routing:
                 routingError = ParseRoutingError(payload);
@@ -518,6 +532,7 @@ public static class MeshDecoder
             Position = pos,
             Waypoint = waypoint,
             Telemetry = telem,
+            StatusMessage = statusMessage,
             RouteDiscovery = route,
             NeighborInfo = neighborInfo,
             StoreForward = storeForward,
@@ -535,6 +550,19 @@ public static class MeshDecoder
             RoutingError = routingError,
             AppPayload = payload,
         };
+    }
+
+    private static MeshStatusMessage? ParseStatusMessage(byte[] data)
+    {
+        try
+        {
+            var msg = Meshtastic.Protobufs.StatusMessage.Parser.ParseFrom(data);
+            return new MeshStatusMessage { Status = msg.Status ?? string.Empty };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // RouteDiscovery (TRACEROUTE_APP): 1 = route (repeated fixed32),

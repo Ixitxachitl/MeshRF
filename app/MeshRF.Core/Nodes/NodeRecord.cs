@@ -44,6 +44,9 @@ public sealed class NodeRecord
     public float?  GasResistanceMohm     { get; set; }
     public int?    Iaq                   { get; set; }
 
+    /// <summary>Most recent NODE_STATUS_APP status string heard from this node.</summary>
+    public string NodeStatus { get; set; } = string.Empty;
+
     /// <summary>Peer's 32-byte X25519 public key (from NODEINFO field 8),
     /// hex-encoded; empty if not yet learned. Enables PKC direct messages.</summary>
     public string PublicKey { get; set; } = string.Empty;

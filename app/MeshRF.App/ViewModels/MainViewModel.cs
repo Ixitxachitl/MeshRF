@@ -532,6 +532,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedChannel));
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
+        SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
     }
@@ -636,6 +637,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string _myNodeIdText = string.Empty;
     [ObservableProperty] private string _myLongName = string.Empty;
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SendNodeStatusCommand))]
+    private string _myNodeStatus = string.Empty;
 
     /// <summary>MAC address derived from the node number: <c>02:00:xx:xx:xx:xx</c>
     /// where the last four bytes are the node number. Matches the Meshtastic
@@ -675,19 +679,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _routingRelayEnabled;
 
     [ObservableProperty] private bool _autoReportNodeInfoEnabled;
-    [ObservableProperty] private int _autoReportNodeInfoSeconds = 300;
+    [ObservableProperty] private int _autoReportNodeInfoSeconds = 3600;
     [ObservableProperty] private bool _autoReportPositionEnabled;
-    [ObservableProperty] private int _autoReportPositionSeconds = 300;
+    [ObservableProperty] private int _autoReportPositionSeconds = 3600;
     [ObservableProperty] private bool _autoReportDeviceMetricsEnabled;
-    [ObservableProperty] private int _autoReportDeviceMetricsSeconds = 300;
-    [ObservableProperty] private string _autoReportLastSentSummary = "Auto last: NI never | POS never | MET never";
+    [ObservableProperty] private int _autoReportDeviceMetricsSeconds = 3600;
+    [ObservableProperty] private bool _autoReportNodeStatusEnabled;
+    [ObservableProperty] private int _autoReportNodeStatusSeconds = 3600;
+    [ObservableProperty] private string _autoReportLastSentSummary = "Auto last: NI never | POS never | MET never | ST never";
 
     private DateTime _lastAutoNodeInfoUtc = DateTime.MinValue;
     private DateTime _lastAutoPositionUtc = DateTime.MinValue;
     private DateTime _lastAutoDeviceMetricsUtc = DateTime.MinValue;
+    private DateTime _lastAutoNodeStatusUtc = DateTime.MinValue;
     private DateTime _nextAutoNodeInfoUtc = DateTime.MinValue;
     private DateTime _nextAutoPositionUtc = DateTime.MinValue;
     private DateTime _nextAutoDeviceMetricsUtc = DateTime.MinValue;
+    private DateTime _nextAutoNodeStatusUtc = DateTime.MinValue;
     private int _autoReportTickInFlight;
     private static readonly TimeSpan RxBusyDefaultHold = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan RxBusyMaxWait = TimeSpan.FromMilliseconds(450);
@@ -730,7 +738,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 : utc.ToLocalTime().ToString("h:mm:ss tt", CultureInfo.CurrentCulture);
 
         AutoReportLastSentSummary =
-            $"Auto last: NI {Stamp(_lastAutoNodeInfoUtc)} | POS {Stamp(_lastAutoPositionUtc)} | MET {Stamp(_lastAutoDeviceMetricsUtc)}";
+            $"Auto last: NI {Stamp(_lastAutoNodeInfoUtc)} | POS {Stamp(_lastAutoPositionUtc)} | MET {Stamp(_lastAutoDeviceMetricsUtc)} | ST {Stamp(_lastAutoNodeStatusUtc)}";
     }
 
     [ObservableProperty] private string _homeLatitudeText  = string.Empty;
@@ -1476,6 +1484,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MyNodeIdText = _myNodeNum != 0 ? $"!{_myNodeNum:x8}" : string.Empty;
         MyLongName = _settings.UserLongName;
         MyShortName = _settings.UserShortName;
+        MyNodeStatus = _settings.UserNodeStatus;
         MyRole = string.IsNullOrEmpty(_settings.UserRole) ? "Client" : _settings.UserRole;
 
         MyHwModel = string.IsNullOrEmpty(_settings.UserHwModel) ? "UNSET" : _settings.UserHwModel;
@@ -1489,6 +1498,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AutoReportPositionSeconds = Math.Max(5, _settings.AutoReportPositionSeconds);
         AutoReportDeviceMetricsEnabled = _settings.AutoReportDeviceMetricsEnabled;
         AutoReportDeviceMetricsSeconds = Math.Max(5, _settings.AutoReportDeviceMetricsSeconds);
+        AutoReportNodeStatusEnabled = _settings.AutoReportNodeStatusEnabled;
+        AutoReportNodeStatusSeconds = Math.Max(5, _settings.AutoReportNodeStatusSeconds);
         var now = DateTime.UtcNow;
         _nextAutoNodeInfoUtc = AutoReportNodeInfoEnabled
             ? now.AddSeconds(Math.Max(5, AutoReportNodeInfoSeconds))
@@ -1498,6 +1509,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             : DateTime.MinValue;
         _nextAutoDeviceMetricsUtc = AutoReportDeviceMetricsEnabled
             ? now.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds))
+            : DateTime.MinValue;
+        _nextAutoNodeStatusUtc = AutoReportNodeStatusEnabled
+            ? now.AddSeconds(Math.Max(5, AutoReportNodeStatusSeconds))
             : DateTime.MinValue;
         UpdateAutoReportLastSentSummary();
         MyPublicKey = _settings.UserPublicKey;
@@ -2298,6 +2312,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ShortName = MyShortName ?? string.Empty,
             HwModel = MyHwModel ?? string.Empty,
             Role = MyRole ?? string.Empty,
+            NodeStatus = MyNodeStatus ?? string.Empty,
             PublicKey = Convert.ToHexString(TryParseKeyBase64(MyPublicKey)),
         });
     }
@@ -3280,6 +3295,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserNodeNum = _myNodeNum;
         _settings.UserLongName = MyLongName ?? string.Empty;
         _settings.UserShortName = MyShortName ?? string.Empty;
+        _settings.UserNodeStatus = MyNodeStatus ?? string.Empty;
         _settings.UserRole = MyRole ?? "Client";
         _settings.UserHwModel = MyHwModel ?? "UNSET";
         _settings.RebroadcastMode = RebroadcastMode ?? "ALL";
@@ -3292,6 +3308,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.AutoReportPositionSeconds = Math.Max(5, AutoReportPositionSeconds);
         _settings.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
         _settings.AutoReportDeviceMetricsSeconds = Math.Max(5, AutoReportDeviceMetricsSeconds);
+        _settings.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
+        _settings.AutoReportNodeStatusSeconds = Math.Max(5, AutoReportNodeStatusSeconds);
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.NodeFilterMqtt = NodeMqttFilter;
@@ -3316,6 +3334,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _myNodeNum = ParseNodeId(value);
         OnPropertyChanged(nameof(MyMacAddress));
         SendNodeInfoCommand.NotifyCanExecuteChanged();
+        SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SaveSettings();
@@ -3324,6 +3343,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnMyLongNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyShortNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyNodeStatusChanged(string value)
+    {
+        SendNodeStatusCommand.NotifyCanExecuteChanged();
+        SaveSettings();
+        RefreshSelfNode();
+    }
     partial void OnMyRoleChanged(string value) => SaveSettings();
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnRebroadcastModeChanged(string value) => SaveSettings();
@@ -3360,6 +3385,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
+    partial void OnAutoReportNodeStatusEnabledChanged(bool value)
+    {
+        _lastAutoNodeStatusUtc = DateTime.MinValue;
+        _nextAutoNodeStatusUtc = value
+            ? DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportNodeStatusSeconds))
+            : DateTime.MinValue;
+        UpdateAutoReportLastSentSummary();
+        SaveSettings();
+    }
+
     partial void OnAutoReportNodeInfoSecondsChanged(int value)
     {
         if (value < 5) { AutoReportNodeInfoSeconds = 5; return; }
@@ -3381,6 +3416,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (value < 5) { AutoReportDeviceMetricsSeconds = 5; return; }
         if (AutoReportDeviceMetricsEnabled)
             _nextAutoDeviceMetricsUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds));
+        SaveSettings();
+    }
+
+    partial void OnAutoReportNodeStatusSecondsChanged(int value)
+    {
+        if (value < 5) { AutoReportNodeStatusSeconds = 5; return; }
+        if (AutoReportNodeStatusEnabled)
+            _nextAutoNodeStatusUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportNodeStatusSeconds));
         SaveSettings();
     }
 
@@ -3901,6 +3944,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanSelectRxSampleRate));
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
+        SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
@@ -3923,6 +3967,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanTransmit));
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
+        SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
@@ -4480,6 +4525,58 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     private bool CanSendNodeInfo() => CanTransmit && _myNodeNum != 0;
+    private bool CanSendNodeStatus() =>
+        CanTransmit && _myNodeNum != 0 && !string.IsNullOrWhiteSpace(MyNodeStatus);
+
+    /// <summary>
+    /// Broadcast our NODE_STATUS_APP status string on the primary channel.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendNodeStatus))]
+    private async Task SendNodeStatusAsync()
+    {
+        if (_myNodeNum == 0)
+        {
+            Status = "Set your node ID (Identity) before sending status.";
+            Log(Status);
+            return;
+        }
+
+        var statusText = (MyNodeStatus ?? string.Empty).Trim();
+        if (statusText.Length == 0)
+        {
+            Status = "Set a status text before sending NODE_STATUS_APP.";
+            Log(Status);
+            return;
+        }
+
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primary is null)
+        {
+            Status = "No primary channel to send status on.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeNodeStatus(
+                primary.Config, _myNodeNum, packetId, statusText,
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            Status = ok
+                ? $"Sent node status ({frame.Length} B) on {primary.DisplayName}"
+                : "Transmit failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Node status error: {ex.Message}";
+            Log(Status);
+        }
+    }
 
     /// <summary>
     /// Broadcast our identity (NODEINFO_APP <c>User</c> protobuf) on the
@@ -5916,6 +6013,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             position = decoded.Position,
             waypoint = decoded.Waypoint,
             telemetry = decoded.Telemetry,
+            status_message = decoded.StatusMessage,
             route_discovery = decoded.RouteDiscovery,
             neighbor_info = decoded.NeighborInfo,
             app_payload_hex = BytesToHex(decoded.AppPayload),
@@ -5963,6 +6061,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             position = decoded.Position,
             waypoint = decoded.Waypoint,
             telemetry = decoded.Telemetry,
+            status_message = decoded.StatusMessage,
             route_discovery = decoded.RouteDiscovery,
             neighbor_info = decoded.NeighborInfo,
             app_payload_hex = BytesToHex(decoded.AppPayload),
@@ -6603,6 +6702,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     EnqueueDbWrite((nodes, _) => nodes.Upsert(telemetryUpsert));
                     PersistTelemetryHistory(header.From, rxEpoch, t);
                     break;
+                case PortNum.NodeStatus when result.StatusMessage is not null:
+                    nodeChanged = true;
+                    var statusText = (result.StatusMessage.Status ?? string.Empty).Trim();
+                    if (!string.IsNullOrEmpty(statusText))
+                    {
+                        var statusUpsert = new NodeRecord
+                        {
+                            NodeNum = header.From,
+                            LastHeardEpoch = rxEpoch,
+                            SeenViaMqtt = header.ViaMqtt,
+                            NodeStatus = statusText,
+                        };
+                        EnqueueDbWrite((nodes, _) => nodes.Upsert(statusUpsert));
+                    }
+                    break;
                 case PortNum.Traceroute:
                     HandleTraceroute(header, result, snrDb);
                     break;
@@ -6684,6 +6798,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             PortNum.Telemetry when result.Telemetry is not null
                 => $"{prefix}: telemetry {(result.Telemetry.HasEnvironmentMetrics ? "env" : string.Empty)}{(result.Telemetry.HasDeviceMetrics ? "dev" : string.Empty)}{size}{meta}",
+
+            PortNum.NodeStatus when result.StatusMessage is not null
+                => $"{prefix}: status=\"{TrimForReplyPreview(result.StatusMessage.Status)}\"{size}{meta}",
 
             PortNum.Routing when result.RoutingError >= 0
                 => $"{prefix}: {(result.RoutingError == 0 ? "ACK" : $"NAK reason={RoutingErrorName(result.RoutingError)} ({result.RoutingError})")}{size}{meta}",
@@ -7169,6 +7286,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (Status.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
                 {
                     _lastAutoDeviceMetricsUtc = now;
+                    UpdateAutoReportLastSentSummary();
+                }
+            }
+
+            now = DateTime.UtcNow;
+            if (AutoReportNodeStatusEnabled &&
+                CanSendNodeStatus() &&
+                now >= _nextAutoNodeStatusUtc)
+            {
+                _nextAutoNodeStatusUtc = now.AddSeconds(Math.Max(5, AutoReportNodeStatusSeconds));
+                await SendNodeStatusAsync();
+                if (Status.StartsWith("Sent node status", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastAutoNodeStatusUtc = now;
                     UpdateAutoReportLastSentSummary();
                 }
             }

@@ -379,6 +379,26 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// Encode a NODE_STATUS_APP StatusMessage payload. This is sent as a
+    /// standalone application packet (not part of NODEINFO_APP).
+    /// </summary>
+    public static byte[] EncodeNodeStatus(ChannelConfig channel,
+                                          uint from,
+                                          uint packetId,
+                                          string status,
+                                          uint to = 0xFFFFFFFFu,
+                                          byte hopLimit = 3,
+                                          bool okToMqtt = false)
+    {
+        var msg = new ProtoWriter();
+        msg.WriteStringField(1, status ?? string.Empty);
+
+        return Encode(channel, from, to, packetId, PortNum.NodeStatus,
+                      msg.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: false, okToMqtt: okToMqtt);
+    }
+
+    /// <summary>
     /// Broadcast or unicast a waypoint (WAYPOINT_APP <c>Waypoint</c> protobuf).
     /// Mirrors the upstream fields: id, lat/lon, optional expiry/lock/name/
     /// description/icon.
