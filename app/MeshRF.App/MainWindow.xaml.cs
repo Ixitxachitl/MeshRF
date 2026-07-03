@@ -620,6 +620,38 @@ public partial class MainWindow : Window
         vm.RequestKeys(selected, channel);
     }
 
+    private async void OnSendNodeInfoPrompted(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var channel = PromptForRequestChannel(vm, "Send node info on which channel?");
+        if (channel is null) return;
+        await vm.SendNodeInfoOnChannelAsync(channel);
+    }
+
+    private async void OnSendPositionPrompted(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var channel = PromptForRequestChannel(vm, "Send position on which channel?");
+        if (channel is null) return;
+        await vm.SendPositionOnChannelAsync(channel);
+    }
+
+    private async void OnSendDeviceMetricsPrompted(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var channel = PromptForRequestChannel(vm, "Send device metrics on which channel?");
+        if (channel is null) return;
+        await vm.SendDeviceMetricsOnChannelAsync(channel);
+    }
+
+    private async void OnSendNodeStatusPrompted(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var channel = PromptForRequestChannel(vm, "Send status on which channel?");
+        if (channel is null) return;
+        await vm.SendNodeStatusOnChannelAsync(channel);
+    }
+
     private ChannelConfig? PromptForRequestChannel(MainViewModel vm, string prompt)
     {
         var channels = vm.Channels.ToList();

@@ -742,6 +742,44 @@
                         </Border>
                     </Expander>
 
+                        <Border DockPanel.Dock="Top"
+                            Margin="0,0,0,4"
+                            Padding="6,4"
+                            Background="{DynamicResource BrushPanelBackground}"
+                            BorderBrush="{DynamicResource BrushPanelBorder}"
+                            BorderThickness="1">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                   Text="Quick send"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                            <Button DockPanel.Dock="Left"
+                                Content="Node info"
+                                Padding="10,3"
+                                Margin="0,0,4,0"
+                                Click="OnSendNodeInfoPrompted"
+                                ToolTip="Choose a channel, then send your NODEINFO payload" />
+                            <Button DockPanel.Dock="Left"
+                                Content="Position"
+                                Padding="10,3"
+                                Margin="0,0,4,0"
+                                Click="OnSendPositionPrompted"
+                                ToolTip="Choose a channel, then send your POSITION payload" />
+                            <Button DockPanel.Dock="Left"
+                                Content="Device metrics"
+                                Padding="10,3"
+                                Margin="0,0,4,0"
+                                Click="OnSendDeviceMetricsPrompted"
+                                ToolTip="Choose a channel, then send your TELEMETRY device metrics" />
+                            <Button DockPanel.Dock="Left"
+                                Content="Status"
+                                Padding="10,3"
+                                Click="OnSendNodeStatusPrompted"
+                                ToolTip="Choose a channel, then send your NODE_STATUS_APP text" />
+                        </DockPanel>
+                        </Border>
+
                     <TextBlock DockPanel.Dock="Top"
                                Text="Nodes"
                                FontWeight="SemiBold"
@@ -1564,26 +1602,6 @@
                                                     ToolTip="Encode and transmit a text message on this channel"
                                                     Command="{Binding DataContext.SendMessageCommand,
                                                               RelativeSource={RelativeSource AncestorType=TabControl}}" />
-                                            <Button DockPanel.Dock="Right" Content="Node info" Padding="14,4"
-                                                    Margin="4,0,0,0"
-                                                    ToolTip="Broadcast your node info (id / name / role) on the primary channel"
-                                                    Command="{Binding DataContext.SendNodeInfoCommand,
-                                                              RelativeSource={RelativeSource AncestorType=TabControl}}" />
-                                            <Button DockPanel.Dock="Right" Content="Position" Padding="14,4"
-                                                    Margin="4,0,0,0"
-                                                    ToolTip="Broadcast your position on the primary channel (uses the channel's position precision and your home location)"
-                                                    Command="{Binding DataContext.SendPositionCommand,
-                                                              RelativeSource={RelativeSource AncestorType=TabControl}}" />
-                                                <Button DockPanel.Dock="Right" Content="Device metrics" Padding="14,4"
-                                                    Margin="4,0,0,0"
-                                                    ToolTip="Send a TELEMETRY device-metrics packet on the primary channel (manual only)"
-                                                    Command="{Binding DataContext.SendDeviceMetricsCommand,
-                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
-                                                <Button DockPanel.Dock="Right" Content="Status" Padding="14,4"
-                                                    Margin="4,0,0,0"
-                                                    ToolTip="Broadcast your NODE_STATUS_APP status string on the primary channel"
-                                                    Command="{Binding DataContext.SendNodeStatusCommand,
-                                                        RelativeSource={RelativeSource AncestorType=TabControl}}" />
                                               <Button DockPanel.Dock="Right"
                                                     Content="😀"
                                                     Padding="8,4"
