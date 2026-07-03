@@ -389,7 +389,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<string> LogLines { get; } = new();
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
-    public ObservableCollection<string> DecodedPacketJsonLines { get; } = new();
+    public ObservableCollection<DecodedPacketJsonEntry> DecodedPacketJsonEntries { get; } = new();
     public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
 
     // -- Node list filters ---------------------------------------------------
@@ -3080,10 +3080,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         RunOnUiThread(() =>
         {
-            if (DecodedPacketJsonLines.Count == 0) return;
+            if (DecodedPacketJsonEntries.Count == 0) return;
             try
             {
-                string text = string.Join(Environment.NewLine, DecodedPacketJsonLines.ToArray());
+                string text = string.Join(
+                    Environment.NewLine + Environment.NewLine,
+                    DecodedPacketJsonEntries.Select(e => e.Json));
                 System.Windows.Clipboard.SetText(text);
             }
             catch { /* clipboard contention; ignore */ }
@@ -3092,7 +3094,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>Clear the decoded-packet JSON feed shown in the raw JSON popup.</summary>
     [RelayCommand]
-    private void ClearDecodedPacketJsonFeed() => RunOnUiThread(DecodedPacketJsonLines.Clear);
+    private void ClearDecodedPacketJsonFeed() => RunOnUiThread(DecodedPacketJsonEntries.Clear);
 
     /// <summary>Clear the global log.</summary>
     [RelayCommand]
@@ -5581,7 +5583,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    private const int MaxDecodedPacketJsonLines = 500;
+    // Long unbroken hex string literals are expensive for wrapped text layout.
+    // Insert zero-width break opportunities for UI display only.
+    private static readonly Regex LongHexJsonStringRegex = new(
+        "\"(?<hex>[0-9A-Fa-f]{96,})\"",
+        RegexOptions.Compiled);
+
+    private const int MaxDecodedPacketJsonEntries = 500;
+
+    private static string BuildDisplayJsonForUi(string json)
+    {
+        return LongHexJsonStringRegex.Replace(json, match =>
+        {
+            var hex = match.Groups["hex"].Value;
+            var sb = new StringBuilder(hex.Length + (hex.Length / 32));
+            for (int i = 0; i < hex.Length; i += 32)
+            {
+                int len = Math.Min(32, hex.Length - i);
+                sb.Append(hex, i, len);
+                if (i + len < hex.Length)
+                    sb.Append('\u200B');
+            }
+
+            return "\"" + sb.ToString() + "\"";
+        });
+    }
 
     // Pulls the peak-above-noise figure out of a preamble line, e.g.
     //   "preamble: SF9 BW250k cfo=+101.6k peak=28.3dB"
@@ -6623,11 +6649,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
 
         string line = JsonSerializer.Serialize(payload, DecodedFeedJsonOptions);
+        string displayLine = BuildDisplayJsonForUi(line);
+        string headerText = $"[{DateTime.Now.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}] {summary.Trim()}";
         RunOnUiThread(() =>
         {
-            DecodedPacketJsonLines.Add(line);
-            if (DecodedPacketJsonLines.Count > MaxDecodedPacketJsonLines)
-                DecodedPacketJsonLines.RemoveAt(0);
+            DecodedPacketJsonEntries.Add(new DecodedPacketJsonEntry(headerText, line, displayLine));
+            if (DecodedPacketJsonEntries.Count > MaxDecodedPacketJsonEntries)
+                DecodedPacketJsonEntries.RemoveAt(0);
         });
     }
 
@@ -7566,3 +7594,5 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _ringtone.Dispose();
     }
 }
+
+public sealed record DecodedPacketJsonEntry(string Header, string Json, string DisplayJson);

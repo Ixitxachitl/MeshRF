@@ -33,16 +33,40 @@
         </DockPanel>
 
         <ListBox Grid.Row="1"
-                 ItemsSource="{Binding DecodedPacketJsonLines}"
+                 ItemsSource="{Binding DecodedPacketJsonEntries}"
                  HorizontalContentAlignment="Stretch"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
                  ScrollViewer.CanContentScroll="True"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  VirtualizingPanel.ScrollUnit="Pixel">
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <emoji:TextBlock FontFamily="Consolas"
+                    <Expander IsExpanded="False"
+                              Margin="0,0,0,4">
+                        <Expander.Header>
+                            <emoji:TextBlock FontFamily="Consolas"
+                                             TextWrapping="Wrap"
+                                             Text="{Binding Header}" />
+                        </Expander.Header>
+                        <Border Margin="8,4,0,0"
+                                Padding="6"
+                                BorderBrush="{DynamicResource BrushPanelBorder}"
+                                BorderThickness="1"
+                                Background="{DynamicResource BrushPanelBackground}">
+                            <TextBox x:Name="JsonBodyText"
+                                     FontFamily="Consolas"
+                                     Text="{Binding DisplayJson}"
                                      TextWrapping="Wrap"
-                                     Text="{Binding}" />
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     BorderThickness="0"
+                                     Padding="0"
+                                     Background="Transparent"
+                                     VerticalScrollBarVisibility="Disabled"
+                                     HorizontalScrollBarVisibility="Disabled" />
+                        </Border>
+                    </Expander>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
