@@ -1943,6 +1943,9 @@
                                     Command="{Binding ClearLogCommand}" />
                             <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
                                     Command="{Binding CopyLogCommand}" />
+                            <Button DockPanel.Dock="Right" Content="Raw JSON" Padding="6,1"
+                                Margin="4,0,0,0"
+                                Click="OnOpenRawJsonLog" />
                             <TextBlock Text="Log" FontWeight="SemiBold" VerticalAlignment="Center" />
                         </DockPanel>
                         <ListBox ItemsSource="{Binding LogLines}"

@@ -140,6 +140,27 @@ public partial class MainWindow : Window
         ShowOwnedHistoryWindow(conversation, c => new LocationHistoryWindow(c));
     }
 
+    private void OnOpenRawJsonLog(object sender, RoutedEventArgs e)
+    {
+        foreach (Window window in OwnedWindows)
+        {
+            if (window is RawJsonFeedWindow existing)
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                    existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return;
+            }
+        }
+
+        var feedWindow = new RawJsonFeedWindow
+        {
+            Owner = this,
+            DataContext = DataContext,
+        };
+        feedWindow.Show();
+    }
+
     private void ShowOwnedHistoryWindow<T>(ConversationViewModel conversation,
                                            Func<ConversationViewModel, T> create)
         where T : Window

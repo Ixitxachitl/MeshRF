@@ -9,6 +9,7 @@ using System.Management;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -388,6 +389,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<string> LogLines { get; } = new();
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
+    public ObservableCollection<string> DecodedPacketJsonLines { get; } = new();
     public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
 
     // -- Node list filters ---------------------------------------------------
@@ -3072,6 +3074,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    /// <summary>Copy the decoded-packet JSON feed to the clipboard.</summary>
+    [RelayCommand]
+    private void CopyDecodedPacketJsonFeed()
+    {
+        RunOnUiThread(() =>
+        {
+            if (DecodedPacketJsonLines.Count == 0) return;
+            try
+            {
+                string text = string.Join(Environment.NewLine, DecodedPacketJsonLines.ToArray());
+                System.Windows.Clipboard.SetText(text);
+            }
+            catch { /* clipboard contention; ignore */ }
+        });
+    }
+
+    /// <summary>Clear the decoded-packet JSON feed shown in the raw JSON popup.</summary>
+    [RelayCommand]
+    private void ClearDecodedPacketJsonFeed() => RunOnUiThread(DecodedPacketJsonLines.Clear);
+
     /// <summary>Clear the global log.</summary>
     [RelayCommand]
     private void ClearLog() => RunOnUiThread(LogLines.Clear);
@@ -5552,6 +5574,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    private static readonly JsonSerializerOptions DecodedFeedJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    private const int MaxDecodedPacketJsonLines = 500;
+
     // Pulls the peak-above-noise figure out of a preamble line, e.g.
     //   "preamble: SF9 BW250k cfo=+101.6k peak=28.3dB"
     // We use this as the per-packet SNR estimate for the message/node tables.
@@ -5865,6 +5896,69 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
     }
 
+    private static object? BuildDecodedPayloadForFeed(MeshDecodeResult decoded)
+    {
+        var h = decoded.Header;
+        return new
+        {
+            header = new
+            {
+                to = h.To,
+                from = h.From,
+                packet_id = h.PacketId,
+                flags = h.Flags,
+                channel_hash = h.ChannelHash,
+                next_hop = h.NextHop,
+                relay_node = h.RelayNode,
+                hop_limit = h.HopLimit,
+                want_ack = h.WantAck,
+                via_mqtt = h.ViaMqtt,
+                hop_start = h.HopStart,
+                is_broadcast = h.IsBroadcast,
+                from_id = h.FromId,
+                to_id = h.ToId,
+            },
+            channel = decoded.ChannelName,
+            port = decoded.Port.ToString(),
+            text = decoded.Text,
+            want_response = decoded.WantResponse,
+            request_id = decoded.RequestId,
+            reply_id = decoded.ReplyId,
+            emoji = decoded.Emoji,
+            ok_to_mqtt = decoded.OkToMqtt,
+            data_dest = decoded.DataDest,
+            data_source = decoded.DataSource,
+            data_bitfield = decoded.DataBitfield,
+            data_field10_hex = BytesToHex(decoded.DataField10),
+            data_proto_json = ParseEmbeddedJson(decoded.DataProtoJson),
+            app_proto_json = ParseEmbeddedJson(decoded.AppProtoJson),
+            routing_error = decoded.RoutingError,
+            user = decoded.User,
+            position = decoded.Position,
+            waypoint = decoded.Waypoint,
+            telemetry = decoded.Telemetry,
+            route_discovery = decoded.RouteDiscovery,
+            neighbor_info = decoded.NeighborInfo,
+            app_payload_hex = BytesToHex(decoded.AppPayload),
+        };
+    }
+
+    private static object? ParseEmbeddedJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.Clone();
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
     /// <summary>
     /// If <paramref name="ev"/> is a CRC-valid decoded payload, parse the
     /// Meshtastic header, try each channel key to AES-CTR decrypt it, and
@@ -6146,7 +6240,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         bool nodeChanged = false;
         var senderName = NodeDisplayName(header.From);
         bool senderIgnored = IsNodeIgnored(header.From);
-        Log(BuildDecodedPortSummary(header, result, senderName));
+        var decodedSummary = BuildDecodedPortSummary(header, result, senderName);
+        Log(decodedSummary);
+        AppendDecodedPacketJsonFeed(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, decodedSummary);
         switch (result.Port)
             {
                 case PortNum.TextMessage:
@@ -6495,6 +6591,44 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         MarkNodeDirty(header.From);
         if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
+    }
+
+    private void AppendDecodedPacketJsonFeed(
+        MeshHeader header,
+        MeshDecodeResult result,
+        long rxEpoch,
+        float? snrDb,
+        float? packetRssiDbm,
+        byte hopsAway,
+        string summary)
+    {
+        var payload = new
+        {
+            time = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", CultureInfo.InvariantCulture),
+            rx_epoch = rxEpoch,
+            summary,
+            packet = new
+            {
+                from = header.From,
+                from_id = header.FromId,
+                to = header.To,
+                to_id = header.ToId,
+                packet_id = header.PacketId,
+                via_mqtt = header.ViaMqtt,
+                hops_away = hopsAway,
+                rssi_dbm = packetRssiDbm,
+                snr_db = snrDb,
+            },
+            decoded = BuildDecodedPayloadForFeed(result),
+        };
+
+        string line = JsonSerializer.Serialize(payload, DecodedFeedJsonOptions);
+        RunOnUiThread(() =>
+        {
+            DecodedPacketJsonLines.Add(line);
+            if (DecodedPacketJsonLines.Count > MaxDecodedPacketJsonLines)
+                DecodedPacketJsonLines.RemoveAt(0);
+        });
     }
 
     private string BuildDecodedPortSummary(MeshHeader header, MeshDecodeResult result, string senderName)
