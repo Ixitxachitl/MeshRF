@@ -43,8 +43,10 @@
                  Grid.Row="1"
                  ItemsSource="{Binding DecodedPacketJsonEntries}"
                  HorizontalContentAlignment="Stretch"
-                 VirtualizingPanel.IsVirtualizing="False"
-                 ScrollViewer.CanContentScroll="False"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Standard"
+                 VirtualizingPanel.ScrollUnit="Pixel"
+                 ScrollViewer.CanContentScroll="True"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemTemplate>
                 <DataTemplate>
