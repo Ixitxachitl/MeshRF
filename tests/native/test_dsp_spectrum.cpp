@@ -55,7 +55,11 @@ TEST(Spectrum, ToneShowsPeakAtExpectedBin) {
     EXPECT_GT(*it, -10.0f);
 }
 
-TEST(Spectrum, LatestMaxHoldsFramesBetweenPulls) {
+TEST(Spectrum, LatestReturnsLastPushedFrame) {
+    // latest() returns the most-recent instantaneous FFT frame, not a max-hold
+    // of all frames since the last pull.  (Max-hold was removed because it
+    // caused visual bouncing when the UI poll rate didn't align with the native
+    // FFT rate; UI-side EMA now provides display stability instead.)
     constexpr std::size_t N = 1024;
     constexpr float kPi = std::numbers::pi_v<float>;
     Spectrum sp(N);
@@ -69,15 +73,17 @@ TEST(Spectrum, LatestMaxHoldsFramesBetweenPulls) {
         return x;
     };
 
-    sp.push(tone(96.0f / static_cast<float>(N)));
-    sp.push(tone(-160.0f / static_cast<float>(N)));
+    sp.push(tone(96.0f / static_cast<float>(N)));    // frame 1: peak at bin N/2+96
+    sp.push(tone(-160.0f / static_cast<float>(N))); // frame 2: peak at bin N/2-160
     ASSERT_EQ(sp.frame_count(), 2u);
 
     std::vector<float> out(N);
     ASSERT_TRUE(sp.latest(out));
 
-    EXPECT_GT(out[N / 2 + 96], -10.0f);
+    // Only the last frame is returned: second tone should be present.
     EXPECT_GT(out[N / 2 - 160], -10.0f);
+    // First tone's bin should be at noise floor (not max-held from frame 1).
+    EXPECT_LT(out[N / 2 + 96], -10.0f);
 }
 
 TEST(SignalStats, RssiOfUnitTone) {

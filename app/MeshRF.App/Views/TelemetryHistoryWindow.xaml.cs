@@ -46,6 +46,8 @@ public partial class TelemetryHistoryWindow : Window
             GraphPaneColumn.Width = new GridLength(leftWidth, GridUnitType.Pixel);
         if (settings.TelemetryHistoryTopPaneHeight is double topHeight && topHeight >= DevicePaneRow.MinHeight)
             DevicePaneRow.Height = new GridLength(topHeight, GridUnitType.Pixel);
+        if (settings.TelemetryHistoryMiddlePaneHeight is double midHeight && midHeight >= EnvironmentPaneRow.MinHeight)
+            EnvironmentPaneRow.Height = new GridLength(midHeight, GridUnitType.Pixel);
     }
 
     private void SaveLayout()
@@ -56,16 +58,18 @@ public partial class TelemetryHistoryWindow : Window
         settings.TelemetryHistoryWindowHeight = Math.Max(MinHeight, bounds.Height);
         settings.TelemetryHistoryLeftPaneWidth = Math.Max(GraphPaneColumn.MinWidth, GraphPaneColumn.ActualWidth);
         settings.TelemetryHistoryTopPaneHeight = Math.Max(DevicePaneRow.MinHeight, DevicePaneRow.ActualHeight);
+        settings.TelemetryHistoryMiddlePaneHeight = Math.Max(EnvironmentPaneRow.MinHeight, EnvironmentPaneRow.ActualHeight);
         settings.Save();
     }
 
     private void DrawSparkGraph()
     {
-        if (_conversation is null || DeviceSparkCanvas is null || EnvironmentSparkCanvas is null)
+        if (_conversation is null || DeviceSparkCanvas is null || EnvironmentSparkCanvas is null || AirQualitySparkCanvas is null)
             return;
 
         DeviceSparkCanvas.Children.Clear();
         EnvironmentSparkCanvas.Children.Clear();
+        AirQualitySparkCanvas.Children.Clear();
 
         var deviceSamples = _conversation.DeviceTelemetryHistory.ToList();
         DrawSparkGraph(DeviceSparkCanvas, deviceSamples,
@@ -85,6 +89,17 @@ public partial class TelemetryHistoryWindow : Window
             new SeriesDefinition(PressureToggle, p => p.BarometricPressureHpa, Color.FromRgb(155, 89, 182)),
             new SeriesDefinition(GasToggle, p => p.GasResistanceMohm, Color.FromRgb(149, 165, 166)),
             new SeriesDefinition(IaqToggle, p => p.IaqValue, Color.FromRgb(255, 107, 154)),
+        ]);
+
+        var airQualitySamples = _conversation.AirQualityTelemetryHistory.ToList();
+        DrawSparkGraph(AirQualitySparkCanvas, airQualitySamples,
+        [
+            new SeriesDefinition(Pm1StdToggle,   p => p.Pm10Standard,      Color.FromRgb(93, 173, 226)),
+            new SeriesDefinition(Pm25StdToggle,  p => p.Pm25Standard,      Color.FromRgb(235, 152, 78)),
+            new SeriesDefinition(Pm100StdToggle, p => p.Pm100Standard,     Color.FromRgb(231, 76, 60)),
+            new SeriesDefinition(Pm1EnvToggle,   p => p.Pm10Environmental,  Color.FromRgb(163, 216, 244)),
+            new SeriesDefinition(Pm25EnvToggle,  p => p.Pm25Environmental,  Color.FromRgb(212, 172, 13)),
+            new SeriesDefinition(Pm100EnvToggle, p => p.Pm100Environmental, Color.FromRgb(192, 57, 43)),
         ]);
     }
 

@@ -789,6 +789,14 @@ public partial class MainWindow : Window
         await vm.SendEnvironmentMetricsOnChannelAsync(channel);
     }
 
+    private async void OnSendAirQualityMetricsPrompted(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var channel = PromptForRequestChannel(vm, "Send air quality telemetry on which channel?");
+        if (channel is null) return;
+        await vm.SendAirQualityMetricsOnChannelAsync(channel);
+    }
+
     private async void OnSendNodeStatusPrompted(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
@@ -1563,6 +1571,14 @@ public partial class MainWindow : Window
             settings.NodeFilterTemperature   = vm.NodeTemperatureFilter;
             settings.NodeFilterHumidity      = vm.NodeHumidityFilter;
             settings.NodeFilterPressure      = vm.NodePressureFilter;
+            settings.NodeFilterGasResistance = vm.NodeGasResistanceFilter;
+            settings.NodeFilterIaq           = vm.NodeIaqFilter;
+            settings.NodeFilterPm10Std       = vm.NodePm10StdFilter;
+            settings.NodeFilterPm25Std       = vm.NodePm25StdFilter;
+            settings.NodeFilterPm100Std      = vm.NodePm100StdFilter;
+            settings.NodeFilterPm10Env       = vm.NodePm10EnvFilter;
+            settings.NodeFilterPm25Env       = vm.NodePm25EnvFilter;
+            settings.NodeFilterPm100Env      = vm.NodePm100EnvFilter;
             SaveNodesGridSort(settings);
             settings.MapNodeLabelMode        = vm.MapNodeLabelMode;
             settings.NodeFilterDistanceKm    = vm.NodeDistanceKmText;

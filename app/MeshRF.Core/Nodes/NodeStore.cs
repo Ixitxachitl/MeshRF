@@ -25,6 +25,12 @@ public sealed record NodeTelemetryHistoryRecord(
     double? BarometricPressureHpa,
     double? GasResistanceMohm,
     double? IaqValue,
+    double? Pm10Standard,
+    double? Pm25Standard,
+    double? Pm100Standard,
+    double? Pm10Environmental,
+    double? Pm25Environmental,
+    double? Pm100Environmental,
     string Signature);
 
 /// <summary>
@@ -113,6 +119,12 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("seen_via_mqtt", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("node_status", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("pm10_std",  "INTEGER");
+        AddColumnIfMissing("pm25_std",  "INTEGER");
+        AddColumnIfMissing("pm100_std", "INTEGER");
+        AddColumnIfMissing("pm10_env",  "INTEGER");
+        AddColumnIfMissing("pm25_env",  "INTEGER");
+        AddColumnIfMissing("pm100_env", "INTEGER");
 
         using var history = _conn.CreateCommand();
         history.CommandText = """
@@ -141,24 +153,39 @@ public sealed class NodeStore : IDisposable
                 barometric_pressure_hpa    REAL,
                 gas_resistance_mohm        REAL,
                 iaq                        REAL,
+                pm10_std                   REAL,
+                pm25_std                   REAL,
+                pm100_std                  REAL,
+                pm10_env                   REAL,
+                pm25_env                   REAL,
+                pm100_env                  REAL,
                 signature                  TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_node_telemetry_history_node_time
                 ON node_telemetry_history(node_num, timestamp_epoch ASC, id ASC);
             """;
         history.ExecuteNonQuery();
+
+        // Additive migrations for air quality columns in node_telemetry_history.
+        const string hist = "node_telemetry_history";
+        AddColumnIfMissing("pm10_std",  "REAL", hist);
+        AddColumnIfMissing("pm25_std",  "REAL", hist);
+        AddColumnIfMissing("pm100_std", "REAL", hist);
+        AddColumnIfMissing("pm10_env",  "REAL", hist);
+        AddColumnIfMissing("pm25_env",  "REAL", hist);
+        AddColumnIfMissing("pm100_env", "REAL", hist);
     }
 
-    private void AddColumnIfMissing(string name, string sqlType)
+    private void AddColumnIfMissing(string name, string sqlType, string table = "nodes")
     {
         using (var check = _conn.CreateCommand())
         {
-            check.CommandText = "SELECT 1 FROM pragma_table_info('nodes') WHERE name = $n";
+            check.CommandText = $"SELECT 1 FROM pragma_table_info('{table}') WHERE name = $n";
             check.Parameters.AddWithValue("$n", name);
             if (check.ExecuteScalar() is not null) return;
         }
         using var alter = _conn.CreateCommand();
-        alter.CommandText = $"ALTER TABLE nodes ADD COLUMN {name} {sqlType}";
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {name} {sqlType}";
         alter.ExecuteNonQuery();
     }
 
@@ -177,7 +204,9 @@ public sealed class NodeStore : IDisposable
                                uptime_seconds, temperature_c,
                                    relative_humidity_pct, barometric_pressure_hpa,
                                    gas_resistance_mohm, iaq, public_key, key_mismatch,
-                                   mute_rtttl, ignored, node_status)
+                                   mute_rtttl, ignored, node_status,
+                                   pm10_std, pm25_std, pm100_std,
+                                   pm10_env, pm25_env, pm100_env)
             VALUES ($node_num, $user_id, $long_name, $short_name,
                     $hw_model, $role, $last_heard, $seen_via_mqtt,
                     $snr, $rssi, $hops,
@@ -187,7 +216,9 @@ public sealed class NodeStore : IDisposable
                     $uptime, $temp,
                     $hum, $pres,
                                 $gas, $iaq, $pubkey, $mismatch,
-                                $mute_rtttl, $ignored, $node_status)
+                                $mute_rtttl, $ignored, $node_status,
+                                $pm10std, $pm25std, $pm100std,
+                                $pm10env, $pm25env, $pm100env)
             ON CONFLICT(node_num) DO UPDATE SET
                 user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
                 long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
@@ -214,7 +245,13 @@ public sealed class NodeStore : IDisposable
                 iaq              = COALESCE(excluded.iaq, iaq),
                 public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key),
                 key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch),
-                node_status      = COALESCE(NULLIF(excluded.node_status, ''), node_status);
+                node_status      = COALESCE(NULLIF(excluded.node_status, ''), node_status),
+                pm10_std         = COALESCE(excluded.pm10_std,  pm10_std),
+                pm25_std         = COALESCE(excluded.pm25_std,  pm25_std),
+                pm100_std        = COALESCE(excluded.pm100_std, pm100_std),
+                pm10_env         = COALESCE(excluded.pm10_env,  pm10_env),
+                pm25_env         = COALESCE(excluded.pm25_env,  pm25_env),
+                pm100_env        = COALESCE(excluded.pm100_env, pm100_env);
             """;
         cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
         cmd.Parameters.AddWithValue("$user_id", rec.UserId ?? string.Empty);
@@ -246,6 +283,12 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$mute_rtttl", rec.MuteRtttl ? 1 : 0);
         cmd.Parameters.AddWithValue("$ignored", rec.Ignored ? 1 : 0);
         cmd.Parameters.AddWithValue("$node_status", rec.NodeStatus ?? string.Empty);
+        cmd.Parameters.AddWithValue("$pm10std",  (object?)rec.Pm10Standard       ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm25std",  (object?)rec.Pm25Standard       ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm100std", (object?)rec.Pm100Standard      ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
@@ -477,6 +520,12 @@ public sealed class NodeStore : IDisposable
                 Nullable<double>(rd, "barometric_pressure_hpa"),
                 Nullable<double>(rd, "gas_resistance_mohm"),
                 Nullable<double>(rd, "iaq"),
+                Nullable<double>(rd, "pm10_std"),
+                Nullable<double>(rd, "pm25_std"),
+                Nullable<double>(rd, "pm100_std"),
+                Nullable<double>(rd, "pm10_env"),
+                Nullable<double>(rd, "pm25_env"),
+                Nullable<double>(rd, "pm100_env"),
                 ReadStringOrEmpty(rd, "signature")));
         }
         rows.Reverse();
@@ -515,11 +564,15 @@ public sealed class NodeStore : IDisposable
                 (node_num, timestamp_epoch, battery_pct, voltage_v,
                  channel_util_pct, air_util_tx_pct, uptime_seconds,
                  temperature_c, relative_humidity_pct, barometric_pressure_hpa,
-                 gas_resistance_mohm, iaq, signature)
+                 gas_resistance_mohm, iaq,
+                 pm10_std, pm25_std, pm100_std, pm10_env, pm25_env, pm100_env,
+                 signature)
             VALUES ($node_num, $ts, $batt, $volt,
                     $chan, $airx, $uptime,
                     $temp, $hum, $pres,
-                    $gas, $iaq, $sig);
+                    $gas, $iaq,
+                    $pm10std, $pm25std, $pm100std, $pm10env, $pm25env, $pm100env,
+                    $sig);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
@@ -534,6 +587,12 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$pres", (object?)rec.BarometricPressureHpa ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$gas", (object?)rec.GasResistanceMohm ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$iaq", (object?)rec.IaqValue ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm10std",  (object?)rec.Pm10Standard       ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm25std",  (object?)rec.Pm25Standard       ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm100std", (object?)rec.Pm100Standard      ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$sig", rec.Signature ?? string.Empty);
         var id = Convert.ToInt64(cmd.ExecuteScalar());
         TrimTelemetryHistory(rec.NodeNum, 500);
@@ -570,7 +629,9 @@ public sealed class NodeStore : IDisposable
                 uptime_seconds = NULL,
                 temperature_c = NULL, relative_humidity_pct = NULL,
                 barometric_pressure_hpa = NULL, gas_resistance_mohm = NULL,
-                iaq = NULL
+                iaq = NULL,
+                pm10_std = NULL, pm25_std = NULL, pm100_std = NULL,
+                pm10_env = NULL, pm25_env = NULL, pm100_env = NULL
             WHERE node_num = $n
             """;
         cmd.Parameters.AddWithValue("$n", nodeNum);
@@ -675,6 +736,12 @@ public sealed class NodeStore : IDisposable
             MuteRtttl             = Nullable<bool>("mute_rtttl") == true,
             Ignored               = Nullable<bool>("ignored") == true,
             Favorite              = Nullable<bool>("favorite") == true,
+            Pm10Standard          = Nullable<uint>("pm10_std"),
+            Pm25Standard          = Nullable<uint>("pm25_std"),
+            Pm100Standard         = Nullable<uint>("pm100_std"),
+            Pm10Environmental     = Nullable<uint>("pm10_env"),
+            Pm25Environmental     = Nullable<uint>("pm25_env"),
+            Pm100Environmental    = Nullable<uint>("pm100_env"),
         };
     }
 

@@ -44,6 +44,15 @@ public sealed class NodeRecord
     public float?  GasResistanceMohm     { get; set; }
     public int?    Iaq                   { get; set; }
 
+    // Air quality metrics (from TELEMETRY_APP AirQualityMetrics).
+    // pm10_standard = PM1.0 µg/m³, pm25_standard = PM2.5 µg/m³, pm100_standard = PM10 µg/m³
+    public uint? Pm10Standard      { get; set; }
+    public uint? Pm25Standard      { get; set; }
+    public uint? Pm100Standard     { get; set; }
+    public uint? Pm10Environmental  { get; set; }
+    public uint? Pm25Environmental  { get; set; }
+    public uint? Pm100Environmental { get; set; }
+
     /// <summary>Most recent NODE_STATUS_APP status string heard from this node.</summary>
     public string NodeStatus { get; set; } = string.Empty;
 

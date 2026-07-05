@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -246,6 +247,45 @@ public partial class MapView : UserControl
         MapTileThemeCombo.ItemsSource = MapTileThemeOptions;
         MapTileThemeCombo.SelectedItem = _mapTileTheme;
         AttributionText.Text = CurrentTiles.Attribution;
+    }
+
+    // Intercept mouse-wheel on the Grid during the TUNNELING phase so the
+    // event is handled before Selector.OnMouseWheel (bubbling) can fire and
+    // call NavigateByLine, which would change the selection without scrolling
+    // the open popup.
+    private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        foreach (var cb in new[] { LabelModeCombo, MapTileThemeCombo })
+        {
+            if (!cb.IsDropDownOpen) continue;
+            if (FindDropDownScrollViewer(cb) is ScrollViewer sv)
+                if (e.Delta > 0) sv.LineUp(); else sv.LineDown();
+            e.Handled = true; // also prevents OnMouseWheel (map zoom) from firing
+            return;
+        }
+    }
+
+    // Try template name scope first (Dark.xaml custom template names it
+    // "DropDownScrollViewer"), then fall back to visual-tree search so the
+    // same code works with the default Light-theme template.
+    private static ScrollViewer? FindDropDownScrollViewer(ComboBox cb)
+    {
+        if (cb.Template?.FindName("DropDownScrollViewer", cb) is ScrollViewer named)
+            return named;
+        if (cb.Template?.FindName("PART_Popup", cb) is Popup { Child: { } child })
+            return FindVisualDescendant<ScrollViewer>(child);
+        return null;
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T t) return t;
+            if (FindVisualDescendant<T>(child) is T found) return found;
+        }
+        return null;
     }
 
     private void OnThemeChanged()

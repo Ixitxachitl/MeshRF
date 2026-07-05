@@ -57,7 +57,7 @@
           <Setter Property="MaxDropDownHeight" Value="260" />
           <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
           <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
-          <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+          <Setter Property="ScrollViewer.CanContentScroll" Value="False" />
      </Style>
 
      <Style TargetType="{x:Type ToolBar}">

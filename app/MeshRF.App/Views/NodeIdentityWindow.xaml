@@ -45,6 +45,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <!-- Row 0: Node ID -->
@@ -272,37 +274,59 @@
                     <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
                 </DockPanel>
 
-                <!-- Row 18: Last sent summary -->
-                <TextBlock Grid.Row="18" Grid.Column="1" Margin="0,2,0,6"
+                <!-- Row 18: Auto AQ telemetry -->
+                <TextBlock Grid.Row="18" Grid.Column="0" Text="Auto AQ telemetry"
+                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                <DockPanel Grid.Row="18" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
+                    <CheckBox Content="Enabled" VerticalAlignment="Center"
+                              IsChecked="{Binding AutoReportAirQualityMetricsEnabled, Mode=TwoWay}" />
+                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
+                    <TextBox Width="60" FontFamily="Consolas"
+                             Text="{Binding AutoReportAirQualityMetricsSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
+                </DockPanel>
+
+                <!-- Row 19: Last sent summary -->
+                <TextBlock Grid.Row="19" Grid.Column="1" Margin="0,2,0,6"
                            FontFamily="Consolas" FontSize="11"
                            Foreground="{DynamicResource BrushSubtle}"
                            Text="{Binding AutoReportLastSentSummary}"
                            TextWrapping="Wrap"
-                           ToolTip="Last successful auto-send times for NodeInfo, Position, Device Metrics, Environment Metrics, and Status." />
+                           ToolTip="Last successful auto-send times for NodeInfo, Position, Device Metrics, Environment Metrics, Air Quality, and Status." />
 
-                <!-- Row 19: Weather status -->
-                <TextBlock Grid.Row="19" Grid.Column="0" Text="Weather status"
+                <!-- Row 20: Weather status -->
+                <TextBlock Grid.Row="20" Grid.Column="0" Text="Weather status"
                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                <TextBlock Grid.Row="19" Grid.Column="1" Margin="0,4,0,4"
+                <TextBlock Grid.Row="20" Grid.Column="1" Margin="0,4,0,4"
                            FontFamily="Consolas" FontSize="11"
                            Foreground="{DynamicResource BrushSubtle}"
                            Text="{Binding WeatherTelemetryStatus}"
                            TextWrapping="Wrap"
                            ToolTip="Live status of weather-source fetches used for environment telemetry." />
 
-                <!-- Row 20: Routing -->
-                <TextBlock Grid.Row="20" Grid.Column="0" Text="Routing"
+                <!-- Row 21: AQ status -->
+                <TextBlock Grid.Row="21" Grid.Column="0" Text="AQ status"
                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                <CheckBox Grid.Row="20" Grid.Column="1" Margin="0,4,0,4"
+                <TextBlock Grid.Row="21" Grid.Column="1" Margin="0,4,0,4"
+                           FontFamily="Consolas" FontSize="11"
+                           Foreground="{DynamicResource BrushSubtle}"
+                           Text="{Binding AirQualityTelemetryStatus}"
+                           TextWrapping="Wrap"
+                           ToolTip="Live status of air quality API fetches used for air quality telemetry (Open-Meteo AQ API)." />
+
+                <!-- Row 22: Routing -->
+                <TextBlock Grid.Row="22" Grid.Column="0" Text="Routing"
+                           Margin="0,4,8,4" VerticalAlignment="Center" />
+                <CheckBox Grid.Row="22" Grid.Column="1" Margin="0,4,0,4"
                           VerticalAlignment="Center"
                           Content="Enable relay routing (role + rebroadcast mode)"
                           IsChecked="{Binding RoutingRelayEnabled, Mode=TwoWay}"
                           ToolTip="When enabled, this node may rebroadcast received packets using your selected role and rebroadcast mode policy." />
 
-                <!-- Row 21: Status text -->
-                <TextBlock Grid.Row="21" Grid.Column="0" Text="Status text"
+                <!-- Row 23: Status text -->
+                <TextBlock Grid.Row="23" Grid.Column="0" Text="Status text"
                            Margin="0,4,8,4" VerticalAlignment="Center" />
-                <TextBox Grid.Row="21" Grid.Column="1" Margin="0,4,0,4"
+                <TextBox Grid.Row="23" Grid.Column="1" Margin="0,4,0,4"
                          MaxLength="280"
                          Text="{Binding MyNodeStatus, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
                          ToolTip="Status string broadcast by NODE_STATUS_APP." />

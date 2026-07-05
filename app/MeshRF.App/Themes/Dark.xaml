@@ -388,18 +388,19 @@
                         <Popup x:Name="PART_Popup"
                                Placement="Bottom"
                                IsOpen="{TemplateBinding IsDropDownOpen}"
-                               AllowsTransparency="True"
+                               AllowsTransparency="False"
                                Focusable="False"
-                               PopupAnimation="Slide">
+                               PopupAnimation="None">
                             <Border x:Name="DropDownBorder"
                                     MinWidth="{TemplateBinding ActualWidth}"
                                     MaxHeight="{TemplateBinding MaxDropDownHeight}"
                                     Background="{DynamicResource BrushPanelBackground}"
                                     BorderBrush="{DynamicResource BrushPanelBorder}"
                                     BorderThickness="1">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                <ScrollViewer x:Name="DropDownScrollViewer"
+                                              VerticalScrollBarVisibility="Auto"
                                               HorizontalScrollBarVisibility="Disabled"
-                                              CanContentScroll="True">
+                                              CanContentScroll="False">
                                     <StackPanel IsItemsHost="True"
                                                 KeyboardNavigation.DirectionalNavigation="Contained" />
                                 </ScrollViewer>

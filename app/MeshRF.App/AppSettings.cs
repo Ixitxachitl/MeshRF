@@ -151,6 +151,12 @@ public sealed class AppSettings
     /// <summary>Interval in seconds for automatic NODE_STATUS_APP transmission.</summary>
     public int AutoReportNodeStatusSeconds { get; set; } = 3600;
 
+    /// <summary>Automatically transmit TELEMETRY air quality metrics at a fixed interval.</summary>
+    public bool AutoReportAirQualityMetricsEnabled { get; set; } = false;
+
+    /// <summary>Interval in seconds for automatic TELEMETRY air quality metrics transmission.</summary>
+    public int AutoReportAirQualityMetricsSeconds { get; set; } = 3600;
+
     /// <summary>Base64 X25519 public key for PKI direct messages (TX).</summary>
     public string UserPublicKey  { get; set; } = string.Empty;
 
@@ -269,6 +275,9 @@ public sealed class AppSettings
     /// <summary>Shared telemetry-history popup top device pane height.</summary>
     public double? TelemetryHistoryTopPaneHeight { get; set; }
 
+    /// <summary>Shared telemetry-history popup middle environment pane height.</summary>
+    public double? TelemetryHistoryMiddlePaneHeight { get; set; }
+
     /// <summary>Whether the identity expander is open.</summary>
     public bool IdentityExpanded { get; set; } = false;
 
@@ -351,6 +360,30 @@ public sealed class AppSettings
 
     /// <summary>Persisted node pressure filter.</summary>
     public string NodeFilterPressure { get; set; } = "Any";
+
+    /// <summary>Persisted node gas resistance filter.</summary>
+    public string NodeFilterGasResistance { get; set; } = "Any";
+
+    /// <summary>Persisted node IAQ filter.</summary>
+    public string NodeFilterIaq { get; set; } = "Any";
+
+    /// <summary>Persisted node PM1.0 standard filter.</summary>
+    public string NodeFilterPm10Std { get; set; } = "Any";
+
+    /// <summary>Persisted node PM2.5 standard filter.</summary>
+    public string NodeFilterPm25Std { get; set; } = "Any";
+
+    /// <summary>Persisted node PM10 standard filter.</summary>
+    public string NodeFilterPm100Std { get; set; } = "Any";
+
+    /// <summary>Persisted node PM1.0 environmental filter.</summary>
+    public string NodeFilterPm10Env { get; set; } = "Any";
+
+    /// <summary>Persisted node PM2.5 environmental filter.</summary>
+    public string NodeFilterPm25Env { get; set; } = "Any";
+
+    /// <summary>Persisted node PM10 environmental filter.</summary>
+    public string NodeFilterPm100Env { get; set; } = "Any";
 
     /// <summary>Persisted node-grid sort column (SortMemberPath).</summary>
     public string NodeSortMemberPath { get; set; } = string.Empty;

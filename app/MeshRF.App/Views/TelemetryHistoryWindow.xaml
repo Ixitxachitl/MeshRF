@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Telemetry History"
         Width="920"
-        Height="430"
+        Height="590"
         MinWidth="760"
-        MinHeight="390"
+        MinHeight="520"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}"
@@ -22,6 +22,12 @@
         <Style x:Key="PressureTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FF9B59B6" /></Style>
         <Style x:Key="GasTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FF95A5A6" /></Style>
         <Style x:Key="IaqTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFFF6B9A" /></Style>
+        <Style x:Key="Pm1StdTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FF5DADE2" /></Style>
+        <Style x:Key="Pm25StdTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFEB984E" /></Style>
+        <Style x:Key="Pm100StdTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFE74C3C" /></Style>
+        <Style x:Key="Pm1EnvTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFA3D8F4" /></Style>
+        <Style x:Key="Pm25EnvTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFD4AC0D" /></Style>
+        <Style x:Key="Pm100EnvTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFC0392B" /></Style>
     </Window.Resources>
 
     <Grid Margin="6">
@@ -51,9 +57,11 @@
 
         <Grid Grid.Row="2">
             <Grid.RowDefinitions>
-                <RowDefinition x:Name="DevicePaneRow" Height="*" MinHeight="130" />
+                <RowDefinition x:Name="DevicePaneRow" Height="*" MinHeight="120" />
                 <RowDefinition Height="6" />
-                <RowDefinition x:Name="EnvironmentPaneRow" Height="*" MinHeight="130" />
+                <RowDefinition x:Name="EnvironmentPaneRow" Height="*" MinHeight="120" />
+                <RowDefinition Height="6" />
+                <RowDefinition x:Name="AirQualityPaneRow" Height="*" MinHeight="120" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="GraphPaneColumn" Width="360" MinWidth="260" />
@@ -93,8 +101,9 @@
                 </DataGrid.Columns>
             </DataGrid>
 
-            <GridSplitter Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
+            <GridSplitter Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
             <GridSplitter Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
+            <GridSplitter Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
 
             <Grid Grid.Row="2" Grid.Column="0">
                 <Grid.RowDefinitions>
@@ -125,6 +134,41 @@
                     <DataGridTextColumn Width="Auto" Binding="{Binding Pressure}" ElementStyle="{StaticResource PressureTextStyle}"><DataGridTextColumn.Header><TextBlock Text="Pressure" Style="{StaticResource PressureTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
                     <DataGridTextColumn Width="Auto" Binding="{Binding GasResistance}" ElementStyle="{StaticResource GasTextStyle}"><DataGridTextColumn.Header><TextBlock Text="Gas" Style="{StaticResource GasTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
                     <DataGridTextColumn Width="Auto" Binding="{Binding AirQuality}" ElementStyle="{StaticResource IaqTextStyle}"><DataGridTextColumn.Header><TextBlock Text="IAQ" Style="{StaticResource IaqTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Air Quality row -->
+            <Grid Grid.Row="4" Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Air Quality" FontWeight="SemiBold" Margin="0,0,0,3" />
+                <Border Grid.Row="1" Background="{DynamicResource BrushPanelBackground}" BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                    <Canvas x:Name="AirQualitySparkCanvas" ClipToBounds="True" SizeChanged="SparkCanvas_SizeChanged" />
+                </Border>
+                <WrapPanel Grid.Row="2" Margin="0,4,0,0">
+                    <CheckBox x:Name="Pm1StdToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="PM1.0" Style="{StaticResource Pm1StdTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Pm25StdToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="PM2.5" Style="{StaticResource Pm25StdTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Pm100StdToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="PM10" Style="{StaticResource Pm100StdTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Pm1EnvToggle" IsChecked="False" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="PM1.0e" Style="{StaticResource Pm1EnvTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Pm25EnvToggle" IsChecked="False" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="PM2.5e" Style="{StaticResource Pm25EnvTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Pm100EnvToggle" IsChecked="False" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="PM10e" Style="{StaticResource Pm100EnvTextStyle}" /></CheckBox>
+                </WrapPanel>
+            </Grid>
+
+            <DataGrid Grid.Row="4" Grid.Column="2" ItemsSource="{Binding AirQualityTelemetryHistory}" AutoGenerateColumns="False" HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow" RowHeight="22" ColumnHeaderHeight="24" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Visibility="{Binding HasTelemetryHistory, Converter={StaticResource BoolToVis}}">
+                <DataGrid.InputBindings><KeyBinding Key="Delete" Command="{Binding DeleteTelemetryHistoryPointCommand}" CommandParameter="{Binding SelectedItem, RelativeSource={RelativeSource AncestorType=DataGrid}}" /></DataGrid.InputBindings>
+                <DataGrid.ContextMenu><ContextMenu><MenuItem Header="Delete" Command="{Binding PlacementTarget.DataContext.DeleteTelemetryHistoryPointCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /></ContextMenu></DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat={}{0:M/d/yyyy h:mm:ss tt}}" />
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Pm25Std}" ElementStyle="{StaticResource Pm25StdTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM2.5" Style="{StaticResource Pm25StdTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Pm100Std}" ElementStyle="{StaticResource Pm100StdTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM10" Style="{StaticResource Pm100StdTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Pm10Std}" ElementStyle="{StaticResource Pm1StdTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM1.0" Style="{StaticResource Pm1StdTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Pm25Env}" ElementStyle="{StaticResource Pm25EnvTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM2.5e" Style="{StaticResource Pm25EnvTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Pm100Env}" ElementStyle="{StaticResource Pm100EnvTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM10e" Style="{StaticResource Pm100EnvTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Pm10Env}" ElementStyle="{StaticResource Pm1EnvTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM1.0e" Style="{StaticResource Pm1EnvTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
                 </DataGrid.Columns>
             </DataGrid>
         </Grid>

@@ -11,7 +11,10 @@ using mrf::dsp::DcBlocker;
 
 TEST(DcBlocker, RemovesConstantOffset) {
     DcBlocker blk;
-    std::vector<std::complex<float>> data(10000, std::complex<float>{0.5f, -0.3f});
+    // With R=0.9995 the output after k samples of constant input decays as
+    // R^k * c.  At k=20000: 0.9995^19999 * 0.5 ≈ 2.3e-5 — well within 1e-3.
+    // 10000 samples only gives ~0.0034, which is above the old tolerance.
+    std::vector<std::complex<float>> data(20000, std::complex<float>{0.5f, -0.3f});
     blk.process(data);
 
     // After enough samples, output should converge to ~0.

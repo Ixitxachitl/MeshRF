@@ -41,6 +41,12 @@ public sealed record TelemetryHistoryPoint(
     double? BarometricPressureHpa,
     double? GasResistanceMohm,
     double? IaqValue,
+    double? Pm10Standard,
+    double? Pm25Standard,
+    double? Pm100Standard,
+    double? Pm10Environmental,
+    double? Pm25Environmental,
+    double? Pm100Environmental,
     string Battery,
     string Voltage,
     string ChannelUtil,
@@ -51,6 +57,12 @@ public sealed record TelemetryHistoryPoint(
     string Pressure,
     string GasResistance,
     string AirQuality,
+    string Pm10Std,
+    string Pm25Std,
+    string Pm100Std,
+    string Pm10Env,
+    string Pm25Env,
+    string Pm100Env,
     string Signature)
 {
     public DateTime TimestampLocal => TimestampUtc.ToLocalTime();
@@ -64,6 +76,10 @@ public sealed record TelemetryHistoryPoint(
     public bool HasEnvironmentalTelemetry =>
         TemperatureC.HasValue || RelativeHumidityPct.HasValue ||
         BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || IaqValue.HasValue;
+
+    public bool HasAirQualityMetrics =>
+        Pm10Standard.HasValue || Pm25Standard.HasValue || Pm100Standard.HasValue ||
+        Pm10Environmental.HasValue || Pm25Environmental.HasValue || Pm100Environmental.HasValue;
 }
 
 /// <summary>
@@ -126,6 +142,9 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 
     /// <summary>Telemetry history rows that contain environmental metrics.</summary>
     public ObservableCollection<TelemetryHistoryPoint> EnvironmentalTelemetryHistory { get; } = new();
+
+    /// <summary>Telemetry history rows that contain air quality metrics.</summary>
+    public ObservableCollection<TelemetryHistoryPoint> AirQualityTelemetryHistory { get; } = new();
 
     /// <summary>True when at least one telemetry value is available.</summary>
     public bool HasTelemetry => Telemetry.Count > 0;
@@ -205,6 +224,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             if (n.BarometricPressureHpa is float pres) Add("Pressure", _formatPressure?.Invoke(pres) ?? $"{pres:0.0} hPa");
             if (n.GasResistanceMohm is float gas) Add("Gas resistance", $"{gas:0.0} M\u03A9");
             if (n.Iaq is int iaq) Add("Air quality (IAQ)", iaq.ToString());
+            if (n.Pm25Standard is uint pm25s) Add("PM2.5 std", $"{pm25s} \u03BCg/m\u00B3");
+            if (n.Pm100Standard is uint pm100s) Add("PM10 std", $"{pm100s} \u03BCg/m\u00B3");
+            if (n.Pm10Standard is uint pm1s) Add("PM1.0 std", $"{pm1s} \u03BCg/m\u00B3");
+            if (n.Pm25Environmental is uint pm25e) Add("PM2.5 env", $"{pm25e} \u03BCg/m\u00B3");
+            if (n.Pm100Environmental is uint pm100e) Add("PM10 env", $"{pm100e} \u03BCg/m\u00B3");
+            if (n.Pm10Environmental is uint pm1e) Add("PM1.0 env", $"{pm1e} \u03BCg/m\u00B3");
             if (n.SnrDb is float snr) Add("SNR", $"{snr:0.0} dB");
             if (n.RssiDbm is float rssi) Add("RSSI", $"{rssi:0} dBm");
             if (n.HopsAway is byte hops) Add("Hops away", hops.ToString());
@@ -244,6 +269,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         TelemetryHistory.Clear();
         DeviceTelemetryHistory.Clear();
         EnvironmentalTelemetryHistory.Clear();
+        AirQualityTelemetryHistory.Clear();
         foreach (var point in _nodeStore.TelemetryHistory(NodeNum))
             AddTelemetryHistoryPoint(BuildTelemetryHistoryPoint(point));
 
@@ -301,10 +327,17 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             Node.BarometricPressureHpa  = null;
             Node.GasResistanceMohm      = null;
             Node.Iaq                    = null;
+            Node.Pm10Standard           = null;
+            Node.Pm25Standard           = null;
+            Node.Pm100Standard          = null;
+            Node.Pm10Environmental      = null;
+            Node.Pm25Environmental      = null;
+            Node.Pm100Environmental     = null;
         }
         TelemetryHistory.Clear();
         DeviceTelemetryHistory.Clear();
         EnvironmentalTelemetryHistory.Clear();
+        AirQualityTelemetryHistory.Clear();
         RebuildTelemetry();
         OnPropertyChanged(nameof(HasTelemetryHistory));
     }
@@ -327,6 +360,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         if (!TelemetryHistory.Remove(point)) return;
         DeviceTelemetryHistory.Remove(point);
         EnvironmentalTelemetryHistory.Remove(point);
+        AirQualityTelemetryHistory.Remove(point);
         if (point.Id != 0)
             _nodeStore?.DeleteTelemetryHistory(point.Id);
         OnPropertyChanged(nameof(HasTelemetryHistory));
@@ -401,6 +435,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             node.BarometricPressureHpa,
             node.GasResistanceMohm,
             node.Iaq,
+            (double?)node.Pm10Standard,
+            (double?)node.Pm25Standard,
+            (double?)node.Pm100Standard,
+            (double?)node.Pm10Environmental,
+            (double?)node.Pm25Environmental,
+            (double?)node.Pm100Environmental,
             signature);
 
         var point = BuildTelemetryHistoryPoint(record);
@@ -425,6 +465,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             DeviceTelemetryHistory.Add(point);
         if (point.HasEnvironmentalTelemetry)
             EnvironmentalTelemetryHistory.Add(point);
+        if (point.HasAirQualityMetrics)
+            AirQualityTelemetryHistory.Add(point);
     }
 
     public void AppendTelemetryHistoryRecord(NodeTelemetryHistoryRecord record)
@@ -449,6 +491,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         TelemetryHistory.Remove(point);
         DeviceTelemetryHistory.Remove(point);
         EnvironmentalTelemetryHistory.Remove(point);
+        AirQualityTelemetryHistory.Remove(point);
     }
 
     private TelemetryHistoryPoint BuildTelemetryHistoryPoint(NodeTelemetryHistoryRecord record) =>
@@ -464,6 +507,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             record.BarometricPressureHpa,
             record.GasResistanceMohm,
             record.IaqValue,
+            record.Pm10Standard,
+            record.Pm25Standard,
+            record.Pm100Standard,
+            record.Pm10Environmental,
+            record.Pm25Environmental,
+            record.Pm100Environmental,
             record.BatteryPct is double bat ? $"{bat:0}%" : string.Empty,
             record.VoltageV is double volt ? $"{volt:0.00} V" : string.Empty,
             record.ChannelUtilPct is double chUtil ? $"{chUtil:0.0}%" : string.Empty,
@@ -474,6 +523,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             record.BarometricPressureHpa is double pres ? (_formatPressure?.Invoke((float)pres) ?? $"{pres:0.0} hPa") : string.Empty,
             record.GasResistanceMohm is double gas ? $"{gas:0.0} M\u03A9" : string.Empty,
             record.IaqValue is double iaq ? iaq.ToString("0", CultureInfo.InvariantCulture) : string.Empty,
+            record.Pm10Standard      is double p1s   ? $"{p1s:0} \u03BCg/m\u00B3"   : string.Empty,
+            record.Pm25Standard      is double p25s  ? $"{p25s:0} \u03BCg/m\u00B3"  : string.Empty,
+            record.Pm100Standard     is double p100s ? $"{p100s:0} \u03BCg/m\u00B3" : string.Empty,
+            record.Pm10Environmental  is double p1e   ? $"{p1e:0} \u03BCg/m\u00B3"   : string.Empty,
+            record.Pm25Environmental  is double p25e  ? $"{p25e:0} \u03BCg/m\u00B3"  : string.Empty,
+            record.Pm100Environmental is double p100e ? $"{p100e:0} \u03BCg/m\u00B3" : string.Empty,
             record.Signature)
         { Id = record.Id };
 
@@ -486,7 +541,10 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         || node.RelativeHumidityPct.HasValue
         || node.BarometricPressureHpa.HasValue
         || node.GasResistanceMohm.HasValue
-        || node.Iaq.HasValue;
+        || node.Iaq.HasValue
+        || node.Pm10Standard.HasValue
+        || node.Pm25Standard.HasValue
+        || node.Pm100Standard.HasValue;
 
     private static string BuildTelemetrySignature(NodeRecord node) => string.Join("|",
         FormatNullable(node.BatteryPct),
@@ -497,7 +555,9 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         FormatNullable(node.RelativeHumidityPct),
         FormatNullable(node.BarometricPressureHpa),
         FormatNullable(node.GasResistanceMohm),
-        FormatNullable(node.Iaq));
+        FormatNullable(node.Iaq),
+        FormatNullable(node.Pm25Standard),
+        FormatNullable(node.Pm100Standard));
 
     private static string FormatNullable<T>(T? value)
         where T : struct, IFormattable =>

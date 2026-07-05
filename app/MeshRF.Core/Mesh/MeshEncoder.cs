@@ -392,6 +392,43 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// Broadcast a TELEMETRY_APP packet carrying <c>AirQualityMetrics</c>
+    /// (PM1.0, PM2.5, and PM10 particulate matter concentrations, µg/m³).
+    /// Only non-null values are written into the proto.
+    /// </summary>
+    public static byte[] EncodeTelemetryAirQualityMetrics(ChannelConfig channel,
+                                                          uint from,
+                                                          uint packetId,
+                                                          uint? pm10Standard = null,
+                                                          uint? pm25Standard = null,
+                                                          uint? pm100Standard = null,
+                                                          uint? pm10Environmental = null,
+                                                          uint? pm25Environmental = null,
+                                                          uint? pm100Environmental = null,
+                                                          uint to = 0xFFFFFFFFu,
+                                                          byte hopLimit = 3,
+                                                          bool okToMqtt = false,
+                                                          uint requestId = 0)
+    {
+        var aq = new ProtoWriter();
+        if (pm10Standard.HasValue)       aq.WriteVarintField(1, pm10Standard.Value);
+        if (pm25Standard.HasValue)       aq.WriteVarintField(2, pm25Standard.Value);
+        if (pm100Standard.HasValue)      aq.WriteVarintField(3, pm100Standard.Value);
+        if (pm10Environmental.HasValue)  aq.WriteVarintField(4, pm10Environmental.Value);
+        if (pm25Environmental.HasValue)  aq.WriteVarintField(5, pm25Environmental.Value);
+        if (pm100Environmental.HasValue) aq.WriteVarintField(6, pm100Environmental.Value);
+
+        var telemetry = new ProtoWriter();
+        telemetry.WriteFixed32Field(1, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        telemetry.WriteBytesField(4, aq.ToArray()); // air_quality_metrics = field 4
+
+        return Encode(channel, from, to, packetId, PortNum.Telemetry,
+                      telemetry.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: false, okToMqtt: okToMqtt,
+                      requestId: requestId);
+    }
+
+    /// <summary>
     /// Encode a TELEMETRY_APP request for device metrics directed at
     /// <paramref name="to"/>. Official firmware chooses the reply variant from
     /// the Telemetry oneof tag, so this sends an empty <c>device_metrics</c>

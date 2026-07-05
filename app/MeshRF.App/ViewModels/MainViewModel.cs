@@ -52,6 +52,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private int _sharedHackRfTxStatusDepth;
 
     // Set when a received packet updates node state; consumed by the 20 Hz
+    // Self-node conversation (not added to Tabs since we don't show ourself as a
+    // tab, but kept here so live telemetry updates reach any open history window).
+    private ConversationViewModel? _selfConversation;
+
     // timer tick so ReloadNodes() runs at most once per tick rather than once
     // per received packet (avoids stutter from Nodes.Clear + full rebind).
     private bool _nodesDirty;
@@ -408,10 +412,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _hideInvalidNodeLocations;
     [ObservableProperty] private string _nodeIgnoredFilter     = "Show all";
     [ObservableProperty] private string _nodeMqttFilter        = "Any";
-    [ObservableProperty] private string _nodeTemperatureFilter = "Any";
-    [ObservableProperty] private string _nodeHumidityFilter    = "Any";
-    [ObservableProperty] private string _nodePressureFilter    = "Any";
-    [ObservableProperty] private string _mapNodeLabelMode      = "Node Number";
+    [ObservableProperty] private string _nodeTemperatureFilter    = "Any";
+    [ObservableProperty] private string _nodeHumidityFilter       = "Any";
+    [ObservableProperty] private string _nodePressureFilter       = "Any";
+    [ObservableProperty] private string _nodeGasResistanceFilter  = "Any";
+    [ObservableProperty] private string _nodeIaqFilter            = "Any";
+    [ObservableProperty] private string _nodePm10StdFilter        = "Any";
+    [ObservableProperty] private string _nodePm25StdFilter        = "Any";
+    [ObservableProperty] private string _nodePm100StdFilter       = "Any";
+    [ObservableProperty] private string _nodePm10EnvFilter        = "Any";
+    [ObservableProperty] private string _nodePm25EnvFilter        = "Any";
+    [ObservableProperty] private string _nodePm100EnvFilter       = "Any";
+    [ObservableProperty] private string _mapNodeLabelMode         = "Node Number";
     [ObservableProperty] private string _nodeDistanceKmText    = string.Empty;
     [ObservableProperty] private string _nodeMaxAgeMinutesText = string.Empty;
 
@@ -423,7 +435,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<string> NodeMqttFilterOptions     { get; } = ["Any", "Hide via MQTT", "Only via MQTT"];
     public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
     public IReadOnlyList<string> MapNodeLabelModeOptions   { get; } =
-        ["Node Number", "Long Name", "Short Name", "Temperature", "Humidity", "Pressure"];
+        ["Node Number", "Long Name", "Short Name",
+         "Temperature", "Humidity", "Pressure", "Gas Resistance", "IAQ",
+         "PM1.0 std", "PM2.5 std", "PM10 std",
+         "PM1.0 env", "PM2.5 env", "PM10 env"];
 
     /// <summary>True when a home location is set (enables the distance filter).</summary>
     public bool HasHomeLocation => HomeLatitude.HasValue && HomeLongitude.HasValue;
@@ -455,6 +470,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnNodeTemperatureFilterChanged(string value)   => RefreshNodesFilter();
     partial void OnNodeHumidityFilterChanged(string value)      => RefreshNodesFilter();
     partial void OnNodePressureFilterChanged(string value)      => RefreshNodesFilter();
+    partial void OnNodeGasResistanceFilterChanged(string value) => RefreshNodesFilter();
+    partial void OnNodeIaqFilterChanged(string value)           => RefreshNodesFilter();
+    partial void OnNodePm10StdFilterChanged(string value)       => RefreshNodesFilter();
+    partial void OnNodePm25StdFilterChanged(string value)       => RefreshNodesFilter();
+    partial void OnNodePm100StdFilterChanged(string value)      => RefreshNodesFilter();
+    partial void OnNodePm10EnvFilterChanged(string value)       => RefreshNodesFilter();
+    partial void OnNodePm25EnvFilterChanged(string value)       => RefreshNodesFilter();
+    partial void OnNodePm100EnvFilterChanged(string value)      => RefreshNodesFilter();
     partial void OnMapNodeLabelModeChanged(string value)        => RefreshNodesFilter();
     partial void OnNodeDistanceKmTextChanged(string value)      => RefreshNodesFilter();
     partial void OnNodeMaxAgeMinutesTextChanged(string value)   => RefreshNodesFilter();
@@ -470,11 +493,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         HideInvalidNodeLocations = false;
         NodeIgnoredFilter     = "Show all";
         NodeMqttFilter        = "Any";
-        NodeTemperatureFilter = "Any";
-        NodeHumidityFilter    = "Any";
-        NodePressureFilter    = "Any";
-        NodeDistanceKmText    = string.Empty;
-        NodeMaxAgeMinutesText = string.Empty;
+        NodeTemperatureFilter   = "Any";
+        NodeHumidityFilter      = "Any";
+        NodePressureFilter      = "Any";
+        NodeGasResistanceFilter = "Any";
+        NodeIaqFilter           = "Any";
+        NodePm10StdFilter       = "Any";
+        NodePm25StdFilter       = "Any";
+        NodePm100StdFilter      = "Any";
+        NodePm10EnvFilter       = "Any";
+        NodePm25EnvFilter       = "Any";
+        NodePm100EnvFilter      = "Any";
+        NodeDistanceKmText      = string.Empty;
+        NodeMaxAgeMinutesText   = string.Empty;
     }
 
     private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
@@ -541,6 +572,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
+        SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
     }
 
     private void MarkTabNeedsAttention(ITabItem? tab)
@@ -694,8 +726,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private int _autoReportEnvironmentMetricsSeconds = 3600;
     [ObservableProperty] private bool _autoReportNodeStatusEnabled;
     [ObservableProperty] private int _autoReportNodeStatusSeconds = 3600;
-    [ObservableProperty] private string _autoReportLastSentSummary = "Auto last: NI never | POS never | MET never | ENV never | ST never";
+    [ObservableProperty] private bool _autoReportAirQualityMetricsEnabled;
+    [ObservableProperty] private int _autoReportAirQualityMetricsSeconds = 3600;
+    [ObservableProperty] private string _autoReportLastSentSummary = "Auto last: NI never | POS never | MET never | ENV never | AQ never | ST never";
     [ObservableProperty] private string _weatherTelemetryStatus = "Weather telemetry: idle";
+    [ObservableProperty] private string _airQualityTelemetryStatus = "Air quality telemetry: idle";
     [ObservableProperty] private bool _logAutoScroll = true;
 
     private DateTime _lastAutoNodeInfoUtc = DateTime.MinValue;
@@ -703,15 +738,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _lastAutoDeviceMetricsUtc = DateTime.MinValue;
     private DateTime _lastAutoEnvironmentMetricsUtc = DateTime.MinValue;
     private DateTime _lastAutoNodeStatusUtc = DateTime.MinValue;
+    private DateTime _lastAutoAirQualityMetricsUtc = DateTime.MinValue;
     private DateTime _nextAutoNodeInfoUtc = DateTime.MinValue;
     private DateTime _nextAutoPositionUtc = DateTime.MinValue;
     private DateTime _nextAutoDeviceMetricsUtc = DateTime.MinValue;
     private DateTime _nextAutoEnvironmentMetricsUtc = DateTime.MinValue;
     private DateTime _nextAutoNodeStatusUtc = DateTime.MinValue;
+    private DateTime _nextAutoAirQualityMetricsUtc = DateTime.MinValue;
     private int _autoReportTickInFlight;
     private readonly SemaphoreSlim _weatherFetchSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _airQualityFetchSemaphore = new(1, 1);
     private WeatherTelemetrySnapshot? _latestWeatherTelemetry;
+    private AirQualityTelemetrySnapshot? _latestAirQualityTelemetry;
     private static readonly TimeSpan WeatherTelemetryCacheTtl = TimeSpan.FromMinutes(20);
+    private static readonly TimeSpan AirQualityCacheTtl = TimeSpan.FromMinutes(30);
     private static readonly HttpClient WeatherHttp = new() { Timeout = TimeSpan.FromSeconds(8) };
     private static readonly TimeSpan RxBusyDefaultHold = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan RxBusyMaxWait = TimeSpan.FromMilliseconds(450);
@@ -753,6 +793,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         DateTime FetchedUtc,
         string Source);
 
+    private sealed record AirQualityTelemetrySnapshot(
+        uint? Pm25Standard,
+        uint? Pm100Standard,
+        DateTime FetchedUtc,
+        string Source);
+
     private void UpdateAutoReportLastSentSummary()
     {
         static string Stamp(DateTime utc) =>
@@ -761,7 +807,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 : utc.ToLocalTime().ToString("h:mm:ss tt", CultureInfo.CurrentCulture);
 
         AutoReportLastSentSummary =
-            $"Auto last: NI {Stamp(_lastAutoNodeInfoUtc)} | POS {Stamp(_lastAutoPositionUtc)} | MET {Stamp(_lastAutoDeviceMetricsUtc)} | ENV {Stamp(_lastAutoEnvironmentMetricsUtc)} | ST {Stamp(_lastAutoNodeStatusUtc)}";
+            $"Auto last: NI {Stamp(_lastAutoNodeInfoUtc)} | POS {Stamp(_lastAutoPositionUtc)} | MET {Stamp(_lastAutoDeviceMetricsUtc)} | ENV {Stamp(_lastAutoEnvironmentMetricsUtc)} | AQ {Stamp(_lastAutoAirQualityMetricsUtc)} | ST {Stamp(_lastAutoNodeStatusUtc)}";
     }
 
     [ObservableProperty] private string _homeLatitudeText  = string.Empty;
@@ -1351,13 +1397,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private string GetMapNodeLabel(NodeRecord n) => MapNodeLabelMode switch
     {
-        "Node Number" => n.DisplayId,
-        "Long Name" => !string.IsNullOrWhiteSpace(n.LongName) ? n.LongName : n.DisplayId,
-        "Short Name" => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
-        "Temperature" => n.TemperatureC is float t ? FormatTemperature(t) : n.DisplayId,
-        "Humidity" => n.RelativeHumidityPct is float h ? $"{h:F0}%" : n.DisplayId,
-        "Pressure" => n.BarometricPressureHpa is float p ? FormatPressure(p) : n.DisplayId,
-        _ => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
+        "Node Number"    => n.DisplayId,
+        "Long Name"      => !string.IsNullOrWhiteSpace(n.LongName) ? n.LongName : n.DisplayId,
+        "Short Name"     => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
+        "Temperature"    => n.TemperatureC is float t ? FormatTemperature(t) : n.DisplayId,
+        "Humidity"       => n.RelativeHumidityPct is float h ? $"{h:F0}%" : n.DisplayId,
+        "Pressure"       => n.BarometricPressureHpa is float p ? FormatPressure(p) : n.DisplayId,
+        "Gas Resistance" => n.GasResistanceMohm is float g ? $"{g:0.0} MΩ" : n.DisplayId,
+        "IAQ"            => n.Iaq is int iaq ? $"IAQ {iaq}" : n.DisplayId,
+        "PM1.0 std"      => n.Pm10Standard  is uint p10s  ? $"{p10s} µg" : n.DisplayId,
+        "PM2.5 std"      => n.Pm25Standard  is uint p25s  ? $"{p25s} µg" : n.DisplayId,
+        "PM10 std"       => n.Pm100Standard is uint p100s ? $"{p100s} µg" : n.DisplayId,
+        "PM1.0 env"      => n.Pm10Environmental  is uint p10e  ? $"{p10e} µg" : n.DisplayId,
+        "PM2.5 env"      => n.Pm25Environmental  is uint p25e  ? $"{p25e} µg" : n.DisplayId,
+        "PM10 env"       => n.Pm100Environmental is uint p100e ? $"{p100e} µg" : n.DisplayId,
+        _                => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
     };
 
     private string GetLocationMarkerLabel()
@@ -1532,6 +1586,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AutoReportEnvironmentMetricsSeconds = Math.Max(5, _settings.AutoReportEnvironmentMetricsSeconds);
         AutoReportNodeStatusEnabled = _settings.AutoReportNodeStatusEnabled;
         AutoReportNodeStatusSeconds = Math.Max(5, _settings.AutoReportNodeStatusSeconds);
+        AutoReportAirQualityMetricsEnabled = _settings.AutoReportAirQualityMetricsEnabled;
+        AutoReportAirQualityMetricsSeconds = Math.Max(5, _settings.AutoReportAirQualityMetricsSeconds);
         var now = DateTime.UtcNow;
         _nextAutoNodeInfoUtc = AutoReportNodeInfoEnabled
             ? now.AddSeconds(Math.Max(5, AutoReportNodeInfoSeconds))
@@ -1547,6 +1603,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             : DateTime.MinValue;
         _nextAutoNodeStatusUtc = AutoReportNodeStatusEnabled
             ? now.AddSeconds(Math.Max(5, AutoReportNodeStatusSeconds))
+            : DateTime.MinValue;
+        _nextAutoAirQualityMetricsUtc = AutoReportAirQualityMetricsEnabled
+            ? now.AddSeconds(Math.Max(5, AutoReportAirQualityMetricsSeconds))
             : DateTime.MinValue;
         UpdateAutoReportLastSentSummary();
         MyPublicKey = _settings.UserPublicKey;
@@ -1604,9 +1663,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodeMqttFilter        = NodeMqttFilterOptions.Contains(_settings.NodeFilterMqtt)
             ? _settings.NodeFilterMqtt
             : "Any";
-        NodeTemperatureFilter = _settings.NodeFilterTemperature;
-        NodeHumidityFilter    = _settings.NodeFilterHumidity;
-        NodePressureFilter    = _settings.NodeFilterPressure;
+        NodeTemperatureFilter   = _settings.NodeFilterTemperature;
+        NodeHumidityFilter      = _settings.NodeFilterHumidity;
+        NodePressureFilter      = _settings.NodeFilterPressure;
+        NodeGasResistanceFilter = _settings.NodeFilterGasResistance;
+        NodeIaqFilter           = _settings.NodeFilterIaq;
+        NodePm10StdFilter       = _settings.NodeFilterPm10Std;
+        NodePm25StdFilter       = _settings.NodeFilterPm25Std;
+        NodePm100StdFilter      = _settings.NodeFilterPm100Std;
+        NodePm10EnvFilter       = _settings.NodeFilterPm10Env;
+        NodePm25EnvFilter       = _settings.NodeFilterPm25Env;
+        NodePm100EnvFilter      = _settings.NodeFilterPm100Env;
         MapNodeLabelMode      = string.IsNullOrWhiteSpace(_settings.MapNodeLabelMode)
             ? "Node Number"
             : _settings.MapNodeLabelMode;
@@ -3347,6 +3414,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.AutoReportEnvironmentMetricsSeconds = Math.Max(5, AutoReportEnvironmentMetricsSeconds);
         _settings.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
         _settings.AutoReportNodeStatusSeconds = Math.Max(5, AutoReportNodeStatusSeconds);
+        _settings.AutoReportAirQualityMetricsEnabled = AutoReportAirQualityMetricsEnabled;
+        _settings.AutoReportAirQualityMetricsSeconds = Math.Max(5, AutoReportAirQualityMetricsSeconds);
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
         _settings.UserPrivateKey = MyPrivateKey ?? string.Empty;
         _settings.NodeFilterMqtt = NodeMqttFilter;
@@ -3375,6 +3444,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
+        SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
         SaveSettings();
         RefreshSelfNode();
     }
@@ -3480,6 +3550,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (value < 5) { AutoReportNodeStatusSeconds = 5; return; }
         if (AutoReportNodeStatusEnabled)
             _nextAutoNodeStatusUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportNodeStatusSeconds));
+        SaveSettings();
+    }
+
+    partial void OnAutoReportAirQualityMetricsEnabledChanged(bool value)
+    {
+        _lastAutoAirQualityMetricsUtc = DateTime.MinValue;
+        _nextAutoAirQualityMetricsUtc = value
+            ? DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportAirQualityMetricsSeconds))
+            : DateTime.MinValue;
+        UpdateAutoReportLastSentSummary();
+        SaveSettings();
+    }
+
+    partial void OnAutoReportAirQualityMetricsSecondsChanged(int value)
+    {
+        if (value < 5) { AutoReportAirQualityMetricsSeconds = 5; return; }
+        if (AutoReportAirQualityMetricsEnabled)
+            _nextAutoAirQualityMetricsUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportAirQualityMetricsSeconds));
         SaveSettings();
     }
 
@@ -3816,6 +3904,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // the same replay path used during startup.
             LoadConversationHistory(convo);
         }
+        else
+        {
+            // Keep a reference to the self conversation so live telemetry updates
+            // (AppendTelemetryHistoryRecord) and node refreshes (RefreshOpenSelfHistoryTabs)
+            // can reach it even though it is not in Tabs.
+            _selfConversation = convo;
+        }
         return convo;
     }
 
@@ -4034,6 +4129,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
+        SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (ShouldLogDeviceStatus(_core.DeviceStatus))
@@ -4058,6 +4154,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
+        SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (!_core.CanTransmit)
@@ -4821,6 +4918,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         => await SendEnvironmentMetricsOnChannelAsync(
             Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
 
+    /// <summary>
+    /// Broadcast TELEMETRY_APP AirQualityMetrics from the Open-Meteo Air Quality API.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendTelemetry))]
+    private async Task SendAirQualityMetricsAsync()
+        => await SendAirQualityMetricsOnChannelAsync(
+            Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
+
     public async Task SendDeviceMetricsOnChannelAsync(ChannelConfig? channel)
     {
         var selectedChannel = channel;
@@ -5045,6 +5150,159 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         return false;
+    }
+
+    public async Task SendAirQualityMetricsOnChannelAsync(ChannelConfig? channel)
+    {
+        var selectedChannel = channel;
+        if (selectedChannel is null)
+        {
+            Status = "No channel available to send air quality metrics on.";
+            Log(Status);
+            return;
+        }
+
+        if (HomeLatitude is not double lat || HomeLongitude is not double lon)
+        {
+            AirQualityTelemetryStatus = "Air quality telemetry: home location required.";
+            Status = "Set your location latitude/longitude before sending air quality metrics.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            var snapshot = await GetAirQualityTelemetryAsync(lat, lon, forceRefresh: true);
+            if (snapshot is null)
+            {
+                Status = "Air quality metrics not sent (air quality source unavailable).";
+                Log(Status);
+                return;
+            }
+
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeTelemetryAirQualityMetrics(
+                selectedChannel,
+                _myNodeNum,
+                packetId,
+                pm25Standard: snapshot.Pm25Standard,
+                pm100Standard: snapshot.Pm100Standard,
+                hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt);
+
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            var channelName = ChannelDisplayName(selectedChannel);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            if (ok)
+            {
+                AirQualityTelemetryStatus =
+                    $"Air quality telemetry: sent ({snapshot.Source}) {snapshot.FetchedUtc.ToLocalTime():h:mm:ss tt}";
+                PersistSelfTelemetryTx(new MeshTelemetry
+                {
+                    Pm25Standard  = snapshot.Pm25Standard,
+                    Pm100Standard = snapshot.Pm100Standard,
+                });
+            }
+
+            Status = ok
+                ? $"Sent air quality metrics ({frame.Length} B) on {channelName}"
+                : "Transmit failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            AirQualityTelemetryStatus = $"Air quality telemetry: send failed ({ex.Message})";
+            Status = $"Air quality metrics error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    /// <summary>
+    /// Fetch current PM2.5 and PM10 concentrations from the Open-Meteo Air
+    /// Quality API (<c>https://air-quality-api.open-meteo.com</c>). Results are
+    /// cached for <see cref="AirQualityCacheTtl"/>; pass <paramref name="forceRefresh"/>
+    /// = true to bypass the cache.
+    /// </summary>
+    private async Task<AirQualityTelemetrySnapshot?> GetAirQualityTelemetryAsync(double latitude,
+                                                                                   double longitude,
+                                                                                   bool forceRefresh)
+    {
+        var now = DateTime.UtcNow;
+        if (!forceRefresh && _latestAirQualityTelemetry is { } cached &&
+            now - cached.FetchedUtc <= AirQualityCacheTtl)
+        {
+            return cached;
+        }
+
+        await _airQualityFetchSemaphore.WaitAsync();
+        try
+        {
+            now = DateTime.UtcNow;
+            if (!forceRefresh && _latestAirQualityTelemetry is { } cachedInside &&
+                now - cachedInside.FetchedUtc <= AirQualityCacheTtl)
+            {
+                return cachedInside;
+            }
+
+            string latText = latitude.ToString("0.####", CultureInfo.InvariantCulture);
+            string lonText = longitude.ToString("0.####", CultureInfo.InvariantCulture);
+            string url =
+                $"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={latText}&longitude={lonText}&current=pm2_5,pm10";
+
+            AirQualityTelemetryStatus = "Air quality telemetry: fetching...";
+
+            using var response = await WeatherHttp.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                AirQualityTelemetryStatus = $"Air quality telemetry: fetch failed ({(int)response.StatusCode})";
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            using var json = await JsonDocument.ParseAsync(stream);
+
+            if (!json.RootElement.TryGetProperty("current", out var current))
+            {
+                AirQualityTelemetryStatus = "Air quality telemetry: missing current values.";
+                return null;
+            }
+
+            // pm2_5 → Pm25Standard (proto field 2 = PM2.5 µg/m³)
+            // pm10  → Pm100Standard (proto field 3 = PM10 µg/m³)
+            uint? pm25 = null, pm10 = null;
+            if (TryReadFloat(current, "pm2_5", out var pm25f))
+                pm25 = (uint)Math.Round(Math.Max(0, pm25f));
+            if (TryReadFloat(current, "pm10", out var pm10f))
+                pm10 = (uint)Math.Round(Math.Max(0, pm10f));
+
+            if (pm25 is null && pm10 is null)
+            {
+                AirQualityTelemetryStatus = "Air quality telemetry: PM fields unavailable.";
+                return null;
+            }
+
+            var snapshot = new AirQualityTelemetrySnapshot(
+                Pm25Standard: pm25,
+                Pm100Standard: pm10,
+                FetchedUtc: DateTime.UtcNow,
+                Source: "Open-Meteo AQ");
+            _latestAirQualityTelemetry = snapshot;
+
+            var pm25Str  = pm25  is uint p25  ? $"{p25} µg/m³ PM2.5" : string.Empty;
+            var pm10Str  = pm10  is uint p10  ? $", {p10} µg/m³ PM10" : string.Empty;
+            AirQualityTelemetryStatus =
+                $"Air quality telemetry: OK {snapshot.FetchedUtc.ToLocalTime():h:mm:ss tt} ({pm25Str}{pm10Str})";
+            return snapshot;
+        }
+        catch (Exception ex)
+        {
+            AirQualityTelemetryStatus = $"Air quality telemetry: fetch failed ({ex.Message})";
+            return null;
+        }
+        finally
+        {
+            _airQualityFetchSemaphore.Release();
+        }
     }
 
     /// <summary>
@@ -6994,6 +7252,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         BarometricPressureHpa = t.BarometricPressureHpa,
                         GasResistanceMohm = t.GasResistanceMohm,
                         Iaq = t.Iaq,
+                        Pm10Standard       = t.Pm10Standard,
+                        Pm25Standard       = t.Pm25Standard,
+                        Pm100Standard      = t.Pm100Standard,
+                        Pm10Environmental   = t.Pm10Environmental,
+                        Pm25Environmental   = t.Pm25Environmental,
+                        Pm100Environmental  = t.Pm100Environmental,
                     };
                     EnqueueDbWrite((nodes, _) => nodes.Upsert(telemetryUpsert));
                     PersistTelemetryHistory(header.From, rxEpoch, t);
@@ -7093,7 +7357,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 => $"{prefix}: waypoint={result.Waypoint.Name} lat={result.Waypoint.Latitude:F5} lon={result.Waypoint.Longitude:F5}{size}{meta}",
 
             PortNum.Telemetry when result.Telemetry is not null
-                => $"{prefix}: telemetry {(result.Telemetry.HasEnvironmentMetrics ? "env" : string.Empty)}{(result.Telemetry.HasDeviceMetrics ? "dev" : string.Empty)}{size}{meta}",
+                => $"{prefix}: telemetry {(result.Telemetry.HasEnvironmentMetrics ? "env" : string.Empty)}{(result.Telemetry.HasAirQualityMetrics ? "aq" : string.Empty)}{(result.Telemetry.HasDeviceMetrics ? "dev" : string.Empty)}{size}{meta}",
 
             PortNum.NodeStatus when result.StatusMessage is not null
                 => $"{prefix}: status=\"{TrimForReplyPreview(result.StatusMessage.Status)}\"{size}{meta}",
@@ -7132,14 +7396,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void PersistTelemetryHistory(uint nodeNum, long rxEpoch, MeshTelemetry telemetry)
     {
-        if (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics)
+        if (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics && !telemetry.HasAirQualityMetrics)
             return;
 
-        string kind = telemetry switch
+        string kind = (telemetry.HasDeviceMetrics, telemetry.HasEnvironmentMetrics, telemetry.HasAirQualityMetrics) switch
         {
-            { HasDeviceMetrics: true, HasEnvironmentMetrics: true } => "DE",
-            { HasDeviceMetrics: true } => "D",
-            { HasEnvironmentMetrics: true } => "E",
+            (true,  true,  true)  => "DEA",
+            (true,  true,  false) => "DE",
+            (true,  false, true)  => "DA",
+            (false, true,  true)  => "EA",
+            (true,  false, false) => "D",
+            (false, true,  false) => "E",
+            (false, false, true)  => "A",
             _ => string.Empty,
         };
         string signature = BuildTelemetryHistorySignature(telemetry);
@@ -7162,6 +7430,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             telemetry.HasEnvironmentMetrics ? telemetry.BarometricPressureHpa : null,
             telemetry.HasEnvironmentMetrics ? telemetry.GasResistanceMohm : null,
             telemetry.HasEnvironmentMetrics ? telemetry.Iaq : null,
+            telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm10Standard      : null,
+            telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm25Standard      : null,
+            telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm100Standard     : null,
+            telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm10Environmental  : null,
+            telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm25Environmental  : null,
+            telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm100Environmental : null,
             signature);
 
         EnqueueDbWrite((nodes, waypoints) =>
@@ -7177,17 +7451,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 foreach (var convo in Tabs.OfType<ConversationViewModel>())
                     if (convo.NodeNum == nodeNum)
                         convo.AppendTelemetryHistoryRecord(withId);
+                // Self convo is not in Tabs — update it separately.
+                if (_selfConversation?.NodeNum == nodeNum)
+                    _selfConversation.AppendTelemetryHistoryRecord(withId);
             }, DispatcherPriority.Background);
         });
     }
 
     private static string BuildTelemetryHistorySignature(MeshTelemetry telemetry)
     {
-        string kind = telemetry switch
+        string kind = (telemetry.HasDeviceMetrics, telemetry.HasEnvironmentMetrics, telemetry.HasAirQualityMetrics) switch
         {
-            { HasDeviceMetrics: true, HasEnvironmentMetrics: true } => "DE",
-            { HasDeviceMetrics: true } => "D",
-            { HasEnvironmentMetrics: true } => "E",
+            (true,  true,  true)  => "DEA",
+            (true,  true,  false) => "DE",
+            (true,  false, true)  => "DA",
+            (false, true,  true)  => "EA",
+            (true,  false, false) => "D",
+            (false, true,  false) => "E",
+            (false, false, true)  => "A",
             _ => string.Empty,
         };
 
@@ -7202,7 +7483,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.RelativeHumidityPct) : string.Empty,
             telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.BarometricPressureHpa) : string.Empty,
             telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.GasResistanceMohm) : string.Empty,
-            telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.Iaq) : string.Empty);
+            telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.Iaq) : string.Empty,
+            telemetry.HasAirQualityMetrics ? FormatTelemetrySignatureValue(telemetry.Pm25Standard) : string.Empty,
+            telemetry.HasAirQualityMetrics ? FormatTelemetrySignatureValue(telemetry.Pm100Standard) : string.Empty);
     }
 
     private void PersistSelfPositionTx(double latitude, double longitude, int? altitudeM)
@@ -7229,7 +7512,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void PersistSelfTelemetryTx(MeshTelemetry telemetry)
     {
-        if (_myNodeNum == 0 || (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics))
+        if (_myNodeNum == 0 || (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics && !telemetry.HasAirQualityMetrics))
             return;
 
         var now = DateTimeOffset.UtcNow;
@@ -7250,6 +7533,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             node.BarometricPressureHpa = telemetry.BarometricPressureHpa;
             node.GasResistanceMohm = telemetry.GasResistanceMohm;
             node.Iaq = telemetry.Iaq;
+        }
+
+        if (telemetry.HasAirQualityMetrics)
+        {
+            node.Pm10Standard      = telemetry.Pm10Standard;
+            node.Pm25Standard      = telemetry.Pm25Standard;
+            node.Pm100Standard     = telemetry.Pm100Standard;
+            node.Pm10Environmental  = telemetry.Pm10Environmental;
+            node.Pm25Environmental  = telemetry.Pm25Environmental;
+            node.Pm100Environmental = telemetry.Pm100Environmental;
         }
 
         _nodeStore.Upsert(node);
@@ -7287,12 +7580,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
 
         var selfNode = _nodeStore.Get(_myNodeNum);
-        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+        // Also covers the self convo (not in Tabs) so open history windows update.
+        var selfConvos = Tabs.OfType<ConversationViewModel>()
+                             .Where(c => c.NodeNum == _myNodeNum)
+                             .Append(_selfConversation)
+                             .OfType<ConversationViewModel>()
+                             .Distinct();
+        foreach (var convo in selfConvos)
         {
-            if (convo.NodeNum != _myNodeNum)
-                continue;
             convo.Node = selfNode;
-            convo.LoadNodeHistories();
+            // LoadNodeHistories is intentionally omitted here: new records arrive
+            // via AppendTelemetryHistoryRecord (dispatched from the DB write worker)
+            // which avoids the race between the DB write and an immediate re-read.
         }
     }
 
@@ -7726,6 +8025,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             now = DateTime.UtcNow;
+            if (AutoReportAirQualityMetricsEnabled &&
+                CanSendTelemetry() &&
+                now >= _nextAutoAirQualityMetricsUtc)
+            {
+                _nextAutoAirQualityMetricsUtc = now.AddSeconds(Math.Max(5, AutoReportAirQualityMetricsSeconds));
+                await SendAirQualityMetricsAsync();
+                if (Status.StartsWith("Sent air quality metrics", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastAutoAirQualityMetricsUtc = now;
+                    UpdateAutoReportLastSentSummary();
+                }
+            }
+
+            now = DateTime.UtcNow;
             if (AutoReportNodeStatusEnabled &&
                 CanSendNodeStatus() &&
                 now >= _nextAutoNodeStatusUtc)
@@ -7836,9 +8149,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         public bool HideInvalidLocations { get; set; }
         public string IgnoredStatus { get; set; }
         public string MqttStatus { get; set; }
-        public string TemperatureStatus { get; set; }
-        public string HumidityStatus { get; set; }
-        public string PressureStatus { get; set; }
+        public string TemperatureStatus    { get; set; }
+        public string HumidityStatus       { get; set; }
+        public string PressureStatus       { get; set; }
+        public string GasResistanceStatus  { get; set; }
+        public string IaqStatus            { get; set; }
+        public string Pm10StdStatus        { get; set; }
+        public string Pm25StdStatus        { get; set; }
+        public string Pm100StdStatus       { get; set; }
+        public string Pm10EnvStatus        { get; set; }
+        public string Pm25EnvStatus        { get; set; }
+        public string Pm100EnvStatus       { get; set; }
         public double MaxDistanceKm { get; set; }
         public double HomeLatitude { get; set; }
         public double HomeLongitude { get; set; }
@@ -7854,9 +8175,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             HideInvalidLocations = false;
             IgnoredStatus = "Show all";
             MqttStatus = "Any";
-            TemperatureStatus = "Any";
-            HumidityStatus = "Any";
-            PressureStatus = "Any";
+            TemperatureStatus   = "Any";
+            HumidityStatus      = "Any";
+            PressureStatus      = "Any";
+            GasResistanceStatus = "Any";
+            IaqStatus           = "Any";
+            Pm10StdStatus       = "Any";
+            Pm25StdStatus       = "Any";
+            Pm100StdStatus      = "Any";
+            Pm10EnvStatus       = "Any";
+            Pm25EnvStatus       = "Any";
+            Pm100EnvStatus      = "Any";
             MaxDistanceKm = -1;
             HomeLatitude = 0;
             HomeLongitude = 0;
@@ -7875,9 +8204,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 HideInvalidLocations = vm.HideInvalidNodeLocations,
                 IgnoredStatus = vm.NodeIgnoredFilter,
                 MqttStatus = vm.NodeMqttFilter,
-                TemperatureStatus = vm.NodeTemperatureFilter,
-                HumidityStatus = vm.NodeHumidityFilter,
-                PressureStatus = vm.NodePressureFilter,
+                TemperatureStatus   = vm.NodeTemperatureFilter,
+                HumidityStatus      = vm.NodeHumidityFilter,
+                PressureStatus      = vm.NodePressureFilter,
+                GasResistanceStatus = vm.NodeGasResistanceFilter,
+                IaqStatus           = vm.NodeIaqFilter,
+                Pm10StdStatus       = vm.NodePm10StdFilter,
+                Pm25StdStatus       = vm.NodePm25StdFilter,
+                Pm100StdStatus      = vm.NodePm100StdFilter,
+                Pm10EnvStatus       = vm.NodePm10EnvFilter,
+                Pm25EnvStatus       = vm.NodePm25EnvFilter,
+                Pm100EnvStatus      = vm.NodePm100EnvFilter,
             };
 
             // Parse hops filter
@@ -8082,6 +8419,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             case "Has value": if (n.BarometricPressureHpa is null) return false; break;
             case "No value": if (n.BarometricPressureHpa is not null) return false; break;
+        }
+        switch (criteria.GasResistanceStatus)
+        {
+            case "Has value": if (n.GasResistanceMohm is null) return false; break;
+            case "No value": if (n.GasResistanceMohm is not null) return false; break;
+        }
+        switch (criteria.IaqStatus)
+        {
+            case "Has value": if (n.Iaq is null) return false; break;
+            case "No value": if (n.Iaq is not null) return false; break;
+        }
+        switch (criteria.Pm10StdStatus)
+        {
+            case "Has value": if (n.Pm10Standard is null) return false; break;
+            case "No value": if (n.Pm10Standard is not null) return false; break;
+        }
+        switch (criteria.Pm25StdStatus)
+        {
+            case "Has value": if (n.Pm25Standard is null) return false; break;
+            case "No value": if (n.Pm25Standard is not null) return false; break;
+        }
+        switch (criteria.Pm100StdStatus)
+        {
+            case "Has value": if (n.Pm100Standard is null) return false; break;
+            case "No value": if (n.Pm100Standard is not null) return false; break;
+        }
+        switch (criteria.Pm10EnvStatus)
+        {
+            case "Has value": if (n.Pm10Environmental is null) return false; break;
+            case "No value": if (n.Pm10Environmental is not null) return false; break;
+        }
+        switch (criteria.Pm25EnvStatus)
+        {
+            case "Has value": if (n.Pm25Environmental is null) return false; break;
+            case "No value": if (n.Pm25Environmental is not null) return false; break;
+        }
+        switch (criteria.Pm100EnvStatus)
+        {
+            case "Has value": if (n.Pm100Environmental is null) return false; break;
+            case "No value": if (n.Pm100Environmental is not null) return false; break;
         }
 
         // Distance from home

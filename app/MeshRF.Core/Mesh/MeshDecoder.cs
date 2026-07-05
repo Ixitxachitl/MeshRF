@@ -150,6 +150,19 @@ public sealed class MeshTelemetry
     public bool HasEnvironmentMetrics =>
         TemperatureC.HasValue || RelativeHumidityPct.HasValue ||
         BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || Iaq.HasValue;
+
+    // Air quality metrics (from TELEMETRY_APP AirQualityMetrics, field 4).
+    // pm10_standard = PM1.0 µg/m³, pm25_standard = PM2.5 µg/m³, pm100_standard = PM10.0 µg/m³
+    public uint? Pm10Standard      { get; init; }
+    public uint? Pm25Standard      { get; init; }
+    public uint? Pm100Standard     { get; init; }
+    public uint? Pm10Environmental  { get; init; }
+    public uint? Pm25Environmental  { get; init; }
+    public uint? Pm100Environmental { get; init; }
+
+    public bool HasAirQualityMetrics =>
+        Pm10Standard.HasValue || Pm25Standard.HasValue || Pm100Standard.HasValue ||
+        Pm10Environmental.HasValue || Pm25Environmental.HasValue || Pm100Environmental.HasValue;
 }
 
 /// <summary>Subset of the Meshtastic <c>StatusMessage</c> protobuf.</summary>
@@ -765,15 +778,20 @@ public static class MeshDecoder
         };
     }
 
-    // Telemetry: 1=time(varint) 2=device_metrics(msg) 3=environment_metrics(msg).
+    // Telemetry: 1=time(varint) 2=device_metrics(msg) 3=environment_metrics(msg)
+    //            4=air_quality_metrics(msg).
     // DeviceMetrics:      1=battery_level 2=voltage 3=channel_utilization
     //                     4=air_util_tx 5=uptime_seconds
     // EnvironmentMetrics: 1=temperature 2=relative_humidity 3=barometric_pressure
     //                     4=gas_resistance 7=iaq
+    // AirQualityMetrics:  1=pm10_standard 2=pm25_standard 3=pm100_standard
+    //                     4=pm10_environmental 5=pm25_environmental 6=pm100_environmental
     private static MeshTelemetry ParseTelemetry(byte[] data)
     {
         byte? batt = null; float? volt = null, chan = null, airx = null; uint? uptime = null;
         float? temp = null, hum = null, pres = null, gas = null; int? iaq = null;
+        uint? pm10std = null, pm25std = null, pm100std = null;
+        uint? pm10env = null, pm25env = null, pm100env = null;
 
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
@@ -817,6 +835,24 @@ public static class MeshDecoder
                     }
                     break;
                 }
+                case 4 when wt == ProtoReader.WireType.Len: // air_quality_metrics
+                {
+                    var sub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
+                    while (sub.TryReadTag(out int f, out var swt))
+                    {
+                        switch (f)
+                        {
+                            case 1 when swt == ProtoReader.WireType.Varint: pm10std  = (uint)sub.ReadVarint(); break;
+                            case 2 when swt == ProtoReader.WireType.Varint: pm25std  = (uint)sub.ReadVarint(); break;
+                            case 3 when swt == ProtoReader.WireType.Varint: pm100std = (uint)sub.ReadVarint(); break;
+                            case 4 when swt == ProtoReader.WireType.Varint: pm10env  = (uint)sub.ReadVarint(); break;
+                            case 5 when swt == ProtoReader.WireType.Varint: pm25env  = (uint)sub.ReadVarint(); break;
+                            case 6 when swt == ProtoReader.WireType.Varint: pm100env = (uint)sub.ReadVarint(); break;
+                            default: sub.SkipField(swt); break;
+                        }
+                    }
+                    break;
+                }
                 default: rdr.SkipField(wt); break;
             }
         }
@@ -833,6 +869,12 @@ public static class MeshDecoder
             BarometricPressureHpa = pres,
             GasResistanceMohm = gas,
             Iaq = iaq,
+            Pm10Standard      = pm10std,
+            Pm25Standard      = pm25std,
+            Pm100Standard     = pm100std,
+            Pm10Environmental  = pm10env,
+            Pm25Environmental  = pm25env,
+            Pm100Environmental = pm100env,
         };
     }
 
