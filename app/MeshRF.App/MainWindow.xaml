@@ -478,269 +478,34 @@
                               ResizeBehavior="PreviousAndNext" />
 
                 <!-- Bottom-left quarter: node list + identity. -->
-                <DockPanel Grid.Row="2" Margin="4">
-                    <Expander x:Name="IdentityExpander" DockPanel.Dock="Top" Header="My node (identity)"
-                              IsExpanded="False" Margin="0,0,0,4">
-                        <Border Padding="8"
-                                Background="{DynamicResource BrushPanelBackground}"
-                                BorderBrush="{DynamicResource BrushPanelBorder}"
-                                BorderThickness="1">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,4,0,4">
-                                    <Button DockPanel.Dock="Right" Content="Random"
-                                            Margin="6,0,0,0" Padding="8,2"
-                                            Command="{Binding GenerateRandomNodeIdCommand}"
-                                            ToolTip="Generate a random node ID" />
-                                    <Button DockPanel.Dock="Right" Content="From Key"
-                                        Margin="6,0,0,0" Padding="8,2"
-                                        Command="{Binding GenerateNodeIdFromKeyCommand}"
-                                        ToolTip="Derive the node ID from the current PKI public key the same way Meshtastic firmware does" />
-                                    <TextBox FontFamily="Consolas"
-                                             ToolTip="!a1b2c3d4, 0xA1B2C3D4 or decimal"
-                                             Text="{Binding MyNodeIdText, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-                                </DockPanel>
-
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="MAC address"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4"
-                                         FontFamily="Consolas"
-                                         IsReadOnly="True"
-                                         Foreground="{DynamicResource BrushSubtle}"
-                                         ToolTip="Derived from node ID (02:00 + last 4 bytes). Set the node ID to change this."
-                                         Text="{Binding MyMacAddress, Mode=OneWay}" />
-
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Long name"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4,0,4"
-                                         Text="{Binding MyLongName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Short name"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4,0,4"
-                                         MaxLength="4"
-                                         Text="{Binding MyShortName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-
-                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Role"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <ComboBox Grid.Row="4" Grid.Column="1" Margin="0,4,0,4"
-                                          HorizontalAlignment="Left" Width="160"
-                                          ItemsSource="{Binding NodeRoleOptions}"
-                                          SelectedItem="{Binding MyRole, Mode=TwoWay}" />
-
-                                <TextBlock Grid.Row="5" Grid.Column="0" Text="Hardware"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <ComboBox Grid.Row="5" Grid.Column="1" Margin="0,4,0,4"
-                                          HorizontalAlignment="Left" Width="200"
-                                          ItemsSource="{Binding HwModelOptions}"
-                                          SelectedItem="{Binding MyHwModel, Mode=TwoWay}"
-                                          ToolTip="Hardware model (for when TX is added)" />
-
-                                <TextBlock Grid.Row="6" Grid.Column="0" Text="Rebroadcast"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <ComboBox Grid.Row="6" Grid.Column="1" Margin="0,4,0,4"
-                                          HorizontalAlignment="Left" Width="200"
-                                          ItemsSource="{Binding RebroadcastModeOptions}"
-                                          SelectedItem="{Binding RebroadcastMode, Mode=TwoWay}"
-                                          ToolTip="Rebroadcast mode (used once TX is enabled)" />
-
-                                <TextBlock Grid.Row="7" Grid.Column="0" Text="Public key"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <TextBox Grid.Row="7" Grid.Column="1" Margin="0,4,0,4"
-                                         FontFamily="Consolas" IsReadOnly="True"
-                                         ToolTip="Derived from private key — not editable"
-                                         Text="{Binding MyPublicKey, Mode=OneWay}" />
-
-                                <TextBlock Grid.Row="8" Grid.Column="0" Text="Private key"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="8" Grid.Column="1" Margin="0,4,0,4">
-                                    <Button DockPanel.Dock="Right" Content="Generate"
-                                            Margin="6,0,0,0" Padding="8,2"
-                                            Command="{Binding GenerateKeyPairCommand}"
-                                            ToolTip="Generate a new random key pair" />
-                                    <TextBox FontFamily="Consolas"
-                                             ToolTip="Base64 X25519 private key (kept locally)"
-                                             Text="{Binding MyPrivateKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-                                </DockPanel>
-
-                                <TextBlock Grid.Row="9" Grid.Column="0" Text="Location source"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <StackPanel Grid.Row="9" Grid.Column="1" Margin="0,4,0,4">
-                                    <ComboBox HorizontalAlignment="Left" Width="160"
-                                              ItemsSource="{Binding LocationSourceOptions}"
-                                              SelectedItem="{Binding SelectedLocationSource, Mode=TwoWay}"
-                                              DisplayMemberPath="Label"
-                                              ToolTip="Choose between a fixed manual location and an auto-detected USB serial GPS." />
-                                    <Grid Margin="0,6,0,0" IsEnabled="{Binding IsUsbSerialLocationSource}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="110" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox Grid.Column="0" Margin="0,0,4,0"
-                                                 FontFamily="Consolas"
-                                                 ToolTip="Optional COM port override, for example COM5. Leave blank for auto-detect."
-                                                 Text="{Binding GpsPortName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                        <TextBox Grid.Column="1" Margin="4,0,0,0"
-                                                 FontFamily="Consolas"
-                                                 ToolTip="Optional baud override, for example 9600. Leave blank for auto-detect."
-                                                 Text="{Binding GpsBaudRateText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    </Grid>
-                                    <TextBlock Margin="0,4,0,0"
-                                               Foreground="{DynamicResource BrushSubtle}"
-                                               Text="{Binding GpsStatus}"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
-
-                                <TextBlock Grid.Row="10" Grid.Column="0" Text="{Binding HomeLocationLabel}"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <Grid Grid.Row="10" Grid.Column="1" Margin="0,4,0,4"
-                                      IsEnabled="{Binding IsManualLocationSource}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="2*" />
-                                        <ColumnDefinition Width="2*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" Margin="0,0,2,0"
-                                             FontFamily="Consolas"
-                                             ToolTip="Latitude in degrees (-90..90)"
-                                             Text="{Binding HomeLatitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBox Grid.Column="1" Margin="2,0,2,0"
-                                             FontFamily="Consolas"
-                                             ToolTip="Longitude in degrees (-180..180)"
-                                             Text="{Binding HomeLongitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBox Grid.Column="2" Margin="2,0,0,0"
-                                             FontFamily="Consolas"
-                                             ToolTip="{Binding HomeAltitudeToolTip}"
-                                             Text="{Binding HomeAltitudeText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </Grid>
-
-                                <TextBlock Grid.Row="11" Grid.Column="0" Text="Hop limit"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="11" Grid.Column="1" Margin="0,4,0,4">
-                                    <TextBlock DockPanel.Dock="Right" Width="20"
-                                               Margin="6,0,0,0" VerticalAlignment="Center"
-                                               TextAlignment="Center"
-                                               Text="{Binding HopLimit}" />
-                                    <Slider Minimum="1" Maximum="7"
-                                            TickFrequency="1" TickPlacement="BottomRight"
-                                            IsSnapToTickEnabled="True"
-                                            VerticalAlignment="Center"
-                                            Value="{Binding HopLimit, Mode=TwoWay}"
-                                            ToolTip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
-                                </DockPanel>
-
-                                <TextBlock Grid.Row="12" Grid.Column="0" Text="OK to MQTT"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <CheckBox Grid.Row="12" Grid.Column="1" Margin="0,4,0,4"
-                                          VerticalAlignment="Center"
-                                          Content="Allow gateways to uplink my packets to public MQTT"
-                                          IsChecked="{Binding OkToMqtt, Mode=TwoWay}"
-                                          ToolTip="Sets the ok_to_mqtt flag on packets you transmit so MQTT gateways may forward them to the public broker." />
-
-                                <TextBlock Grid.Row="13" Grid.Column="0" Text="Auto node info"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="13" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
-                                    <CheckBox Content="Enabled"
-                                              VerticalAlignment="Center"
-                                              IsChecked="{Binding AutoReportNodeInfoEnabled, Mode=TwoWay}" />
-                                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
-                                    <TextBox Width="60"
-                                             FontFamily="Consolas"
-                                             Text="{Binding AutoReportNodeInfoSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-                                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
-                                </DockPanel>
-
-                                <TextBlock Grid.Row="14" Grid.Column="0" Text="Auto position"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="14" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
-                                    <CheckBox Content="Enabled"
-                                              VerticalAlignment="Center"
-                                              IsChecked="{Binding AutoReportPositionEnabled, Mode=TwoWay}" />
-                                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
-                                    <TextBox Width="60"
-                                             FontFamily="Consolas"
-                                             Text="{Binding AutoReportPositionSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-                                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
-                                </DockPanel>
-
-                                <TextBlock Grid.Row="15" Grid.Column="0" Text="Auto device metrics"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
-                                    <CheckBox Content="Enabled"
-                                              VerticalAlignment="Center"
-                                              IsChecked="{Binding AutoReportDeviceMetricsEnabled, Mode=TwoWay}" />
-                                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
-                                    <TextBox Width="60"
-                                             FontFamily="Consolas"
-                                             Text="{Binding AutoReportDeviceMetricsSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-                                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
-                                </DockPanel>
-
-                                <TextBlock Grid.Row="17" Grid.Column="1" Margin="0,2,0,0"
-                                           FontFamily="Consolas"
-                                           FontSize="11"
-                                           Foreground="{DynamicResource BrushSubtle}"
-                                           Text="{Binding AutoReportLastSentSummary}"
-                                           ToolTip="Last successful auto-send times for NodeInfo, Position, Device Metrics, and Status." />
-
-                                <TextBlock Grid.Row="18" Grid.Column="0" Text="Routing"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <CheckBox Grid.Row="18" Grid.Column="1" Margin="0,4,0,4"
-                                          VerticalAlignment="Center"
-                                          Content="Enable relay routing (role + rebroadcast mode)"
-                                          IsChecked="{Binding RoutingRelayEnabled, Mode=TwoWay}"
-                                          ToolTip="When enabled, this node may rebroadcast received packets using your selected role and rebroadcast mode policy." />
-
-                                <TextBlock Grid.Row="19" Grid.Column="0" Text="Status text"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <TextBox Grid.Row="19" Grid.Column="1" Margin="0,4,0,4"
-                                         MaxLength="280"
-                                         Text="{Binding MyNodeStatus, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
-                                         ToolTip="Status string broadcast by NODE_STATUS_APP." />
-
-                                <TextBlock Grid.Row="16" Grid.Column="0" Text="Auto status"
-                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                <DockPanel Grid.Row="16" Grid.Column="1" Margin="0,4,0,4" LastChildFill="False">
-                                    <CheckBox Content="Enabled"
-                                              VerticalAlignment="Center"
-                                              IsChecked="{Binding AutoReportNodeStatusEnabled, Mode=TwoWay}" />
-                                    <TextBlock Margin="12,0,4,0" VerticalAlignment="Center" Text="Interval" />
-                                    <TextBox Width="60"
-                                             FontFamily="Consolas"
-                                             Text="{Binding AutoReportNodeStatusSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-                                    <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" Text="sec" />
-                                </DockPanel>
-                            </Grid>
-                        </Border>
-                    </Expander>
+                <DockPanel x:Name="LeftBottomDock" Grid.Row="2" Margin="4">
+                    <!-- Compact My Node bar — opens the identity settings window. -->
+                    <Border DockPanel.Dock="Top"
+                            Margin="0,0,0,4" Padding="6,4"
+                            Background="{DynamicResource BrushPanelBackground}"
+                            BorderBrush="{DynamicResource BrushPanelBorder}"
+                            BorderThickness="1">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0,0,0">
+                                <Button Padding="8,2" Margin="0,0,4,0"
+                                        Content="Self telemetry"
+                                        Click="OnOpenSelfTelemetryHistory"
+                                        ToolTip="Open telemetry history for this node" />
+                                <Button Padding="8,2" Margin="0,0,4,0"
+                                        Content="Self position"
+                                        Click="OnOpenSelfLocationHistory"
+                                        ToolTip="Open position history for this node" />
+                                <Button Padding="8,2"
+                                        Content="Configure"
+                                        Click="OnOpenNodeIdentity"
+                                        ToolTip="Open My Node identity and settings" />
+                            </StackPanel>
+                            <TextBlock Text="My Node" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BrushSubtle}"
+                                       Text="{Binding MyLongName}" />
+                        </DockPanel>
+                    </Border>
 
                         <Border DockPanel.Dock="Top"
                             Margin="0,0,0,4"
@@ -772,6 +537,12 @@
                                 Margin="0,0,4,0"
                                 Click="OnSendDeviceMetricsPrompted"
                                 ToolTip="Choose a channel, then send your TELEMETRY device metrics" />
+                            <Button DockPanel.Dock="Left"
+                                Content="Env telemetry"
+                                Padding="10,3"
+                                Margin="0,0,4,0"
+                                Click="OnSendEnvironmentMetricsPrompted"
+                                ToolTip="Choose a channel, fetch weather data, then send TELEMETRY environment metrics" />
                             <Button DockPanel.Dock="Left"
                                 Content="Status"
                                 Padding="10,3"
@@ -811,6 +582,9 @@
                             </DockPanel>
 
                             <Expander Header="Filters" IsExpanded="False">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              MaxHeight="220">
                                 <Grid Margin="0,6,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="120" />
@@ -911,6 +685,7 @@
                                               SelectedItem="{Binding NodePressureFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether pressure telemetry is present" />
                                 </Grid>
+                                </ScrollViewer>
                             </Expander>
                         </StackPanel>
                     </Border>
@@ -1369,7 +1144,8 @@
                                 Width="22" Height="22"
                                 Margin="2,0,0,0"
                                 Padding="0"
-                                Command="{Binding RemoveSelectedChannelCommand}"
+                                IsEnabled="{Binding CanRemoveSelectedChannel}"
+                                Click="OnRemoveChannelClicked"
                                 ToolTip="Remove selected channel"
                                 Content="&#xE738;"
                                 FontFamily="Segoe MDL2 Assets" FontSize="11" />
@@ -1472,84 +1248,7 @@
                                         <RowDefinition Height="*" MinHeight="60" />
                                     </Grid.RowDefinitions>
 
-                                    <Expander Grid.Row="0" Header="Channel settings" IsExpanded="False"
-                                              Margin="2">
-                                        <Border Padding="8"
-                                                Background="{DynamicResource BrushPanelBackground}"
-                                                BorderBrush="{DynamicResource BrushPanelBorder}"
-                                                BorderThickness="1">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
 
-                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name"
-                                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                                <TextBox Grid.Row="0" Grid.Column="1"
-                                                         Margin="0,4,0,4"
-                                                         Text="{Binding EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                                <TextBlock Grid.Row="0" Grid.Column="2"
-                                                           Margin="8,4,0,4"
-                                                           Foreground="{DynamicResource BrushSubtle}"
-                                                           VerticalAlignment="Center"
-                                                           Text="{Binding Hash, StringFormat=hash 0x{0:X2}}" />
-
-                                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Role"
-                                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                                <ComboBox Grid.Row="1" Grid.Column="1"
-                                                          Margin="0,4,0,4"
-                                                          HorizontalAlignment="Left" Width="160"
-                                                          ItemsSource="{Binding RoleOptions}"
-                                                          SelectedItem="{Binding EditRole, Mode=TwoWay}" />
-
-                                                <TextBlock Grid.Row="2" Grid.Column="0" Text="PSK"
-                                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                                <TextBox Grid.Row="2" Grid.Column="1"
-                                                         Margin="0,4,0,4"
-                                                         FontFamily="Consolas"
-                                                         ToolTip="Empty = no encryption, AQ== = default key, or paste base64/hex"
-                                                         Text="{Binding EditPsk, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource PskText}}" />
-                                                <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Margin="8,4,0,4">
-                                                    <Button Content="Default"  Margin="2,0"
-                                                            Padding="8,2"
-                                                            Command="{Binding UseDefaultKeyCommand}" />
-                                                    <Button Content="Random 16" Margin="2,0"
-                                                            Padding="8,2"
-                                                            Command="{Binding GenerateRandomKey128Command}" />
-                                                    <Button Content="Random 32" Margin="2,0"
-                                                            Padding="8,2"
-                                                            Command="{Binding GenerateRandomKeyCommand}" />
-                                                </StackPanel>
-
-                                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Location sharing"
-                                                           Margin="0,4,8,4" VerticalAlignment="Center" />
-                                                <ComboBox Grid.Row="3" Grid.Column="1" Margin="0,4,0,4"
-                                                          VerticalAlignment="Center"
-                                                          ItemsSource="{Binding PositionPrecisionOptions}"
-                                                          DisplayMemberPath="Label"
-                                                          SelectedValuePath="Bits"
-                                                          SelectedValue="{Binding EditPositionPrecision, Mode=TwoWay}"
-                                                          ToolTip="How precisely your location is shared on this channel: off, an approximate radius, or precise (matches Meshtastic)" />
-
-                                                <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal"
-                                                            Margin="0,8,0,0" HorizontalAlignment="Right">
-                                                    <Button Content="Revert" Margin="0,0,4,0" Padding="14,4"
-                                                            Command="{Binding RevertCommand}" />
-                                                    <Button Content="Save"   Padding="14,4"
-                                                            Command="{Binding SaveCommand}" />
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
-                                    </Expander>
 
                                     <DockPanel Grid.Row="1" Margin="4">
                                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2" LastChildFill="True">
@@ -1561,18 +1260,17 @@
                                                     CommandParameter="{Binding}" />
                                             <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
                                                     Command="{Binding CopyMessagesCommand}" />
-                                                <CheckBox DockPanel.Dock="Right"
+                                            <Button DockPanel.Dock="Right" Content="Settings"
+                                                    Padding="6,1" Margin="4,0,4,0"
+                                                    ToolTip="Configure channel name, role, PSK, location sharing and mute"
+                                                    Click="OnOpenChannelSettings" />
+                                            <ToggleButton DockPanel.Dock="Right"
                                                     Content="Auto-scroll"
-                                                    Margin="0,0,8,0"
+                                                    Margin="4,0,0,0"
+                                                    Padding="6,1"
                                                     VerticalAlignment="Center"
                                                     IsChecked="{Binding AutoScroll, Mode=TwoWay}"
                                                     ToolTip="Automatically follow new messages in this channel" />
-                                                <CheckBox DockPanel.Dock="Right"
-                                                      Content="Mute RTTTL"
-                                                      Margin="0,0,8,0"
-                                                      VerticalAlignment="Center"
-                                                      IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
-                                                      ToolTip="Mute RTTTL ringtone for text messages on this channel" />
                                             <TextBlock Text="Messages" FontWeight="SemiBold" VerticalAlignment="Center" />
                                         </DockPanel>
                                         <!-- Compose bar: visible only when the active device can transmit (HackRF). -->
@@ -1718,15 +1416,17 @@
                                                     VerticalAlignment="Center"
                                                     ToolTip="Copy this conversation to the clipboard"
                                                     Command="{Binding CopyMessagesCommand}" />
-                                                <CheckBox DockPanel.Dock="Right"
+                                                <ToggleButton DockPanel.Dock="Right"
                                                     Content="Auto-scroll"
-                                                    Margin="0,0,8,0"
+                                                    Margin="4,0,0,0"
+                                                    Padding="6,1"
                                                     VerticalAlignment="Center"
                                                     IsChecked="{Binding AutoScroll, Mode=TwoWay}"
                                                     ToolTip="Automatically follow new messages in this conversation" />
-                                                <CheckBox DockPanel.Dock="Right"
-                                                      Content="Mute RTTTL"
-                                                      Margin="0,0,8,0"
+                                                <ToggleButton DockPanel.Dock="Right"
+                                                      Content="Mute Ringtone"
+                                                      Margin="4,0,0,0"
+                                                      Padding="6,1"
                                                       VerticalAlignment="Center"
                                                       IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
                                                       ToolTip="Mute RTTTL ringtone for text messages from this node" />
@@ -1992,8 +1692,13 @@
                             <Button DockPanel.Dock="Right" Content="Copy" Padding="6,1"
                                     Command="{Binding CopyLogCommand}" />
                             <Button DockPanel.Dock="Right" Content="Raw JSON" Padding="6,1"
-                                Margin="4,0,0,0"
+                                Margin="4,0,4,0"
                                 Click="OnOpenRawJsonLog" />
+                            <ToggleButton DockPanel.Dock="Right" Content="Auto-scroll"
+                                          Padding="6,1" Margin="4,0,0,0"
+                                          VerticalAlignment="Center"
+                                          IsChecked="{Binding LogAutoScroll, Mode=TwoWay}"
+                                          ToolTip="Automatically scroll the log to new entries" />
                             <TextBlock Text="Log" FontWeight="SemiBold" VerticalAlignment="Center" />
                         </DockPanel>
                         <ListBox ItemsSource="{Binding LogLines}"
@@ -2002,7 +1707,7 @@
                                  ScrollViewer.CanContentScroll="True"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  VirtualizingPanel.ScrollUnit="Pixel"
-                                 beh:AutoScroll.IsEnabled="True">
+                                 beh:AutoScroll.IsEnabled="{Binding LogAutoScroll}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <emoji:TextBlock Text="{Binding}" FontFamily="Consolas" TextWrapping="Wrap" />

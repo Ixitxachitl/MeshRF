@@ -139,6 +139,12 @@ public sealed class AppSettings
     /// <summary>Interval in seconds for automatic TELEMETRY device metrics transmission.</summary>
     public int AutoReportDeviceMetricsSeconds { get; set; } = 3600;
 
+    /// <summary>Automatically transmit TELEMETRY environment metrics at a fixed interval.</summary>
+    public bool AutoReportEnvironmentMetricsEnabled { get; set; } = false;
+
+    /// <summary>Interval in seconds for automatic TELEMETRY environment metrics transmission.</summary>
+    public int AutoReportEnvironmentMetricsSeconds { get; set; } = 3600;
+
     /// <summary>Automatically transmit NODE_STATUS_APP at a fixed interval.</summary>
     public bool AutoReportNodeStatusEnabled { get; set; } = false;
 

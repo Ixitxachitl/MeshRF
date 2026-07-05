@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using System.Text;
@@ -509,6 +510,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>The selected tab when it is a channel (null for DM tabs).</summary>
     public ChannelViewModel? SelectedChannel => SelectedTab as ChannelViewModel;
 
+    /// <summary>True when the selected tab is a secondary channel that can be removed.</summary>
+    public bool CanRemoveSelectedChannel => SelectedTab is ChannelViewModel ch && ch.Config.Role != ChannelRole.Primary;
+
     partial void OnSelectedTabChanging(object? value)
     {
         // Capture the current tab as "previous" before the switch happens,
@@ -530,11 +534,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         OnPropertyChanged(nameof(SelectedChannel));
+        OnPropertyChanged(nameof(CanRemoveSelectedChannel));
         SendMessageCommand.NotifyCanExecuteChanged();
         SendNodeInfoCommand.NotifyCanExecuteChanged();
         SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
+        SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
     }
 
     private void MarkTabNeedsAttention(ITabItem? tab)
@@ -684,19 +690,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private int _autoReportPositionSeconds = 3600;
     [ObservableProperty] private bool _autoReportDeviceMetricsEnabled;
     [ObservableProperty] private int _autoReportDeviceMetricsSeconds = 3600;
+    [ObservableProperty] private bool _autoReportEnvironmentMetricsEnabled;
+    [ObservableProperty] private int _autoReportEnvironmentMetricsSeconds = 3600;
     [ObservableProperty] private bool _autoReportNodeStatusEnabled;
     [ObservableProperty] private int _autoReportNodeStatusSeconds = 3600;
-    [ObservableProperty] private string _autoReportLastSentSummary = "Auto last: NI never | POS never | MET never | ST never";
+    [ObservableProperty] private string _autoReportLastSentSummary = "Auto last: NI never | POS never | MET never | ENV never | ST never";
+    [ObservableProperty] private string _weatherTelemetryStatus = "Weather telemetry: idle";
+    [ObservableProperty] private bool _logAutoScroll = true;
 
     private DateTime _lastAutoNodeInfoUtc = DateTime.MinValue;
     private DateTime _lastAutoPositionUtc = DateTime.MinValue;
     private DateTime _lastAutoDeviceMetricsUtc = DateTime.MinValue;
+    private DateTime _lastAutoEnvironmentMetricsUtc = DateTime.MinValue;
     private DateTime _lastAutoNodeStatusUtc = DateTime.MinValue;
     private DateTime _nextAutoNodeInfoUtc = DateTime.MinValue;
     private DateTime _nextAutoPositionUtc = DateTime.MinValue;
     private DateTime _nextAutoDeviceMetricsUtc = DateTime.MinValue;
+    private DateTime _nextAutoEnvironmentMetricsUtc = DateTime.MinValue;
     private DateTime _nextAutoNodeStatusUtc = DateTime.MinValue;
     private int _autoReportTickInFlight;
+    private readonly SemaphoreSlim _weatherFetchSemaphore = new(1, 1);
+    private WeatherTelemetrySnapshot? _latestWeatherTelemetry;
+    private static readonly TimeSpan WeatherTelemetryCacheTtl = TimeSpan.FromMinutes(20);
+    private static readonly HttpClient WeatherHttp = new() { Timeout = TimeSpan.FromSeconds(8) };
     private static readonly TimeSpan RxBusyDefaultHold = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan RxBusyMaxWait = TimeSpan.FromMilliseconds(450);
     private const int RxBusyPollMs = 20;
@@ -730,6 +746,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         byte[] MyPrivateKey,
         byte[] SenderPublicKey);
 
+    private sealed record WeatherTelemetrySnapshot(
+        float TemperatureC,
+        float RelativeHumidityPct,
+        float BarometricPressureHpa,
+        DateTime FetchedUtc,
+        string Source);
+
     private void UpdateAutoReportLastSentSummary()
     {
         static string Stamp(DateTime utc) =>
@@ -738,7 +761,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 : utc.ToLocalTime().ToString("h:mm:ss tt", CultureInfo.CurrentCulture);
 
         AutoReportLastSentSummary =
-            $"Auto last: NI {Stamp(_lastAutoNodeInfoUtc)} | POS {Stamp(_lastAutoPositionUtc)} | MET {Stamp(_lastAutoDeviceMetricsUtc)} | ST {Stamp(_lastAutoNodeStatusUtc)}";
+            $"Auto last: NI {Stamp(_lastAutoNodeInfoUtc)} | POS {Stamp(_lastAutoPositionUtc)} | MET {Stamp(_lastAutoDeviceMetricsUtc)} | ENV {Stamp(_lastAutoEnvironmentMetricsUtc)} | ST {Stamp(_lastAutoNodeStatusUtc)}";
     }
 
     [ObservableProperty] private string _homeLatitudeText  = string.Empty;
@@ -1342,13 +1365,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_myNodeNum == 0)
             return "Location";
 
-        var self = new NodeRecord
+        var self = _nodesByNum.GetValueOrDefault(_myNodeNum)
+            ?? _nodeStore.Get(_myNodeNum)
+            ?? new NodeRecord
         {
             NodeNum = _myNodeNum,
             UserId = $"!{_myNodeNum:x8}",
-            LongName = MyLongName ?? string.Empty,
-            ShortName = MyShortName ?? string.Empty,
         };
+
+        // Prefer live identity fields when set, while still preserving any
+        // persisted telemetry values used by map label modes.
+        if (!string.IsNullOrWhiteSpace(MyLongName))
+            self.LongName = MyLongName;
+        if (!string.IsNullOrWhiteSpace(MyShortName))
+            self.ShortName = MyShortName;
 
         return GetMapNodeLabel(self);
     }
@@ -1498,6 +1528,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AutoReportPositionSeconds = Math.Max(5, _settings.AutoReportPositionSeconds);
         AutoReportDeviceMetricsEnabled = _settings.AutoReportDeviceMetricsEnabled;
         AutoReportDeviceMetricsSeconds = Math.Max(5, _settings.AutoReportDeviceMetricsSeconds);
+        AutoReportEnvironmentMetricsEnabled = _settings.AutoReportEnvironmentMetricsEnabled;
+        AutoReportEnvironmentMetricsSeconds = Math.Max(5, _settings.AutoReportEnvironmentMetricsSeconds);
         AutoReportNodeStatusEnabled = _settings.AutoReportNodeStatusEnabled;
         AutoReportNodeStatusSeconds = Math.Max(5, _settings.AutoReportNodeStatusSeconds);
         var now = DateTime.UtcNow;
@@ -1509,6 +1541,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             : DateTime.MinValue;
         _nextAutoDeviceMetricsUtc = AutoReportDeviceMetricsEnabled
             ? now.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds))
+            : DateTime.MinValue;
+        _nextAutoEnvironmentMetricsUtc = AutoReportEnvironmentMetricsEnabled
+            ? now.AddSeconds(Math.Max(5, AutoReportEnvironmentMetricsSeconds))
             : DateTime.MinValue;
         _nextAutoNodeStatusUtc = AutoReportNodeStatusEnabled
             ? now.AddSeconds(Math.Max(5, AutoReportNodeStatusSeconds))
@@ -3308,6 +3343,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.AutoReportPositionSeconds = Math.Max(5, AutoReportPositionSeconds);
         _settings.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
         _settings.AutoReportDeviceMetricsSeconds = Math.Max(5, AutoReportDeviceMetricsSeconds);
+        _settings.AutoReportEnvironmentMetricsEnabled = AutoReportEnvironmentMetricsEnabled;
+        _settings.AutoReportEnvironmentMetricsSeconds = Math.Max(5, AutoReportEnvironmentMetricsSeconds);
         _settings.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
         _settings.AutoReportNodeStatusSeconds = Math.Max(5, AutoReportNodeStatusSeconds);
         _settings.UserPublicKey = MyPublicKey ?? string.Empty;
@@ -3337,6 +3374,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
+        SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
         SaveSettings();
         RefreshSelfNode();
     }
@@ -3385,6 +3423,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
+    partial void OnAutoReportEnvironmentMetricsEnabledChanged(bool value)
+    {
+        _lastAutoEnvironmentMetricsUtc = DateTime.MinValue;
+        _nextAutoEnvironmentMetricsUtc = value
+            ? DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportEnvironmentMetricsSeconds))
+            : DateTime.MinValue;
+        UpdateAutoReportLastSentSummary();
+        SaveSettings();
+    }
+
     partial void OnAutoReportNodeStatusEnabledChanged(bool value)
     {
         _lastAutoNodeStatusUtc = DateTime.MinValue;
@@ -3416,6 +3464,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (value < 5) { AutoReportDeviceMetricsSeconds = 5; return; }
         if (AutoReportDeviceMetricsEnabled)
             _nextAutoDeviceMetricsUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportDeviceMetricsSeconds));
+        SaveSettings();
+    }
+
+    partial void OnAutoReportEnvironmentMetricsSecondsChanged(int value)
+    {
+        if (value < 5) { AutoReportEnvironmentMetricsSeconds = 5; return; }
+        if (AutoReportEnvironmentMetricsEnabled)
+            _nextAutoEnvironmentMetricsUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, AutoReportEnvironmentMetricsSeconds));
         SaveSettings();
     }
 
@@ -3746,14 +3802,44 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _nodeStore);
         convo.LoadNodeHistories();
         convo.Node = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
-        // Add the tab immediately so the UI is responsive while history loads.
-        Tabs.Add(convo);
-        if (focus) SelectedTab = convo;
-        // Remember that this tab is open so it (and only it) reopens next launch.
-        SaveSettings();
-        // Restore persisted DM history (including per-message reactions) using
-        // the same replay path used during startup.
-        LoadConversationHistory(convo);
+
+        // Never create a visible DM tab for our own node number.
+        bool isSelf = _myNodeNum != 0 && nodeNum == _myNodeNum;
+        if (!isSelf)
+        {
+            // Add the tab immediately so the UI is responsive while history loads.
+            Tabs.Add(convo);
+            if (focus) SelectedTab = convo;
+            // Remember that this tab is open so it (and only it) reopens next launch.
+            SaveSettings();
+            // Restore persisted DM history (including per-message reactions) using
+            // the same replay path used during startup.
+            LoadConversationHistory(convo);
+        }
+        return convo;
+    }
+
+    /// <summary>
+    /// Open (or reuse) a conversation view model for this node so telemetry and
+    /// location history popups can show self history the same way they do for
+    /// other nodes.
+    /// </summary>
+    public ConversationViewModel? OpenSelfConversationForHistory(bool focus = false)
+    {
+        if (_myNodeNum == 0)
+        {
+            Status = "Set your node ID (Identity) to open self history.";
+            Log(Status);
+            return null;
+        }
+
+        var name = !string.IsNullOrWhiteSpace(MyLongName)
+            ? MyLongName
+            : NodeDisplayName(_myNodeNum);
+
+        var convo = OpenConversation(_myNodeNum, name, focus);
+        convo.LoadNodeHistories();
+        convo.Node = _nodeStore.Get(_myNodeNum) ?? Nodes.FirstOrDefault(n => n.NodeNum == _myNodeNum);
         return convo;
     }
 
@@ -3947,6 +4033,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
+        SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (ShouldLogDeviceStatus(_core.DeviceStatus))
@@ -3970,6 +4057,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendNodeStatusCommand.NotifyCanExecuteChanged();
         SendPositionCommand.NotifyCanExecuteChanged();
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
+        SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (!_core.CanTransmit)
@@ -4702,6 +4790,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var channelName = ChannelDisplayName(selectedChannel);
 
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            if (ok)
+                PersistSelfPositionTx(lat, lon, HomeAltitude);
             Status = ok
                 ? $"Sent position ({frame.Length} B) on {channelName}"
                 : "Transmit failed (device cannot transmit).";
@@ -4721,6 +4811,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanSendTelemetry))]
     private async Task SendDeviceMetricsAsync()
         => await SendDeviceMetricsOnChannelAsync(
+            Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
+
+    /// <summary>
+    /// Broadcast TELEMETRY_APP EnvironmentMetrics from a weather source.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendTelemetry))]
+    private async Task SendEnvironmentMetricsAsync()
+        => await SendEnvironmentMetricsOnChannelAsync(
             Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
 
     public async Task SendDeviceMetricsOnChannelAsync(ChannelConfig? channel)
@@ -4765,6 +4863,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var channelName = ChannelDisplayName(selectedChannel);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            if (ok)
+            {
+                PersistSelfTelemetryTx(new MeshTelemetry
+                {
+                    BatteryLevel = batteryPct,
+                    Voltage = voltageV,
+                    ChannelUtilization = channelUtil,
+                    AirUtilTx = airUtilTx,
+                    UptimeSeconds = uptime,
+                });
+            }
             Status = ok
                 ? $"Sent device metrics ({frame.Length} B) on {channelName}"
                 : "Transmit failed (device cannot transmit).";
@@ -4775,6 +4884,167 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Status = $"Device metrics error: {ex.Message}";
             Log(Status);
         }
+    }
+
+    public async Task SendEnvironmentMetricsOnChannelAsync(ChannelConfig? channel)
+    {
+        var selectedChannel = channel;
+        if (selectedChannel is null)
+        {
+            Status = "No channel available to send environment metrics on.";
+            Log(Status);
+            return;
+        }
+
+        if (HomeLatitude is not double lat || HomeLongitude is not double lon)
+        {
+            WeatherTelemetryStatus = "Weather telemetry: home location required.";
+            Status = "Set your location latitude/longitude before sending environment metrics.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            var snapshot = await GetWeatherTelemetryAsync(lat, lon, forceRefresh: true);
+            if (snapshot is null)
+            {
+                Status = "Environment metrics not sent (weather source unavailable).";
+                Log(Status);
+                return;
+            }
+
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeTelemetryEnvironmentMetrics(
+                selectedChannel,
+                _myNodeNum,
+                packetId,
+                temperatureC: snapshot.TemperatureC,
+                relativeHumidityPct: snapshot.RelativeHumidityPct,
+                barometricPressureHpa: snapshot.BarometricPressureHpa,
+                hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt);
+
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            var channelName = ChannelDisplayName(selectedChannel);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            if (ok)
+            {
+                WeatherTelemetryStatus =
+                    $"Weather telemetry: sent ({snapshot.Source}) {snapshot.FetchedUtc.ToLocalTime():h:mm:ss tt}";
+                PersistSelfTelemetryTx(new MeshTelemetry
+                {
+                    TemperatureC = snapshot.TemperatureC,
+                    RelativeHumidityPct = snapshot.RelativeHumidityPct,
+                    BarometricPressureHpa = snapshot.BarometricPressureHpa,
+                });
+            }
+
+            Status = ok
+                ? $"Sent environment metrics ({frame.Length} B) on {channelName}"
+                : "Transmit failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            WeatherTelemetryStatus = $"Weather telemetry: send failed ({ex.Message})";
+            Status = $"Environment metrics error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    private async Task<WeatherTelemetrySnapshot?> GetWeatherTelemetryAsync(double latitude,
+                                                                            double longitude,
+                                                                            bool forceRefresh)
+    {
+        var now = DateTime.UtcNow;
+        if (!forceRefresh && _latestWeatherTelemetry is { } cached &&
+            now - cached.FetchedUtc <= WeatherTelemetryCacheTtl)
+        {
+            return cached;
+        }
+
+        await _weatherFetchSemaphore.WaitAsync();
+        try
+        {
+            now = DateTime.UtcNow;
+            if (!forceRefresh && _latestWeatherTelemetry is { } cachedInside &&
+                now - cachedInside.FetchedUtc <= WeatherTelemetryCacheTtl)
+            {
+                return cachedInside;
+            }
+
+            string latText = latitude.ToString("0.####", CultureInfo.InvariantCulture);
+            string lonText = longitude.ToString("0.####", CultureInfo.InvariantCulture);
+            string url =
+                $"https://api.open-meteo.com/v1/forecast?latitude={latText}&longitude={lonText}&current=temperature_2m,relative_humidity_2m,surface_pressure";
+
+            WeatherTelemetryStatus = "Weather telemetry: fetching...";
+
+            using var response = await WeatherHttp.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                WeatherTelemetryStatus = $"Weather telemetry: fetch failed ({(int)response.StatusCode})";
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            using var json = await JsonDocument.ParseAsync(stream);
+
+            if (!json.RootElement.TryGetProperty("current", out var current))
+            {
+                WeatherTelemetryStatus = "Weather telemetry: missing current values.";
+                return null;
+            }
+
+            if (!TryReadFloat(current, "temperature_2m", out var temperatureC) ||
+                !TryReadFloat(current, "relative_humidity_2m", out var humidityPct) ||
+                !TryReadFloat(current, "surface_pressure", out var pressureHpa))
+            {
+                WeatherTelemetryStatus = "Weather telemetry: weather fields unavailable.";
+                return null;
+            }
+
+            var snapshot = new WeatherTelemetrySnapshot(
+                TemperatureC: temperatureC,
+                RelativeHumidityPct: humidityPct,
+                BarometricPressureHpa: pressureHpa,
+                FetchedUtc: DateTime.UtcNow,
+                Source: "Open-Meteo");
+            _latestWeatherTelemetry = snapshot;
+
+            WeatherTelemetryStatus =
+                $"Weather telemetry: OK {snapshot.FetchedUtc.ToLocalTime():h:mm:ss tt} ({snapshot.TemperatureC:F1} C, {snapshot.RelativeHumidityPct:F0}% RH, {snapshot.BarometricPressureHpa:F1} hPa)";
+            return snapshot;
+        }
+        catch (Exception ex)
+        {
+            WeatherTelemetryStatus = $"Weather telemetry: fetch failed ({ex.Message})";
+            return null;
+        }
+        finally
+        {
+            _weatherFetchSemaphore.Release();
+        }
+    }
+
+    private static bool TryReadFloat(JsonElement obj, string name, out float value)
+    {
+        value = 0f;
+        if (!obj.TryGetProperty(name, out var node))
+            return false;
+
+        if (node.ValueKind == JsonValueKind.Number)
+            return node.TryGetSingle(out value);
+
+        if (node.ValueKind == JsonValueKind.String &&
+            float.TryParse(node.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            value = parsed;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -6935,6 +7205,131 @@ public partial class MainViewModel : ObservableObject, IDisposable
             telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.Iaq) : string.Empty);
     }
 
+    private void PersistSelfPositionTx(double latitude, double longitude, int? altitudeM)
+    {
+        if (_myNodeNum == 0)
+            return;
+
+        var now = DateTimeOffset.UtcNow;
+        var node = BuildSelfNodeSnapshotForUpsert(now.ToUnixTimeSeconds());
+        node.Latitude = latitude;
+        node.Longitude = longitude;
+        node.AltitudeM = altitudeM;
+
+        _nodeStore.Upsert(node);
+        _nodeStore.AddLocationHistory(_myNodeNum, now.UtcDateTime, latitude, longitude, altitudeM);
+
+        _nodeLocationHistoryCounts[_myNodeNum] = _nodeLocationHistoryCounts.TryGetValue(_myNodeNum, out int count)
+            ? count + 1
+            : 1;
+
+        ReloadNodes();
+        RefreshOpenSelfHistoryTabs();
+    }
+
+    private void PersistSelfTelemetryTx(MeshTelemetry telemetry)
+    {
+        if (_myNodeNum == 0 || (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics))
+            return;
+
+        var now = DateTimeOffset.UtcNow;
+        var node = BuildSelfNodeSnapshotForUpsert(now.ToUnixTimeSeconds());
+        if (telemetry.HasDeviceMetrics)
+        {
+            node.BatteryPct = telemetry.BatteryLevel;
+            node.VoltageV = telemetry.Voltage;
+            node.ChannelUtilPct = telemetry.ChannelUtilization;
+            node.AirUtilTxPct = telemetry.AirUtilTx;
+            node.UptimeSeconds = telemetry.UptimeSeconds;
+        }
+
+        if (telemetry.HasEnvironmentMetrics)
+        {
+            node.TemperatureC = telemetry.TemperatureC;
+            node.RelativeHumidityPct = telemetry.RelativeHumidityPct;
+            node.BarometricPressureHpa = telemetry.BarometricPressureHpa;
+            node.GasResistanceMohm = telemetry.GasResistanceMohm;
+            node.Iaq = telemetry.Iaq;
+        }
+
+        _nodeStore.Upsert(node);
+        PersistTelemetryHistory(_myNodeNum, now.ToUnixTimeSeconds(), telemetry);
+
+        ReloadNodes();
+        RefreshOpenSelfHistoryTabs();
+    }
+
+    private NodeRecord BuildSelfNodeSnapshotForUpsert(long lastHeardEpoch)
+    {
+        var existing = _nodeStore.Get(_myNodeNum)
+            ?? _nodesByNum.GetValueOrDefault(_myNodeNum);
+        var node = existing is not null
+            ? CloneNodeRecord(existing)
+            : new NodeRecord
+            {
+                NodeNum = _myNodeNum,
+                UserId = $"!{_myNodeNum:x8}",
+            };
+
+        node.NodeNum = _myNodeNum;
+        node.UserId = $"!{_myNodeNum:x8}";
+        node.LongName = string.IsNullOrWhiteSpace(MyLongName) ? node.LongName : MyLongName;
+        node.ShortName = string.IsNullOrWhiteSpace(MyShortName) ? node.ShortName : MyShortName;
+        node.Role = string.IsNullOrWhiteSpace(MyRole) ? node.Role : MyRole;
+        node.HwModel = string.IsNullOrWhiteSpace(MyHwModel) ? node.HwModel : MyHwModel;
+        node.LastHeardEpoch = lastHeardEpoch;
+        return node;
+    }
+
+    private void RefreshOpenSelfHistoryTabs()
+    {
+        if (_myNodeNum == 0)
+            return;
+
+        var selfNode = _nodeStore.Get(_myNodeNum);
+        foreach (var convo in Tabs.OfType<ConversationViewModel>())
+        {
+            if (convo.NodeNum != _myNodeNum)
+                continue;
+            convo.Node = selfNode;
+            convo.LoadNodeHistories();
+        }
+    }
+
+    private static NodeRecord CloneNodeRecord(NodeRecord source) => new()
+    {
+        NodeNum = source.NodeNum,
+        UserId = source.UserId,
+        LongName = source.LongName,
+        ShortName = source.ShortName,
+        HwModel = source.HwModel,
+        Role = source.Role,
+        LastHeardEpoch = source.LastHeardEpoch,
+        SeenViaMqtt = source.SeenViaMqtt,
+        SnrDb = source.SnrDb,
+        RssiDbm = source.RssiDbm,
+        HopsAway = source.HopsAway,
+        Latitude = source.Latitude,
+        Longitude = source.Longitude,
+        AltitudeM = source.AltitudeM,
+        BatteryPct = source.BatteryPct,
+        VoltageV = source.VoltageV,
+        ChannelUtilPct = source.ChannelUtilPct,
+        AirUtilTxPct = source.AirUtilTxPct,
+        UptimeSeconds = source.UptimeSeconds,
+        TemperatureC = source.TemperatureC,
+        RelativeHumidityPct = source.RelativeHumidityPct,
+        BarometricPressureHpa = source.BarometricPressureHpa,
+        GasResistanceMohm = source.GasResistanceMohm,
+        Iaq = source.Iaq,
+        NodeStatus = source.NodeStatus,
+        PublicKey = source.PublicKey,
+        KeyMismatch = source.KeyMismatch,
+        MuteRtttl = source.MuteRtttl,
+        Ignored = source.Ignored,
+        Favorite = source.Favorite,
+    };
+
     private static bool SameTelemetryHistoryKind(string? left, string right)
     {
         static string Kind(string? signature)
@@ -7312,6 +7707,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (Status.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
                 {
                     _lastAutoDeviceMetricsUtc = now;
+                    UpdateAutoReportLastSentSummary();
+                }
+            }
+
+            now = DateTime.UtcNow;
+            if (AutoReportEnvironmentMetricsEnabled &&
+                CanSendTelemetry() &&
+                now >= _nextAutoEnvironmentMetricsUtc)
+            {
+                _nextAutoEnvironmentMetricsUtc = now.AddSeconds(Math.Max(5, AutoReportEnvironmentMetricsSeconds));
+                await SendEnvironmentMetricsAsync();
+                if (Status.StartsWith("Sent environment metrics", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastAutoEnvironmentMetricsUtc = now;
                     UpdateAutoReportLastSentSummary();
                 }
             }

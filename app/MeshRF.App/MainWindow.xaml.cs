@@ -16,6 +16,7 @@ namespace MeshRF.App;
 
 public partial class MainWindow : Window
 {
+    private static bool _comboWheelHandlersRegistered;
     private readonly DispatcherTimer _statsTimer;
     // The render-synced frame loop. Driven by CompositionTarget.Rendering so it
     // fires once per composition frame (monitor refresh) instead of being
@@ -106,6 +107,66 @@ public partial class MainWindow : Window
             UpdateMainTabsDividerOverlay();
         };
         MainTabs.LayoutUpdated += (_, _) => UpdateMainTabsDividerOverlay();
+
+        EnsureComboBoxWheelHandlers();
+    }
+
+    private static void EnsureComboBoxWheelHandlers()
+    {
+        if (_comboWheelHandlersRegistered)
+            return;
+
+        // Single class handler on ComboBox only.
+        // Popup-internal events live in a separate visual tree (PopupRoot) and never
+        // reach this handler, so the open dropdown list can still scroll on its own.
+        EventManager.RegisterClassHandler(
+            typeof(ComboBox),
+            UIElement.PreviewMouseWheelEvent,
+            new System.Windows.Input.MouseWheelEventHandler(OnComboBoxWheelClassHandler),
+            handledEventsToo: true);
+
+        _comboWheelHandlersRegistered = true;
+    }
+
+    private static void OnComboBoxWheelClassHandler(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        var combo = sender as ComboBox;
+        if (combo is null)
+            return;
+
+        // Walk up the visual tree from the ComboBox looking for the nearest
+        // ScrollViewer that actually has room to scroll.  Skip any that are
+        // full (e.g. the ToolBar's own internal horizontal scroller).
+        var viewport = FindScrollableAncestorViewer(combo);
+
+        if (viewport is not null)
+        {
+            int steps = Math.Max(1, Math.Abs(e.Delta) / 120);
+            double pixelDelta = steps * 48.0;
+            viewport.ScrollToVerticalOffset(
+                viewport.VerticalOffset + (e.Delta > 0 ? -pixelDelta : pixelDelta));
+        }
+
+        // Always suppress ComboBox value-cycling on wheel — even when there is
+        // no scrollable panel ancestor.
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Walks the visual tree upward from <paramref name="start"/> and returns
+    /// the first <see cref="ScrollViewer"/> that has non-zero vertical scroll range.
+    /// Returns <c>null</c> if none is found.
+    /// </summary>
+    private static ScrollViewer? FindScrollableAncestorViewer(DependencyObject? start)
+    {
+        var current = start is not null ? VisualTreeHelper.GetParent(start) : null;
+        while (current is not null)
+        {
+            if (current is ScrollViewer sv && sv.ScrollableHeight > 0)
+                return sv;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
     }
 
     private void HookRendering(bool hook)
@@ -135,6 +196,82 @@ public partial class MainWindow : Window
     private void OnOpenLocationHistory(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not ConversationViewModel conversation)
+            return;
+
+        ShowOwnedHistoryWindow(conversation, c => new LocationHistoryWindow(c));
+    }
+
+    private void OnOpenNodeIdentity(object sender, RoutedEventArgs e)
+    {
+        foreach (Window window in OwnedWindows)
+        {
+            if (window is NodeIdentityWindow existing)
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                    existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return;
+            }
+        }
+        var w = new NodeIdentityWindow { Owner = this, DataContext = DataContext };
+        w.Show();
+    }
+
+    private void OnRemoveChannelClicked(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var ch = vm.SelectedChannel;
+        if (ch is null) return;
+
+        var name = string.IsNullOrWhiteSpace(ch.Config.Name) ? "this channel" : $"\"{ch.Config.Name}\"";
+        var result = MessageBox.Show(
+            $"Remove {name}? This cannot be undone.",
+            "Remove Channel",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+
+        if (result == MessageBoxResult.Yes)
+            vm.RemoveSelectedChannelCommand.Execute(null);
+    }
+
+    private void OnOpenChannelSettings(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ChannelViewModel channel)
+            return;
+        foreach (Window window in OwnedWindows)
+        {
+            if (window is ChannelSettingsWindow existing && ReferenceEquals(existing.DataContext, channel))
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                    existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return;
+            }
+        }
+        var w = new ChannelSettingsWindow { Owner = this, DataContext = channel };
+        w.Show();
+    }
+
+    private void OnOpenSelfTelemetryHistory(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        var conversation = vm.OpenSelfConversationForHistory(focus: false);
+        if (conversation is null)
+            return;
+
+        ShowOwnedHistoryWindow(conversation, c => new TelemetryHistoryWindow(c));
+    }
+
+    private void OnOpenSelfLocationHistory(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        var conversation = vm.OpenSelfConversationForHistory(focus: false);
+        if (conversation is null)
             return;
 
         ShowOwnedHistoryWindow(conversation, c => new LocationHistoryWindow(c));
@@ -642,6 +779,14 @@ public partial class MainWindow : Window
         var channel = PromptForRequestChannel(vm, "Send device metrics on which channel?");
         if (channel is null) return;
         await vm.SendDeviceMetricsOnChannelAsync(channel);
+    }
+
+    private async void OnSendEnvironmentMetricsPrompted(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var channel = PromptForRequestChannel(vm, "Send environment telemetry on which channel?");
+        if (channel is null) return;
+        await vm.SendEnvironmentMetricsOnChannelAsync(channel);
     }
 
     private async void OnSendNodeStatusPrompted(object sender, RoutedEventArgs e)
@@ -1246,7 +1391,6 @@ public partial class MainWindow : Window
         ApplyNodesColumnDisplayOrder(settings.NodeColumnDisplayOrder);
         ApplyNodesGridSort(settings);
 
-        IdentityExpander.IsExpanded = settings.IdentityExpanded;
         ApplyLastPacketExpandedState(settings.LastPacketExpanded, persist: false);
         RestoreSelectedTab(settings);
         Map.LoadFromSettings(settings);
@@ -1391,7 +1535,6 @@ public partial class MainWindow : Window
         settings.NodeColumnWidths = SaveNodesColumnWidths();
         settings.NodeColumnDisplayOrder = SaveNodesColumnDisplayOrder();
 
-        settings.IdentityExpanded = IdentityExpander.IsExpanded;
         settings.LastPacketExpanded = _lastPacketExpanded;
 
         settings.SelectedChannelIndex = -1;

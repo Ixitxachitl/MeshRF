@@ -359,6 +359,39 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// Broadcast a TELEMETRY_APP packet carrying <c>EnvironmentMetrics</c>
+    /// (temperature, humidity, and pressure).
+    /// </summary>
+    public static byte[] EncodeTelemetryEnvironmentMetrics(ChannelConfig channel,
+                                                           uint from,
+                                                           uint packetId,
+                                                           float? temperatureC = null,
+                                                           float? relativeHumidityPct = null,
+                                                           float? barometricPressureHpa = null,
+                                                           uint to = 0xFFFFFFFFu,
+                                                           byte hopLimit = 3,
+                                                           bool okToMqtt = false,
+                                                           uint requestId = 0)
+    {
+        var environment = new ProtoWriter();
+        if (temperatureC is float temp)
+            environment.WriteFloatField(1, temp);
+        if (relativeHumidityPct is float humidity)
+            environment.WriteFloatField(2, humidity);
+        if (barometricPressureHpa is float pressure)
+            environment.WriteFloatField(3, pressure);
+
+        var telemetry = new ProtoWriter();
+        telemetry.WriteFixed32Field(1, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        telemetry.WriteBytesField(3, environment.ToArray()); // environment_metrics
+
+        return Encode(channel, from, to, packetId, PortNum.Telemetry,
+                      telemetry.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: false, okToMqtt: okToMqtt,
+                      requestId: requestId);
+    }
+
+    /// <summary>
     /// Encode a TELEMETRY_APP request for device metrics directed at
     /// <paramref name="to"/>. Official firmware chooses the reply variant from
     /// the Telemetry oneof tag, so this sends an empty <c>device_metrics</c>

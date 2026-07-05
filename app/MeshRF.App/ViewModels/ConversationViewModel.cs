@@ -429,6 +429,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 
     public void AppendTelemetryHistoryRecord(NodeTelemetryHistoryRecord record)
     {
+        // Guard against duplicates that arise when a LoadNodeHistories reload
+        // completes after the background DB write, and then the write's async
+        // UI dispatch also fires and tries to add the same record again.
+        if (record.Id > 0 && TelemetryHistory.Any(p => p.Id == record.Id))
+            return;
+
         var point = BuildTelemetryHistoryPoint(record);
         AddTelemetryHistoryPoint(point);
 

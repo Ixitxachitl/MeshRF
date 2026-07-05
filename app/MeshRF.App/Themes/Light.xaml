@@ -53,6 +53,13 @@
           <Setter Property="ContextMenu" Value="{StaticResource TextEditingContextMenu}" />
      </Style>
 
+     <Style TargetType="{x:Type ComboBox}">
+          <Setter Property="MaxDropDownHeight" Value="260" />
+          <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+          <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+          <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+     </Style>
+
      <Style TargetType="{x:Type ToolBar}">
           <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
           <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />

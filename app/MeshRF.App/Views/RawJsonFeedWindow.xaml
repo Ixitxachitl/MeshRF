@@ -27,19 +27,25 @@
                     Content="Copy"
                     Padding="8,2"
                     Command="{Binding CopyDecodedPacketJsonFeedCommand}" />
+            <ToggleButton x:Name="AutoScrollToggle"
+                          DockPanel.Dock="Right"
+                          Content="Auto-scroll"
+                          Padding="8,2" Margin="16,0,4,0"
+                          VerticalAlignment="Center"
+                          IsChecked="True"
+                          ToolTip="Automatically scroll to new entries" />
             <TextBlock VerticalAlignment="Center"
                        FontWeight="SemiBold"
                        Text="Decoded Packet JSON Feed" />
         </DockPanel>
 
-        <ListBox Grid.Row="1"
+        <ListBox x:Name="JsonList"
+                 Grid.Row="1"
                  ItemsSource="{Binding DecodedPacketJsonEntries}"
                  HorizontalContentAlignment="Stretch"
-                 VirtualizingPanel.IsVirtualizing="True"
-                 VirtualizingPanel.VirtualizationMode="Recycling"
-                 ScrollViewer.CanContentScroll="True"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 VirtualizingPanel.ScrollUnit="Pixel">
+                 VirtualizingPanel.IsVirtualizing="False"
+                 ScrollViewer.CanContentScroll="False"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Expander IsExpanded="False"

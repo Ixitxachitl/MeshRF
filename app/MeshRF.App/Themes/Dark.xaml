@@ -328,6 +328,10 @@
         <Setter Property="TextElement.Foreground" Value="{DynamicResource BrushAppForeground}" />
         <Setter Property="TextBlock.Foreground" Value="{DynamicResource BrushAppForeground}" />
         <Setter Property="Padding" Value="6,2" />
+        <Setter Property="MaxDropDownHeight" Value="260" />
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ComboBox}">
@@ -393,7 +397,9 @@
                                     Background="{DynamicResource BrushPanelBackground}"
                                     BorderBrush="{DynamicResource BrushPanelBorder}"
                                     BorderThickness="1">
-                                <ScrollViewer>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              CanContentScroll="True">
                                     <StackPanel IsItemsHost="True"
                                                 KeyboardNavigation.DirectionalNavigation="Contained" />
                                 </ScrollViewer>
