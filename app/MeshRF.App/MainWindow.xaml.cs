@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Navigation;
 using System.Windows.Threading;
 using MeshRF.Channels;
 using MeshRF.App.ViewModels;
@@ -183,6 +184,20 @@ public partial class MainWindow : Window
     {
         var about = new AboutWindow { Owner = this };
         about.ShowDialog();
+    }
+
+    private void OnMessageHyperlinkNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Ignore launch failures for malformed or blocked URLs.
+        }
+
+        e.Handled = true;
     }
 
     private void OnOpenTelemetryHistory(object sender, RoutedEventArgs e)

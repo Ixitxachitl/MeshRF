@@ -2,18 +2,23 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Text.RegularExpressions;
 
 namespace MeshRF.App.Behaviors;
 
 /// <summary>
-/// Attached property for <see cref="TextBlock"/> that renders a small subset of
+/// Attached property for <see cref="TextBlock"/> and <see cref="RichTextBox"/>
+/// that renders a small subset of
 /// inline Markdown: <c>**bold**</c> (and <c>__bold__</c>) becomes bold, and
 /// <c>*italic*</c> (and <c>_italic_</c>) becomes italic. Unmatched markers are
-/// left as literal text. Used so chat messages show emphasis instead of the raw
-/// asterisks.
+/// left as literal text. Bare URLs are emitted as hyperlinks.
 /// </summary>
 public static class MarkdownText
 {
+    private static readonly Regex UrlRegex = new(
+        @"(?:(?:https?|ftp)://|www\.)[^\s<>""]+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     public static readonly DependencyProperty TextProperty =
         DependencyProperty.RegisterAttached(
             "Text",
@@ -26,10 +31,29 @@ public static class MarkdownText
 
     private static void OnTextChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not TextBlock tb) return;
-        tb.Inlines.Clear();
-        foreach (var inline in Parse(e.NewValue as string ?? string.Empty))
-            tb.Inlines.Add(inline);
+        var text = e.NewValue as string ?? string.Empty;
+
+        if (d is TextBlock tb)
+        {
+            tb.Inlines.Clear();
+            foreach (var inline in Parse(text))
+                tb.Inlines.Add(inline);
+            return;
+        }
+
+        if (d is not RichTextBox rtb) return;
+
+        rtb.Document.Blocks.Clear();
+        var paragraph = new Paragraph
+        {
+            Margin = new Thickness(0),
+            Padding = new Thickness(0),
+        };
+
+        foreach (var inline in Parse(text))
+            paragraph.Inlines.Add(inline);
+
+        rtb.Document.Blocks.Add(paragraph);
     }
 
     // Walk the text and emit Runs, toggling bold/italic on the emphasis markers.
@@ -44,10 +68,7 @@ public static class MarkdownText
         void Flush()
         {
             if (buffer.Length == 0) return;
-            var run = new Run(buffer.ToString());
-            if (bold) run.FontWeight = FontWeights.Bold;
-            if (italic) run.FontStyle = FontStyles.Italic;
-            result.Add(run);
+            AppendTextWithUrls(result, buffer.ToString(), bold, italic);
             buffer.Clear();
         }
 
@@ -100,5 +121,85 @@ public static class MarkdownText
             if (doubled && isDouble) i++;
         }
         return false;
+    }
+
+    private static void AppendTextWithUrls(ICollection<Inline> output, string text, bool bold, bool italic)
+    {
+        int cursor = 0;
+        foreach (Match match in UrlRegex.Matches(text))
+        {
+            if (!match.Success || match.Length == 0) continue;
+
+            var (start, end) = TrimUrlBounds(text, match.Index, match.Index + match.Length);
+            if (start < cursor || end <= start) continue;
+
+            if (start > cursor)
+                output.Add(CreateRun(text[cursor..start], bold, italic));
+
+            string linkText = text[start..end];
+            if (Uri.TryCreate(NormalizeUrl(linkText), UriKind.Absolute, out var uri))
+            {
+                var link = new Hyperlink(CreateRun(linkText, bold, italic)) { NavigateUri = uri };
+                output.Add(link);
+            }
+            else
+            {
+                output.Add(CreateRun(linkText, bold, italic));
+            }
+
+            cursor = end;
+        }
+
+        if (cursor < text.Length)
+            output.Add(CreateRun(text[cursor..], bold, italic));
+    }
+
+    private static Run CreateRun(string text, bool bold, bool italic)
+    {
+        var run = new Run(text);
+        if (bold) run.FontWeight = FontWeights.Bold;
+        if (italic) run.FontStyle = FontStyles.Italic;
+        return run;
+    }
+
+    private static string NormalizeUrl(string raw)
+    {
+        if (raw.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+            return "https://" + raw;
+        return raw;
+    }
+
+    private static (int Start, int End) TrimUrlBounds(string source, int start, int end)
+    {
+        while (end > start)
+        {
+            char tail = source[end - 1];
+            if (tail is '.' or ',' or ';' or '!' or '?' or ':' or ']' or '}')
+            {
+                end--;
+                continue;
+            }
+
+            if (tail == ')')
+            {
+                int openCount = 0;
+                int closeCount = 0;
+                for (int i = start; i < end; i++)
+                {
+                    if (source[i] == '(') openCount++;
+                    else if (source[i] == ')') closeCount++;
+                }
+
+                if (closeCount > openCount)
+                {
+                    end--;
+                    continue;
+                }
+            }
+
+            break;
+        }
+
+        return (start, end);
     }
 }

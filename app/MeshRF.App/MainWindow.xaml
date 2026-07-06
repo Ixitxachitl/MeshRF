@@ -899,7 +899,7 @@
                                   GridLinesVisibility="Horizontal"
                                   HeadersVisibility="Column"
                                   MouseDoubleClick="NodesGrid_MouseDoubleClick"
-                                  KeyDown="NodesGrid_KeyDown">
+                                  PreviewKeyDown="NodesGrid_KeyDown">
                             <DataGrid.RowStyle>
                                 <Style TargetType="DataGridRow">
                                     <Style.Triggers>
@@ -1461,9 +1461,19 @@
                                                         <emoji:TextBlock x:Name="ChannelMessageFromText" Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
                                                         <StackPanel Grid.Column="2" Margin="0,0,0,2">
-                                                            <emoji:TextBlock x:Name="ChannelMessageBodyText"
-                                                                             beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                             TextWrapping="Wrap" />
+                                                            <RichTextBox x:Name="ChannelMessageBodyText"
+                                                                         beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                         Background="Transparent"
+                                                                         BorderThickness="0"
+                                                                         Padding="0"
+                                                                         Margin="0"
+                                                                         IsReadOnly="True"
+                                                                         IsDocumentEnabled="True"
+                                                                         IsTabStop="False"
+                                                                         HorizontalScrollBarVisibility="Disabled"
+                                                                         VerticalScrollBarVisibility="Disabled"
+                                                                         Hyperlink.RequestNavigate="OnMessageHyperlinkNavigate"
+                                                                         TextElement.FontFamily="Consolas" />
                                                             <ItemsControl ItemsSource="{Binding Reactions}"
                                                                           Margin="0,3,0,0"
                                                                           Visibility="{Binding HasReactions, Converter={StaticResource BoolToVis}}">
@@ -1639,9 +1649,19 @@
                                                         <emoji:TextBlock x:Name="ConversationMessageFromText" Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
                                                         <StackPanel Grid.Column="2" Margin="0,0,0,2">
-                                                            <emoji:TextBlock x:Name="ConversationMessageBodyText"
-                                                                             beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                             TextWrapping="Wrap" />
+                                                            <RichTextBox x:Name="ConversationMessageBodyText"
+                                                                         beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                         Background="Transparent"
+                                                                         BorderThickness="0"
+                                                                         Padding="0"
+                                                                         Margin="0"
+                                                                         IsReadOnly="True"
+                                                                         IsDocumentEnabled="True"
+                                                                         IsTabStop="False"
+                                                                         HorizontalScrollBarVisibility="Disabled"
+                                                                         VerticalScrollBarVisibility="Disabled"
+                                                                         Hyperlink.RequestNavigate="OnMessageHyperlinkNavigate"
+                                                                         TextElement.FontFamily="Consolas" />
                                                             <ItemsControl ItemsSource="{Binding Reactions}"
                                                                           Margin="0,3,0,0"
                                                                           Visibility="{Binding HasReactions, Converter={StaticResource BoolToVis}}">
@@ -1814,7 +1834,15 @@
                                  beh:AutoScroll.IsEnabled="{Binding LogAutoScroll}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <emoji:TextBlock Text="{Binding}" FontFamily="Consolas" TextWrapping="Wrap" />
+                                    <TextBox Text="{Binding ., Mode=OneWay}"
+                                             FontFamily="Consolas"
+                                             TextWrapping="Wrap"
+                                             IsReadOnly="True"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             Padding="0"
+                                             Margin="0"
+                                             VerticalContentAlignment="Center" />
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
