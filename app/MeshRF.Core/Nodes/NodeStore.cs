@@ -680,7 +680,10 @@ public sealed class NodeStore : IDisposable
                 barometric_pressure_hpa = NULL, gas_resistance_mohm = NULL,
                 iaq = NULL,
                 pm10_std = NULL, pm25_std = NULL, pm100_std = NULL,
-                pm10_env = NULL, pm25_env = NULL, pm100_env = NULL
+                pm10_env = NULL, pm25_env = NULL, pm100_env = NULL,
+                ch1_voltage_v = NULL, ch1_current_ma = NULL,
+                ch2_voltage_v = NULL, ch2_current_ma = NULL,
+                ch3_voltage_v = NULL, ch3_current_ma = NULL
             WHERE node_num = $n
             """;
         cmd.Parameters.AddWithValue("$n", nodeNum);
@@ -791,6 +794,12 @@ public sealed class NodeStore : IDisposable
             Pm10Environmental     = Nullable<uint>("pm10_env"),
             Pm25Environmental     = Nullable<uint>("pm25_env"),
             Pm100Environmental    = Nullable<uint>("pm100_env"),
+            Ch1VoltageV           = Nullable<float>("ch1_voltage_v"),
+            Ch1CurrentMa          = Nullable<float>("ch1_current_ma"),
+            Ch2VoltageV           = Nullable<float>("ch2_voltage_v"),
+            Ch2CurrentMa          = Nullable<float>("ch2_current_ma"),
+            Ch3VoltageV           = Nullable<float>("ch3_voltage_v"),
+            Ch3CurrentMa          = Nullable<float>("ch3_current_ma"),
         };
     }
 

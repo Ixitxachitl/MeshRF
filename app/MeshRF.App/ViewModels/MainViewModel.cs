@@ -71,6 +71,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // to _nodeStore when the dirty flush reads. Overlay ensures the row shows the
     // new name/role immediately without waiting for the background write to land.
     private readonly Dictionary<uint, NodeRecord> _pendingNodeInfos = new();
+    // Telemetry fields from a just-received TELEMETRY_APP packet that may not yet
+    // be committed to _nodeStore when the dirty flush reads.
+    private readonly Dictionary<uint, NodeRecord> _pendingNodeTelemetry = new();
     private readonly Dictionary<uint, int> _nodeLocationHistoryCounts = new();
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
@@ -1783,6 +1786,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _dirtyNodeNums.Clear();
         _pendingNodeSightings.Clear();
         _pendingNodeInfos.Clear();
+        _pendingNodeTelemetry.Clear();
         _nodesByNum.Clear();
         _pkcSenderPublicKeyBytes.Clear();
         _nodeLocationHistoryCounts.Clear();
@@ -1933,9 +1937,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // ShortName, Role, etc.) written by EnqueueDbWrite may not be visible
             // in _nodeStore yet. Patching here ensures the row updates immediately.
             bool hadPendingNodeInfo = _pendingNodeInfos.TryGetValue(nodeNum, out var pendingInfo);
-            if (hadPendingNodeInfo && latest is not null)
+            if (hadPendingNodeInfo && latest is not null && pendingInfo is not null)
             {
-                if (!string.IsNullOrEmpty(pendingInfo!.LongName))  latest.LongName  = pendingInfo.LongName;
+                if (!string.IsNullOrEmpty(pendingInfo.LongName))  latest.LongName  = pendingInfo.LongName;
                 if (!string.IsNullOrEmpty(pendingInfo.ShortName))  latest.ShortName = pendingInfo.ShortName;
                 if (!string.IsNullOrEmpty(pendingInfo.UserId))     latest.UserId    = pendingInfo.UserId;
                 if (!string.IsNullOrEmpty(pendingInfo.HwModel))    latest.HwModel   = pendingInfo.HwModel;
@@ -1943,6 +1947,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (!string.IsNullOrEmpty(pendingInfo.PublicKey))  latest.PublicKey = pendingInfo.PublicKey;
                 if (pendingInfo.KeyMismatch.HasValue)               latest.KeyMismatch = pendingInfo.KeyMismatch.Value;
                 _pendingNodeInfos.Remove(nodeNum);
+            }
+
+            bool hadPendingTelemetry = _pendingNodeTelemetry.TryGetValue(nodeNum, out var pendingTelemetry);
+            if (hadPendingTelemetry && latest is not null && pendingTelemetry is not null)
+            {
+                if (pendingTelemetry.BatteryPct.HasValue)             latest.BatteryPct = pendingTelemetry.BatteryPct;
+                if (pendingTelemetry.VoltageV.HasValue)               latest.VoltageV = pendingTelemetry.VoltageV;
+                if (pendingTelemetry.ChannelUtilPct.HasValue)         latest.ChannelUtilPct = pendingTelemetry.ChannelUtilPct;
+                if (pendingTelemetry.AirUtilTxPct.HasValue)           latest.AirUtilTxPct = pendingTelemetry.AirUtilTxPct;
+                if (pendingTelemetry.UptimeSeconds.HasValue)          latest.UptimeSeconds = pendingTelemetry.UptimeSeconds;
+                if (pendingTelemetry.TemperatureC.HasValue)           latest.TemperatureC = pendingTelemetry.TemperatureC;
+                if (pendingTelemetry.RelativeHumidityPct.HasValue)    latest.RelativeHumidityPct = pendingTelemetry.RelativeHumidityPct;
+                if (pendingTelemetry.BarometricPressureHpa.HasValue)  latest.BarometricPressureHpa = pendingTelemetry.BarometricPressureHpa;
+                if (pendingTelemetry.GasResistanceMohm.HasValue)      latest.GasResistanceMohm = pendingTelemetry.GasResistanceMohm;
+                if (pendingTelemetry.Iaq.HasValue)                    latest.Iaq = pendingTelemetry.Iaq;
+                if (pendingTelemetry.Pm10Standard.HasValue)           latest.Pm10Standard = pendingTelemetry.Pm10Standard;
+                if (pendingTelemetry.Pm25Standard.HasValue)           latest.Pm25Standard = pendingTelemetry.Pm25Standard;
+                if (pendingTelemetry.Pm100Standard.HasValue)          latest.Pm100Standard = pendingTelemetry.Pm100Standard;
+                if (pendingTelemetry.Pm10Environmental.HasValue)      latest.Pm10Environmental = pendingTelemetry.Pm10Environmental;
+                if (pendingTelemetry.Pm25Environmental.HasValue)      latest.Pm25Environmental = pendingTelemetry.Pm25Environmental;
+                if (pendingTelemetry.Pm100Environmental.HasValue)     latest.Pm100Environmental = pendingTelemetry.Pm100Environmental;
+                if (pendingTelemetry.Ch1VoltageV.HasValue)            latest.Ch1VoltageV = pendingTelemetry.Ch1VoltageV;
+                if (pendingTelemetry.Ch1CurrentMa.HasValue)           latest.Ch1CurrentMa = pendingTelemetry.Ch1CurrentMa;
+                if (pendingTelemetry.Ch2VoltageV.HasValue)            latest.Ch2VoltageV = pendingTelemetry.Ch2VoltageV;
+                if (pendingTelemetry.Ch2CurrentMa.HasValue)           latest.Ch2CurrentMa = pendingTelemetry.Ch2CurrentMa;
+                if (pendingTelemetry.Ch3VoltageV.HasValue)            latest.Ch3VoltageV = pendingTelemetry.Ch3VoltageV;
+                if (pendingTelemetry.Ch3CurrentMa.HasValue)           latest.Ch3CurrentMa = pendingTelemetry.Ch3CurrentMa;
+                _pendingNodeTelemetry.Remove(nodeNum);
             }
 
             var existing = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
@@ -7298,6 +7330,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         Ch3VoltageV  = t.Ch3VoltageV,
                         Ch3CurrentMa = t.Ch3CurrentMa,
                     };
+                    _pendingNodeTelemetry[header.From] = telemetryUpsert;
                     EnqueueDbWrite((nodes, _) => nodes.Upsert(telemetryUpsert));
                     PersistTelemetryHistory(header.From, rxEpoch, t);
                     break;
@@ -7690,6 +7723,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MuteRtttl = source.MuteRtttl,
         Ignored = source.Ignored,
         Favorite = source.Favorite,
+        Pm10Standard = source.Pm10Standard,
+        Pm25Standard = source.Pm25Standard,
+        Pm100Standard = source.Pm100Standard,
+        Pm10Environmental = source.Pm10Environmental,
+        Pm25Environmental = source.Pm25Environmental,
+        Pm100Environmental = source.Pm100Environmental,
+        Ch1VoltageV = source.Ch1VoltageV,
+        Ch1CurrentMa = source.Ch1CurrentMa,
+        Ch2VoltageV = source.Ch2VoltageV,
+        Ch2CurrentMa = source.Ch2CurrentMa,
+        Ch3VoltageV = source.Ch3VoltageV,
+        Ch3CurrentMa = source.Ch3CurrentMa,
     };
 
     private static bool SameTelemetryHistoryKind(string? left, string right)
