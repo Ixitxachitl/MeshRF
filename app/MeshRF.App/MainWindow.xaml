@@ -1179,9 +1179,14 @@
                                 <DataGridTextColumn Header="SNR" Width="Auto"
                                                     SortMemberPath="SnrDb"
                                                     Binding="{Binding SnrDb, StringFormat={}{0:F1}}" />
-                                <DataGridTextColumn Header="🐇" Width="Auto"
+                                <DataGridTextColumn Width="Auto"
                                                     SortMemberPath="HopsAway"
-                                                    Binding="{Binding HopsAway}" />
+                                                    Binding="{Binding HopsAway}">
+                                    <DataGridTextColumn.Header>
+                                        <emoji:TextBlock Text="🐇"
+                                                         ToolTip="Hops" />
+                                    </DataGridTextColumn.Header>
+                                </DataGridTextColumn>
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
@@ -1443,14 +1448,14 @@
                                                     ToolTip="Encode and transmit a text message on this channel"
                                                     Command="{Binding DataContext.SendMessageCommand,
                                                               RelativeSource={RelativeSource AncestorType=TabControl}}" />
-                                              <Button DockPanel.Dock="Right"
-                                                    Content="😀"
+                                                <Button DockPanel.Dock="Right"
                                                     Padding="8,4"
                                                     Margin="4,0,0,0"
-                                                    FontFamily="Segoe UI Emoji"
                                                     ToolTip="Insert emoji into this message"
                                                     Command="{Binding DataContext.InsertComposeEmojiCommand,
-                                                          RelativeSource={RelativeSource AncestorType=TabControl}}" />
+                                                        RelativeSource={RelativeSource AncestorType=TabControl}}">
+                                                  <emoji:TextBlock Text="😀" />
+                                                </Button>
                                               <TextBox VerticalContentAlignment="Center"
                                                     FontFamily="Segoe UI, Segoe UI Emoji"
                                                      ToolTip="Type a message and press Enter or Send (HackRF only)"
@@ -1500,19 +1505,11 @@
                                                         <emoji:TextBlock x:Name="ChannelMessageFromText" Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
                                                         <StackPanel Grid.Column="2" Margin="0,0,0,2">
-                                                            <RichTextBox x:Name="ChannelMessageBodyText"
-                                                                         beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                         Background="Transparent"
-                                                                         BorderThickness="0"
-                                                                         Padding="0"
-                                                                         Margin="0"
-                                                                         IsReadOnly="True"
-                                                                         IsDocumentEnabled="True"
-                                                                         IsTabStop="False"
-                                                                         HorizontalScrollBarVisibility="Disabled"
-                                                                         VerticalScrollBarVisibility="Disabled"
-                                                                         Hyperlink.RequestNavigate="OnMessageHyperlinkNavigate"
-                                                                         TextElement.FontFamily="Consolas" />
+                                                            <emoji:TextBlock x:Name="ChannelMessageBodyText"
+                                                                             beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                             TextWrapping="Wrap"
+                                                                             FontFamily="Consolas"
+                                                                             Hyperlink.RequestNavigate="OnMessageHyperlinkNavigate" />
                                                             <ItemsControl ItemsSource="{Binding Reactions}"
                                                                           Margin="0,3,0,0"
                                                                           Visibility="{Binding HasReactions, Converter={StaticResource BoolToVis}}">
@@ -1620,15 +1617,15 @@
                                                 Command="{Binding DataContext.SendDirectMessageCommand,
                                                           RelativeSource={RelativeSource AncestorType=TabControl}}"
                                                 CommandParameter="{Binding}" />
-                                        <Button DockPanel.Dock="Right"
-                                            Content="😀"
-                                            Padding="8,4"
-                                            Margin="4,0,0,0"
-                                            FontFamily="Segoe UI Emoji"
-                                            ToolTip="Insert emoji into this message"
-                                            Command="{Binding DataContext.InsertConversationEmojiCommand,
+                                            <Button DockPanel.Dock="Right"
+                                              Padding="8,4"
+                                              Margin="4,0,0,0"
+                                              ToolTip="Insert emoji into this message"
+                                              Command="{Binding DataContext.InsertConversationEmojiCommand,
                                                   RelativeSource={RelativeSource AncestorType=TabControl}}"
-                                            CommandParameter="{Binding}" />
+                                              CommandParameter="{Binding}">
+                                              <emoji:TextBlock Text="😀" />
+                                            </Button>
                                                  <TextBox VerticalContentAlignment="Center"
                                                     FontFamily="Segoe UI, Segoe UI Emoji"
                                                  ToolTip="Type a direct message and press Enter or Send"
@@ -1688,19 +1685,11 @@
                                                         <emoji:TextBlock x:Name="ConversationMessageFromText" Grid.Column="1" Margin="6,0" Text="{Binding FromId}"
                                                                          ToolTip="{Binding FromId}" />
                                                         <StackPanel Grid.Column="2" Margin="0,0,0,2">
-                                                            <RichTextBox x:Name="ConversationMessageBodyText"
-                                                                         beh:MarkdownText.Text="{Binding TextWithStatus}"
-                                                                         Background="Transparent"
-                                                                         BorderThickness="0"
-                                                                         Padding="0"
-                                                                         Margin="0"
-                                                                         IsReadOnly="True"
-                                                                         IsDocumentEnabled="True"
-                                                                         IsTabStop="False"
-                                                                         HorizontalScrollBarVisibility="Disabled"
-                                                                         VerticalScrollBarVisibility="Disabled"
-                                                                         Hyperlink.RequestNavigate="OnMessageHyperlinkNavigate"
-                                                                         TextElement.FontFamily="Consolas" />
+                                                            <emoji:TextBlock x:Name="ConversationMessageBodyText"
+                                                                             beh:MarkdownText.Text="{Binding TextWithStatus}"
+                                                                             TextWrapping="Wrap"
+                                                                             FontFamily="Consolas"
+                                                                             Hyperlink.RequestNavigate="OnMessageHyperlinkNavigate" />
                                                             <ItemsControl ItemsSource="{Binding Reactions}"
                                                                           Margin="0,3,0,0"
                                                                           Visibility="{Binding HasReactions, Converter={StaticResource BoolToVis}}">
@@ -1873,15 +1862,9 @@
                                  beh:AutoScroll.IsEnabled="{Binding LogAutoScroll}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBox Text="{Binding ., Mode=OneWay}"
-                                             FontFamily="Consolas"
-                                             TextWrapping="Wrap"
-                                             IsReadOnly="True"
-                                             BorderThickness="0"
-                                             Background="Transparent"
-                                             Padding="0"
-                                             Margin="0"
-                                             VerticalContentAlignment="Center" />
+                                    <emoji:TextBlock Text="{Binding}"
+                                                     FontFamily="Consolas"
+                                                     TextWrapping="Wrap" />
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>

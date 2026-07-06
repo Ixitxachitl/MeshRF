@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Media;
 using System.Text.RegularExpressions;
 
 namespace MeshRF.App.Behaviors;
@@ -15,6 +16,8 @@ namespace MeshRF.App.Behaviors;
 /// </summary>
 public static class MarkdownText
 {
+    private static readonly FontFamily EmojiFontFamily = new("Segoe UI Emoji");
+
     private static readonly Regex UrlRegex = new(
         @"(?:(?:https?|ftp)://|www\.)[^\s<>""]+",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -159,7 +162,29 @@ public static class MarkdownText
         var run = new Run(text);
         if (bold) run.FontWeight = FontWeights.Bold;
         if (italic) run.FontStyle = FontStyles.Italic;
+        if (ContainsEmoji(text)) run.FontFamily = EmojiFontFamily;
         return run;
+    }
+
+    private static bool ContainsEmoji(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        foreach (var ch in text)
+        {
+            if (ch == '\u200D' || ch == '\uFE0F')
+                return true;
+
+            // Cover the primary emoji/symbol planes and common symbol blocks.
+            if (ch >= 0x2600 && ch <= 0x27BF)
+                return true;
+
+            if (char.IsSurrogate(ch))
+                return true;
+        }
+
+        return false;
     }
 
     private static string NormalizeUrl(string raw)
