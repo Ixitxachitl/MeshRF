@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Text.RegularExpressions;
+using System.Text;
 
 namespace MeshRF.App.Behaviors;
 
@@ -137,24 +138,82 @@ public static class MarkdownText
             if (start < cursor || end <= start) continue;
 
             if (start > cursor)
-                output.Add(CreateRun(text[cursor..start], bold, italic));
+                AppendFormattedText(output, text[cursor..start], bold, italic);
 
             string linkText = text[start..end];
             if (Uri.TryCreate(NormalizeUrl(linkText), UriKind.Absolute, out var uri))
             {
-                var link = new Hyperlink(CreateRun(linkText, bold, italic)) { NavigateUri = uri };
+                var link = new Hyperlink();
+                foreach (var inline in CreateFormattedInlines(linkText, bold, italic))
+                    link.Inlines.Add(inline);
+                link.NavigateUri = uri;
                 output.Add(link);
             }
             else
             {
-                output.Add(CreateRun(linkText, bold, italic));
+                AppendFormattedText(output, linkText, bold, italic);
             }
 
             cursor = end;
         }
 
         if (cursor < text.Length)
-            output.Add(CreateRun(text[cursor..], bold, italic));
+            AppendFormattedText(output, text[cursor..], bold, italic);
+    }
+
+    private static IEnumerable<Inline> CreateFormattedInlines(string text, bool bold, bool italic)
+    {
+        var result = new List<Inline>();
+        AppendFormattedText(result, text, bold, italic);
+        return result;
+    }
+
+    private static void AppendFormattedText(ICollection<Inline> output, string text, bool bold, bool italic)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        var buffer = new StringBuilder();
+
+        void FlushBuffer()
+        {
+            if (buffer.Length == 0) return;
+            output.Add(CreateRun(buffer.ToString(), bold, italic));
+            buffer.Clear();
+        }
+
+        for (int i = 0; i < text.Length;)
+        {
+            var rune = Rune.GetRuneAt(text, i);
+            int runeLength = rune.Utf16SequenceLength;
+
+            if (IsEmojiRune(rune))
+            {
+                FlushBuffer();
+
+                var emojiText = new StringBuilder();
+                emojiText.Append(text, i, runeLength);
+                i += runeLength;
+
+                while (i < text.Length)
+                {
+                    var nextRune = Rune.GetRuneAt(text, i);
+                    if (!IsEmojiRune(nextRune))
+                        break;
+
+                    emojiText.Append(text, i, nextRune.Utf16SequenceLength);
+                    i += nextRune.Utf16SequenceLength;
+                }
+
+                output.Add(CreateEmojiContainer(emojiText.ToString(), bold, italic));
+                continue;
+            }
+
+            buffer.Append(text, i, runeLength);
+            i += runeLength;
+        }
+
+        FlushBuffer();
     }
 
     private static Run CreateRun(string text, bool bold, bool italic)
@@ -162,29 +221,35 @@ public static class MarkdownText
         var run = new Run(text);
         if (bold) run.FontWeight = FontWeights.Bold;
         if (italic) run.FontStyle = FontStyles.Italic;
-        if (ContainsEmoji(text)) run.FontFamily = EmojiFontFamily;
         return run;
     }
 
-    private static bool ContainsEmoji(string text)
+    private static InlineUIContainer CreateEmojiContainer(string text, bool bold, bool italic)
     {
-        if (string.IsNullOrEmpty(text))
-            return false;
-
-        foreach (var ch in text)
+        var emojiText = new Emoji.Wpf.TextBlock
         {
-            if (ch == '\u200D' || ch == '\uFE0F')
-                return true;
+            Text = text,
+            FontWeight = bold ? FontWeights.Bold : FontWeights.Normal,
+            FontStyle = italic ? FontStyles.Italic : FontStyles.Normal,
+            IsHitTestVisible = false,
+        };
 
-            // Cover the primary emoji/symbol planes and common symbol blocks.
-            if (ch >= 0x2600 && ch <= 0x27BF)
-                return true;
+        return new InlineUIContainer(emojiText)
+        {
+            BaselineAlignment = BaselineAlignment.Center,
+        };
+    }
 
-            if (char.IsSurrogate(ch))
-                return true;
-        }
-
-        return false;
+    private static bool IsEmojiRune(Rune rune)
+    {
+        int value = rune.Value;
+        return value == 0x200D || value == 0xFE0F || value == 0xFE0E
+            || (value >= 0x1F000 && value <= 0x1FAFF)
+            || (value >= 0x2600 && value <= 0x27BF)
+            || (value >= 0x2300 && value <= 0x23FF)
+            || (value >= 0x2B00 && value <= 0x2BFF)
+            || (value >= 0x1F1E6 && value <= 0x1F1FF)
+            || (value >= 0x1F3FB && value <= 0x1F3FF);
     }
 
     private static string NormalizeUrl(string raw)
