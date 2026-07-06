@@ -1028,7 +1028,7 @@
                             <DataGrid.Columns>
                                 <DataGridTemplateColumn Header="&#xE734;" Width="Auto"
                                                         SortMemberPath="Favorite"
-                                                        CanUserResize="False">
+                                                        CanUserResize="True">
                                     <DataGridTemplateColumn.HeaderStyle>
                                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
                                             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
@@ -1049,9 +1049,17 @@
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
-                                <DataGridTemplateColumn Header="" Width="Auto"
+                                <DataGridTemplateColumn Header="&#xE192;" Width="Auto"
                                                         SortMemberPath="HasPublicKey"
-                                                        CanUserResize="False">
+                                                        CanUserResize="True">
+                                    <DataGridTemplateColumn.HeaderStyle>
+                                        <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                                            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+                                            <Setter Property="FontSize" Value="12" />
+                                            <Setter Property="ToolTip" Value="Has encryption key" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                        </Style>
+                                    </DataGridTemplateColumn.HeaderStyle>
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="&#xE192;"
@@ -1078,9 +1086,40 @@
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
-                                <DataGridTemplateColumn Header="" Width="Auto"
+                                <DataGridTemplateColumn Header="&#xE198;" Width="Auto"
+                                                        SortMemberPath="IsUnmessagable"
+                                                        CanUserResize="True">
+                                    <DataGridTemplateColumn.HeaderStyle>
+                                        <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                                            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+                                            <Setter Property="FontSize" Value="12" />
+                                            <Setter Property="ToolTip" Value="Marked unmessagable" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                        </Style>
+                                    </DataGridTemplateColumn.HeaderStyle>
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="&#xE198;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="#E53935"
+                                                       ToolTip="Node is marked unmessagable"
+                                                       Visibility="{Binding IsUnmessagableTrue, Converter={StaticResource BoolToVis}}" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="&#xE707;" Width="Auto"
                                                         SortMemberPath="HasLocation"
-                                                        CanUserResize="False">
+                                                        CanUserResize="True">
+                                    <DataGridTemplateColumn.HeaderStyle>
+                                        <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                                            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+                                            <Setter Property="FontSize" Value="12" />
+                                            <Setter Property="ToolTip" Value="Has position" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                        </Style>
+                                    </DataGridTemplateColumn.HeaderStyle>
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="&#xE707;"
@@ -1140,7 +1179,7 @@
                                 <DataGridTextColumn Header="SNR" Width="Auto"
                                                     SortMemberPath="SnrDb"
                                                     Binding="{Binding SnrDb, StringFormat={}{0:F1}}" />
-                                <DataGridTextColumn Header="Hops" Width="Auto"
+                                <DataGridTextColumn Header="🐇" Width="Auto"
                                                     SortMemberPath="HopsAway"
                                                     Binding="{Binding HopsAway}" />
                             </DataGrid.Columns>

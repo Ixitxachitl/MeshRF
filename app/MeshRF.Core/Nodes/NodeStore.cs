@@ -120,6 +120,7 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("iaq", "INTEGER");
         AddColumnIfMissing("public_key", "TEXT");
         AddColumnIfMissing("key_mismatch", "INTEGER");
+        AddColumnIfMissing("is_unmessagable", "INTEGER");
         AddColumnIfMissing("mute_rtttl", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("ignored", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
@@ -222,6 +223,7 @@ public sealed class NodeStore : IDisposable
                                uptime_seconds, temperature_c,
                                    relative_humidity_pct, barometric_pressure_hpa,
                                    gas_resistance_mohm, iaq, public_key, key_mismatch,
+                                   is_unmessagable,
                                    mute_rtttl, ignored, node_status,
                                    pm10_std, pm25_std, pm100_std,
                                    pm10_env, pm25_env, pm100_env,
@@ -237,6 +239,7 @@ public sealed class NodeStore : IDisposable
                     $uptime, $temp,
                     $hum, $pres,
                                 $gas, $iaq, $pubkey, $mismatch,
+                                $isunmessagable,
                                 $mute_rtttl, $ignored, $node_status,
                                 $pm10std, $pm25std, $pm100std,
                                 $pm10env, $pm25env, $pm100env,
@@ -267,6 +270,7 @@ public sealed class NodeStore : IDisposable
                 iaq              = COALESCE(excluded.iaq, iaq),
                 public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key),
                 key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch),
+                is_unmessagable  = COALESCE(excluded.is_unmessagable, is_unmessagable),
                 node_status      = COALESCE(NULLIF(excluded.node_status, ''), node_status),
                 pm10_std         = COALESCE(excluded.pm10_std,  pm10_std),
                 pm25_std         = COALESCE(excluded.pm25_std,  pm25_std),
@@ -308,6 +312,8 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$pubkey", rec.PublicKey ?? string.Empty);
         cmd.Parameters.AddWithValue("$mismatch",
             rec.KeyMismatch is bool km ? (km ? 1 : 0) : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$isunmessagable",
+            rec.IsUnmessagable is bool iu ? (iu ? 1 : 0) : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$mute_rtttl", rec.MuteRtttl ? 1 : 0);
         cmd.Parameters.AddWithValue("$ignored", rec.Ignored ? 1 : 0);
         cmd.Parameters.AddWithValue("$node_status", rec.NodeStatus ?? string.Empty);
@@ -785,6 +791,7 @@ public sealed class NodeStore : IDisposable
             NodeStatus            = ReadStringOrEmpty(r, "node_status"),
             PublicKey             = ReadStringOrEmpty(r, "public_key"),
             KeyMismatch           = Nullable<bool>("key_mismatch"),
+            IsUnmessagable        = Nullable<bool>("is_unmessagable"),
             MuteRtttl             = Nullable<bool>("mute_rtttl") == true,
             Ignored               = Nullable<bool>("ignored") == true,
             Favorite              = Nullable<bool>("favorite") == true,

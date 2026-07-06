@@ -84,6 +84,13 @@ public sealed class NodeRecord
     /// state and should be shown as suspect (red key icon).</summary>
     public bool HasKeyMismatch => KeyMismatch == true;
 
+    /// <summary>When true, the peer advertises that it should not be messaged.
+    /// Null when unknown / not advertised.</summary>
+    public bool? IsUnmessagable { get; set; }
+
+    /// <summary>Convenience flag for UI visibility bindings.</summary>
+    public bool IsUnmessagableTrue => IsUnmessagable == true;
+
     /// <summary>True when this node's stored public key hashes back to the
     /// same node number Meshtastic derives from PKI identity.</summary>
     public bool HasDerivedNodeNumMatch =>

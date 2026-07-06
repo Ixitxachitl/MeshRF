@@ -7165,6 +7165,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             PublicKey = keyMismatch ? string.Empty : newKeyHex,
                             // Only touch the flag when this NodeInfo carried a key.
                             KeyMismatch = newKeyHex.Length > 0 ? keyMismatch : (bool?)null,
+                            IsUnmessagable = result.User.IsUnmessagable,
                             LastHeardEpoch = rxEpoch,
                             SeenViaMqtt = header.ViaMqtt,
                             RssiDbm = packetRssiDbm,

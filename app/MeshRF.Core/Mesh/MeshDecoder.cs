@@ -100,6 +100,9 @@ public sealed class MeshUser
 
     /// <summary>32-byte X25519 public key (field 8), empty if not advertised.</summary>
     public byte[] PublicKey { get; init; } = Array.Empty<byte>();
+
+    /// <summary>User.is_unmessagable (field 9), null if absent.</summary>
+    public bool? IsUnmessagable { get; init; }
 }
 
 /// <summary>Subset of the Meshtastic <c>Position</c> protobuf.</summary>
@@ -667,13 +670,14 @@ public static class MeshDecoder
     }
 
     // User: 1=id(string) 2=long_name(string) 3=short_name(string) 5=hw_model(varint)
-    //       7=role(varint) 8=public_key(bytes)
+    //       7=role(varint) 8=public_key(bytes) 9=is_unmessagable(varint)
     private static MeshUser ParseUser(byte[] data)
     {
         string id = "", ln = "", sn = "";
         int hw = 0;
         int role = -1;
         byte[] pub = Array.Empty<byte>();
+        bool? isUnmessagable = null;
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
         {
@@ -685,6 +689,7 @@ public static class MeshDecoder
                 case 5 when wt == ProtoReader.WireType.Varint: hw = (int)rdr.ReadVarint(); break;
                 case 7 when wt == ProtoReader.WireType.Varint: role = (int)rdr.ReadVarint(); break;
                 case 8 when wt == ProtoReader.WireType.Len: pub = rdr.ReadLengthDelimited().ToArray(); break;
+                case 9 when wt == ProtoReader.WireType.Varint: isUnmessagable = rdr.ReadVarint() != 0; break;
                 default: rdr.SkipField(wt); break;
             }
         }
@@ -696,6 +701,7 @@ public static class MeshDecoder
             HwModel = hw,
             Role = RoleName(role),
             PublicKey = pub,
+            IsUnmessagable = isUnmessagable,
         };
     }
 

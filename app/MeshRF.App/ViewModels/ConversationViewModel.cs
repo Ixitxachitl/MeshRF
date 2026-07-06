@@ -232,6 +232,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             Add("Short name", n.ShortName);
             Add("Hardware", HardwareModels.Display(n.HwModel));
             Add("Role", n.Role);
+            if (n.IsUnmessagable.HasValue)
+                Add("Unmessagable", n.IsUnmessagable.Value ? "Yes" : "No");
             if (n.SeenViaMqtt) Add("Via MQTT", "Yes");
             if (n.BatteryPct is byte bat) Add("Battery", $"{bat}%");
             if (n.VoltageV is float volt) Add("Voltage", $"{volt:0.00} V");
