@@ -278,6 +278,9 @@ public sealed class AppSettings
     /// <summary>Shared telemetry-history popup middle environment pane height.</summary>
     public double? TelemetryHistoryMiddlePaneHeight { get; set; }
 
+    /// <summary>Shared telemetry-history popup power pane height.</summary>
+    public double? TelemetryHistoryPowerPaneHeight { get; set; }
+
     /// <summary>Whether the identity expander is open.</summary>
     public bool IdentityExpanded { get; set; } = false;
 
@@ -384,6 +387,24 @@ public sealed class AppSettings
 
     /// <summary>Persisted node PM10 environmental filter.</summary>
     public string NodeFilterPm100Env { get; set; } = "Any";
+
+    /// <summary>Persisted power metrics channel 1 voltage filter.</summary>
+    public string NodeFilterCh1Voltage { get; set; } = "Any";
+
+    /// <summary>Persisted power metrics channel 1 current filter.</summary>
+    public string NodeFilterCh1Current { get; set; } = "Any";
+
+    /// <summary>Persisted power metrics channel 2 voltage filter.</summary>
+    public string NodeFilterCh2Voltage { get; set; } = "Any";
+
+    /// <summary>Persisted power metrics channel 2 current filter.</summary>
+    public string NodeFilterCh2Current { get; set; } = "Any";
+
+    /// <summary>Persisted power metrics channel 3 voltage filter.</summary>
+    public string NodeFilterCh3Voltage { get; set; } = "Any";
+
+    /// <summary>Persisted power metrics channel 3 current filter.</summary>
+    public string NodeFilterCh3Current { get; set; } = "Any";
 
     /// <summary>Persisted node-grid sort column (SortMemberPath).</summary>
     public string NodeSortMemberPath { get; set; } = string.Empty;

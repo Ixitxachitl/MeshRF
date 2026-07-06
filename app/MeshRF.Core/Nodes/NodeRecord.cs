@@ -53,6 +53,15 @@ public sealed class NodeRecord
     public uint? Pm25Environmental  { get; set; }
     public uint? Pm100Environmental { get; set; }
 
+    // Power metrics (from TELEMETRY_APP PowerMetrics, field 5).
+    // Voltages in volts, currents in milliamps.
+    public float? Ch1VoltageV  { get; set; }
+    public float? Ch1CurrentMa { get; set; }
+    public float? Ch2VoltageV  { get; set; }
+    public float? Ch2CurrentMa { get; set; }
+    public float? Ch3VoltageV  { get; set; }
+    public float? Ch3CurrentMa { get; set; }
+
     /// <summary>Most recent NODE_STATUS_APP status string heard from this node.</summary>
     public string NodeStatus { get; set; } = string.Empty;
 

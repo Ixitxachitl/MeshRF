@@ -47,6 +47,12 @@ public sealed record TelemetryHistoryPoint(
     double? Pm10Environmental,
     double? Pm25Environmental,
     double? Pm100Environmental,
+    double? Ch1VoltageV,
+    double? Ch1CurrentMa,
+    double? Ch2VoltageV,
+    double? Ch2CurrentMa,
+    double? Ch3VoltageV,
+    double? Ch3CurrentMa,
     string Battery,
     string Voltage,
     string ChannelUtil,
@@ -63,6 +69,12 @@ public sealed record TelemetryHistoryPoint(
     string Pm10Env,
     string Pm25Env,
     string Pm100Env,
+    string Ch1Voltage,
+    string Ch1Current,
+    string Ch2Voltage,
+    string Ch2Current,
+    string Ch3Voltage,
+    string Ch3Current,
     string Signature)
 {
     public DateTime TimestampLocal => TimestampUtc.ToLocalTime();
@@ -80,6 +92,11 @@ public sealed record TelemetryHistoryPoint(
     public bool HasAirQualityMetrics =>
         Pm10Standard.HasValue || Pm25Standard.HasValue || Pm100Standard.HasValue ||
         Pm10Environmental.HasValue || Pm25Environmental.HasValue || Pm100Environmental.HasValue;
+
+    public bool HasPowerMetrics =>
+        Ch1VoltageV.HasValue || Ch1CurrentMa.HasValue ||
+        Ch2VoltageV.HasValue || Ch2CurrentMa.HasValue ||
+        Ch3VoltageV.HasValue || Ch3CurrentMa.HasValue;
 }
 
 /// <summary>
@@ -145,6 +162,9 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 
     /// <summary>Telemetry history rows that contain air quality metrics.</summary>
     public ObservableCollection<TelemetryHistoryPoint> AirQualityTelemetryHistory { get; } = new();
+
+    /// <summary>Telemetry history rows that contain power metrics.</summary>
+    public ObservableCollection<TelemetryHistoryPoint> PowerTelemetryHistory { get; } = new();
 
     /// <summary>True when at least one telemetry value is available.</summary>
     public bool HasTelemetry => Telemetry.Count > 0;
@@ -230,6 +250,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             if (n.Pm25Environmental is uint pm25e) Add("PM2.5 env", $"{pm25e} \u03BCg/m\u00B3");
             if (n.Pm100Environmental is uint pm100e) Add("PM10 env", $"{pm100e} \u03BCg/m\u00B3");
             if (n.Pm10Environmental is uint pm1e) Add("PM1.0 env", $"{pm1e} \u03BCg/m\u00B3");
+            if (n.Ch1VoltageV  is float c1v) Add("CH1 voltage", $"{c1v:0.000} V");
+            if (n.Ch1CurrentMa is float c1i) Add("CH1 current", $"{c1i:0.0} mA");
+            if (n.Ch2VoltageV  is float c2v) Add("CH2 voltage", $"{c2v:0.000} V");
+            if (n.Ch2CurrentMa is float c2i) Add("CH2 current", $"{c2i:0.0} mA");
+            if (n.Ch3VoltageV  is float c3v) Add("CH3 voltage", $"{c3v:0.000} V");
+            if (n.Ch3CurrentMa is float c3i) Add("CH3 current", $"{c3i:0.0} mA");
             if (n.SnrDb is float snr) Add("SNR", $"{snr:0.0} dB");
             if (n.RssiDbm is float rssi) Add("RSSI", $"{rssi:0} dBm");
             if (n.HopsAway is byte hops) Add("Hops away", hops.ToString());
@@ -270,6 +296,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         DeviceTelemetryHistory.Clear();
         EnvironmentalTelemetryHistory.Clear();
         AirQualityTelemetryHistory.Clear();
+        PowerTelemetryHistory.Clear();
         foreach (var point in _nodeStore.TelemetryHistory(NodeNum))
             AddTelemetryHistoryPoint(BuildTelemetryHistoryPoint(point));
 
@@ -333,11 +360,18 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             Node.Pm10Environmental      = null;
             Node.Pm25Environmental      = null;
             Node.Pm100Environmental     = null;
+            Node.Ch1VoltageV            = null;
+            Node.Ch1CurrentMa           = null;
+            Node.Ch2VoltageV            = null;
+            Node.Ch2CurrentMa           = null;
+            Node.Ch3VoltageV            = null;
+            Node.Ch3CurrentMa           = null;
         }
         TelemetryHistory.Clear();
         DeviceTelemetryHistory.Clear();
         EnvironmentalTelemetryHistory.Clear();
         AirQualityTelemetryHistory.Clear();
+        PowerTelemetryHistory.Clear();
         RebuildTelemetry();
         OnPropertyChanged(nameof(HasTelemetryHistory));
     }
@@ -361,6 +395,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         DeviceTelemetryHistory.Remove(point);
         EnvironmentalTelemetryHistory.Remove(point);
         AirQualityTelemetryHistory.Remove(point);
+        PowerTelemetryHistory.Remove(point);
         if (point.Id != 0)
             _nodeStore?.DeleteTelemetryHistory(point.Id);
         OnPropertyChanged(nameof(HasTelemetryHistory));
@@ -441,6 +476,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             (double?)node.Pm10Environmental,
             (double?)node.Pm25Environmental,
             (double?)node.Pm100Environmental,
+            (double?)node.Ch1VoltageV,
+            (double?)node.Ch1CurrentMa,
+            (double?)node.Ch2VoltageV,
+            (double?)node.Ch2CurrentMa,
+            (double?)node.Ch3VoltageV,
+            (double?)node.Ch3CurrentMa,
             signature);
 
         var point = BuildTelemetryHistoryPoint(record);
@@ -467,6 +508,8 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             EnvironmentalTelemetryHistory.Add(point);
         if (point.HasAirQualityMetrics)
             AirQualityTelemetryHistory.Add(point);
+        if (point.HasPowerMetrics)
+            PowerTelemetryHistory.Add(point);
     }
 
     public void AppendTelemetryHistoryRecord(NodeTelemetryHistoryRecord record)
@@ -492,6 +535,7 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         DeviceTelemetryHistory.Remove(point);
         EnvironmentalTelemetryHistory.Remove(point);
         AirQualityTelemetryHistory.Remove(point);
+        PowerTelemetryHistory.Remove(point);
     }
 
     private TelemetryHistoryPoint BuildTelemetryHistoryPoint(NodeTelemetryHistoryRecord record) =>
@@ -513,6 +557,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             record.Pm10Environmental,
             record.Pm25Environmental,
             record.Pm100Environmental,
+            record.Ch1VoltageV,
+            record.Ch1CurrentMa,
+            record.Ch2VoltageV,
+            record.Ch2CurrentMa,
+            record.Ch3VoltageV,
+            record.Ch3CurrentMa,
             record.BatteryPct is double bat ? $"{bat:0}%" : string.Empty,
             record.VoltageV is double volt ? $"{volt:0.00} V" : string.Empty,
             record.ChannelUtilPct is double chUtil ? $"{chUtil:0.0}%" : string.Empty,
@@ -529,6 +579,12 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
             record.Pm10Environmental  is double p1e   ? $"{p1e:0} \u03BCg/m\u00B3"   : string.Empty,
             record.Pm25Environmental  is double p25e  ? $"{p25e:0} \u03BCg/m\u00B3"  : string.Empty,
             record.Pm100Environmental is double p100e ? $"{p100e:0} \u03BCg/m\u00B3" : string.Empty,
+            record.Ch1VoltageV  is double c1v  ? $"{c1v:0.000} V"  : string.Empty,
+            record.Ch1CurrentMa is double c1i  ? $"{c1i:0.0} mA"   : string.Empty,
+            record.Ch2VoltageV  is double c2v  ? $"{c2v:0.000} V"  : string.Empty,
+            record.Ch2CurrentMa is double c2i  ? $"{c2i:0.0} mA"   : string.Empty,
+            record.Ch3VoltageV  is double c3v  ? $"{c3v:0.000} V"  : string.Empty,
+            record.Ch3CurrentMa is double c3i  ? $"{c3i:0.0} mA"   : string.Empty,
             record.Signature)
         { Id = record.Id };
 
@@ -544,7 +600,9 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         || node.Iaq.HasValue
         || node.Pm10Standard.HasValue
         || node.Pm25Standard.HasValue
-        || node.Pm100Standard.HasValue;
+        || node.Pm100Standard.HasValue
+        || node.Ch1VoltageV.HasValue
+        || node.Ch1CurrentMa.HasValue;
 
     private static string BuildTelemetrySignature(NodeRecord node) => string.Join("|",
         FormatNullable(node.BatteryPct),
@@ -557,7 +615,9 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
         FormatNullable(node.GasResistanceMohm),
         FormatNullable(node.Iaq),
         FormatNullable(node.Pm25Standard),
-        FormatNullable(node.Pm100Standard));
+        FormatNullable(node.Pm100Standard),
+        FormatNullable(node.Ch1VoltageV),
+        FormatNullable(node.Ch1CurrentMa));
 
     private static string FormatNullable<T>(T? value)
         where T : struct, IFormattable =>

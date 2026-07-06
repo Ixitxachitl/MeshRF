@@ -48,6 +48,8 @@ public partial class TelemetryHistoryWindow : Window
             DevicePaneRow.Height = new GridLength(topHeight, GridUnitType.Pixel);
         if (settings.TelemetryHistoryMiddlePaneHeight is double midHeight && midHeight >= EnvironmentPaneRow.MinHeight)
             EnvironmentPaneRow.Height = new GridLength(midHeight, GridUnitType.Pixel);
+        if (settings.TelemetryHistoryPowerPaneHeight is double pwrHeight && pwrHeight >= PowerPaneRow.MinHeight)
+            PowerPaneRow.Height = new GridLength(pwrHeight, GridUnitType.Pixel);
     }
 
     private void SaveLayout()
@@ -59,17 +61,19 @@ public partial class TelemetryHistoryWindow : Window
         settings.TelemetryHistoryLeftPaneWidth = Math.Max(GraphPaneColumn.MinWidth, GraphPaneColumn.ActualWidth);
         settings.TelemetryHistoryTopPaneHeight = Math.Max(DevicePaneRow.MinHeight, DevicePaneRow.ActualHeight);
         settings.TelemetryHistoryMiddlePaneHeight = Math.Max(EnvironmentPaneRow.MinHeight, EnvironmentPaneRow.ActualHeight);
+        settings.TelemetryHistoryPowerPaneHeight = Math.Max(PowerPaneRow.MinHeight, PowerPaneRow.ActualHeight);
         settings.Save();
     }
 
     private void DrawSparkGraph()
     {
-        if (_conversation is null || DeviceSparkCanvas is null || EnvironmentSparkCanvas is null || AirQualitySparkCanvas is null)
+        if (_conversation is null || DeviceSparkCanvas is null || EnvironmentSparkCanvas is null || AirQualitySparkCanvas is null || PowerSparkCanvas is null)
             return;
 
         DeviceSparkCanvas.Children.Clear();
         EnvironmentSparkCanvas.Children.Clear();
         AirQualitySparkCanvas.Children.Clear();
+        PowerSparkCanvas.Children.Clear();
 
         var deviceSamples = _conversation.DeviceTelemetryHistory.ToList();
         DrawSparkGraph(DeviceSparkCanvas, deviceSamples,
@@ -100,6 +104,17 @@ public partial class TelemetryHistoryWindow : Window
             new SeriesDefinition(Pm1EnvToggle,   p => p.Pm10Environmental,  Color.FromRgb(163, 216, 244)),
             new SeriesDefinition(Pm25EnvToggle,  p => p.Pm25Environmental,  Color.FromRgb(212, 172, 13)),
             new SeriesDefinition(Pm100EnvToggle, p => p.Pm100Environmental, Color.FromRgb(192, 57, 43)),
+        ]);
+
+        var powerSamples = _conversation.PowerTelemetryHistory.ToList();
+        DrawSparkGraph(PowerSparkCanvas, powerSamples,
+        [
+            new SeriesDefinition(Ch1VToggle, p => p.Ch1VoltageV,  Color.FromRgb(243, 156, 18)),
+            new SeriesDefinition(Ch1IToggle, p => p.Ch1CurrentMa, Color.FromRgb(230, 126, 34)),
+            new SeriesDefinition(Ch2VToggle, p => p.Ch2VoltageV,  Color.FromRgb(39, 174, 96)),
+            new SeriesDefinition(Ch2IToggle, p => p.Ch2CurrentMa, Color.FromRgb(46, 204, 113)),
+            new SeriesDefinition(Ch3VToggle, p => p.Ch3VoltageV,  Color.FromRgb(142, 68, 173)),
+            new SeriesDefinition(Ch3IToggle, p => p.Ch3CurrentMa, Color.FromRgb(155, 89, 182)),
         ]);
     }
 

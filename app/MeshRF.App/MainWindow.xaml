@@ -617,6 +617,12 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Hops" />
@@ -746,6 +752,42 @@
                                               ItemsSource="{Binding TelemetryHasFilterOptions}"
                                               SelectedItem="{Binding NodePm100EnvFilter, Mode=TwoWay}"
                                               ToolTip="Filter by whether PM10 environmental air quality is present" />
+
+                                    <TextBlock Grid.Row="20" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has Ch1 voltage" />
+                                    <ComboBox Grid.Row="20" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding TelemetryHasFilterOptions}"
+                                              SelectedItem="{Binding NodeCh1VoltageFilter, Mode=TwoWay}"
+                                              ToolTip="Filter by whether power channel 1 voltage is present" />
+
+                                    <TextBlock Grid.Row="21" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has Ch1 current" />
+                                    <ComboBox Grid.Row="21" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding TelemetryHasFilterOptions}"
+                                              SelectedItem="{Binding NodeCh1CurrentFilter, Mode=TwoWay}"
+                                              ToolTip="Filter by whether power channel 1 current is present" />
+
+                                    <TextBlock Grid.Row="22" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has Ch2 voltage" />
+                                    <ComboBox Grid.Row="22" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding TelemetryHasFilterOptions}"
+                                              SelectedItem="{Binding NodeCh2VoltageFilter, Mode=TwoWay}"
+                                              ToolTip="Filter by whether power channel 2 voltage is present" />
+
+                                    <TextBlock Grid.Row="23" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has Ch2 current" />
+                                    <ComboBox Grid.Row="23" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding TelemetryHasFilterOptions}"
+                                              SelectedItem="{Binding NodeCh2CurrentFilter, Mode=TwoWay}"
+                                              ToolTip="Filter by whether power channel 2 current is present" />
+
+                                    <TextBlock Grid.Row="24" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has Ch3 voltage" />
+                                    <ComboBox Grid.Row="24" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding TelemetryHasFilterOptions}"
+                                              SelectedItem="{Binding NodeCh3VoltageFilter, Mode=TwoWay}"
+                                              ToolTip="Filter by whether power channel 3 voltage is present" />
+
+                                    <TextBlock Grid.Row="25" Grid.Column="0" Margin="0,2,8,2" VerticalAlignment="Center" FontSize="11" Text="Has Ch3 current" />
+                                    <ComboBox Grid.Row="25" Grid.Column="1" Height="22" FontSize="11"
+                                              ItemsSource="{Binding TelemetryHasFilterOptions}"
+                                              SelectedItem="{Binding NodeCh3CurrentFilter, Mode=TwoWay}"
+                                              ToolTip="Filter by whether power channel 3 current is present" />
                                 </Grid>
                                 </ScrollViewer>
                             </Expander>

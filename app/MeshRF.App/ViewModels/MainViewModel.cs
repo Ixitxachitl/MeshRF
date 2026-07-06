@@ -423,6 +423,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _nodePm10EnvFilter        = "Any";
     [ObservableProperty] private string _nodePm25EnvFilter        = "Any";
     [ObservableProperty] private string _nodePm100EnvFilter       = "Any";
+    [ObservableProperty] private string _nodeCh1VoltageFilter      = "Any";
+    [ObservableProperty] private string _nodeCh1CurrentFilter      = "Any";
+    [ObservableProperty] private string _nodeCh2VoltageFilter      = "Any";
+    [ObservableProperty] private string _nodeCh2CurrentFilter      = "Any";
+    [ObservableProperty] private string _nodeCh3VoltageFilter      = "Any";
+    [ObservableProperty] private string _nodeCh3CurrentFilter      = "Any";
     [ObservableProperty] private string _mapNodeLabelMode         = "Node Number";
     [ObservableProperty] private string _nodeDistanceKmText    = string.Empty;
     [ObservableProperty] private string _nodeMaxAgeMinutesText = string.Empty;
@@ -438,7 +444,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ["Node Number", "Long Name", "Short Name",
          "Temperature", "Humidity", "Pressure", "Gas Resistance", "IAQ",
          "PM1.0 std", "PM2.5 std", "PM10 std",
-         "PM1.0 env", "PM2.5 env", "PM10 env"];
+         "PM1.0 env", "PM2.5 env", "PM10 env",
+         "Ch1 Voltage", "Ch1 Current",
+         "Ch2 Voltage", "Ch2 Current",
+         "Ch3 Voltage", "Ch3 Current"];
 
     /// <summary>True when a home location is set (enables the distance filter).</summary>
     public bool HasHomeLocation => HomeLatitude.HasValue && HomeLongitude.HasValue;
@@ -478,6 +487,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnNodePm10EnvFilterChanged(string value)       => RefreshNodesFilter();
     partial void OnNodePm25EnvFilterChanged(string value)       => RefreshNodesFilter();
     partial void OnNodePm100EnvFilterChanged(string value)      => RefreshNodesFilter();
+    partial void OnNodeCh1VoltageFilterChanged(string value)    => RefreshNodesFilter();
+    partial void OnNodeCh1CurrentFilterChanged(string value)    => RefreshNodesFilter();
+    partial void OnNodeCh2VoltageFilterChanged(string value)    => RefreshNodesFilter();
+    partial void OnNodeCh2CurrentFilterChanged(string value)    => RefreshNodesFilter();
+    partial void OnNodeCh3VoltageFilterChanged(string value)    => RefreshNodesFilter();
+    partial void OnNodeCh3CurrentFilterChanged(string value)    => RefreshNodesFilter();
     partial void OnMapNodeLabelModeChanged(string value)        => RefreshNodesFilter();
     partial void OnNodeDistanceKmTextChanged(string value)      => RefreshNodesFilter();
     partial void OnNodeMaxAgeMinutesTextChanged(string value)   => RefreshNodesFilter();
@@ -504,6 +519,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodePm10EnvFilter       = "Any";
         NodePm25EnvFilter       = "Any";
         NodePm100EnvFilter      = "Any";
+        NodeCh1VoltageFilter    = "Any";
+        NodeCh1CurrentFilter    = "Any";
+        NodeCh2VoltageFilter    = "Any";
+        NodeCh2CurrentFilter    = "Any";
+        NodeCh3VoltageFilter    = "Any";
+        NodeCh3CurrentFilter    = "Any";
         NodeDistanceKmText      = string.Empty;
         NodeMaxAgeMinutesText   = string.Empty;
     }
@@ -1411,6 +1432,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         "PM1.0 env"      => n.Pm10Environmental  is uint p10e  ? $"{p10e} µg" : n.DisplayId,
         "PM2.5 env"      => n.Pm25Environmental  is uint p25e  ? $"{p25e} µg" : n.DisplayId,
         "PM10 env"       => n.Pm100Environmental is uint p100e ? $"{p100e} µg" : n.DisplayId,
+        "Ch1 Voltage"    => n.Ch1VoltageV  is float v1 ? $"{v1:0.00} V"  : n.DisplayId,
+        "Ch1 Current"    => n.Ch1CurrentMa is float i1 ? $"{i1:0.0} mA"  : n.DisplayId,
+        "Ch2 Voltage"    => n.Ch2VoltageV  is float v2 ? $"{v2:0.00} V"  : n.DisplayId,
+        "Ch2 Current"    => n.Ch2CurrentMa is float i2 ? $"{i2:0.0} mA"  : n.DisplayId,
+        "Ch3 Voltage"    => n.Ch3VoltageV  is float v3 ? $"{v3:0.00} V"  : n.DisplayId,
+        "Ch3 Current"    => n.Ch3CurrentMa is float i3 ? $"{i3:0.0} mA"  : n.DisplayId,
         _                => !string.IsNullOrWhiteSpace(n.ShortName) ? n.ShortName : n.DisplayId,
     };
 
@@ -1674,6 +1701,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodePm10EnvFilter       = _settings.NodeFilterPm10Env;
         NodePm25EnvFilter       = _settings.NodeFilterPm25Env;
         NodePm100EnvFilter      = _settings.NodeFilterPm100Env;
+        NodeCh1VoltageFilter    = _settings.NodeFilterCh1Voltage;
+        NodeCh1CurrentFilter    = _settings.NodeFilterCh1Current;
+        NodeCh2VoltageFilter    = _settings.NodeFilterCh2Voltage;
+        NodeCh2CurrentFilter    = _settings.NodeFilterCh2Current;
+        NodeCh3VoltageFilter    = _settings.NodeFilterCh3Voltage;
+        NodeCh3CurrentFilter    = _settings.NodeFilterCh3Current;
         MapNodeLabelMode      = string.IsNullOrWhiteSpace(_settings.MapNodeLabelMode)
             ? "Node Number"
             : _settings.MapNodeLabelMode;
@@ -7258,6 +7291,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         Pm10Environmental   = t.Pm10Environmental,
                         Pm25Environmental   = t.Pm25Environmental,
                         Pm100Environmental  = t.Pm100Environmental,
+                        Ch1VoltageV  = t.Ch1VoltageV,
+                        Ch1CurrentMa = t.Ch1CurrentMa,
+                        Ch2VoltageV  = t.Ch2VoltageV,
+                        Ch2CurrentMa = t.Ch2CurrentMa,
+                        Ch3VoltageV  = t.Ch3VoltageV,
+                        Ch3CurrentMa = t.Ch3CurrentMa,
                     };
                     EnqueueDbWrite((nodes, _) => nodes.Upsert(telemetryUpsert));
                     PersistTelemetryHistory(header.From, rxEpoch, t);
@@ -7357,7 +7396,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 => $"{prefix}: waypoint={result.Waypoint.Name} lat={result.Waypoint.Latitude:F5} lon={result.Waypoint.Longitude:F5}{size}{meta}",
 
             PortNum.Telemetry when result.Telemetry is not null
-                => $"{prefix}: telemetry {(result.Telemetry.HasEnvironmentMetrics ? "env" : string.Empty)}{(result.Telemetry.HasAirQualityMetrics ? "aq" : string.Empty)}{(result.Telemetry.HasDeviceMetrics ? "dev" : string.Empty)}{size}{meta}",
+                => $"{prefix}: telemetry {(result.Telemetry.HasEnvironmentMetrics ? "env" : string.Empty)}{(result.Telemetry.HasAirQualityMetrics ? "aq" : string.Empty)}{(result.Telemetry.HasDeviceMetrics ? "dev" : string.Empty)}{(result.Telemetry.HasPowerMetrics ? "pwr" : string.Empty)}{size}{meta}",
 
             PortNum.NodeStatus when result.StatusMessage is not null
                 => $"{prefix}: status=\"{TrimForReplyPreview(result.StatusMessage.Status)}\"{size}{meta}",
@@ -7396,18 +7435,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void PersistTelemetryHistory(uint nodeNum, long rxEpoch, MeshTelemetry telemetry)
     {
-        if (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics && !telemetry.HasAirQualityMetrics)
+        if (!telemetry.HasDeviceMetrics && !telemetry.HasEnvironmentMetrics && !telemetry.HasAirQualityMetrics && !telemetry.HasPowerMetrics)
             return;
 
-        string kind = (telemetry.HasDeviceMetrics, telemetry.HasEnvironmentMetrics, telemetry.HasAirQualityMetrics) switch
+        string kind = (telemetry.HasDeviceMetrics, telemetry.HasEnvironmentMetrics, telemetry.HasAirQualityMetrics, telemetry.HasPowerMetrics) switch
         {
-            (true,  true,  true)  => "DEA",
-            (true,  true,  false) => "DE",
-            (true,  false, true)  => "DA",
-            (false, true,  true)  => "EA",
-            (true,  false, false) => "D",
-            (false, true,  false) => "E",
-            (false, false, true)  => "A",
+            (true,  true,  true,  true)  => "DEAP",
+            (true,  true,  true,  false) => "DEA",
+            (true,  true,  false, true)  => "DEP",
+            (true,  false, true,  true)  => "DAP",
+            (false, true,  true,  true)  => "EAP",
+            (true,  true,  false, false) => "DE",
+            (true,  false, true,  false) => "DA",
+            (false, true,  true,  false) => "EA",
+            (true,  false, false, true)  => "DP",
+            (false, true,  false, true)  => "EP",
+            (false, false, true,  true)  => "AP",
+            (true,  false, false, false) => "D",
+            (false, true,  false, false) => "E",
+            (false, false, true,  false) => "A",
+            (false, false, false, true)  => "P",
             _ => string.Empty,
         };
         string signature = BuildTelemetryHistorySignature(telemetry);
@@ -7436,6 +7483,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm10Environmental  : null,
             telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm25Environmental  : null,
             telemetry.HasAirQualityMetrics ? (double?)telemetry.Pm100Environmental : null,
+            telemetry.HasPowerMetrics ? (double?)telemetry.Ch1VoltageV  : null,
+            telemetry.HasPowerMetrics ? (double?)telemetry.Ch1CurrentMa : null,
+            telemetry.HasPowerMetrics ? (double?)telemetry.Ch2VoltageV  : null,
+            telemetry.HasPowerMetrics ? (double?)telemetry.Ch2CurrentMa : null,
+            telemetry.HasPowerMetrics ? (double?)telemetry.Ch3VoltageV  : null,
+            telemetry.HasPowerMetrics ? (double?)telemetry.Ch3CurrentMa : null,
             signature);
 
         EnqueueDbWrite((nodes, waypoints) =>
@@ -7460,15 +7513,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private static string BuildTelemetryHistorySignature(MeshTelemetry telemetry)
     {
-        string kind = (telemetry.HasDeviceMetrics, telemetry.HasEnvironmentMetrics, telemetry.HasAirQualityMetrics) switch
+        string kind = (telemetry.HasDeviceMetrics, telemetry.HasEnvironmentMetrics, telemetry.HasAirQualityMetrics, telemetry.HasPowerMetrics) switch
         {
-            (true,  true,  true)  => "DEA",
-            (true,  true,  false) => "DE",
-            (true,  false, true)  => "DA",
-            (false, true,  true)  => "EA",
-            (true,  false, false) => "D",
-            (false, true,  false) => "E",
-            (false, false, true)  => "A",
+            (true,  true,  true,  true)  => "DEAP",
+            (true,  true,  true,  false) => "DEA",
+            (true,  true,  false, true)  => "DEP",
+            (true,  false, true,  true)  => "DAP",
+            (false, true,  true,  true)  => "EAP",
+            (true,  true,  false, false) => "DE",
+            (true,  false, true,  false) => "DA",
+            (false, true,  true,  false) => "EA",
+            (true,  false, false, true)  => "DP",
+            (false, true,  false, true)  => "EP",
+            (false, false, true,  true)  => "AP",
+            (true,  false, false, false) => "D",
+            (false, true,  false, false) => "E",
+            (false, false, true,  false) => "A",
+            (false, false, false, true)  => "P",
             _ => string.Empty,
         };
 
@@ -7485,7 +7546,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.GasResistanceMohm) : string.Empty,
             telemetry.HasEnvironmentMetrics ? FormatTelemetrySignatureValue(telemetry.Iaq) : string.Empty,
             telemetry.HasAirQualityMetrics ? FormatTelemetrySignatureValue(telemetry.Pm25Standard) : string.Empty,
-            telemetry.HasAirQualityMetrics ? FormatTelemetrySignatureValue(telemetry.Pm100Standard) : string.Empty);
+            telemetry.HasAirQualityMetrics ? FormatTelemetrySignatureValue(telemetry.Pm100Standard) : string.Empty,
+            telemetry.HasPowerMetrics ? FormatTelemetrySignatureValue(telemetry.Ch1VoltageV) : string.Empty,
+            telemetry.HasPowerMetrics ? FormatTelemetrySignatureValue(telemetry.Ch1CurrentMa) : string.Empty);
     }
 
     private void PersistSelfPositionTx(double latitude, double longitude, int? altitudeM)
@@ -8160,6 +8223,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         public string Pm10EnvStatus        { get; set; }
         public string Pm25EnvStatus        { get; set; }
         public string Pm100EnvStatus       { get; set; }
+        public string Ch1VoltageStatus     { get; set; }
+        public string Ch1CurrentStatus     { get; set; }
+        public string Ch2VoltageStatus     { get; set; }
+        public string Ch2CurrentStatus     { get; set; }
+        public string Ch3VoltageStatus     { get; set; }
+        public string Ch3CurrentStatus     { get; set; }
         public double MaxDistanceKm { get; set; }
         public double HomeLatitude { get; set; }
         public double HomeLongitude { get; set; }
@@ -8186,6 +8255,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Pm10EnvStatus       = "Any";
             Pm25EnvStatus       = "Any";
             Pm100EnvStatus      = "Any";
+            Ch1VoltageStatus    = "Any";
+            Ch1CurrentStatus    = "Any";
+            Ch2VoltageStatus    = "Any";
+            Ch2CurrentStatus    = "Any";
+            Ch3VoltageStatus    = "Any";
+            Ch3CurrentStatus    = "Any";
             MaxDistanceKm = -1;
             HomeLatitude = 0;
             HomeLongitude = 0;
@@ -8215,6 +8290,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Pm10EnvStatus       = vm.NodePm10EnvFilter,
                 Pm25EnvStatus       = vm.NodePm25EnvFilter,
                 Pm100EnvStatus      = vm.NodePm100EnvFilter,
+                Ch1VoltageStatus    = vm.NodeCh1VoltageFilter,
+                Ch1CurrentStatus    = vm.NodeCh1CurrentFilter,
+                Ch2VoltageStatus    = vm.NodeCh2VoltageFilter,
+                Ch2CurrentStatus    = vm.NodeCh2CurrentFilter,
+                Ch3VoltageStatus    = vm.NodeCh3VoltageFilter,
+                Ch3CurrentStatus    = vm.NodeCh3CurrentFilter,
             };
 
             // Parse hops filter
@@ -8459,6 +8540,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             case "Has value": if (n.Pm100Environmental is null) return false; break;
             case "No value": if (n.Pm100Environmental is not null) return false; break;
+        }
+        switch (criteria.Ch1VoltageStatus)
+        {
+            case "Has value": if (n.Ch1VoltageV is null) return false; break;
+            case "No value": if (n.Ch1VoltageV is not null) return false; break;
+        }
+        switch (criteria.Ch1CurrentStatus)
+        {
+            case "Has value": if (n.Ch1CurrentMa is null) return false; break;
+            case "No value": if (n.Ch1CurrentMa is not null) return false; break;
+        }
+        switch (criteria.Ch2VoltageStatus)
+        {
+            case "Has value": if (n.Ch2VoltageV is null) return false; break;
+            case "No value": if (n.Ch2VoltageV is not null) return false; break;
+        }
+        switch (criteria.Ch2CurrentStatus)
+        {
+            case "Has value": if (n.Ch2CurrentMa is null) return false; break;
+            case "No value": if (n.Ch2CurrentMa is not null) return false; break;
+        }
+        switch (criteria.Ch3VoltageStatus)
+        {
+            case "Has value": if (n.Ch3VoltageV is null) return false; break;
+            case "No value": if (n.Ch3VoltageV is not null) return false; break;
+        }
+        switch (criteria.Ch3CurrentStatus)
+        {
+            case "Has value": if (n.Ch3CurrentMa is null) return false; break;
+            case "No value": if (n.Ch3CurrentMa is not null) return false; break;
         }
 
         // Distance from home

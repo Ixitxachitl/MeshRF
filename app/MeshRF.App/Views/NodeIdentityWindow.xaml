@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:conv="clr-namespace:MeshRF.App.Converters"
         Title="My Node — Identity &amp; Settings"
-        Width="630" Height="820"
+        Width="630" Height="740"
         MinWidth="480" MinHeight="500"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"

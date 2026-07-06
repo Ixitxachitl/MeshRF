@@ -1579,6 +1579,12 @@ public partial class MainWindow : Window
             settings.NodeFilterPm10Env       = vm.NodePm10EnvFilter;
             settings.NodeFilterPm25Env       = vm.NodePm25EnvFilter;
             settings.NodeFilterPm100Env      = vm.NodePm100EnvFilter;
+            settings.NodeFilterCh1Voltage    = vm.NodeCh1VoltageFilter;
+            settings.NodeFilterCh1Current    = vm.NodeCh1CurrentFilter;
+            settings.NodeFilterCh2Voltage    = vm.NodeCh2VoltageFilter;
+            settings.NodeFilterCh2Current    = vm.NodeCh2CurrentFilter;
+            settings.NodeFilterCh3Voltage    = vm.NodeCh3VoltageFilter;
+            settings.NodeFilterCh3Current    = vm.NodeCh3CurrentFilter;
             SaveNodesGridSort(settings);
             settings.MapNodeLabelMode        = vm.MapNodeLabelMode;
             settings.NodeFilterDistanceKm    = vm.NodeDistanceKmText;

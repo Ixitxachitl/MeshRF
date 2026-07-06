@@ -163,6 +163,21 @@ public sealed class MeshTelemetry
     public bool HasAirQualityMetrics =>
         Pm10Standard.HasValue || Pm25Standard.HasValue || Pm100Standard.HasValue ||
         Pm10Environmental.HasValue || Pm25Environmental.HasValue || Pm100Environmental.HasValue;
+
+    // Power metrics (from TELEMETRY_APP PowerMetrics, field 5).
+    // ch1_voltage=1, ch1_current=2, ch2_voltage=3, ch2_current=4,
+    // ch3_voltage=5, ch3_current=6
+    public float? Ch1VoltageV  { get; init; }
+    public float? Ch1CurrentMa { get; init; }
+    public float? Ch2VoltageV  { get; init; }
+    public float? Ch2CurrentMa { get; init; }
+    public float? Ch3VoltageV  { get; init; }
+    public float? Ch3CurrentMa { get; init; }
+
+    public bool HasPowerMetrics =>
+        Ch1VoltageV.HasValue || Ch1CurrentMa.HasValue ||
+        Ch2VoltageV.HasValue || Ch2CurrentMa.HasValue ||
+        Ch3VoltageV.HasValue || Ch3CurrentMa.HasValue;
 }
 
 /// <summary>Subset of the Meshtastic <c>StatusMessage</c> protobuf.</summary>
@@ -792,6 +807,7 @@ public static class MeshDecoder
         float? temp = null, hum = null, pres = null, gas = null; int? iaq = null;
         uint? pm10std = null, pm25std = null, pm100std = null;
         uint? pm10env = null, pm25env = null, pm100env = null;
+        float? ch1v = null, ch1i = null, ch2v = null, ch2i = null, ch3v = null, ch3i = null;
 
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
@@ -853,6 +869,24 @@ public static class MeshDecoder
                     }
                     break;
                 }
+                case 5 when wt == ProtoReader.WireType.Len: // power_metrics
+                {
+                    var sub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
+                    while (sub.TryReadTag(out int f, out var swt))
+                    {
+                        switch (f)
+                        {
+                            case 1 when swt == ProtoReader.WireType.I32: ch1v = sub.ReadFloat(); break;
+                            case 2 when swt == ProtoReader.WireType.I32: ch1i = sub.ReadFloat(); break;
+                            case 3 when swt == ProtoReader.WireType.I32: ch2v = sub.ReadFloat(); break;
+                            case 4 when swt == ProtoReader.WireType.I32: ch2i = sub.ReadFloat(); break;
+                            case 5 when swt == ProtoReader.WireType.I32: ch3v = sub.ReadFloat(); break;
+                            case 6 when swt == ProtoReader.WireType.I32: ch3i = sub.ReadFloat(); break;
+                            default: sub.SkipField(swt); break;
+                        }
+                    }
+                    break;
+                }
                 default: rdr.SkipField(wt); break;
             }
         }
@@ -875,6 +909,12 @@ public static class MeshDecoder
             Pm10Environmental  = pm10env,
             Pm25Environmental  = pm25env,
             Pm100Environmental = pm100env,
+            Ch1VoltageV  = ch1v,
+            Ch1CurrentMa = ch1i,
+            Ch2VoltageV  = ch2v,
+            Ch2CurrentMa = ch2i,
+            Ch3VoltageV  = ch3v,
+            Ch3CurrentMa = ch3i,
         };
     }
 

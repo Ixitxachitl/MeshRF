@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Telemetry History"
         Width="920"
-        Height="590"
+        Height="780"
         MinWidth="760"
-        MinHeight="520"
+        MinHeight="640"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}"
@@ -28,6 +28,12 @@
         <Style x:Key="Pm1EnvTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFA3D8F4" /></Style>
         <Style x:Key="Pm25EnvTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFD4AC0D" /></Style>
         <Style x:Key="Pm100EnvTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFC0392B" /></Style>
+        <Style x:Key="Ch1VTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFF39C12" /></Style>
+        <Style x:Key="Ch1ITextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FFE67E22" /></Style>
+        <Style x:Key="Ch2VTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FF27AE60" /></Style>
+        <Style x:Key="Ch2ITextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FF2ECC71" /></Style>
+        <Style x:Key="Ch3VTextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FF8E44AD" /></Style>
+        <Style x:Key="Ch3ITextStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="#FF9B59B6" /></Style>
     </Window.Resources>
 
     <Grid Margin="6">
@@ -62,6 +68,8 @@
                 <RowDefinition x:Name="EnvironmentPaneRow" Height="*" MinHeight="120" />
                 <RowDefinition Height="6" />
                 <RowDefinition x:Name="AirQualityPaneRow" Height="*" MinHeight="120" />
+                <RowDefinition Height="6" />
+                <RowDefinition x:Name="PowerPaneRow" Height="*" MinHeight="120" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="GraphPaneColumn" Width="360" MinWidth="260" />
@@ -101,9 +109,10 @@
                 </DataGrid.Columns>
             </DataGrid>
 
-            <GridSplitter Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
+            <GridSplitter Grid.Row="0" Grid.RowSpan="7" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
             <GridSplitter Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
             <GridSplitter Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
+            <GridSplitter Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" ShowsPreview="False" ResizeBehavior="PreviousAndNext" />
 
             <Grid Grid.Row="2" Grid.Column="0">
                 <Grid.RowDefinitions>
@@ -169,6 +178,41 @@
                     <DataGridTextColumn Width="Auto" Binding="{Binding Pm25Env}" ElementStyle="{StaticResource Pm25EnvTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM2.5e" Style="{StaticResource Pm25EnvTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
                     <DataGridTextColumn Width="Auto" Binding="{Binding Pm100Env}" ElementStyle="{StaticResource Pm100EnvTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM10e" Style="{StaticResource Pm100EnvTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
                     <DataGridTextColumn Width="Auto" Binding="{Binding Pm10Env}" ElementStyle="{StaticResource Pm1EnvTextStyle}"><DataGridTextColumn.Header><TextBlock Text="PM1.0e" Style="{StaticResource Pm1EnvTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Power pane -->
+            <Grid Grid.Row="6" Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Power" FontWeight="SemiBold" Margin="0,0,0,3" />
+                <Border Grid.Row="1" Background="{DynamicResource BrushPanelBackground}" BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                    <Canvas x:Name="PowerSparkCanvas" ClipToBounds="True" SizeChanged="SparkCanvas_SizeChanged" />
+                </Border>
+                <WrapPanel Grid.Row="2" Margin="0,4,0,0">
+                    <CheckBox x:Name="Ch1VToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="CH1 V" Style="{StaticResource Ch1VTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Ch1IToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="CH1 A" Style="{StaticResource Ch1ITextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Ch2VToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="CH2 V" Style="{StaticResource Ch2VTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Ch2IToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="CH2 A" Style="{StaticResource Ch2ITextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Ch3VToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="CH3 V" Style="{StaticResource Ch3VTextStyle}" /></CheckBox>
+                    <CheckBox x:Name="Ch3IToggle" IsChecked="True" Margin="0,0,10,2" Checked="SparkGraphChanged" Unchecked="SparkGraphChanged"><TextBlock Text="CH3 A" Style="{StaticResource Ch3ITextStyle}" /></CheckBox>
+                </WrapPanel>
+            </Grid>
+
+            <DataGrid Grid.Row="6" Grid.Column="2" ItemsSource="{Binding PowerTelemetryHistory}" AutoGenerateColumns="False" HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow" RowHeight="22" ColumnHeaderHeight="24" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Visibility="{Binding HasTelemetryHistory, Converter={StaticResource BoolToVis}}">
+                <DataGrid.InputBindings><KeyBinding Key="Delete" Command="{Binding DeleteTelemetryHistoryPointCommand}" CommandParameter="{Binding SelectedItem, RelativeSource={RelativeSource AncestorType=DataGrid}}" /></DataGrid.InputBindings>
+                <DataGrid.ContextMenu><ContextMenu><MenuItem Header="Delete" Command="{Binding PlacementTarget.DataContext.DeleteTelemetryHistoryPointCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /></ContextMenu></DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat={}{0:M/d/yyyy h:mm:ss tt}}" />
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Ch1Voltage}" ElementStyle="{StaticResource Ch1VTextStyle}"><DataGridTextColumn.Header><TextBlock Text="CH1 V" Style="{StaticResource Ch1VTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Ch1Current}" ElementStyle="{StaticResource Ch1ITextStyle}"><DataGridTextColumn.Header><TextBlock Text="CH1 A" Style="{StaticResource Ch1ITextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Ch2Voltage}" ElementStyle="{StaticResource Ch2VTextStyle}"><DataGridTextColumn.Header><TextBlock Text="CH2 V" Style="{StaticResource Ch2VTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Ch2Current}" ElementStyle="{StaticResource Ch2ITextStyle}"><DataGridTextColumn.Header><TextBlock Text="CH2 A" Style="{StaticResource Ch2ITextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Ch3Voltage}" ElementStyle="{StaticResource Ch3VTextStyle}"><DataGridTextColumn.Header><TextBlock Text="CH3 V" Style="{StaticResource Ch3VTextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
+                    <DataGridTextColumn Width="Auto" Binding="{Binding Ch3Current}" ElementStyle="{StaticResource Ch3ITextStyle}"><DataGridTextColumn.Header><TextBlock Text="CH3 A" Style="{StaticResource Ch3ITextStyle}" /></DataGridTextColumn.Header></DataGridTextColumn>
                 </DataGrid.Columns>
             </DataGrid>
         </Grid>

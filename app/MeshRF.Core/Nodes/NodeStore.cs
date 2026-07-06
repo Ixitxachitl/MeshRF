@@ -31,6 +31,12 @@ public sealed record NodeTelemetryHistoryRecord(
     double? Pm10Environmental,
     double? Pm25Environmental,
     double? Pm100Environmental,
+    double? Ch1VoltageV,
+    double? Ch1CurrentMa,
+    double? Ch2VoltageV,
+    double? Ch2CurrentMa,
+    double? Ch3VoltageV,
+    double? Ch3CurrentMa,
     string Signature);
 
 /// <summary>
@@ -125,6 +131,12 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("pm10_env",  "INTEGER");
         AddColumnIfMissing("pm25_env",  "INTEGER");
         AddColumnIfMissing("pm100_env", "INTEGER");
+        AddColumnIfMissing("ch1_voltage_v",  "REAL");
+        AddColumnIfMissing("ch1_current_ma", "REAL");
+        AddColumnIfMissing("ch2_voltage_v",  "REAL");
+        AddColumnIfMissing("ch2_current_ma", "REAL");
+        AddColumnIfMissing("ch3_voltage_v",  "REAL");
+        AddColumnIfMissing("ch3_current_ma", "REAL");
 
         using var history = _conn.CreateCommand();
         history.CommandText = """
@@ -174,6 +186,12 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("pm10_env",  "REAL", hist);
         AddColumnIfMissing("pm25_env",  "REAL", hist);
         AddColumnIfMissing("pm100_env", "REAL", hist);
+        AddColumnIfMissing("ch1_voltage_v",  "REAL", hist);
+        AddColumnIfMissing("ch1_current_ma", "REAL", hist);
+        AddColumnIfMissing("ch2_voltage_v",  "REAL", hist);
+        AddColumnIfMissing("ch2_current_ma", "REAL", hist);
+        AddColumnIfMissing("ch3_voltage_v",  "REAL", hist);
+        AddColumnIfMissing("ch3_current_ma", "REAL", hist);
     }
 
     private void AddColumnIfMissing(string name, string sqlType, string table = "nodes")
@@ -206,7 +224,10 @@ public sealed class NodeStore : IDisposable
                                    gas_resistance_mohm, iaq, public_key, key_mismatch,
                                    mute_rtttl, ignored, node_status,
                                    pm10_std, pm25_std, pm100_std,
-                                   pm10_env, pm25_env, pm100_env)
+                                   pm10_env, pm25_env, pm100_env,
+                                   ch1_voltage_v, ch1_current_ma,
+                                   ch2_voltage_v, ch2_current_ma,
+                                   ch3_voltage_v, ch3_current_ma)
             VALUES ($node_num, $user_id, $long_name, $short_name,
                     $hw_model, $role, $last_heard, $seen_via_mqtt,
                     $snr, $rssi, $hops,
@@ -218,7 +239,8 @@ public sealed class NodeStore : IDisposable
                                 $gas, $iaq, $pubkey, $mismatch,
                                 $mute_rtttl, $ignored, $node_status,
                                 $pm10std, $pm25std, $pm100std,
-                                $pm10env, $pm25env, $pm100env)
+                                $pm10env, $pm25env, $pm100env,
+                                $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i)
             ON CONFLICT(node_num) DO UPDATE SET
                 user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
                 long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
@@ -251,7 +273,13 @@ public sealed class NodeStore : IDisposable
                 pm100_std        = COALESCE(excluded.pm100_std, pm100_std),
                 pm10_env         = COALESCE(excluded.pm10_env,  pm10_env),
                 pm25_env         = COALESCE(excluded.pm25_env,  pm25_env),
-                pm100_env        = COALESCE(excluded.pm100_env, pm100_env);
+                pm100_env        = COALESCE(excluded.pm100_env, pm100_env),
+                ch1_voltage_v    = COALESCE(excluded.ch1_voltage_v,  ch1_voltage_v),
+                ch1_current_ma   = COALESCE(excluded.ch1_current_ma, ch1_current_ma),
+                ch2_voltage_v    = COALESCE(excluded.ch2_voltage_v,  ch2_voltage_v),
+                ch2_current_ma   = COALESCE(excluded.ch2_current_ma, ch2_current_ma),
+                ch3_voltage_v    = COALESCE(excluded.ch3_voltage_v,  ch3_voltage_v),
+                ch3_current_ma   = COALESCE(excluded.ch3_current_ma, ch3_current_ma);
             """;
         cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
         cmd.Parameters.AddWithValue("$user_id", rec.UserId ?? string.Empty);
@@ -289,6 +317,12 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch1v", (object?)rec.Ch1VoltageV  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch1i", (object?)rec.Ch1CurrentMa ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch2v", (object?)rec.Ch2VoltageV  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
@@ -526,6 +560,12 @@ public sealed class NodeStore : IDisposable
                 Nullable<double>(rd, "pm10_env"),
                 Nullable<double>(rd, "pm25_env"),
                 Nullable<double>(rd, "pm100_env"),
+                Nullable<double>(rd, "ch1_voltage_v"),
+                Nullable<double>(rd, "ch1_current_ma"),
+                Nullable<double>(rd, "ch2_voltage_v"),
+                Nullable<double>(rd, "ch2_current_ma"),
+                Nullable<double>(rd, "ch3_voltage_v"),
+                Nullable<double>(rd, "ch3_current_ma"),
                 ReadStringOrEmpty(rd, "signature")));
         }
         rows.Reverse();
@@ -566,12 +606,15 @@ public sealed class NodeStore : IDisposable
                  temperature_c, relative_humidity_pct, barometric_pressure_hpa,
                  gas_resistance_mohm, iaq,
                  pm10_std, pm25_std, pm100_std, pm10_env, pm25_env, pm100_env,
+                 ch1_voltage_v, ch1_current_ma, ch2_voltage_v, ch2_current_ma,
+                 ch3_voltage_v, ch3_current_ma,
                  signature)
             VALUES ($node_num, $ts, $batt, $volt,
                     $chan, $airx, $uptime,
                     $temp, $hum, $pres,
                     $gas, $iaq,
                     $pm10std, $pm25std, $pm100std, $pm10env, $pm25env, $pm100env,
+                    $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i,
                     $sig);
             SELECT last_insert_rowid();
             """;
@@ -593,6 +636,12 @@ public sealed class NodeStore : IDisposable
         cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch1v", (object?)rec.Ch1VoltageV  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch1i", (object?)rec.Ch1CurrentMa ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch2v", (object?)rec.Ch2VoltageV  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$sig", rec.Signature ?? string.Empty);
         var id = Convert.ToInt64(cmd.ExecuteScalar());
         TrimTelemetryHistory(rec.NodeNum, 500);
