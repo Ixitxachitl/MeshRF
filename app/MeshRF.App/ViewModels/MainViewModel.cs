@@ -351,7 +351,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isRecordingPayloads;
 
-    private const uint HackRfStableMaxRateHz = 16_000_000;
+    private const uint HackRfStableMaxRateHz = 20_000_000;
     private const uint HackRfMaxSelectableRateHz = 20_000_000;
     private const uint RtlSdrDecodeSafeMaxRateHz = 2_560_000;
 

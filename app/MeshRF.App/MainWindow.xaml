@@ -1863,17 +1863,22 @@
                                  beh:AutoScroll.IsEnabled="{Binding LogAutoScroll}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <RichTextBox beh:MarkdownText.Text="{Binding}"
-                                                 Background="Transparent"
+                                    <RichTextBox Background="Transparent"
                                                  BorderThickness="0"
                                                  Padding="0"
                                                  Margin="0"
                                                  IsReadOnly="True"
-                                                 IsDocumentEnabled="True"
+                                                 IsDocumentEnabled="False"
                                                  IsTabStop="False"
                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                                  ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                                                 TextElement.FontFamily="Consolas" />
+                                                 TextElement.FontFamily="Consolas">
+                                        <FlowDocument PagePadding="0">
+                                            <Paragraph Margin="0">
+                                                <Run Text="{Binding ., Mode=OneWay}" />
+                                            </Paragraph>
+                                        </FlowDocument>
+                                    </RichTextBox>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
