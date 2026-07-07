@@ -52,11 +52,6 @@ public sealed class AppSettings
     /// <summary>Enable the HackRF RF amplifier during TX.</summary>
     public bool TxAmpEnable { get; set; } = false;
 
-    /// <summary>Auto-Gain-Control: when on, the app pushes LNA/VGA to keep
-    /// the peak power around <see cref="AgcTargetDbfs"/>.</summary>
-    public bool AgcEnable { get; set; } = false;
-    public double AgcTargetDbfs { get; set; } = -15.0;
-
     /// <summary>RTL-SDR manual tuner gain in dB (0..49).</summary>
     public byte RtlGainDb { get; set; } = 30;
     /// <summary>RTL-SDR tuner automatic gain control.</summary>

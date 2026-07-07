@@ -230,21 +230,6 @@
                            IsChecked="{Binding AmpEnable, Mode=TwoWay}"
                            VerticalAlignment="Center"
                            ToolTip="Enable HackRF front-end RF amplifier" />
-                 <Separator />
-                 <ToggleButton Content="AGC"
-                               Style="{StaticResource {x:Type ToggleButton}}"
-                           IsChecked="{Binding AgcEnable, Mode=TwoWay}"
-                           VerticalAlignment="Center"
-                           ToolTip="Auto-Gain-Control: keep peak power near target by nudging LNA/VGA" />
-                 <TextBlock Text="target" VerticalAlignment="Center" Margin="6,0,4,0" />
-                 <Slider Width="90"
-                        Minimum="-40" Maximum="-3"
-                        TickFrequency="1" IsSnapToTickEnabled="True"
-                        Value="{Binding AgcTargetDbfs, Mode=TwoWay}"
-                        VerticalAlignment="Center"
-                        IsEnabled="{Binding AgcEnable}" />
-                 <TextBlock Width="48" VerticalAlignment="Center"
-                          Text="{Binding AgcTargetDbfs, StringFormat={}{0:F0} dBFS}" />
               </StackPanel>
 
                                     <StackPanel

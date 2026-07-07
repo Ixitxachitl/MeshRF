@@ -156,12 +156,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _ampEnable;
 
-    [ObservableProperty]
-    private bool _agcEnable;
-
-    [ObservableProperty]
-    private double _agcTargetDbfs = -15.0;
-
     /// <summary>RTL-SDR manual tuner gain in dB (0..49). Independent of the
     /// HackRF LNA/VGA controls so each device remembers its own setting.</summary>
     [ObservableProperty]
@@ -1576,8 +1570,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AmpEnable = _settings.AmpEnable;
         TxGainDb = _settings.TxGainDb;
         TxAmpEnable = _settings.TxAmpEnable;
-        AgcEnable = _settings.AgcEnable;
-        AgcTargetDbfs = _settings.AgcTargetDbfs;
         RtlGainDb = _settings.RtlGainDb;
         RtlAgcEnable = _settings.RtlAgcEnable;
         BiasTee = _settings.BiasTee;
@@ -3360,8 +3352,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         StoreSavedRxSampleRateHz(CurrentRxDeviceKind, value.Hz);
         SaveSettings();
     }
-    partial void OnAgcEnableChanged(bool value) { SaveSettings(); }
-    partial void OnAgcTargetDbfsChanged(double value) { SaveSettings(); }
     partial void OnRtlGainDbChanged(byte value) { PushGains(); SaveSettings(); }
     partial void OnRtlAgcEnableChanged(bool value) { PushGains(); SaveSettings(); }
     partial void OnTxGainDbChanged(byte value) { SaveSettings(); }
@@ -3435,8 +3425,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.TxDeviceKind = SelectedTxDevice?.Kind.ToString() ?? "HackRf";
         _settings.TxGainDb = TxGainDb;
         _settings.TxAmpEnable = TxAmpEnable;
-        _settings.AgcEnable = AgcEnable;
-        _settings.AgcTargetDbfs = AgcTargetDbfs;
         _settings.RtlGainDb = RtlGainDb;
         _settings.RtlAgcEnable = RtlAgcEnable;
         _settings.BiasTee = BiasTee;
@@ -7997,8 +7985,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         PeakDbfs = s.PeakDbfs;
         TotalSamples = s.TotalSamples;
 
-        if (AgcEnable) StepAgc();
-
         // Flag any outgoing DMs that never got an ACK within the timeout.
         SweepPendingAcks();
 
@@ -8215,35 +8201,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// valid CRC (i.e. a genuine frame, not a false positive or corrupt one).
     /// The View commits the frozen last-packet spectrogram only on this.</summary>
     public event Action? PacketDecoded;
-
-    // AGC: nudge LNA/VGA toward a target peak power. Runs at the UI tick
-    // (20 Hz) but only acts ~once per second, with small +/- 2 dB steps so
-    // the receiver never oscillates badly. We move VGA first (cheap), then
-    // LNA when VGA hits a rail.
-    private int _agcDecimator;
-    private void StepAgc()
-    {
-        if ((++_agcDecimator % 20) != 0) return; // ~1 Hz
-        var peak = PeakDbfs;
-        if (float.IsNaN(peak) || float.IsInfinity(peak)) return;
-        var target = (float)AgcTargetDbfs;
-        var err = peak - target;
-        const float deadband = 2.0f;
-        if (Math.Abs(err) < deadband) return;
-
-        if (err > 0) // too hot -> lower gain
-        {
-            if (VgaGainDb >= 2) VgaGainDb -= 2;
-            else if (LnaGainDb >= 8) LnaGainDb -= 8;
-            else if (AmpEnable) AmpEnable = false;
-        }
-        else        // too cold -> raise gain
-        {
-            if (VgaGainDb <= 60) VgaGainDb += 2;
-            else if (LnaGainDb <= 32) LnaGainDb += 8;
-            // (Don't auto-enable AMP — it adds noise; user opts in.)
-        }
-    }
 
     // ========== Filter Optimization: Parallel evaluation off UI thread ==========
 
