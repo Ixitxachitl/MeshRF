@@ -187,7 +187,15 @@ public static class MarkdownText
             var rune = Rune.GetRuneAt(text, i);
             int runeLength = rune.Utf16SequenceLength;
 
-            if (IsEmojiRune(rune))
+            // An emoji sequence starts when the current rune is an intrinsic emoji,
+            // OR when it is a keycap base char (digit, #, *) immediately followed
+            // by a continuation (variation selector, combining enclosing keycap, etc.).
+            bool isEmojiStart = IsEmojiStarter(rune)
+                || (IsKeycapBase(rune)
+                    && i + runeLength < text.Length
+                    && IsEmojiContinuation(Rune.GetRuneAt(text, i + runeLength)));
+
+            if (isEmojiStart)
             {
                 FlushBuffer();
 
@@ -198,11 +206,20 @@ public static class MarkdownText
                 while (i < text.Length)
                 {
                     var nextRune = Rune.GetRuneAt(text, i);
-                    if (!IsEmojiRune(nextRune))
+                    int nextLen = nextRune.Utf16SequenceLength;
+                    if (!IsEmojiContinuation(nextRune))
                         break;
 
-                    emojiText.Append(text, i, nextRune.Utf16SequenceLength);
-                    i += nextRune.Utf16SequenceLength;
+                    emojiText.Append(text, i, nextLen);
+                    i += nextLen;
+
+                    // After ZWJ consume the next rune as part of the sequence too.
+                    if (nextRune.Value == 0x200D && i < text.Length)
+                    {
+                        var afterZwj = Rune.GetRuneAt(text, i);
+                        emojiText.Append(text, i, afterZwj.Utf16SequenceLength);
+                        i += afterZwj.Utf16SequenceLength;
+                    }
                 }
 
                 output.Add(CreateEmojiContainer(emojiText.ToString(), bold, italic));
@@ -240,16 +257,35 @@ public static class MarkdownText
         };
     }
 
-    private static bool IsEmojiRune(Rune rune)
+    // Runes that are emoji by themselves (no modifier needed to trigger emoji rendering).
+    private static bool IsEmojiStarter(Rune rune)
     {
         int value = rune.Value;
-        return value == 0x200D || value == 0xFE0F || value == 0xFE0E
-            || (value >= 0x1F000 && value <= 0x1FAFF)
-            || (value >= 0x2600 && value <= 0x27BF)
-            || (value >= 0x2300 && value <= 0x23FF)
-            || (value >= 0x2B00 && value <= 0x2BFF)
-            || (value >= 0x1F1E6 && value <= 0x1F1FF)
-            || (value >= 0x1F3FB && value <= 0x1F3FF);
+        return (value >= 0x1F000 && value <= 0x1FAFF)  // Misc symbols, emoticons, transport…
+            || (value >= 0x2600 && value <= 0x27BF)     // Misc symbols, dingbats
+            || (value >= 0x2300 && value <= 0x23FF)     // Misc technical
+            || (value >= 0x2B00 && value <= 0x2BFF)     // Misc symbols & arrows
+            || (value >= 0x1F1E6 && value <= 0x1F1FF)   // Regional indicator letters
+            || (value >= 0x1F3FB && value <= 0x1F3FF);  // Skin-tone modifiers
+    }
+
+    // Digits 0-9, #, * — plain ASCII that can become emoji via keycap sequences.
+    private static bool IsKeycapBase(Rune rune)
+    {
+        int value = rune.Value;
+        return (value >= 0x30 && value <= 0x39) || value == 0x23 || value == 0x2A;
+    }
+
+    // Runes that extend/modify the preceding emoji rune(s).
+    private static bool IsEmojiContinuation(Rune rune)
+    {
+        int value = rune.Value;
+        return value == 0x200D           // ZWJ
+            || value == 0xFE0F           // variation selector-16 (emoji presentation)
+            || value == 0xFE0E           // variation selector-15 (text presentation)
+            || value == 0x20E3           // combining enclosing keycap
+            || (value >= 0x1F3FB && value <= 0x1F3FF)   // skin-tone modifiers
+            || (value >= 0xE0020 && value <= 0xE007F);  // tag chars (flag sequences)
     }
 
     private static string NormalizeUrl(string raw)
