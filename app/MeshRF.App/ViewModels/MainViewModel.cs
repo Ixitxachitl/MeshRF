@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Buffers.Binary;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -2947,6 +2948,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SyncPrimaryChannelName();
         RebuildTabs();
         SelectedTab = Channels.FirstOrDefault();
+        // Restore persisted snake scores into the new primary channel and
+        // hook CollectionChanged so any update (incoming packet or Clear) saves.
+        var snakePrimary = Channels.FirstOrDefault(c => c.IsPrimary);
+        if (_subscribedSnakeScoresChannel != null)
+        {
+            _subscribedSnakeScoresChannel.SnakeScores.CollectionChanged -= OnSnakeScoresChanged;
+            _subscribedSnakeScoresChannel = null;
+        }
+        if (snakePrimary != null)
+        {
+            RestoreSnakeScores(snakePrimary);
+            _subscribedSnakeScoresChannel = snakePrimary;
+            snakePrimary.SnakeScores.CollectionChanged += OnSnakeScoresChanged;
+        }
     }
 
     private bool IsChannelRtttlMuted(int channelIndex) =>
@@ -3483,6 +3498,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                           .Select(c => c.NodeNum)
                                           .ToList();
         _settings.LastSelectedChannelIndex = _lastSelectedChannelIndex;
+        var snakePrimary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        _settings.SnakeHighScores = snakePrimary?.SnakeScores
+            .Select(e => new PersistedSnakeScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score })
+            .ToList() ?? new();
         _settings.Save();
     }
 
@@ -4183,6 +4202,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
         SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
+        SendSnakeHighScoresCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (ShouldLogDeviceStatus(_core.DeviceStatus))
@@ -4208,6 +4228,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendDeviceMetricsCommand.NotifyCanExecuteChanged();
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
         SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
+        SendSnakeHighScoresCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (!_core.CanTransmit)
@@ -5952,6 +5973,168 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Log(sb.ToString());
     }
 
+    // -----------------------------------------------------------------------
+    // Snake high-score handling (PrivateApp / PRIVATE_APP port, channel 0)
+    // -----------------------------------------------------------------------
+
+    // Wire format constants matching SnakeModule.cpp:
+    //   SnakeTableWire  = version(1) + count(1) + SnakeTableEntry[5]*13 = 67 bytes
+    //   SnakeScoreWire  = version(1) + shortName[5] + score(4)          = 10 bytes
+    private const byte SnakeWireVersion = 1;
+    private const int SnakeTableWireSize = 67;
+    private const int SnakeScoreWireSize = 10;
+
+    private void TryApplySnakeScores(byte[] payload, uint fromNode)
+    {
+        if (IsNodeIgnored(fromNode)) return;
+        if (payload.Length != SnakeTableWireSize && payload.Length != SnakeScoreWireSize)
+            return;
+        if (payload[0] != SnakeWireVersion)
+            return;
+
+        var primaryCh = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primaryCh == null) return;
+
+        var incoming = new List<SnakeHighScoreEntry>();
+
+        if (payload.Length == SnakeTableWireSize)
+        {
+            byte count = payload[1];
+            if (count > 5) count = 5;
+            for (int i = 0; i < count; i++)
+            {
+                int o = 2 + i * 13;
+                uint nodeNum = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o));
+                string name = ReadPackedAscii(payload, o + 4, 5);
+                uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o + 9));
+                if (score > 0)
+                    incoming.Add(new SnakeHighScoreEntry(0, nodeNum, name, score));
+            }
+        }
+        else // SnakeScoreWireSize
+        {
+            string name = ReadPackedAscii(payload, 1, 5);
+            uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(6));
+            if (score > 0)
+                incoming.Add(new SnakeHighScoreEntry(0, fromNode, name, score));
+        }
+
+        if (incoming.Count == 0) return;
+
+        // Merge: a node can hold multiple leaderboard slots (e.g. the same
+        // player's top-5 games). Deduplicate only exact (NodeNum, Score) pairs
+        // to avoid double-counting repeated broadcasts of the same score.
+        var merged = primaryCh.SnakeScores.ToList();
+        foreach (var entry in incoming)
+        {
+            bool alreadyHave = merged.Any(e => e.NodeNum == entry.NodeNum && e.Score == entry.Score);
+            if (!alreadyHave)
+                merged.Add(entry);
+        }
+        merged.Sort((a, b) => b.Score.CompareTo(a.Score));
+        if (merged.Count > 5) merged = merged.GetRange(0, 5);
+
+        // Suppress per-item CollectionChanged saves during the batch update;
+        // do one single save at the end so we never write a partial list.
+        if (_subscribedSnakeScoresChannel != null)
+            _subscribedSnakeScoresChannel.SnakeScores.CollectionChanged -= OnSnakeScoresChanged;
+        primaryCh.SnakeScores.Clear();
+        for (int i = 0; i < merged.Count; i++)
+            primaryCh.SnakeScores.Add(merged[i] with { Rank = i + 1 });
+        if (_subscribedSnakeScoresChannel != null)
+            _subscribedSnakeScoresChannel.SnakeScores.CollectionChanged += OnSnakeScoresChanged;
+        SaveSettings();
+    }
+
+    private static string ReadPackedAscii(byte[] data, int offset, int maxLen)
+    {
+        int end = offset;
+        int limit = Math.Min(offset + maxLen, data.Length);
+        while (end < limit && data[end] != 0)
+            end++;
+        return Encoding.ASCII.GetString(data, offset, end - offset);
+    }
+
+    private ChannelViewModel? _subscribedSnakeScoresChannel;
+
+    private void OnSnakeScoresChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        => SaveSettings();
+
+    private void RestoreSnakeScores(ChannelViewModel primaryCh)
+    {
+        var saved = _settings.SnakeHighScores;
+        if (saved == null || saved.Count == 0) return;
+        var sorted = saved
+            .Where(e => e.Score > 0)
+            .OrderByDescending(e => e.Score)
+            .Take(5)
+            .ToList();
+        primaryCh.SnakeScores.Clear();
+        for (int i = 0; i < sorted.Count; i++)
+            primaryCh.SnakeScores.Add(new SnakeHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score));
+    }
+
+    private bool CanSendSnakeHighScores() => CanTransmit && _myNodeNum != 0;
+
+    /// <summary>
+    /// Manually broadcast the current in-memory snake high-score table on the
+    /// primary channel, using the same <c>SnakeTableWire</c> wire format the
+    /// firmware uses for its periodic 12-hour broadcasts.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendSnakeHighScores))]
+    private async Task SendSnakeHighScoresAsync()
+    {
+        var primaryCh = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primaryCh == null || _myNodeNum == 0 || !CanTransmit) return;
+
+        var scores = primaryCh.SnakeScores.ToList();
+        if (scores.Count == 0)
+        {
+            Status = "No snake scores to broadcast.";
+            Log(Status);
+            return;
+        }
+
+        // Build SnakeTableWire (packed, 67 bytes):
+        //   version(1) + count(1) + SnakeTableEntry[5]*13
+        //   SnakeTableEntry: nodeNum(4) + shortName[5] + score(4)
+        const int entrySize = 13;
+        const int tableSize = 2 + 5 * entrySize;
+        var tbl = new byte[tableSize];
+        tbl[0] = SnakeWireVersion;
+        byte count = (byte)Math.Min(scores.Count, 5);
+        tbl[1] = count;
+        for (int i = 0; i < count; i++)
+        {
+            int o = 2 + i * entrySize;
+            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o), scores[i].NodeNum);
+            var nameBytes = Encoding.ASCII.GetBytes(scores[i].ShortName);
+            int nameCopy = Math.Min(nameBytes.Length, 4); // 4 chars + NUL = 5 bytes total
+            nameBytes.AsSpan(0, nameCopy).CopyTo(tbl.AsSpan(o + 4));
+            // tbl[o + 8] stays 0 (NUL terminator)
+            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o + 9), scores[i].Score);
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.Encode(
+                primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
+                PortNum.PrivateApp, tbl, hopLimit: (byte)HopLimit);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            Status = ok
+                ? $"Snake scores broadcast ({count} entries, {frame.Length} B)"
+                : "Snake broadcast failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Snake broadcast error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
     private void LogStoreForward(MeshHeader header, MeshRF.Mesh.MeshStoreForward sf)
     {
         var sb = new System.Text.StringBuilder();
@@ -7345,6 +7528,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     HandleNeighborInfo(header, result.NeighborInfo);
                     break;
                 case PortNum.StoreForward when result.StoreForward is not null:
+                    break;
+                case PortNum.PrivateApp:
+                    TryApplySnakeScores(result.AppPayload, header.From);
                     break;
                 default:
                     break;

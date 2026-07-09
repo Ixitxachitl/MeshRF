@@ -1,0 +1,93 @@
+<Window x:Class="MeshRF.App.Views.SnakeHighScoresWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:emoji="clr-namespace:Emoji.Wpf;assembly=Emoji.Wpf"
+        Title="Snake High Scores"
+        Width="320"
+        Height="220"
+        ResizeMode="CanResize"
+        MinWidth="220"
+        MinHeight="160"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BrushAppBackground}"
+        Foreground="{DynamicResource BrushAppForeground}">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,8" LastChildFill="True">
+            <Button DockPanel.Dock="Right"
+                    Content="Clear"
+                    Padding="8,2"
+                    Margin="8,0,0,0"
+                    ToolTip="Clear all received high scores"
+                    Command="{Binding ClearSnakeScoresCommand}" />
+            <Button DockPanel.Dock="Right"
+                    Content="Broadcast"
+                    Padding="8,2"
+                    Margin="8,0,0,0"
+                    ToolTip="Broadcast the current high score table on the primary channel (same format as device firmware)"
+                    Command="{Binding Tag.SendSnakeHighScoresCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+            <emoji:TextBlock Text="🐍  Snake High Scores"
+                             FontWeight="SemiBold"
+                             FontSize="14"
+                             VerticalAlignment="Center" />
+        </DockPanel>
+
+        <!-- Separator -->
+        <Separator Grid.Row="1" Margin="0,0,0,8" />
+
+        <!-- Scores list -->
+        <Grid Grid.Row="2">
+            <!-- Empty state -->
+            <TextBlock Text="No high scores received yet."
+                       Foreground="{DynamicResource BrushSubtle}"
+                       FontStyle="Italic"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Top"
+                       Margin="0,4">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasSnakeScores}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+
+            <!-- Score rows -->
+            <ItemsControl ItemsSource="{Binding SnakeScores}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="26" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding Rank, StringFormat={}{0}.}"
+                                       Foreground="{DynamicResource BrushSubtle}"
+                                       VerticalAlignment="Center" />
+                            <emoji:TextBlock Grid.Column="1"
+                                            Text="{Binding ShortName}"
+                                            VerticalAlignment="Center"
+                                            Margin="4,0" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding Score}"
+                                       FontFamily="Consolas"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Grid>
+    </Grid>
+</Window>

@@ -1397,6 +1397,15 @@
                                                     Padding="6,1" Margin="4,0,4,0"
                                                     ToolTip="Configure channel name, role, PSK, location sharing and mute"
                                                     Click="OnOpenChannelSettings" />
+                                            <Button DockPanel.Dock="Right"
+                                                    Padding="4,1"
+                                                    Margin="4,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    ToolTip="Snake high scores received from the mesh"
+                                                    Click="OnOpenSnakeScores"
+                                                    Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
+                                                <emoji:TextBlock Text="🐍" FontSize="11" />
+                                            </Button>
                                             <ToggleButton DockPanel.Dock="Right"
                                                     Content="Auto-scroll"
                                                     Margin="4,0,0,0"

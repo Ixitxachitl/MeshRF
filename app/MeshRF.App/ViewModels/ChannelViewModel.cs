@@ -41,10 +41,22 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         _editPositionPrecision = cfg.PositionPrecision;
         _muteRtttl = muteRtttl;
         UpdatePositionPrecisionOptions(unitSystem);
+        SnakeScores.CollectionChanged += (_, _) => HasSnakeScores = SnakeScores.Count > 0;
     }
 
     /// <summary>Decoded text messages, newest last.</summary>
     public ObservableCollection<ChannelMessage> Messages { get; } = new();
+
+    /// <summary>Snake high-score table entries as received from the mesh.</summary>
+    public ObservableCollection<SnakeHighScoreEntry> SnakeScores { get; } = new();
+
+    private bool _hasSnakeScores;
+    /// <summary>True when at least one snake high score has been received.</summary>
+    public bool HasSnakeScores
+    {
+        get => _hasSnakeScores;
+        private set { if (_hasSnakeScores != value) { _hasSnakeScores = value; OnPropertyChanged(); } }
+    }
 
     [ObservableProperty]
     private int _packetCount;
@@ -167,6 +179,9 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, Messages.Select(m => m.Display))); }
         catch { }
     }
+
+    [RelayCommand]
+    private void ClearSnakeScores() => SnakeScores.Clear();
 }
 
 public partial class ChannelMessage : ObservableObject

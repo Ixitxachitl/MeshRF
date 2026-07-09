@@ -425,6 +425,9 @@ public sealed class AppSettings
     /// <summary>Persisted Nodes grid column order by SortMemberPath.</summary>
     public List<string> NodeColumnDisplayOrder { get; set; } = new();
 
+    /// <summary>Snake high-score table received from the mesh, persisted across sessions.</summary>
+    public List<PersistedSnakeScore> SnakeHighScores { get; set; } = new();
+
     private static readonly JsonSerializerOptions s_opts = new()
     {
         WriteIndented = true,
@@ -490,4 +493,12 @@ public sealed class AppSettings
         UseFahrenheit = imperial;
         UseMiles = imperial;
     }
+}
+
+/// <summary>One entry in the persisted snake high-score table.</summary>
+public sealed class PersistedSnakeScore
+{
+    public uint NodeNum { get; set; }
+    public string ShortName { get; set; } = string.Empty;
+    public uint Score { get; set; }
 }
