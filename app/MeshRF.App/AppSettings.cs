@@ -428,6 +428,9 @@ public sealed class AppSettings
     /// <summary>Snake high-score table received from the mesh, persisted across sessions.</summary>
     public List<PersistedSnakeScore> SnakeHighScores { get; set; } = new();
 
+    /// <summary>Tetris high-score table received from the mesh, persisted across sessions.</summary>
+    public List<PersistedTetrisScore> TetrisHighScores { get; set; } = new();
+
     private static readonly JsonSerializerOptions s_opts = new()
     {
         WriteIndented = true,
@@ -497,6 +500,14 @@ public sealed class AppSettings
 
 /// <summary>One entry in the persisted snake high-score table.</summary>
 public sealed class PersistedSnakeScore
+{
+    public uint NodeNum { get; set; }
+    public string ShortName { get; set; } = string.Empty;
+    public uint Score { get; set; }
+}
+
+/// <summary>One entry in the persisted Tetris high-score table.</summary>
+public sealed class PersistedTetrisScore
 {
     public uint NodeNum { get; set; }
     public string ShortName { get; set; } = string.Empty;

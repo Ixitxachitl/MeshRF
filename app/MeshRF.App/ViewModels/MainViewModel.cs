@@ -2962,6 +2962,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _subscribedSnakeScoresChannel = snakePrimary;
             snakePrimary.SnakeScores.CollectionChanged += OnSnakeScoresChanged;
         }
+        // Restore persisted Tetris scores into the new primary channel and
+        // hook CollectionChanged so any update (incoming packet or Clear) saves.
+        var tetrisPrimary = snakePrimary; // same primary channel
+        if (_subscribedTetrisScoresChannel != null)
+        {
+            _subscribedTetrisScoresChannel.TetrisScores.CollectionChanged -= OnTetrisScoresChanged;
+            _subscribedTetrisScoresChannel = null;
+        }
+        if (tetrisPrimary != null)
+        {
+            RestoreTetrisScores(tetrisPrimary);
+            _subscribedTetrisScoresChannel = tetrisPrimary;
+            tetrisPrimary.TetrisScores.CollectionChanged += OnTetrisScoresChanged;
+        }
     }
 
     private bool IsChannelRtttlMuted(int channelIndex) =>
@@ -3501,6 +3515,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var snakePrimary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
         _settings.SnakeHighScores = snakePrimary?.SnakeScores
             .Select(e => new PersistedSnakeScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score })
+            .ToList() ?? new();
+        _settings.TetrisHighScores = snakePrimary?.TetrisScores
+            .Select(e => new PersistedTetrisScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score })
             .ToList() ?? new();
         _settings.Save();
     }
@@ -4203,6 +4220,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
         SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
         SendSnakeHighScoresCommand.NotifyCanExecuteChanged();
+        SendTetrisHighScoresCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (ShouldLogDeviceStatus(_core.DeviceStatus))
@@ -4229,6 +4247,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendEnvironmentMetricsCommand.NotifyCanExecuteChanged();
         SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
         SendSnakeHighScoresCommand.NotifyCanExecuteChanged();
+        SendTetrisHighScoresCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (!_core.CanTransmit)
@@ -6021,16 +6040,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (incoming.Count == 0) return;
 
-        // Merge: a node can hold multiple leaderboard slots (e.g. the same
-        // player's top-5 games). Deduplicate only exact (NodeNum, Score) pairs
-        // to avoid double-counting repeated broadcasts of the same score.
+        // Meshtastic deduplicates packets at the transport layer, so every
+        // packet we receive is a genuinely new event.  Just union the incoming
+        // entries with the board, sort descending, and cap at 5.
         var merged = primaryCh.SnakeScores.ToList();
-        foreach (var entry in incoming)
-        {
-            bool alreadyHave = merged.Any(e => e.NodeNum == entry.NodeNum && e.Score == entry.Score);
-            if (!alreadyHave)
-                merged.Add(entry);
-        }
+        merged.AddRange(incoming);
         merged.Sort((a, b) => b.Score.CompareTo(a.Score));
         if (merged.Count > 5) merged = merged.GetRange(0, 5);
 
@@ -6056,6 +6070,152 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     private ChannelViewModel? _subscribedSnakeScoresChannel;
+
+    // -----------------------------------------------------------------------
+    // Tetris high scores
+    // -----------------------------------------------------------------------
+
+    // Wire format constants matching TetrisModule.cpp:
+    //   TetrisTableWire  = game_id(1) + version(1) + count(1) + TetrisTableEntry[5]*13 = 68 bytes
+    //   TetrisScoreWire  = game_id(1) + version(1) + shortName[5] + score(4)           = 11 bytes
+    private const byte TetrisWireGameId  = 0x54; // 'T'
+    private const byte TetrisWireVersion = 1;
+    private const int TetrisTableWireSize = 68;
+    private const int TetrisScoreWireSize = 11;
+
+    private void TryApplyTetrisScores(byte[] payload, uint fromNode)
+    {
+        if (IsNodeIgnored(fromNode)) return;
+        if (payload.Length != TetrisTableWireSize && payload.Length != TetrisScoreWireSize)
+            return;
+        if (payload[0] != TetrisWireGameId || payload[1] != TetrisWireVersion)
+            return;
+
+        var primaryCh = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primaryCh == null) return;
+
+        var incoming = new List<TetrisHighScoreEntry>();
+
+        if (payload.Length == TetrisTableWireSize)
+        {
+            byte count = payload[2];
+            if (count > 5) count = 5;
+            for (int i = 0; i < count; i++)
+            {
+                int o = 3 + i * 13;
+                uint nodeNum = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o));
+                string name = ReadPackedAscii(payload, o + 4, 5);
+                uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o + 9));
+                if (score > 0)
+                    incoming.Add(new TetrisHighScoreEntry(0, nodeNum, name, score));
+            }
+        }
+        else // TetrisScoreWireSize
+        {
+            string name = ReadPackedAscii(payload, 2, 5);
+            uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(7));
+            if (score > 0)
+                incoming.Add(new TetrisHighScoreEntry(0, fromNode, name, score));
+        }
+
+        if (incoming.Count == 0) return;
+
+        // Meshtastic deduplicates packets at the transport layer, so every
+        // packet we receive is a genuinely new event. Just union, sort, cap.
+        var merged = primaryCh.TetrisScores.ToList();
+        merged.AddRange(incoming);
+        merged.Sort((a, b) => b.Score.CompareTo(a.Score));
+        if (merged.Count > 5) merged = merged.GetRange(0, 5);
+
+        if (_subscribedTetrisScoresChannel != null)
+            _subscribedTetrisScoresChannel.TetrisScores.CollectionChanged -= OnTetrisScoresChanged;
+        primaryCh.TetrisScores.Clear();
+        for (int i = 0; i < merged.Count; i++)
+            primaryCh.TetrisScores.Add(merged[i] with { Rank = i + 1 });
+        if (_subscribedTetrisScoresChannel != null)
+            _subscribedTetrisScoresChannel.TetrisScores.CollectionChanged += OnTetrisScoresChanged;
+        SaveSettings();
+    }
+
+    private void OnTetrisScoresChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        => SaveSettings();
+
+    private void RestoreTetrisScores(ChannelViewModel primaryCh)
+    {
+        var saved = _settings.TetrisHighScores;
+        if (saved == null || saved.Count == 0) return;
+        var sorted = saved
+            .Where(e => e.Score > 0)
+            .OrderByDescending(e => e.Score)
+            .Take(5)
+            .ToList();
+        primaryCh.TetrisScores.Clear();
+        for (int i = 0; i < sorted.Count; i++)
+            primaryCh.TetrisScores.Add(new TetrisHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score));
+    }
+
+    private bool CanSendTetrisHighScores() => CanTransmit && _myNodeNum != 0;
+
+    /// <summary>
+    /// Manually broadcast the current in-memory Tetris high-score table on the
+    /// primary channel, using the same <c>TetrisTableWire</c> wire format the
+    /// firmware uses for its periodic broadcasts.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendTetrisHighScores))]
+    private async Task SendTetrisHighScoresAsync()
+    {
+        var primaryCh = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        if (primaryCh == null || _myNodeNum == 0 || !CanTransmit) return;
+
+        var scores = primaryCh.TetrisScores.ToList();
+        if (scores.Count == 0)
+        {
+            Status = "No Tetris scores to broadcast.";
+            Log(Status);
+            return;
+        }
+
+        // Build TetrisTableWire (packed, 68 bytes):
+        //   game_id(1) + version(1) + count(1) + TetrisTableEntry[5]*13
+        //   TetrisTableEntry: nodeNum(4) + shortName[5] + score(4)
+        const int entrySize = 13;
+        const int tableSize = 3 + 5 * entrySize;
+        var tbl = new byte[tableSize];
+        tbl[0] = TetrisWireGameId;
+        tbl[1] = TetrisWireVersion;
+        byte count = (byte)Math.Min(scores.Count, 5);
+        tbl[2] = count;
+        for (int i = 0; i < count; i++)
+        {
+            int o = 3 + i * entrySize;
+            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o), scores[i].NodeNum);
+            var nameBytes = Encoding.ASCII.GetBytes(scores[i].ShortName);
+            int nameCopy = Math.Min(nameBytes.Length, 4);
+            nameBytes.AsSpan(0, nameCopy).CopyTo(tbl.AsSpan(o + 4));
+            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o + 9), scores[i].Score);
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.Encode(
+                primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
+                PortNum.PrivateApp, tbl, hopLimit: (byte)HopLimit);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            Status = ok
+                ? $"Tetris scores broadcast ({count} entries, {frame.Length} B)"
+                : "Tetris broadcast failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Tetris broadcast error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    private ChannelViewModel? _subscribedTetrisScoresChannel;
 
     private void OnSnakeScoresChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         => SaveSettings();
@@ -7531,6 +7691,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     break;
                 case PortNum.PrivateApp:
                     TryApplySnakeScores(result.AppPayload, header.From);
+                    TryApplyTetrisScores(result.AppPayload, header.From);
                     break;
                 default:
                     break;

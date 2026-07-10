@@ -42,6 +42,7 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         _muteRtttl = muteRtttl;
         UpdatePositionPrecisionOptions(unitSystem);
         SnakeScores.CollectionChanged += (_, _) => HasSnakeScores = SnakeScores.Count > 0;
+        TetrisScores.CollectionChanged += (_, _) => HasTetrisScores = TetrisScores.Count > 0;
     }
 
     /// <summary>Decoded text messages, newest last.</summary>
@@ -56,6 +57,17 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     {
         get => _hasSnakeScores;
         private set { if (_hasSnakeScores != value) { _hasSnakeScores = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>Tetris high-score table entries as received from the mesh.</summary>
+    public ObservableCollection<TetrisHighScoreEntry> TetrisScores { get; } = new();
+
+    private bool _hasTetrisScores;
+    /// <summary>True when at least one Tetris high score has been received.</summary>
+    public bool HasTetrisScores
+    {
+        get => _hasTetrisScores;
+        private set { if (_hasTetrisScores != value) { _hasTetrisScores = value; OnPropertyChanged(); } }
     }
 
     [ObservableProperty]
@@ -182,6 +194,9 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
 
     [RelayCommand]
     private void ClearSnakeScores() => SnakeScores.Clear();
+
+    [RelayCommand]
+    private void ClearTetrisScores() => TetrisScores.Clear();
 }
 
 public partial class ChannelMessage : ObservableObject
