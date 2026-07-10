@@ -504,6 +504,7 @@ public sealed class PersistedSnakeScore
     public uint NodeNum { get; set; }
     public string ShortName { get; set; } = string.Empty;
     public uint Score { get; set; }
+    public uint ScoreId { get; set; }
 }
 
 /// <summary>One entry in the persisted Tetris high-score table.</summary>
@@ -512,4 +513,5 @@ public sealed class PersistedTetrisScore
     public uint NodeNum { get; set; }
     public string ShortName { get; set; } = string.Empty;
     public uint Score { get; set; }
+    public uint ScoreId { get; set; }
 }

@@ -2,4 +2,4 @@
 namespace MeshRF.App.ViewModels;
 
 /// <summary>One row in the snake high-score table as broadcast on the mesh.</summary>
-public sealed record SnakeHighScoreEntry(int Rank, uint NodeNum, string ShortName, uint Score);
+public sealed record SnakeHighScoreEntry(int Rank, uint NodeNum, string ShortName, uint Score, uint ScoreId = 0);

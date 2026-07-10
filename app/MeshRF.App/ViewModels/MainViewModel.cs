@@ -3514,10 +3514,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.LastSelectedChannelIndex = _lastSelectedChannelIndex;
         var snakePrimary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
         _settings.SnakeHighScores = snakePrimary?.SnakeScores
-            .Select(e => new PersistedSnakeScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score })
+            .Select(e => new PersistedSnakeScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score, ScoreId = e.ScoreId })
             .ToList() ?? new();
         _settings.TetrisHighScores = snakePrimary?.TetrisScores
-            .Select(e => new PersistedTetrisScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score })
+            .Select(e => new PersistedTetrisScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score, ScoreId = e.ScoreId })
             .ToList() ?? new();
         _settings.Save();
     }
@@ -6010,16 +6010,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var incoming = lb.Entries
             .Where(e => e.Score > 0)
-            .Select(e => new SnakeHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score))
+            .Select(e => new SnakeHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score, e.ScoreId))
             .ToList();
 
         if (incoming.Count == 0) return;
 
-        // Meshtastic deduplicates packets at the transport layer, so every
-        // packet we receive is a genuinely new event.  Just union the incoming
-        // entries with the board, sort descending, and cap at 5.
+        // Deduplicate by (NodeNum, ScoreId) when score_id != 0 to detect
+        // re-broadcasts of already-seen entries.  ScoreId == 0 means the
+        // sender is old firmware; add those unconditionally.
         var merged = primaryCh.SnakeScores.ToList();
-        merged.AddRange(incoming);
+        foreach (var entry in incoming)
+        {
+            bool alreadySeen = entry.ScoreId != 0 &&
+                merged.Any(e => e.NodeNum == entry.NodeNum && e.ScoreId == entry.ScoreId);
+            if (!alreadySeen)
+                merged.Add(entry);
+        }
         merged.Sort((a, b) => b.Score.CompareTo(a.Score));
         if (merged.Count > 5) merged = merged.GetRange(0, 5);
 
@@ -6054,15 +6060,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var incoming = lb.Entries
             .Where(e => e.Score > 0)
-            .Select(e => new TetrisHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score))
+            .Select(e => new TetrisHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score, e.ScoreId))
             .ToList();
 
         if (incoming.Count == 0) return;
 
-        // Meshtastic deduplicates packets at the transport layer, so every
-        // packet we receive is a genuinely new event. Just union, sort, cap.
+        // Deduplicate by (NodeNum, ScoreId) when score_id != 0 to detect
+        // re-broadcasts of already-seen entries.  ScoreId == 0 means the
+        // sender is old firmware; add those unconditionally.
         var merged = primaryCh.TetrisScores.ToList();
-        merged.AddRange(incoming);
+        foreach (var entry in incoming)
+        {
+            bool alreadySeen = entry.ScoreId != 0 &&
+                merged.Any(e => e.NodeNum == entry.NodeNum && e.ScoreId == entry.ScoreId);
+            if (!alreadySeen)
+                merged.Add(entry);
+        }
         merged.Sort((a, b) => b.Score.CompareTo(a.Score));
         if (merged.Count > 5) merged = merged.GetRange(0, 5);
 
@@ -6090,7 +6103,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ToList();
         primaryCh.TetrisScores.Clear();
         for (int i = 0; i < sorted.Count; i++)
-            primaryCh.TetrisScores.Add(new TetrisHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score));
+            primaryCh.TetrisScores.Add(new TetrisHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score, sorted[i].ScoreId));
     }
 
     private bool CanSendTetrisHighScores() => CanTransmit && _myNodeNum != 0;
@@ -6117,7 +6130,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var lb = new Meshtastic.Protobuf.GameLeaderboard { Game = Meshtastic.Protobuf.GameType.GameTetris };
         foreach (var s in scores.Take(5))
             lb.Entries.Add(new Meshtastic.Protobuf.GameLeaderboardEntry
-                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score });
+                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score, ScoreId = s.ScoreId });
         var payload = lb.ToByteArray();
 
         try
@@ -6156,7 +6169,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ToList();
         primaryCh.SnakeScores.Clear();
         for (int i = 0; i < sorted.Count; i++)
-            primaryCh.SnakeScores.Add(new SnakeHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score));
+            primaryCh.SnakeScores.Add(new SnakeHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score, sorted[i].ScoreId));
     }
 
     private bool CanSendSnakeHighScores() => CanTransmit && _myNodeNum != 0;
@@ -6183,7 +6196,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var lb = new Meshtastic.Protobuf.GameLeaderboard { Game = Meshtastic.Protobuf.GameType.GameSnake };
         foreach (var s in scores.Take(5))
             lb.Entries.Add(new Meshtastic.Protobuf.GameLeaderboardEntry
-                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score });
+                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score, ScoreId = s.ScoreId });
         var payload = lb.ToByteArray();
 
         try
