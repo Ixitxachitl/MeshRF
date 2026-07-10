@@ -36,6 +36,7 @@ public enum PortNum
     PowerStress        = 74,
     PrivateApp         = 256,
     AtakForwarder      = 257,
+    GameApp            = 258,
 }
 
 /// <summary>

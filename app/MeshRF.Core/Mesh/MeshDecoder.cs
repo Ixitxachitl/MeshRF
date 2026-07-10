@@ -476,6 +476,7 @@ public static class MeshDecoder
             PortNum.PaxCounter => Meshtastic.Protobufs.Paxcount.Parser.ParseFrom(payload),
             PortNum.Audio => Meshtastic.Protobufs.Compressed.Parser.ParseFrom(payload),
             PortNum.NodeStatus => Meshtastic.Protobufs.StatusMessage.Parser.ParseFrom(payload),
+            PortNum.GameApp => Meshtastic.Protobuf.GameLeaderboard.Parser.ParseFrom(payload),
             _ => null,
         };
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-using System.Buffers.Binary;
+using Google.Protobuf;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -5993,50 +5993,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     // -----------------------------------------------------------------------
-    // Snake high-score handling (PrivateApp / PRIVATE_APP port, channel 0)
+    // Game high-score handling (GAME_APP port = 258, channel 0)
+    // Protobuf: meshtastic.GameLeaderboard from game.proto
     // -----------------------------------------------------------------------
-
-    // Wire format constants matching SnakeModule.cpp:
-    //   SnakeTableWire  = version(1) + count(1) + SnakeTableEntry[5]*13 = 67 bytes
-    //   SnakeScoreWire  = version(1) + shortName[5] + score(4)          = 10 bytes
-    private const byte SnakeWireVersion = 1;
-    private const int SnakeTableWireSize = 67;
-    private const int SnakeScoreWireSize = 10;
 
     private void TryApplySnakeScores(byte[] payload, uint fromNode)
     {
         if (IsNodeIgnored(fromNode)) return;
-        if (payload.Length != SnakeTableWireSize && payload.Length != SnakeScoreWireSize)
-            return;
-        if (payload[0] != SnakeWireVersion)
-            return;
+        Meshtastic.Protobuf.GameLeaderboard lb;
+        try { lb = Meshtastic.Protobuf.GameLeaderboard.Parser.ParseFrom(payload); }
+        catch { return; }
+        if (lb.Game != Meshtastic.Protobuf.GameType.GameSnake) return;
 
-        var primaryCh = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        var primaryCh = Channels.FirstOrDefault(c => c.IsPrimary);
         if (primaryCh == null) return;
 
-        var incoming = new List<SnakeHighScoreEntry>();
-
-        if (payload.Length == SnakeTableWireSize)
-        {
-            byte count = payload[1];
-            if (count > 5) count = 5;
-            for (int i = 0; i < count; i++)
-            {
-                int o = 2 + i * 13;
-                uint nodeNum = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o));
-                string name = ReadPackedAscii(payload, o + 4, 5);
-                uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o + 9));
-                if (score > 0)
-                    incoming.Add(new SnakeHighScoreEntry(0, nodeNum, name, score));
-            }
-        }
-        else // SnakeScoreWireSize
-        {
-            string name = ReadPackedAscii(payload, 1, 5);
-            uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(6));
-            if (score > 0)
-                incoming.Add(new SnakeHighScoreEntry(0, fromNode, name, score));
-        }
+        var incoming = lb.Entries
+            .Where(e => e.Score > 0)
+            .Select(e => new SnakeHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score))
+            .ToList();
 
         if (incoming.Count == 0) return;
 
@@ -6060,63 +6035,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
-    private static string ReadPackedAscii(byte[] data, int offset, int maxLen)
-    {
-        int end = offset;
-        int limit = Math.Min(offset + maxLen, data.Length);
-        while (end < limit && data[end] != 0)
-            end++;
-        return Encoding.ASCII.GetString(data, offset, end - offset);
-    }
-
     private ChannelViewModel? _subscribedSnakeScoresChannel;
 
     // -----------------------------------------------------------------------
-    // Tetris high scores
+    // Tetris high scores (same GAME_APP port, game.proto GameType.GAME_TETRIS)
     // -----------------------------------------------------------------------
-
-    // Wire format constants matching TetrisModule.cpp:
-    //   TetrisTableWire  = game_id(1) + version(1) + count(1) + TetrisTableEntry[5]*13 = 68 bytes
-    //   TetrisScoreWire  = game_id(1) + version(1) + shortName[5] + score(4)           = 11 bytes
-    private const byte TetrisWireGameId  = 0x54; // 'T'
-    private const byte TetrisWireVersion = 1;
-    private const int TetrisTableWireSize = 68;
-    private const int TetrisScoreWireSize = 11;
 
     private void TryApplyTetrisScores(byte[] payload, uint fromNode)
     {
         if (IsNodeIgnored(fromNode)) return;
-        if (payload.Length != TetrisTableWireSize && payload.Length != TetrisScoreWireSize)
-            return;
-        if (payload[0] != TetrisWireGameId || payload[1] != TetrisWireVersion)
-            return;
+        Meshtastic.Protobuf.GameLeaderboard lb;
+        try { lb = Meshtastic.Protobuf.GameLeaderboard.Parser.ParseFrom(payload); }
+        catch { return; }
+        if (lb.Game != Meshtastic.Protobuf.GameType.GameTetris) return;
 
-        var primaryCh = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary);
+        var primaryCh = Channels.FirstOrDefault(c => c.IsPrimary);
         if (primaryCh == null) return;
 
-        var incoming = new List<TetrisHighScoreEntry>();
-
-        if (payload.Length == TetrisTableWireSize)
-        {
-            byte count = payload[2];
-            if (count > 5) count = 5;
-            for (int i = 0; i < count; i++)
-            {
-                int o = 3 + i * 13;
-                uint nodeNum = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o));
-                string name = ReadPackedAscii(payload, o + 4, 5);
-                uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(o + 9));
-                if (score > 0)
-                    incoming.Add(new TetrisHighScoreEntry(0, nodeNum, name, score));
-            }
-        }
-        else // TetrisScoreWireSize
-        {
-            string name = ReadPackedAscii(payload, 2, 5);
-            uint score = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(7));
-            if (score > 0)
-                incoming.Add(new TetrisHighScoreEntry(0, fromNode, name, score));
-        }
+        var incoming = lb.Entries
+            .Where(e => e.Score > 0)
+            .Select(e => new TetrisHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score))
+            .ToList();
 
         if (incoming.Count == 0) return;
 
@@ -6175,36 +6114,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Build TetrisTableWire (packed, 68 bytes):
-        //   game_id(1) + version(1) + count(1) + TetrisTableEntry[5]*13
-        //   TetrisTableEntry: nodeNum(4) + shortName[5] + score(4)
-        const int entrySize = 13;
-        const int tableSize = 3 + 5 * entrySize;
-        var tbl = new byte[tableSize];
-        tbl[0] = TetrisWireGameId;
-        tbl[1] = TetrisWireVersion;
-        byte count = (byte)Math.Min(scores.Count, 5);
-        tbl[2] = count;
-        for (int i = 0; i < count; i++)
-        {
-            int o = 3 + i * entrySize;
-            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o), scores[i].NodeNum);
-            var nameBytes = Encoding.ASCII.GetBytes(scores[i].ShortName);
-            int nameCopy = Math.Min(nameBytes.Length, 4);
-            nameBytes.AsSpan(0, nameCopy).CopyTo(tbl.AsSpan(o + 4));
-            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o + 9), scores[i].Score);
-        }
+        var lb = new Meshtastic.Protobuf.GameLeaderboard { Game = Meshtastic.Protobuf.GameType.GameTetris };
+        foreach (var s in scores.Take(5))
+            lb.Entries.Add(new Meshtastic.Protobuf.GameLeaderboardEntry
+                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score });
+        var payload = lb.ToByteArray();
 
         try
         {
             uint packetId = NextPacketId();
             var frame = MeshEncoder.Encode(
                 primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
-                PortNum.PrivateApp, tbl, hopLimit: (byte)HopLimit);
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
-                ? $"Tetris scores broadcast ({count} entries, {frame.Length} B)"
+                ? $"Tetris scores broadcast ({lb.Entries.Count} entries, {frame.Length} B)"
                 : "Tetris broadcast failed (device cannot transmit).";
             Log(Status);
         }
@@ -6255,36 +6180,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Build SnakeTableWire (packed, 67 bytes):
-        //   version(1) + count(1) + SnakeTableEntry[5]*13
-        //   SnakeTableEntry: nodeNum(4) + shortName[5] + score(4)
-        const int entrySize = 13;
-        const int tableSize = 2 + 5 * entrySize;
-        var tbl = new byte[tableSize];
-        tbl[0] = SnakeWireVersion;
-        byte count = (byte)Math.Min(scores.Count, 5);
-        tbl[1] = count;
-        for (int i = 0; i < count; i++)
-        {
-            int o = 2 + i * entrySize;
-            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o), scores[i].NodeNum);
-            var nameBytes = Encoding.ASCII.GetBytes(scores[i].ShortName);
-            int nameCopy = Math.Min(nameBytes.Length, 4); // 4 chars + NUL = 5 bytes total
-            nameBytes.AsSpan(0, nameCopy).CopyTo(tbl.AsSpan(o + 4));
-            // tbl[o + 8] stays 0 (NUL terminator)
-            BinaryPrimitives.WriteUInt32LittleEndian(tbl.AsSpan(o + 9), scores[i].Score);
-        }
+        var lb = new Meshtastic.Protobuf.GameLeaderboard { Game = Meshtastic.Protobuf.GameType.GameSnake };
+        foreach (var s in scores.Take(5))
+            lb.Entries.Add(new Meshtastic.Protobuf.GameLeaderboardEntry
+                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score });
+        var payload = lb.ToByteArray();
 
         try
         {
             uint packetId = NextPacketId();
             var frame = MeshEncoder.Encode(
                 primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
-                PortNum.PrivateApp, tbl, hopLimit: (byte)HopLimit);
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
-                ? $"Snake scores broadcast ({count} entries, {frame.Length} B)"
+                ? $"Snake scores broadcast ({lb.Entries.Count} entries, {frame.Length} B)"
                 : "Snake broadcast failed (device cannot transmit).";
             Log(Status);
         }
@@ -7689,7 +7600,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     break;
                 case PortNum.StoreForward when result.StoreForward is not null:
                     break;
-                case PortNum.PrivateApp:
+                case PortNum.GameApp:
                     TryApplySnakeScores(result.AppPayload, header.From);
                     TryApplyTetrisScores(result.AppPayload, header.From);
                     break;
