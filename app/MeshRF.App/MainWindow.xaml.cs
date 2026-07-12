@@ -310,6 +310,48 @@ public partial class MainWindow : Window
         w.Show();
     }
 
+    private void OnOpenBreakoutScores(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not MeshRF.App.ViewModels.ChannelViewModel channel)
+            return;
+
+        foreach (Window window in OwnedWindows)
+        {
+            if (window is BreakoutHighScoresWindow existing &&
+                ReferenceEquals(existing.DataContext, channel))
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                    existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return;
+            }
+        }
+
+        var w = new BreakoutHighScoresWindow { Owner = this, DataContext = channel, Tag = DataContext };
+        w.Show();
+    }
+
+    private void OnOpenChirpyRunnerScores(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not MeshRF.App.ViewModels.ChannelViewModel channel)
+            return;
+
+        foreach (Window window in OwnedWindows)
+        {
+            if (window is ChirpyRunnerHighScoresWindow existing &&
+                ReferenceEquals(existing.DataContext, channel))
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                    existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return;
+            }
+        }
+
+        var w = new ChirpyRunnerHighScoresWindow { Owner = this, DataContext = channel, Tag = DataContext };
+        w.Show();
+    }
+
     private void OnOpenSelfTelemetryHistory(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm)

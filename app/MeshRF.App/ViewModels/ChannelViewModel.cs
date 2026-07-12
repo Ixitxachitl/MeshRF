@@ -43,6 +43,8 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         UpdatePositionPrecisionOptions(unitSystem);
         SnakeScores.CollectionChanged += (_, _) => HasSnakeScores = SnakeScores.Count > 0;
         TetrisScores.CollectionChanged += (_, _) => HasTetrisScores = TetrisScores.Count > 0;
+        BreakoutScores.CollectionChanged += (_, _) => HasBreakoutScores = BreakoutScores.Count > 0;
+        ChirpyRunnerScores.CollectionChanged += (_, _) => HasChirpyRunnerScores = ChirpyRunnerScores.Count > 0;
     }
 
     /// <summary>Decoded text messages, newest last.</summary>
@@ -68,6 +70,28 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     {
         get => _hasTetrisScores;
         private set { if (_hasTetrisScores != value) { _hasTetrisScores = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>Breakout high-score table entries as received from the mesh.</summary>
+    public ObservableCollection<BreakoutHighScoreEntry> BreakoutScores { get; } = new();
+
+    private bool _hasBreakoutScores;
+    /// <summary>True when at least one Breakout high score has been received.</summary>
+    public bool HasBreakoutScores
+    {
+        get => _hasBreakoutScores;
+        private set { if (_hasBreakoutScores != value) { _hasBreakoutScores = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>Chirpy Runner high-score table entries as received from the mesh.</summary>
+    public ObservableCollection<ChirpyRunnerHighScoreEntry> ChirpyRunnerScores { get; } = new();
+
+    private bool _hasChirpyRunnerScores;
+    /// <summary>True when at least one Chirpy Runner high score has been received.</summary>
+    public bool HasChirpyRunnerScores
+    {
+        get => _hasChirpyRunnerScores;
+        private set { if (_hasChirpyRunnerScores != value) { _hasChirpyRunnerScores = value; OnPropertyChanged(); } }
     }
 
     [ObservableProperty]
@@ -197,6 +221,12 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
 
     [RelayCommand]
     private void ClearTetrisScores() => TetrisScores.Clear();
+
+    [RelayCommand]
+    private void ClearBreakoutScores() => BreakoutScores.Clear();
+
+    [RelayCommand]
+    private void ClearChirpyRunnerScores() => ChirpyRunnerScores.Clear();
 }
 
 public partial class ChannelMessage : ObservableObject

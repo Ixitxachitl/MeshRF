@@ -1415,6 +1415,24 @@
                                                     Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
                                                 <emoji:TextBlock Text="🧱" FontSize="11" />
                                             </Button>
+                                            <Button DockPanel.Dock="Right"
+                                                    Padding="4,1"
+                                                    Margin="4,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    ToolTip="Breakout high scores received from the mesh"
+                                                    Click="OnOpenBreakoutScores"
+                                                    Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
+                                                <emoji:TextBlock Text="🏓" FontSize="11" />
+                                            </Button>
+                                            <Button DockPanel.Dock="Right"
+                                                    Padding="4,1"
+                                                    Margin="4,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    ToolTip="Chirpy Runner high scores received from the mesh"
+                                                    Click="OnOpenChirpyRunnerScores"
+                                                    Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
+                                                <emoji:TextBlock Text="🐦" FontSize="11" />
+                                            </Button>
                                             <ToggleButton DockPanel.Dock="Right"
                                                     Content="Auto-scroll"
                                                     Margin="4,0,0,0"

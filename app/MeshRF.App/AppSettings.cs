@@ -431,6 +431,12 @@ public sealed class AppSettings
     /// <summary>Tetris high-score table received from the mesh, persisted across sessions.</summary>
     public List<PersistedTetrisScore> TetrisHighScores { get; set; } = new();
 
+    /// <summary>Breakout high-score table received from the mesh, persisted across sessions.</summary>
+    public List<PersistedBreakoutScore> BreakoutHighScores { get; set; } = new();
+
+    /// <summary>Chirpy Runner high-score table received from the mesh, persisted across sessions.</summary>
+    public List<PersistedChirpyRunnerScore> ChirpyRunnerHighScores { get; set; } = new();
+
     private static readonly JsonSerializerOptions s_opts = new()
     {
         WriteIndented = true,
@@ -509,6 +515,24 @@ public sealed class PersistedSnakeScore
 
 /// <summary>One entry in the persisted Tetris high-score table.</summary>
 public sealed class PersistedTetrisScore
+{
+    public uint NodeNum { get; set; }
+    public string ShortName { get; set; } = string.Empty;
+    public uint Score { get; set; }
+    public uint ScoreId { get; set; }
+}
+
+/// <summary>One entry in the persisted Breakout high-score table.</summary>
+public sealed class PersistedBreakoutScore
+{
+    public uint NodeNum { get; set; }
+    public string ShortName { get; set; } = string.Empty;
+    public uint Score { get; set; }
+    public uint ScoreId { get; set; }
+}
+
+/// <summary>One entry in the persisted Chirpy Runner high-score table.</summary>
+public sealed class PersistedChirpyRunnerScore
 {
     public uint NodeNum { get; set; }
     public string ShortName { get; set; } = string.Empty;

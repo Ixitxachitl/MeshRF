@@ -2976,6 +2976,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _subscribedTetrisScoresChannel = tetrisPrimary;
             tetrisPrimary.TetrisScores.CollectionChanged += OnTetrisScoresChanged;
         }
+        var breakoutPrimary = snakePrimary;
+        if (_subscribedBreakoutScoresChannel != null)
+        {
+            _subscribedBreakoutScoresChannel.BreakoutScores.CollectionChanged -= OnBreakoutScoresChanged;
+            _subscribedBreakoutScoresChannel = null;
+        }
+        if (breakoutPrimary != null)
+        {
+            RestoreBreakoutScores(breakoutPrimary);
+            _subscribedBreakoutScoresChannel = breakoutPrimary;
+            breakoutPrimary.BreakoutScores.CollectionChanged += OnBreakoutScoresChanged;
+        }
+        var chirpyPrimary = snakePrimary;
+        if (_subscribedChirpyRunnerScoresChannel != null)
+        {
+            _subscribedChirpyRunnerScoresChannel.ChirpyRunnerScores.CollectionChanged -= OnChirpyRunnerScoresChanged;
+            _subscribedChirpyRunnerScoresChannel = null;
+        }
+        if (chirpyPrimary != null)
+        {
+            RestoreChirpyRunnerScores(chirpyPrimary);
+            _subscribedChirpyRunnerScoresChannel = chirpyPrimary;
+            chirpyPrimary.ChirpyRunnerScores.CollectionChanged += OnChirpyRunnerScoresChanged;
+        }
     }
 
     private bool IsChannelRtttlMuted(int channelIndex) =>
@@ -3518,6 +3542,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ToList() ?? new();
         _settings.TetrisHighScores = snakePrimary?.TetrisScores
             .Select(e => new PersistedTetrisScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score, ScoreId = e.ScoreId })
+            .ToList() ?? new();
+        _settings.BreakoutHighScores = snakePrimary?.BreakoutScores
+            .Select(e => new PersistedBreakoutScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score, ScoreId = e.ScoreId })
+            .ToList() ?? new();
+        _settings.ChirpyRunnerHighScores = snakePrimary?.ChirpyRunnerScores
+            .Select(e => new PersistedChirpyRunnerScore { NodeNum = e.NodeNum, ShortName = e.ShortName, Score = e.Score, ScoreId = e.ScoreId })
             .ToList() ?? new();
         _settings.Save();
     }
@@ -4248,6 +4278,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SendAirQualityMetricsCommand.NotifyCanExecuteChanged();
         SendSnakeHighScoresCommand.NotifyCanExecuteChanged();
         SendTetrisHighScoresCommand.NotifyCanExecuteChanged();
+        SendBreakoutHighScoresCommand.NotifyCanExecuteChanged();
+        SendChirpyRunnerHighScoresCommand.NotifyCanExecuteChanged();
         Status = $"Idle (RX {_core.DeviceName}, TX {_core.TxDeviceName})";
         Log(DeviceBadge);
         if (!_core.CanTransmit)
@@ -6155,6 +6187,212 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private ChannelViewModel? _subscribedTetrisScoresChannel;
 
+    // -----------------------------------------------------------------------
+    // Breakout high scores (GAME_APP port, game.proto GameType.GAME_BREAKOUT)
+    // -----------------------------------------------------------------------
+
+    private void TryApplyBreakoutScores(byte[] payload, uint fromNode)
+    {
+        if (IsNodeIgnored(fromNode)) return;
+        Meshtastic.Protobuf.GameLeaderboard lb;
+        try { lb = Meshtastic.Protobuf.GameLeaderboard.Parser.ParseFrom(payload); }
+        catch { return; }
+        if (lb.Game != Meshtastic.Protobuf.GameType.GameBreakout) return;
+
+        var primaryCh = Channels.FirstOrDefault(c => c.IsPrimary);
+        if (primaryCh == null) return;
+
+        var incoming = lb.Entries
+            .Where(e => e.Score > 0)
+            .Select(e => new BreakoutHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score, e.ScoreId))
+            .ToList();
+        if (incoming.Count == 0) return;
+
+        var merged = primaryCh.BreakoutScores.ToList();
+        foreach (var entry in incoming)
+        {
+            bool alreadySeen = entry.ScoreId != 0 &&
+                merged.Any(e => e.NodeNum == entry.NodeNum && e.ScoreId == entry.ScoreId);
+            if (!alreadySeen)
+                merged.Add(entry);
+        }
+        merged.Sort((a, b) => b.Score.CompareTo(a.Score));
+        if (merged.Count > 5) merged = merged.GetRange(0, 5);
+
+        if (_subscribedBreakoutScoresChannel != null)
+            _subscribedBreakoutScoresChannel.BreakoutScores.CollectionChanged -= OnBreakoutScoresChanged;
+        primaryCh.BreakoutScores.Clear();
+        for (int i = 0; i < merged.Count; i++)
+            primaryCh.BreakoutScores.Add(merged[i] with { Rank = i + 1 });
+        if (_subscribedBreakoutScoresChannel != null)
+            _subscribedBreakoutScoresChannel.BreakoutScores.CollectionChanged += OnBreakoutScoresChanged;
+        SaveSettings();
+    }
+
+    private void OnBreakoutScoresChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        => SaveSettings();
+
+    private void RestoreBreakoutScores(ChannelViewModel primaryCh)
+    {
+        var saved = _settings.BreakoutHighScores;
+        if (saved == null || saved.Count == 0) return;
+        var sorted = saved
+            .Where(e => e.Score > 0)
+            .OrderByDescending(e => e.Score)
+            .Take(5)
+            .ToList();
+        primaryCh.BreakoutScores.Clear();
+        for (int i = 0; i < sorted.Count; i++)
+            primaryCh.BreakoutScores.Add(new BreakoutHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score, sorted[i].ScoreId));
+    }
+
+    private bool CanSendBreakoutHighScores() => CanTransmit && _myNodeNum != 0;
+
+    [RelayCommand(CanExecute = nameof(CanSendBreakoutHighScores))]
+    private async Task SendBreakoutHighScoresAsync()
+    {
+        var primaryCh = Channels.FirstOrDefault(c => c.IsPrimary);
+        if (primaryCh == null || _myNodeNum == 0 || !CanTransmit) return;
+
+        var scores = primaryCh.BreakoutScores.ToList();
+        if (scores.Count == 0)
+        {
+            Status = "No Breakout scores to broadcast.";
+            Log(Status);
+            return;
+        }
+
+        var lb = new Meshtastic.Protobuf.GameLeaderboard { Game = Meshtastic.Protobuf.GameType.GameBreakout };
+        foreach (var s in scores.Take(5))
+            lb.Entries.Add(new Meshtastic.Protobuf.GameLeaderboardEntry
+                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score, ScoreId = s.ScoreId });
+        var payload = lb.ToByteArray();
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.Encode(
+                primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            Status = ok
+                ? $"Breakout scores broadcast ({lb.Entries.Count} entries, {frame.Length} B)"
+                : "Breakout broadcast failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Breakout broadcast error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    private ChannelViewModel? _subscribedBreakoutScoresChannel;
+
+    // -----------------------------------------------------------------------
+    // Chirpy Runner high scores (GAME_APP port, GameType.GAME_CHIRPY_RUNNER)
+    // -----------------------------------------------------------------------
+
+    private void TryApplyChirpyRunnerScores(byte[] payload, uint fromNode)
+    {
+        if (IsNodeIgnored(fromNode)) return;
+        Meshtastic.Protobuf.GameLeaderboard lb;
+        try { lb = Meshtastic.Protobuf.GameLeaderboard.Parser.ParseFrom(payload); }
+        catch { return; }
+        if (lb.Game != Meshtastic.Protobuf.GameType.GameChirpyRunner) return;
+
+        var primaryCh = Channels.FirstOrDefault(c => c.IsPrimary);
+        if (primaryCh == null) return;
+
+        var incoming = lb.Entries
+            .Where(e => e.Score > 0)
+            .Select(e => new ChirpyRunnerHighScoreEntry(0, e.NodeNum, e.ShortName, e.Score, e.ScoreId))
+            .ToList();
+        if (incoming.Count == 0) return;
+
+        var merged = primaryCh.ChirpyRunnerScores.ToList();
+        foreach (var entry in incoming)
+        {
+            bool alreadySeen = entry.ScoreId != 0 &&
+                merged.Any(e => e.NodeNum == entry.NodeNum && e.ScoreId == entry.ScoreId);
+            if (!alreadySeen)
+                merged.Add(entry);
+        }
+        merged.Sort((a, b) => b.Score.CompareTo(a.Score));
+        if (merged.Count > 5) merged = merged.GetRange(0, 5);
+
+        if (_subscribedChirpyRunnerScoresChannel != null)
+            _subscribedChirpyRunnerScoresChannel.ChirpyRunnerScores.CollectionChanged -= OnChirpyRunnerScoresChanged;
+        primaryCh.ChirpyRunnerScores.Clear();
+        for (int i = 0; i < merged.Count; i++)
+            primaryCh.ChirpyRunnerScores.Add(merged[i] with { Rank = i + 1 });
+        if (_subscribedChirpyRunnerScoresChannel != null)
+            _subscribedChirpyRunnerScoresChannel.ChirpyRunnerScores.CollectionChanged += OnChirpyRunnerScoresChanged;
+        SaveSettings();
+    }
+
+    private void OnChirpyRunnerScoresChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        => SaveSettings();
+
+    private void RestoreChirpyRunnerScores(ChannelViewModel primaryCh)
+    {
+        var saved = _settings.ChirpyRunnerHighScores;
+        if (saved == null || saved.Count == 0) return;
+        var sorted = saved
+            .Where(e => e.Score > 0)
+            .OrderByDescending(e => e.Score)
+            .Take(5)
+            .ToList();
+        primaryCh.ChirpyRunnerScores.Clear();
+        for (int i = 0; i < sorted.Count; i++)
+            primaryCh.ChirpyRunnerScores.Add(new ChirpyRunnerHighScoreEntry(i + 1, sorted[i].NodeNum, sorted[i].ShortName, sorted[i].Score, sorted[i].ScoreId));
+    }
+
+    private bool CanSendChirpyRunnerHighScores() => CanTransmit && _myNodeNum != 0;
+
+    [RelayCommand(CanExecute = nameof(CanSendChirpyRunnerHighScores))]
+    private async Task SendChirpyRunnerHighScoresAsync()
+    {
+        var primaryCh = Channels.FirstOrDefault(c => c.IsPrimary);
+        if (primaryCh == null || _myNodeNum == 0 || !CanTransmit) return;
+
+        var scores = primaryCh.ChirpyRunnerScores.ToList();
+        if (scores.Count == 0)
+        {
+            Status = "No Chirpy Runner scores to broadcast.";
+            Log(Status);
+            return;
+        }
+
+        var lb = new Meshtastic.Protobuf.GameLeaderboard { Game = Meshtastic.Protobuf.GameType.GameChirpyRunner };
+        foreach (var s in scores.Take(5))
+            lb.Entries.Add(new Meshtastic.Protobuf.GameLeaderboardEntry
+                { NodeNum = s.NodeNum, ShortName = s.ShortName, Score = s.Score, ScoreId = s.ScoreId });
+        var payload = lb.ToByteArray();
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.Encode(
+                primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            Status = ok
+                ? $"Chirpy Runner scores broadcast ({lb.Entries.Count} entries, {frame.Length} B)"
+                : "Chirpy Runner broadcast failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Chirpy Runner broadcast error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    private ChannelViewModel? _subscribedChirpyRunnerScoresChannel;
+
     private void OnSnakeScoresChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         => SaveSettings();
 
@@ -7616,6 +7854,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 case PortNum.GameApp:
                     TryApplySnakeScores(result.AppPayload, header.From);
                     TryApplyTetrisScores(result.AppPayload, header.From);
+                    TryApplyBreakoutScores(result.AppPayload, header.From);
+                    TryApplyChirpyRunnerScores(result.AppPayload, header.From);
                     break;
                 default:
                     break;
