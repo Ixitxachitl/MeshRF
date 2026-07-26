@@ -118,8 +118,6 @@ public partial class MainWindow : Window
             return;
 
         // Single class handler on ComboBox only.
-        // Popup-internal events live in a separate visual tree (PopupRoot) and never
-        // reach this handler, so the open dropdown list can still scroll on its own.
         EventManager.RegisterClassHandler(
             typeof(ComboBox),
             UIElement.PreviewMouseWheelEvent,
@@ -133,6 +131,14 @@ public partial class MainWindow : Window
     {
         var combo = sender as ComboBox;
         if (combo is null)
+            return;
+
+        // While the dropdown is open, the ComboBox holds mouse capture over
+        // its popup, so wheel input over the open item list still routes
+        // through this class handler (it does NOT stay confined to the
+        // popup's own visual tree, despite appearances). Step out of the way
+        // here so the popup's internal ScrollViewer scrolls the list normally.
+        if (combo.IsDropDownOpen)
             return;
 
         // Walk up the visual tree from the ComboBox looking for the nearest
