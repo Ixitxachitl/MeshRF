@@ -916,49 +916,49 @@ public partial class MainWindow : Window
     private async void OnSendNodeInfoPrompted(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        var channel = PromptForRequestChannel(vm, "Send node info on which channel?");
-        if (channel is null) return;
-        await vm.SendNodeInfoOnChannelAsync(channel);
+        var dest = PromptForSendDestination(vm, "Send node info on which channel?");
+        if (dest is not var (channel, dmNodeNum)) return;
+        await vm.SendNodeInfoOnChannelAsync(channel, dmNodeNum);
     }
 
     private async void OnSendPositionPrompted(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        var channel = PromptForRequestChannel(vm, "Send position on which channel?");
-        if (channel is null) return;
-        await vm.SendPositionOnChannelAsync(channel);
+        var dest = PromptForSendDestination(vm, "Send position on which channel?");
+        if (dest is not var (channel, dmNodeNum)) return;
+        await vm.SendPositionOnChannelAsync(channel, dmNodeNum);
     }
 
     private async void OnSendDeviceMetricsPrompted(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        var channel = PromptForRequestChannel(vm, "Send device metrics on which channel?");
-        if (channel is null) return;
-        await vm.SendDeviceMetricsOnChannelAsync(channel);
+        var dest = PromptForSendDestination(vm, "Send device metrics on which channel?");
+        if (dest is not var (channel, dmNodeNum)) return;
+        await vm.SendDeviceMetricsOnChannelAsync(channel, dmNodeNum);
     }
 
     private async void OnSendEnvironmentMetricsPrompted(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        var channel = PromptForRequestChannel(vm, "Send environment telemetry on which channel?");
-        if (channel is null) return;
-        await vm.SendEnvironmentMetricsOnChannelAsync(channel);
+        var dest = PromptForSendDestination(vm, "Send environment telemetry on which channel?");
+        if (dest is not var (channel, dmNodeNum)) return;
+        await vm.SendEnvironmentMetricsOnChannelAsync(channel, dmNodeNum);
     }
 
     private async void OnSendAirQualityMetricsPrompted(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        var channel = PromptForRequestChannel(vm, "Send air quality telemetry on which channel?");
-        if (channel is null) return;
-        await vm.SendAirQualityMetricsOnChannelAsync(channel);
+        var dest = PromptForSendDestination(vm, "Send air quality telemetry on which channel?");
+        if (dest is not var (channel, dmNodeNum)) return;
+        await vm.SendAirQualityMetricsOnChannelAsync(channel, dmNodeNum);
     }
 
     private async void OnSendNodeStatusPrompted(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        var channel = PromptForRequestChannel(vm, "Send status on which channel?");
-        if (channel is null) return;
-        await vm.SendNodeStatusOnChannelAsync(channel);
+        var dest = PromptForSendDestination(vm, "Send status on which channel?");
+        if (dest is not var (channel, dmNodeNum)) return;
+        await vm.SendNodeStatusOnChannelAsync(channel, dmNodeNum);
     }
 
     private ChannelConfig? PromptForRequestChannel(MainViewModel vm, string prompt)
@@ -979,8 +979,46 @@ public partial class MainWindow : Window
             Owner = this,
         };
         return picker.ShowDialog() == true
-            ? picker.SelectedChannel?.Config
+            ? picker.SelectedChannel
             : null;
+    }
+
+    /// <summary>
+    /// Like <see cref="PromptForRequestChannel"/>, but also offers any
+    /// currently-open DM conversations as destinations, so the user can send
+    /// directly to one peer instead of broadcasting to a whole channel.
+    /// Returns null if the dialog was cancelled.
+    /// </summary>
+    private (ChannelConfig? Channel, uint? DmNodeNum)? PromptForSendDestination(MainViewModel vm, string prompt)
+    {
+        var channels = vm.Channels.ToList();
+        var openDms = vm.Tabs.OfType<ConversationViewModel>().ToList();
+        if (channels.Count == 0 && openDms.Count == 0) return null;
+        if (channels.Count == 1 && openDms.Count == 0) return (channels[0].Config, null);
+
+        var selectedChannel = vm.SelectedChannel;
+        int preferredIndex = selectedChannel is not null &&
+                (selectedChannel.Config.Role == ChannelRole.Primary || selectedChannel.Config.Role == ChannelRole.Secondary)
+                ? selectedChannel.Config.Index
+                : channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config.Index
+                    ?? channels.FirstOrDefault()?.Config.Index
+                    ?? -1;
+
+        var picker = new ChannelPickerWindow(channels, preferredIndex, prompt, openDms)
+        {
+            Owner = this,
+        };
+        if (picker.ShowDialog() != true) return null;
+
+        // DMs still ride a channel's PSK for encryption even though they're
+        // unicast to a peer, so resolve one when the user picked a DM entry
+        // (which carries no ChannelConfig of its own).
+        var channel = picker.SelectedChannel
+            ?? (picker.SelectedDmNodeNum is not null
+                ? channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config
+                    ?? channels.FirstOrDefault()?.Config
+                : null);
+        return (channel, picker.SelectedDmNodeNum);
     }
 
     private void DeleteSelectedNodes()

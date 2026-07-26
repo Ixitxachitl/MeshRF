@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using MeshRF.App;
 using Path = System.IO.Path;
 
 namespace MeshRF.App.Views;
@@ -17,18 +18,54 @@ namespace MeshRF.App.Views;
 /// to show a waypoint's location and let the user redraw its rectangular
 /// geofence by clicking two opposite corners. Deliberately independent of
 /// <c>MapView</c> (own tile fetch/cache, own pan/zoom) so a bug here can't
-/// affect the main map; shares the same on-disk tile cache directory and a
-/// fixed tile style (CARTO Voyager) so it stays legible in both themes without
-/// needing MapView's per-provider gamma correction.
+/// affect the main map, but follows the same map tile theme (<see
+/// cref="ThemeManager.MapTileTheme"/>, including "Auto" following the app
+/// theme) and shares the same on-disk tile cache directory, tile providers,
+/// and dark-tile gamma correction as <c>MapView</c>/<c>LocationHistoryWindow</c>.
 /// </summary>
 public partial class WaypointBoundingBoxPreview : UserControl
 {
     private const int TileSize = 256;
     private const int MinZoom = 3;
     private const int MaxZoom = 19;
-    private const string TileProviderId = "cartovoyager";
-    private const string TileUrlTemplate = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
-    private const string TileSubdomains = "abcd";
+
+    private readonly record struct TileProvider(
+        string Id, string UrlTemplate, string Subdomains,
+        double Brightness = 1.0, double Gamma = 1.0);
+
+    private static readonly TileProvider LightTiles = new(
+        "osm",
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "abc");
+
+    private static readonly TileProvider LightCartoTiles = new(
+        "cartopositron",
+        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "abcd");
+
+    private static readonly TileProvider VoyagerTiles = new(
+        "cartovoyager",
+        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "abcd");
+
+    private static readonly TileProvider DarkTiles = new(
+        "cartodark",
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "abcd",
+        // Gamma correction lifts the low-contrast CARTO dark palette: roads and
+        // labels become clearly readable while the dark background is preserved.
+        Gamma: 1.8);
+
+    private string _mapTileTheme = "Auto";
+
+    private TileProvider CurrentTiles => _mapTileTheme switch
+    {
+        "Light"         => LightTiles,
+        "Light (CARTO)" => LightCartoTiles,
+        "Voyager"       => VoyagerTiles,
+        "Dark"          => DarkTiles,
+        _               => ThemeManager.IsDark ? DarkTiles : LightTiles, // "Auto"
+    };
 
     private static readonly HttpClient s_http = CreateHttpClient();
     private static readonly string s_cacheDir = Path.Combine(
@@ -61,8 +98,24 @@ public partial class WaypointBoundingBoxPreview : UserControl
     {
         InitializeComponent();
         Directory.CreateDirectory(s_cacheDir);
+        _mapTileTheme = ThemeManager.MapTileTheme;
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        ThemeManager.MapTileThemeChanged += OnMapTileThemeChanged;
         Loaded += (_, _) => Render();
+        Unloaded += (_, _) =>
+        {
+            ThemeManager.ThemeChanged -= OnThemeChanged;
+            ThemeManager.MapTileThemeChanged -= OnMapTileThemeChanged;
+        };
         SizeChanged += (_, _) => Render();
+    }
+
+    private void OnThemeChanged() => Render();
+
+    private void OnMapTileThemeChanged()
+    {
+        _mapTileTheme = ThemeManager.MapTileTheme;
+        Render();
     }
 
     /// <summary>Sets the fixed waypoint marker position and the initial
@@ -277,30 +330,35 @@ public partial class WaypointBoundingBoxPreview : UserControl
         Canvas.SetTop(img, top);
         TileCanvas.Children.Add(img);
 
-        var key = $"{TileProviderId}/{zoom}/{x}/{y}";
+        var provider = CurrentTiles;
+        var key = $"{provider.Id}/{zoom}/{x}/{y}";
+        img.Tag = key;
         if (s_memCache.TryGetValue(key, out var cached))
         {
             img.Source = cached;
             return;
         }
-        _ = LoadTileAsync(key, x, y, zoom, img);
+        _ = LoadTileAsync(key, provider, x, y, zoom, img);
     }
 
-    private async Task LoadTileAsync(string key, int x, int y, int zoom, Image target)
+    private static async Task LoadTileAsync(string key, TileProvider provider, int x, int y, int zoom, Image target)
     {
         try
         {
-            var bmp = await GetTileBitmapAsync(x, y, zoom);
+            var bmp = await GetTileBitmapAsync(key, provider, x, y, zoom);
             if (bmp is null) return;
             s_memCache[key] = bmp;
-            target.Source = bmp;
+            // The tile may have started loading under a different theme; only
+            // apply it if the image still wants this exact tile.
+            if (Equals(target.Tag, key))
+                target.Source = bmp;
         }
         catch { /* tile fetch failed; leave blank */ }
     }
 
-    private static async Task<BitmapSource?> GetTileBitmapAsync(int x, int y, int zoom)
+    private static async Task<BitmapSource?> GetTileBitmapAsync(string key, TileProvider provider, int x, int y, int zoom)
     {
-        var file = Path.Combine(s_cacheDir, $"{TileProviderId}_{zoom}_{x}_{y}.png");
+        var file = Path.Combine(s_cacheDir, $"{provider.Id}_{zoom}_{x}_{y}.png");
         byte[] bytes;
         if (File.Exists(file))
         {
@@ -308,8 +366,8 @@ public partial class WaypointBoundingBoxPreview : UserControl
         }
         else
         {
-            var server = TileSubdomains[(x + y) % TileSubdomains.Length];
-            var url = TileUrlTemplate
+            var server = provider.Subdomains[(x + y) % provider.Subdomains.Length];
+            var url = provider.UrlTemplate
                 .Replace("{s}", server.ToString())
                 .Replace("{z}", zoom.ToString())
                 .Replace("{x}", x.ToString())
@@ -324,7 +382,40 @@ public partial class WaypointBoundingBoxPreview : UserControl
         bmp.StreamSource = new MemoryStream(bytes);
         bmp.EndInit();
         bmp.Freeze();
-        return bmp;
+
+        return (provider.Brightness == 1.0 && provider.Gamma == 1.0)
+            ? bmp
+            : PostProcessTile(bmp, provider.Brightness, provider.Gamma);
+    }
+
+    private static BitmapSource PostProcessTile(BitmapSource src, double brightness, double gamma)
+    {
+        var bgra = new FormatConvertedBitmap(src, PixelFormats.Bgra32, null, 0);
+        int w = bgra.PixelWidth, h = bgra.PixelHeight;
+        int stride = w * 4;
+        var pixels = new byte[h * stride];
+        bgra.CopyPixels(pixels, stride, 0);
+
+        var lut = new byte[256];
+        double gammaInv = (gamma > 0.0 && gamma != 1.0) ? (1.0 / gamma) : 1.0;
+        for (int i = 0; i < 256; i++)
+        {
+            double v = i / 255.0;
+            if (gammaInv != 1.0) v = Math.Pow(v, gammaInv);
+            lut[i] = (byte)Math.Min(255.0, v * brightness * 255.0);
+        }
+
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i]     = lut[pixels[i]];
+            pixels[i + 1] = lut[pixels[i + 1]];
+            pixels[i + 2] = lut[pixels[i + 2]];
+        }
+
+        var wb = new WriteableBitmap(w, h, bgra.DpiX, bgra.DpiY, PixelFormats.Bgra32, null);
+        wb.WritePixels(new Int32Rect(0, 0, w, h), pixels, stride, 0);
+        wb.Freeze();
+        return wb;
     }
 
     private static HttpClient CreateHttpClient()

@@ -5219,7 +5219,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         => await SendNodeStatusOnChannelAsync(
             Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
 
-    public async Task SendNodeStatusOnChannelAsync(ChannelConfig? channel)
+    public async Task SendNodeStatusOnChannelAsync(ChannelConfig? channel, uint? to = null)
     {
         if (_myNodeNum == 0)
         {
@@ -5249,14 +5249,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodeNodeStatus(
                 selectedChannel, _myNodeNum, packetId, statusText,
+                to: to ?? 0xFFFFFFFFu,
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var channelName = ChannelDisplayName(selectedChannel);
+            var destName = to is uint dest ? NodeDisplayName(dest) : ChannelDisplayName(selectedChannel);
 
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
-                ? $"Sent node status ({frame.Length} B) on {channelName}"
+                ? $"Sent node status ({frame.Length} B) {(to is not null ? "to" : "on")} {destName}"
                 : "Transmit failed (device cannot transmit).";
             Log(Status);
         }
@@ -5277,7 +5278,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         => await SendNodeInfoOnChannelAsync(
             Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
 
-    public async Task SendNodeInfoOnChannelAsync(ChannelConfig? channel)
+    public async Task SendNodeInfoOnChannelAsync(ChannelConfig? channel, uint? to = null)
     {
         if (_myNodeNum == 0)
         {
@@ -5302,15 +5303,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var frame = MeshEncoder.EncodeNodeInfo(
                 selectedChannel, _myNodeNum, packetId,
                 MyLongName ?? string.Empty, MyShortName ?? string.Empty,
-                hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey, hopLimit: (byte)HopLimit,
+                hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey,
+                to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit,
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var channelName = ChannelDisplayName(selectedChannel);
+            var destName = to is uint dest ? NodeDisplayName(dest) : ChannelDisplayName(selectedChannel);
 
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
-                ? $"Sent node info ({frame.Length} B) on {channelName}"
+                ? $"Sent node info ({frame.Length} B) {(to is not null ? "to" : "on")} {destName}"
                 : "Transmit failed (device cannot transmit).";
             Log(Status);
         }
@@ -5337,7 +5339,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         => await SendPositionOnChannelAsync(
             Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
 
-    public async Task SendPositionOnChannelAsync(ChannelConfig? channel)
+    public async Task SendPositionOnChannelAsync(ChannelConfig? channel, uint? to = null)
     {
         if (_myNodeNum == 0)
         {
@@ -5376,16 +5378,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 selectedChannel, _myNodeNum, packetId,
                 lat, lon, altitudeM: HomeAltitude,
                 precisionBits: selectedChannel.PositionPrecision,
+                to: to ?? 0xFFFFFFFFu,
                 hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var channelName = ChannelDisplayName(selectedChannel);
+            var destName = to is uint dest ? NodeDisplayName(dest) : ChannelDisplayName(selectedChannel);
 
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             if (ok)
                 PersistSelfPositionTx(lat, lon, HomeAltitude);
             Status = ok
-                ? $"Sent position ({frame.Length} B) on {channelName}"
+                ? $"Sent position ({frame.Length} B) {(to is not null ? "to" : "on")} {destName}"
                 : "Transmit failed (device cannot transmit).";
             Log(Status);
         }
@@ -5421,7 +5424,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         => await SendAirQualityMetricsOnChannelAsync(
             Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config);
 
-    public async Task SendDeviceMetricsOnChannelAsync(ChannelConfig? channel)
+    public async Task SendDeviceMetricsOnChannelAsync(ChannelConfig? channel, uint? to = null)
     {
         var selectedChannel = channel;
         if (selectedChannel is null)
@@ -5457,12 +5460,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 channelUtilization: channelUtil,
                 airUtilTx: airUtilTx,
                 uptimeSeconds: uptime,
+                to: to ?? 0xFFFFFFFFu,
                 hopLimit: (byte)HopLimit,
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
 
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var channelName = ChannelDisplayName(selectedChannel);
+            var destName = to is uint dest ? NodeDisplayName(dest) : ChannelDisplayName(selectedChannel);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             if (ok)
             {
@@ -5476,7 +5480,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 });
             }
             Status = ok
-                ? $"Sent device metrics ({frame.Length} B) on {channelName}"
+                ? $"Sent device metrics ({frame.Length} B) {(to is not null ? "to" : "on")} {destName}"
                 : "Transmit failed (device cannot transmit).";
             Log(Status);
         }
@@ -5487,7 +5491,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task SendEnvironmentMetricsOnChannelAsync(ChannelConfig? channel)
+    public async Task SendEnvironmentMetricsOnChannelAsync(ChannelConfig? channel, uint? to = null)
     {
         var selectedChannel = channel;
         if (selectedChannel is null)
@@ -5523,12 +5527,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 temperatureC: snapshot.TemperatureC,
                 relativeHumidityPct: snapshot.RelativeHumidityPct,
                 barometricPressureHpa: snapshot.BarometricPressureHpa,
+                to: to ?? 0xFFFFFFFFu,
                 hopLimit: (byte)HopLimit,
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
 
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var channelName = ChannelDisplayName(selectedChannel);
+            var destName = to is uint dest ? NodeDisplayName(dest) : ChannelDisplayName(selectedChannel);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             if (ok)
             {
@@ -5543,7 +5548,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             Status = ok
-                ? $"Sent environment metrics ({frame.Length} B) on {channelName}"
+                ? $"Sent environment metrics ({frame.Length} B) {(to is not null ? "to" : "on")} {destName}"
                 : "Transmit failed (device cannot transmit).";
             Log(Status);
         }
@@ -5649,7 +5654,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return false;
     }
 
-    public async Task SendAirQualityMetricsOnChannelAsync(ChannelConfig? channel)
+    public async Task SendAirQualityMetricsOnChannelAsync(ChannelConfig? channel, uint? to = null)
     {
         var selectedChannel = channel;
         if (selectedChannel is null)
@@ -5684,12 +5689,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 packetId,
                 pm25Standard: snapshot.Pm25Standard,
                 pm100Standard: snapshot.Pm100Standard,
+                to: to ?? 0xFFFFFFFFu,
                 hopLimit: (byte)HopLimit,
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
 
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-            var channelName = ChannelDisplayName(selectedChannel);
+            var destName = to is uint dest ? NodeDisplayName(dest) : ChannelDisplayName(selectedChannel);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             if (ok)
             {
@@ -5703,7 +5709,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             Status = ok
-                ? $"Sent air quality metrics ({frame.Length} B) on {channelName}"
+                ? $"Sent air quality metrics ({frame.Length} B) {(to is not null ? "to" : "on")} {destName}"
                 : "Transmit failed (device cannot transmit).";
             Log(Status);
         }
@@ -5808,7 +5814,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// map until explicitly deleted.
     /// </summary>
     public async Task SendWaypointFromMapAsync(double lat, double lon,
-                                               ChannelConfig? channel = null)
+                                               ChannelConfig? channel = null,
+                                               uint? to = null)
     {
         if (!CanTransmit || _myNodeNum == 0)
         {
@@ -5868,6 +5875,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 notifyOnEnter: notifyOnEnter,
                 notifyOnExit: notifyOnExit,
                 notifyFavoritesOnly: notifyFavoritesOnly,
+                to: to ?? 0xFFFFFFFFu,
                 hopLimit: (byte)HopLimit,
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
@@ -5907,7 +5915,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             });
             ReloadWaypoints();
 
-            Status = $"Sent waypoint ({frame.Length} B) on {selectedChannelName}";
+            var destName = to is uint dest ? NodeDisplayName(dest) : selectedChannelName;
+            Status = $"Sent waypoint ({frame.Length} B) {(to is not null ? "to" : "on")} {destName}";
             Log(Status);
         }
         catch (Exception ex)

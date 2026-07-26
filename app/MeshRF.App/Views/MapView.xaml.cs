@@ -2082,14 +2082,14 @@ public partial class MapView : UserControl
             lon = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
             lat = ClampLat(lat);
 
-            var channel = PromptForWaypointChannel(_vm);
-            if (channel is null)
+            var dest = PromptForWaypointDestination(_vm);
+            if (dest is not var (channel, dmNodeNum))
             {
                 e.Handled = true;
                 return;
             }
 
-            _ = _vm.SendWaypointFromMapAsync(lat, lon, channel);
+            _ = _vm.SendWaypointFromMapAsync(lat, lon, channel, dmNodeNum);
             e.Handled = true;
             return;
         }
@@ -2124,10 +2124,16 @@ public partial class MapView : UserControl
         MarkerCanvas.CaptureMouse();
     }
 
-    private ChannelConfig? PromptForWaypointChannel(MainViewModel vm)
+    /// <summary>
+    /// Prompts for a broadcast channel or, if the user has an open DM
+    /// conversation, a direct-message peer to send the waypoint to instead.
+    /// Returns null if the dialog was cancelled.
+    /// </summary>
+    private (ChannelConfig? Channel, uint? DmNodeNum)? PromptForWaypointDestination(MainViewModel vm)
     {
         var channels = vm.Channels.ToList();
-        if (channels.Count == 0)
+        var openDms = vm.Tabs.OfType<ConversationViewModel>().ToList();
+        if (channels.Count == 0 && openDms.Count == 0)
         {
             vm.Status = "No channel to send waypoint on.";
             return null;
@@ -2138,17 +2144,26 @@ public partial class MapView : UserControl
             (selectedChannel.Config.Role == ChannelRole.Primary || selectedChannel.Config.Role == ChannelRole.Secondary)
             ? selectedChannel.Config.Index
             : channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config.Index
-                ?? channels[0].Config.Index;
+                ?? channels.FirstOrDefault()?.Config.Index
+                ?? -1;
 
         var picker = new ChannelPickerWindow(channels, preferredIndex,
-            "Send waypoint on which channel?")
+            "Send waypoint on which channel?", openDms)
         {
             Owner = Window.GetWindow(this),
         };
 
-        return picker.ShowDialog() == true
-            ? picker.SelectedChannel?.Config
-            : null;
+        if (picker.ShowDialog() != true) return null;
+
+        // DMs still ride a channel's PSK for encryption even though they're
+        // unicast to a peer, so resolve one when the user picked a DM entry
+        // (which carries no ChannelConfig of its own).
+        var channel = picker.SelectedChannel
+            ?? (picker.SelectedDmNodeNum is not null
+                ? channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config
+                    ?? channels.FirstOrDefault()?.Config
+                : null);
+        return (channel, picker.SelectedDmNodeNum);
     }
 
     private bool IsWithinSpider(DependencyObject? source)
