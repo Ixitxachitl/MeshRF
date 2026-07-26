@@ -906,6 +906,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         WaypointBboxSouth = Math.Min(latA, latB);
         WaypointBboxNorth = Math.Max(latA, latB);
         IsPickingWaypointBoundingBox = false;
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     [RelayCommand]
@@ -916,6 +917,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         WaypointBboxEast = null;
         WaypointBboxNorth = null;
         IsPickingWaypointBoundingBox = false;
+        MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public IReadOnlyList<string> WaypointExpiryHourOptions { get; } =
@@ -1057,11 +1059,67 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsWaypointLockedByOther(WaypointRecord wp) =>
         wp.LockedTo != 0 && wp.LockedTo != _myNodeNum;
 
-    /// <summary>Remove persisted waypoints and refresh the map.</summary>
-    public void RemoveWaypoints(IEnumerable<WaypointRecord> waypoints)
+    /// <summary>
+    /// Remove persisted waypoints and refresh the map. For each waypoint we're
+    /// allowed to modify (unlocked, or locked to us) and can currently transmit
+    /// on, this also broadcasts an <c>expire = 1</c> update first — the
+    /// Meshtastic convention for signalling a delete to other nodes (mirrors the
+    /// official app's <c>sendWaypoint(wp.copy(expire = 1))</c>; there is no
+    /// separate delete message, receivers just see an already-expired waypoint
+    /// and drop it). Best-effort: a skipped or failed broadcast (no radio, no
+    /// matching channel, locked to someone else) never blocks the local removal.
+    /// </summary>
+    public async Task RemoveWaypointsAsync(IEnumerable<WaypointRecord> waypoints)
     {
         var targets = waypoints?.Where(w => w is not null).ToList();
         if (targets is null || targets.Count == 0) return;
+
+        if (CanTransmit && _myNodeNum != 0)
+        {
+            foreach (var wp in targets)
+            {
+                if (IsWaypointLockedByOther(wp)) continue;
+                if (wp.IsExpired) continue; // already expired mesh-side — nothing to signal
+
+                var channel = FindChannelByName(wp.Channel);
+                if (channel is null) continue;
+
+                try
+                {
+                    uint packetId = NextPacketId();
+                    var frame = MeshEncoder.EncodeWaypoint(
+                        channel,
+                        _myNodeNum,
+                        packetId,
+                        wp.WaypointId,
+                        wp.Latitude,
+                        wp.Longitude,
+                        name: wp.Name,
+                        description: wp.Description,
+                        expireEpoch: 1,
+                        lockedTo: wp.LockedTo,
+                        icon: wp.Icon,
+                        geofenceRadiusM: wp.GeofenceRadius,
+                        bboxWest: wp.BboxWest, bboxSouth: wp.BboxSouth,
+                        bboxEast: wp.BboxEast, bboxNorth: wp.BboxNorth,
+                        notifyOnEnter: wp.NotifyOnEnter,
+                        notifyOnExit: wp.NotifyOnExit,
+                        notifyFavoritesOnly: wp.NotifyFavoritesOnly,
+                        hopLimit: (byte)HopLimit,
+                        okToMqtt: OkToMqtt,
+                        xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
+                    var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+                    bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+                    Log(ok
+                        ? $"Broadcast waypoint delete (expire=1) for \"{wp.DisplayName}\""
+                        : $"Waypoint delete broadcast failed for \"{wp.DisplayName}\" (device cannot transmit) — removed locally only.");
+                }
+                catch (Exception ex)
+                {
+                    Log($"Waypoint delete broadcast error for \"{wp.DisplayName}\": {ex.Message}");
+                }
+            }
+        }
 
         _waypointStore.ForgetRange(targets.Select(w => w.Id));
         foreach (var wp in targets)

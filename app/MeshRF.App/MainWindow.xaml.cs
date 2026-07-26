@@ -462,7 +462,9 @@ public partial class MainWindow : Window
             if (DataContext is not MainViewModel vm) return;
             string lockNote = vm.IsWaypointLockedByOther(wp)
                 ? $"\n\nThis waypoint is locked to !{wp.LockedTo:x8}. This only removes it from your local cache — other clients still honor the lock."
-                : string.Empty;
+                : wp.IsExpired
+                    ? "\n\nThis waypoint has already expired on the mesh, so this only removes it from your local cache."
+                    : "\n\nThis also broadcasts an expire update so other nodes drop it too (best-effort).";
             var result = MessageBox.Show(
                 this,
                 $"Delete waypoint \"{wp.DisplayName}\"?{lockNote}",
@@ -471,7 +473,7 @@ public partial class MainWindow : Window
                 MessageBoxImage.Warning);
             if (result != MessageBoxResult.OK) return;
 
-            vm.RemoveWaypoints(new[] { wp });
+            _ = vm.RemoveWaypointsAsync(new[] { wp });
         };
 
         UpdateMainTabsDividerOverlay();
@@ -963,9 +965,13 @@ public partial class MainWindow : Window
             ? $"waypoint \"{selected[0].DisplayName}\""
             : $"{selected.Count} waypoints";
         int lockedByOtherCount = selected.Count(vm.IsWaypointLockedByOther);
-        string lockNote = lockedByOtherCount > 0
-            ? $"\n\n{lockedByOtherCount} of these are locked to another node. This only removes your local cache — other clients still honor the lock."
-            : string.Empty;
+        int broadcastCount = selected.Count(w => !vm.IsWaypointLockedByOther(w) && !w.IsExpired);
+        var notes = new List<string>();
+        if (lockedByOtherCount > 0)
+            notes.Add($"{lockedByOtherCount} locked to another node — removed from your local cache only, other clients still honor the lock.");
+        if (broadcastCount > 0)
+            notes.Add($"{broadcastCount} will also broadcast an expire update so other nodes drop them too (best-effort).");
+        string lockNote = notes.Count > 0 ? "\n\n" + string.Join(" ", notes) : string.Empty;
         var result = MessageBox.Show(
             this,
             $"Delete {label}? This removes them from the waypoint database.{lockNote}",
@@ -974,7 +980,7 @@ public partial class MainWindow : Window
             MessageBoxImage.Warning);
         if (result != MessageBoxResult.OK) return;
 
-        vm.RemoveWaypoints(selected);
+        _ = vm.RemoveWaypointsAsync(selected);
     }
 
     private void OnStatsTick(object? sender, EventArgs e)
