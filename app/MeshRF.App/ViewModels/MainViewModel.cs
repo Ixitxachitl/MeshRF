@@ -75,6 +75,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Telemetry fields from a just-received TELEMETRY_APP packet that may not yet
     // be committed to _nodeStore when the dirty flush reads.
     private readonly Dictionary<uint, NodeRecord> _pendingNodeTelemetry = new();
+    // Coordinates from a just-received Position packet that may not yet be
+    // committed to _nodeStore when the dirty flush reads.
+    private readonly Dictionary<uint, (double Latitude, double Longitude, int? AltitudeM)> _pendingNodePositions = new();
+    // Status text from a just-received NodeStatus packet that may not yet be
+    // committed to _nodeStore when the dirty flush reads.
+    private readonly Dictionary<uint, string> _pendingNodeStatuses = new();
+    // Nodes whose XEdDSA-verified flag was just set but may not yet be
+    // committed to _nodeStore when the dirty flush reads.
+    private readonly HashSet<uint> _pendingXeddsaSigned = new();
     private readonly Dictionary<uint, int> _nodeLocationHistoryCounts = new();
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
@@ -2036,6 +2045,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (!string.IsNullOrEmpty(pendingInfo.Role))       latest.Role      = pendingInfo.Role;
                 if (!string.IsNullOrEmpty(pendingInfo.PublicKey))  latest.PublicKey = pendingInfo.PublicKey;
                 if (pendingInfo.KeyMismatch.HasValue)               latest.KeyMismatch = pendingInfo.KeyMismatch.Value;
+                if (pendingInfo.IsUnmessagable.HasValue)            latest.IsUnmessagable = pendingInfo.IsUnmessagable.Value;
                 _pendingNodeInfos.Remove(nodeNum);
             }
 
@@ -2065,6 +2075,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (pendingTelemetry.Ch3VoltageV.HasValue)            latest.Ch3VoltageV = pendingTelemetry.Ch3VoltageV;
                 if (pendingTelemetry.Ch3CurrentMa.HasValue)           latest.Ch3CurrentMa = pendingTelemetry.Ch3CurrentMa;
                 _pendingNodeTelemetry.Remove(nodeNum);
+            }
+
+            // Apply the optimistic position overlay: coordinates written by
+            // EnqueueDbWrite may not be visible in _nodeStore yet.
+            if (_pendingNodePositions.TryGetValue(nodeNum, out var pendingPosition) && latest is not null)
+            {
+                latest.Latitude = pendingPosition.Latitude;
+                latest.Longitude = pendingPosition.Longitude;
+                latest.AltitudeM = pendingPosition.AltitudeM;
+                _pendingNodePositions.Remove(nodeNum);
+            }
+
+            // Apply the optimistic NodeStatus overlay: status text written by
+            // EnqueueDbWrite may not be visible in _nodeStore yet.
+            if (_pendingNodeStatuses.TryGetValue(nodeNum, out var pendingStatus) && latest is not null)
+            {
+                latest.NodeStatus = pendingStatus;
+                _pendingNodeStatuses.Remove(nodeNum);
+            }
+
+            // Apply the optimistic XEdDSA-verified overlay: the flag written by
+            // EnqueueDbWrite may not be visible in _nodeStore yet.
+            if (_pendingXeddsaSigned.Remove(nodeNum) && latest is not null)
+            {
+                latest.HasXeddsaSigned = true;
             }
 
             var existing = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
@@ -7586,6 +7621,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Log($"  {header.FromId}: XEdDSA signature verified — marking as a verified signer.");
 
         EnqueueDbWrite((nodes, _) => nodes.SetXeddsaSigned(header.From, true));
+        _pendingXeddsaSigned.Add(header.From);
         MarkNodeDirty(header.From);
     }
 
@@ -7954,6 +7990,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 result.Position.Longitude,
                                 result.Position.AltitudeM);
                         });
+                        _pendingNodePositions[header.From] = (result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM);
                     }
                     if (positionChanged)
                         _nodeLocationHistoryCounts[header.From] = _nodeLocationHistoryCounts.TryGetValue(header.From, out int count)
@@ -8060,6 +8097,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             NodeStatus = statusText,
                         };
                         EnqueueDbWrite((nodes, _) => nodes.Upsert(statusUpsert));
+                        _pendingNodeStatuses[header.From] = statusText;
                     }
                     break;
                 case PortNum.Traceroute:

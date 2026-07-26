@@ -2041,7 +2041,37 @@ public partial class MapView : UserControl
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (_vm is not null && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        bool ctrlHeld = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+
+        // Bounding-box corner picking is its own explicit mode (toggled via the
+        // "Pick corners on map" button), so it fires on a plain click — Ctrl is
+        // only needed for the normal "send a waypoint here" gesture below.
+        if (_vm is not null && _vm.IsPickingWaypointBoundingBox)
+        {
+            var pick = e.GetPosition(MarkerCanvas);
+            double pickW = MarkerCanvas.ActualWidth, pickH = MarkerCanvas.ActualHeight;
+            double pickOriginX = LonToX(_centerLon, _zoom) - pickW / 2.0;
+            double pickOriginY = LatToY(_centerLat, _zoom) - pickH / 2.0;
+            double pickLon = XToLon(pickOriginX + pick.X, _zoom);
+            double pickLat = YToLat(pickOriginY + pick.Y, _zoom);
+            pickLon = ((pickLon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+            pickLat = ClampLat(pickLat);
+
+            if (_pendingBboxCorner is (double cLat, double cLon))
+            {
+                _pendingBboxCorner = null;
+                _vm.SetWaypointBoundingBox(cLat, cLon, pickLat, pickLon);
+            }
+            else
+            {
+                _pendingBboxCorner = (pickLat, pickLon);
+            }
+            OnMarkersChanged();
+            e.Handled = true;
+            return;
+        }
+
+        if (_vm is not null && ctrlHeld)
         {
             var p = e.GetPosition(MarkerCanvas);
             double w = MarkerCanvas.ActualWidth, h = MarkerCanvas.ActualHeight;
@@ -2051,22 +2081,6 @@ public partial class MapView : UserControl
             double lat = YToLat(originY + p.Y, _zoom);
             lon = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
             lat = ClampLat(lat);
-
-            if (_vm.IsPickingWaypointBoundingBox)
-            {
-                if (_pendingBboxCorner is (double cLat, double cLon))
-                {
-                    _pendingBboxCorner = null;
-                    _vm.SetWaypointBoundingBox(cLat, cLon, lat, lon);
-                }
-                else
-                {
-                    _pendingBboxCorner = (lat, lon);
-                }
-                OnMarkersChanged();
-                e.Handled = true;
-                return;
-            }
 
             var channel = PromptForWaypointChannel(_vm);
             if (channel is null)

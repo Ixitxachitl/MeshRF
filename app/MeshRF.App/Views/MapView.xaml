@@ -270,7 +270,7 @@
                                       IsChecked="{Binding IsPickingWaypointBoundingBox, Mode=TwoWay}"
                                       Checked="OnPickBoundingBoxCornersToggled"
                                       Unchecked="OnPickBoundingBoxCornersToggled"
-                                      ToolTip="Click, then Ctrl+click two opposite corners on the map" />
+                                      ToolTip="Click, then click two opposite corners on the map (no Ctrl needed while this is on)" />
                         <TextBlock Text="{Binding WaypointBoundingBoxSummary}"
                                    Foreground="{DynamicResource BrushAppForeground}"
                                    Margin="0,4,0,0"
