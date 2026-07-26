@@ -21,6 +21,21 @@ public sealed class WaypointRecord
     public uint ExpireEpoch { get; set; }
     public uint LockedTo { get; set; }
 
+    /// <summary>Circular geofence radius in meters. 0 = no circular geofence.</summary>
+    public uint GeofenceRadius { get; set; }
+
+    /// <summary>Optional rectangular geofence bounds (degrees), all four set together.</summary>
+    public double? BboxWest { get; set; }
+    public double? BboxSouth { get; set; }
+    public double? BboxEast { get; set; }
+    public double? BboxNorth { get; set; }
+
+    public bool NotifyOnEnter { get; set; }
+    public bool NotifyOnExit { get; set; }
+    public bool NotifyFavoritesOnly { get; set; }
+
+    public bool HasGeofence => GeofenceRadius > 0 || BboxWest is not null;
+
     public long RxEpoch { get; set; }
 
     public DateTime RxTime =>

@@ -852,6 +852,62 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _waypointExpiryMeridiem = "PM";
     [ObservableProperty] private string _waypointNameInput = string.Empty;
     [ObservableProperty] private string _waypointDescriptionInput = string.Empty;
+    [ObservableProperty] private bool _waypointLockToMe;
+    [ObservableProperty] private bool _useWaypointGeofence;
+    [ObservableProperty] private string _waypointGeofenceRadiusInput = "100";
+    [ObservableProperty] private bool _waypointNotifyOnEnter = true;
+    [ObservableProperty] private bool _waypointNotifyOnExit = true;
+    [ObservableProperty] private bool _waypointNotifyFavoritesOnly;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WaypointBoundingBoxSummary))]
+    private bool _useWaypointBoundingBox;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WaypointBoundingBoxSummary))]
+    private double? _waypointBboxWest;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WaypointBoundingBoxSummary))]
+    private double? _waypointBboxSouth;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WaypointBoundingBoxSummary))]
+    private double? _waypointBboxEast;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WaypointBoundingBoxSummary))]
+    private double? _waypointBboxNorth;
+    [ObservableProperty] private bool _isPickingWaypointBoundingBox;
+
+    /// <summary>Human-readable summary of the picked bounding-box corners for
+    /// the waypoint composer panel.</summary>
+    public string WaypointBoundingBoxSummary =>
+        WaypointBboxWest is double w && WaypointBboxSouth is double s &&
+        WaypointBboxEast is double e && WaypointBboxNorth is double n
+            ? $"{s.ToString("F4", CultureInfo.InvariantCulture)}, {w.ToString("F4", CultureInfo.InvariantCulture)} to " +
+              $"{n.ToString("F4", CultureInfo.InvariantCulture)}, {e.ToString("F4", CultureInfo.InvariantCulture)}"
+            : "Not set";
+
+    /// <summary>
+    /// Called by <c>MapView</c> once two opposite corners have been picked for
+    /// the pending waypoint's rectangular geofence. Normalises the two
+    /// arbitrary corners into west/south/east/north and stops picking mode.
+    /// </summary>
+    public void SetWaypointBoundingBox(double latA, double lonA, double latB, double lonB)
+    {
+        WaypointBboxWest = Math.Min(lonA, lonB);
+        WaypointBboxEast = Math.Max(lonA, lonB);
+        WaypointBboxSouth = Math.Min(latA, latB);
+        WaypointBboxNorth = Math.Max(latA, latB);
+        IsPickingWaypointBoundingBox = false;
+    }
+
+    [RelayCommand]
+    private void ClearWaypointBoundingBox()
+    {
+        WaypointBboxWest = null;
+        WaypointBboxSouth = null;
+        WaypointBboxEast = null;
+        WaypointBboxNorth = null;
+        IsPickingWaypointBoundingBox = false;
+    }
 
     public IReadOnlyList<string> WaypointExpiryHourOptions { get; } =
         Enumerable.Range(1, 12).Select(h => h.ToString("00", CultureInfo.InvariantCulture)).ToArray();
@@ -907,7 +963,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public sealed record MapMarker(
         double Lat, double Lon, string Label, string Title,
         bool IsHome, bool IsWaypoint = false, bool IsExpired = false,
-        uint? NodeNum = null, long? WaypointRowId = null);
+        uint? NodeNum = null, long? WaypointRowId = null,
+        uint GeofenceRadiusM = 0,
+        double? BboxWest = null, double? BboxSouth = null,
+        double? BboxEast = null, double? BboxNorth = null);
 
     /// <summary>A polyline on the map (used for per-node location history).</summary>
     public sealed record MapPolyline(string Label, IReadOnlyList<(double Lat, double Lon)> Points);
@@ -944,7 +1003,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 IsHome: false,
                 IsWaypoint: true,
                 IsExpired: wp.IsExpired,
-                WaypointRowId: wp.Id));
+                WaypointRowId: wp.Id,
+                GeofenceRadiusM: wp.GeofenceRadius,
+                BboxWest: wp.BboxWest, BboxSouth: wp.BboxSouth,
+                BboxEast: wp.BboxEast, BboxNorth: wp.BboxNorth));
         }
         return list;
     }
@@ -978,6 +1040,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (removedPositioned)
             MapDataChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>True when <paramref name="wp"/> is locked (Waypoint.locked_to)
+    /// to a node other than us. Meshtastic-compliant clients refuse to edit or
+    /// delete such a waypoint on the mesh; deleting it here only removes our
+    /// own local cached copy, so callers should warn rather than silently allow.</summary>
+    public bool IsWaypointLockedByOther(WaypointRecord wp) =>
+        wp.LockedTo != 0 && wp.LockedTo != _myNodeNum;
 
     /// <summary>Remove persisted waypoints and refresh the map.</summary>
     public void RemoveWaypoints(IEnumerable<WaypointRecord> waypoints)
@@ -1402,6 +1471,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
             sb.Append("\n").Append(wp.Description);
         if (wp.LockedTo != 0)
             sb.Append("\nLocked to !").Append(wp.LockedTo.ToString("x8", CultureInfo.InvariantCulture));
+        if (wp.GeofenceRadius > 0)
+            sb.Append("\nGeofence: ").Append(wp.GeofenceRadius).Append(" m radius");
+        if (wp.BboxWest is double bw && wp.BboxSouth is double bs && wp.BboxEast is double be && wp.BboxNorth is double bn)
+            sb.Append("\nGeofence box: ")
+              .Append(bs.ToString("F4", CultureInfo.InvariantCulture)).Append(',')
+              .Append(bw.ToString("F4", CultureInfo.InvariantCulture)).Append(" to ")
+              .Append(bn.ToString("F4", CultureInfo.InvariantCulture)).Append(',')
+              .Append(be.ToString("F4", CultureInfo.InvariantCulture));
+        if (wp.GeofenceRadius > 0 || wp.BboxWest is not null)
+        {
+            var notify = (wp.NotifyOnEnter, wp.NotifyOnExit) switch
+            {
+                (true, true) => "enter/exit",
+                (true, false) => "enter",
+                (false, true) => "exit",
+                _ => "none",
+            };
+            sb.Append(" (notify: ").Append(notify);
+            if (wp.NotifyFavoritesOnly) sb.Append(", favorites only");
+            sb.Append(')');
+        }
         if (wp.ExpireEpoch != 0)
             sb.Append("\nExpires ").Append(FormatLocalDateTime(DateTimeOffset.FromUnixTimeSeconds(wp.ExpireEpoch).LocalDateTime))
               .Append(wp.IsExpired ? "  [EXPIRED]" : string.Empty);
@@ -5492,6 +5582,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
             string description = WaypointDescriptionInput?.Trim() ?? string.Empty;
             uint? icon = EmojiToCodePoint(SelectedWaypointEmoji);
             uint expireEpoch = BuildWaypointExpiryEpoch();
+            uint lockedTo = WaypointLockToMe && _myNodeNum != 0 ? _myNodeNum : 0;
+            uint geofenceRadius = BuildWaypointGeofenceRadius();
+            double? bboxWest = null, bboxSouth = null, bboxEast = null, bboxNorth = null;
+            if (UseWaypointBoundingBox &&
+                WaypointBboxWest is double bw && WaypointBboxSouth is double bs &&
+                WaypointBboxEast is double be && WaypointBboxNorth is double bn)
+            {
+                bboxWest = bw; bboxSouth = bs; bboxEast = be; bboxNorth = bn;
+            }
+            bool hasGeofence = geofenceRadius > 0 || bboxWest is not null;
+            bool notifyOnEnter = hasGeofence && WaypointNotifyOnEnter;
+            bool notifyOnExit = hasGeofence && WaypointNotifyOnExit;
+            bool notifyFavoritesOnly = hasGeofence && WaypointNotifyFavoritesOnly;
             var frame = MeshEncoder.EncodeWaypoint(
                 selectedChannel,
                 _myNodeNum,
@@ -5502,7 +5605,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 name: name,
                 description: description,
                 expireEpoch: expireEpoch,
+                lockedTo: lockedTo,
                 icon: icon,
+                geofenceRadiusM: geofenceRadius,
+                bboxWest: bboxWest, bboxSouth: bboxSouth, bboxEast: bboxEast, bboxNorth: bboxNorth,
+                notifyOnEnter: notifyOnEnter,
+                notifyOnExit: notifyOnExit,
+                notifyFavoritesOnly: notifyFavoritesOnly,
                 hopLimit: (byte)HopLimit,
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
@@ -5529,7 +5638,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Latitude = lat,
                 Longitude = lon,
                 ExpireEpoch = expireEpoch,
+                LockedTo = lockedTo,
                 RxEpoch = now,
+                GeofenceRadius = geofenceRadius,
+                BboxWest = bboxWest,
+                BboxSouth = bboxSouth,
+                BboxEast = bboxEast,
+                BboxNorth = bboxNorth,
+                NotifyOnEnter = notifyOnEnter,
+                NotifyOnExit = notifyOnExit,
+                NotifyFavoritesOnly = notifyFavoritesOnly,
             });
             ReloadWaypoints();
 
@@ -5589,6 +5707,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             second,
             DateTimeKind.Local);
         return (uint)new DateTimeOffset(local).ToUnixTimeSeconds();
+    }
+
+    /// <summary>Parses <see cref="WaypointGeofenceRadiusInput"/> into a whole-meter
+    /// radius, or 0 when geofencing is off / the input isn't a positive integer.</summary>
+    private uint BuildWaypointGeofenceRadius()
+    {
+        if (!UseWaypointGeofence) return 0;
+        if (!uint.TryParse(WaypointGeofenceRadiusInput, NumberStyles.None,
+                CultureInfo.InvariantCulture, out uint radius) || radius == 0)
+            return 0;
+        return radius;
     }
 
     /// <summary>
@@ -7860,6 +7989,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             ExpireEpoch = wp.ExpireEpoch,
                             LockedTo = wp.LockedTo,
                             RxEpoch = rxEpoch,
+                            GeofenceRadius = wp.GeofenceRadius,
+                            BboxWest = wp.BoundingBox?.West,
+                            BboxSouth = wp.BoundingBox?.South,
+                            BboxEast = wp.BoundingBox?.East,
+                            BboxNorth = wp.BoundingBox?.North,
+                            NotifyOnEnter = wp.NotifyOnEnter,
+                            NotifyOnExit = wp.NotifyOnExit,
+                            NotifyFavoritesOnly = wp.NotifyFavoritesOnly,
                         };
                         EnqueueDbWrite((_, waypoints) => waypoints.Upsert(waypointRecord));
                         _waypointsDirty = true;

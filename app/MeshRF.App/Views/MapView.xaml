@@ -170,6 +170,12 @@
                              Text="{Binding WaypointDescriptionInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              ToolTip="Waypoint description for new Ctrl+left-click waypoints" />
 
+                    <CheckBox Content="Lock to me"
+                              Margin="0,6,0,0"
+                              Foreground="{DynamicResource BrushAppForeground}"
+                              IsChecked="{Binding WaypointLockToMe, Mode=TwoWay}"
+                              ToolTip="Sets Waypoint.locked_to to your node number, so compliant clients refuse edits/deletes from other nodes" />
+
                     <CheckBox Content="Set expiration"
                               Margin="0,6,0,0"
                               Foreground="{DynamicResource BrushAppForeground}"
@@ -221,6 +227,58 @@
                                                                           SelectedItem="{Binding WaypointExpiryMeridiem, Mode=TwoWay}"
                                                                           ToolTip="AM or PM" />
                                                 </StackPanel>
+                    </StackPanel>
+
+                    <CheckBox Content="Add geofence"
+                              Margin="0,6,0,0"
+                              Foreground="{DynamicResource BrushAppForeground}"
+                              IsChecked="{Binding UseWaypointGeofence, Mode=TwoWay}"
+                              ToolTip="Attach a circular geofence to this waypoint (Waypoint.geofence_radius)" />
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0"
+                                IsEnabled="{Binding UseWaypointGeofence}">
+                        <TextBlock Text="Radius (m)" Foreground="{DynamicResource BrushAppForeground}"
+                                   VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <TextBox Width="80"
+                                 Text="{Binding WaypointGeofenceRadiusInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Circular geofence radius in meters" />
+                    </StackPanel>
+                    <StackPanel Orientation="Vertical" Margin="0,2,0,0"
+                                IsEnabled="{Binding UseWaypointGeofence}">
+                        <CheckBox Content="Notify on enter"
+                                  Foreground="{DynamicResource BrushAppForeground}"
+                                  IsChecked="{Binding WaypointNotifyOnEnter, Mode=TwoWay}" />
+                        <CheckBox Content="Notify on exit"
+                                  Margin="0,2,0,0"
+                                  Foreground="{DynamicResource BrushAppForeground}"
+                                  IsChecked="{Binding WaypointNotifyOnExit, Mode=TwoWay}" />
+                        <CheckBox Content="Favorites only"
+                                  Margin="0,2,0,0"
+                                  Foreground="{DynamicResource BrushAppForeground}"
+                                  IsChecked="{Binding WaypointNotifyFavoritesOnly, Mode=TwoWay}"
+                                  ToolTip="Only raise enter/exit notifications for nodes marked as favorites (per receiver)" />
+                    </StackPanel>
+
+                    <CheckBox Content="Add bounding box geofence"
+                              Margin="0,6,0,0"
+                              Foreground="{DynamicResource BrushAppForeground}"
+                              IsChecked="{Binding UseWaypointBoundingBox, Mode=TwoWay}"
+                              ToolTip="Attach a rectangular geofence to this waypoint (Waypoint.bounding_box). May be combined with the circular radius above." />
+                    <StackPanel Orientation="Vertical" Margin="0,2,0,0"
+                                IsEnabled="{Binding UseWaypointBoundingBox}">
+                        <ToggleButton Content="Pick corners on map"
+                                      HorizontalAlignment="Left"
+                                      IsChecked="{Binding IsPickingWaypointBoundingBox, Mode=TwoWay}"
+                                      Checked="OnPickBoundingBoxCornersToggled"
+                                      Unchecked="OnPickBoundingBoxCornersToggled"
+                                      ToolTip="Click, then Ctrl+click two opposite corners on the map" />
+                        <TextBlock Text="{Binding WaypointBoundingBoxSummary}"
+                                   Foreground="{DynamicResource BrushAppForeground}"
+                                   Margin="0,4,0,0"
+                                   TextWrapping="Wrap" />
+                        <Button Content="Clear box"
+                                HorizontalAlignment="Left"
+                                Margin="0,4,0,0"
+                                Command="{Binding ClearWaypointBoundingBoxCommand}" />
                     </StackPanel>
                 </StackPanel>
             </Border>

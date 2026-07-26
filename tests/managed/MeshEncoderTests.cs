@@ -89,4 +89,61 @@ public class MeshEncoderTests
         Assert.Equal(PortNum.PrivateApp, result!.Port);
         Assert.Equal(payload, result.AppPayload);
     }
+
+    [Fact]
+    public void WaypointGeofenceRadiusRoundTrips()
+    {
+        var channel = DefaultChannel();
+        var frame = MeshEncoder.EncodeWaypoint(channel, from: 0x1u, packetId: 0x2u,
+            waypointId: 0x42u, latitude: 47.6062, longitude: -122.3321,
+            name: "Camp", geofenceRadiusM: 250,
+            notifyOnEnter: true, notifyOnExit: true, notifyFavoritesOnly: true);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.Waypoint, result!.Port);
+        var wp = result.Waypoint;
+        Assert.NotNull(wp);
+        Assert.Equal(250u, wp!.GeofenceRadius);
+        Assert.True(wp.NotifyOnEnter);
+        Assert.True(wp.NotifyOnExit);
+        Assert.True(wp.NotifyFavoritesOnly);
+        Assert.True(wp.HasGeofence);
+        Assert.Null(wp.BoundingBox);
+    }
+
+    [Fact]
+    public void WaypointBoundingBoxRoundTrips()
+    {
+        var channel = DefaultChannel();
+        var frame = MeshEncoder.EncodeWaypoint(channel, from: 0x1u, packetId: 0x2u,
+            waypointId: 0x43u, latitude: 47.6062, longitude: -122.3321,
+            bboxWest: -122.35, bboxSouth: 47.60, bboxEast: -122.30, bboxNorth: 47.62);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.NotNull(result);
+        var wp = result!.Waypoint;
+        Assert.NotNull(wp);
+        Assert.NotNull(wp!.BoundingBox);
+        Assert.Equal(-122.35, wp.BoundingBox!.West, 5);
+        Assert.Equal(47.60, wp.BoundingBox.South, 5);
+        Assert.Equal(-122.30, wp.BoundingBox.East, 5);
+        Assert.Equal(47.62, wp.BoundingBox.North, 5);
+        Assert.True(wp.HasGeofence);
+    }
+
+    [Fact]
+    public void WaypointWithoutGeofenceHasZeroRadiusAndNullBox()
+    {
+        var channel = DefaultChannel();
+        var frame = MeshEncoder.EncodeWaypoint(channel, from: 0x1u, packetId: 0x2u,
+            waypointId: 0x44u, latitude: 1.0, longitude: 2.0);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        var wp = result!.Waypoint;
+        Assert.NotNull(wp);
+        Assert.Equal(0u, wp!.GeofenceRadius);
+        Assert.Null(wp.BoundingBox);
+        Assert.False(wp.HasGeofence);
+    }
 }

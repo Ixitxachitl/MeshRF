@@ -124,6 +124,36 @@ public sealed class MeshWaypoint
     public string Name { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public uint? Icon { get; init; }
+
+    /// <summary>Waypoint.geofence_radius (field 9): circular geofence radius in
+    /// meters centred on this waypoint's location. 0 = no circular geofence.</summary>
+    public uint GeofenceRadius { get; init; }
+
+    /// <summary>Waypoint.bounding_box (field 10): optional rectangular geofence
+    /// region, in addition to or instead of <see cref="GeofenceRadius"/>.</summary>
+    public MeshBoundingBox? BoundingBox { get; init; }
+
+    /// <summary>Waypoint.notify_on_enter (field 11).</summary>
+    public bool NotifyOnEnter { get; init; }
+
+    /// <summary>Waypoint.notify_on_exit (field 12).</summary>
+    public bool NotifyOnExit { get; init; }
+
+    /// <summary>Waypoint.notify_favorites_only (field 13).</summary>
+    public bool NotifyFavoritesOnly { get; init; }
+
+    /// <summary>True when this waypoint defines a circular and/or rectangular geofence.</summary>
+    public bool HasGeofence => GeofenceRadius > 0 || BoundingBox is not null;
+}
+
+/// <summary>Subset of the Meshtastic <c>BoundingBox</c> protobuf: a rectangular,
+/// axis-aligned geofence region (west/south/east/north, in degrees).</summary>
+public sealed class MeshBoundingBox
+{
+    public double West { get; init; }
+    public double South { get; init; }
+    public double East { get; init; }
+    public double North { get; init; }
 }
 
 /// <summary>
@@ -750,7 +780,9 @@ public static class MeshDecoder
 
     // Waypoint: 1=id(varint) 2=latitude_i(sfixed32) 3=longitude_i(sfixed32)
     //           4=expire(varint) 5=locked_to(varint) 6=name(string)
-    //           7=description(string) 8=icon(fixed32)
+    //           7=description(string) 8=icon(fixed32) 9=geofence_radius(varint)
+    //           10=bounding_box(message) 11=notify_on_enter(varint)
+    //           12=notify_on_exit(varint) 13=notify_favorites_only(varint)
     private static MeshWaypoint ParseWaypoint(byte[] data)
     {
         uint id = 0;
@@ -760,6 +792,9 @@ public static class MeshDecoder
         string name = string.Empty;
         string description = string.Empty;
         uint? icon = null;
+        uint geofenceRadius = 0;
+        MeshBoundingBox? boundingBox = null;
+        bool notifyOnEnter = false, notifyOnExit = false, notifyFavoritesOnly = false;
 
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
@@ -782,6 +817,16 @@ public static class MeshDecoder
                     description = rdr.ReadString(); break;
                 case 8 when wt == ProtoReader.WireType.I32:
                     icon = rdr.ReadFixed32(); break;
+                case 9 when wt == ProtoReader.WireType.Varint:
+                    geofenceRadius = (uint)rdr.ReadVarint(); break;
+                case 10 when wt == ProtoReader.WireType.Len:
+                    boundingBox = ParseBoundingBox(rdr.ReadLengthDelimited()); break;
+                case 11 when wt == ProtoReader.WireType.Varint:
+                    notifyOnEnter = rdr.ReadVarint() != 0; break;
+                case 12 when wt == ProtoReader.WireType.Varint:
+                    notifyOnExit = rdr.ReadVarint() != 0; break;
+                case 13 when wt == ProtoReader.WireType.Varint:
+                    notifyFavoritesOnly = rdr.ReadVarint() != 0; break;
                 default:
                     rdr.SkipField(wt); break;
             }
@@ -797,7 +842,36 @@ public static class MeshDecoder
             Name = name,
             Description = description,
             Icon = icon,
+            GeofenceRadius = geofenceRadius,
+            BoundingBox = boundingBox,
+            NotifyOnEnter = notifyOnEnter,
+            NotifyOnExit = notifyOnExit,
+            NotifyFavoritesOnly = notifyFavoritesOnly,
         };
+    }
+
+    // BoundingBox: 1=west(sfixed32) 2=south(sfixed32) 3=east(sfixed32) 4=north(sfixed32)
+    private static MeshBoundingBox ParseBoundingBox(ReadOnlySpan<byte> data)
+    {
+        double west = 0, south = 0, east = 0, north = 0;
+        var rdr = new ProtoReader(data);
+        while (rdr.TryReadTag(out int field, out var wt))
+        {
+            switch (field)
+            {
+                case 1 when wt == ProtoReader.WireType.I32:
+                    west = (int)rdr.ReadFixed32() * 1e-7; break;
+                case 2 when wt == ProtoReader.WireType.I32:
+                    south = (int)rdr.ReadFixed32() * 1e-7; break;
+                case 3 when wt == ProtoReader.WireType.I32:
+                    east = (int)rdr.ReadFixed32() * 1e-7; break;
+                case 4 when wt == ProtoReader.WireType.I32:
+                    north = (int)rdr.ReadFixed32() * 1e-7; break;
+                default:
+                    rdr.SkipField(wt); break;
+            }
+        }
+        return new MeshBoundingBox { West = west, South = south, East = east, North = north };
     }
 
     // Telemetry: 1=time(varint) 2=device_metrics(msg) 3=environment_metrics(msg)

@@ -134,12 +134,21 @@ public partial class MapView : UserControl
     private bool _mapRenderQueued;
     private bool _mapFullRenderQueued;
 
+    /// <summary>First corner picked while drawing a waypoint's rectangular
+    /// geofence (see <see cref="MainViewModel.IsPickingWaypointBoundingBox"/>);
+    /// null before the first click or after the box is completed/cancelled.</summary>
+    private (double Lat, double Lon)? _pendingBboxCorner;
+
     private static readonly SolidColorBrush NodeFillBrush = CreateFrozenBrush(Color.FromRgb(0x2d, 0x8c, 0xff));
     private static readonly SolidColorBrush WaypointFillBrush = CreateFrozenBrush(Color.FromRgb(0x2e, 0x7d, 0x32));
     private static readonly SolidColorBrush WaypointExpiredFillBrush = CreateFrozenBrush(Color.FromRgb(0xc6, 0x28, 0x28));
     private static readonly SolidColorBrush ClusterBadgeFillBrush = CreateFrozenBrush(Color.FromRgb(0xff, 0x8c, 0x2d));
     private static readonly SolidColorBrush LocationHistoryStrokeBrush =
         CreateFrozenBrush(Color.FromArgb(0xC0, 0xFF, 0x8C, 0x2D));
+    private static readonly SolidColorBrush GeofenceStrokeBrush =
+        CreateFrozenBrush(Color.FromArgb(0xA0, 0x2e, 0x7d, 0x32));
+    private static readonly SolidColorBrush GeofenceFillBrush =
+        CreateFrozenBrush(Color.FromArgb(0x18, 0x2e, 0x7d, 0x32));
 
     private sealed record NodeVisual(Ellipse Dot, FrameworkElement Label);
     private readonly Dictionary<uint, NodeVisual> _nodeVisuals = new();
@@ -675,6 +684,11 @@ public partial class MapView : UserControl
         var t = Math.PI * (1.0 - 2.0 * y / (n * TileSize));
         return Math.Atan(Math.Sinh(t)) * 180.0 / Math.PI;
     }
+
+    /// <summary>Ground resolution (meters/pixel) of the Web-Mercator projection
+    /// at <paramref name="lat"/> and <paramref name="zoom"/>, standard 256px-tile formula.</summary>
+    private static double MetersPerPixel(double lat, int zoom) =>
+        156543.03392804062 * Math.Cos(lat * Math.PI / 180.0) / (1 << zoom);
 
     // -- Coordinate caching for performance with large marker counts --------
 
@@ -1345,6 +1359,7 @@ public partial class MapView : UserControl
         const double cullMarginPx = 48;
 
         DrawLocationHistory(originX, originY, viewportW, viewportH);
+        DrawPendingBoundingBox(originX, originY);
 
         // Node markers are collected and clustered; the home marker is drawn
         // immediately since it never stacks with nodes.
@@ -1379,6 +1394,11 @@ public partial class MapView : UserControl
             }
             else if (mk.IsWaypoint)
             {
+                if (mk.GeofenceRadiusM > 0)
+                    AddGeofenceCircle(mk, px, py);
+                if (mk.BboxWest is double mbw && mk.BboxSouth is double mbs &&
+                    mk.BboxEast is double mbe && mk.BboxNorth is double mbn)
+                    AddGeofenceRectangle(mbw, mbs, mbe, mbn, originX, originY);
                 AddNodeDot(mk, px, py);
                 AddNodeLabel(mk.Label, px, py);
             }
@@ -1497,6 +1517,93 @@ public partial class MapView : UserControl
             if (segment.Points.Count >= 2 && anyVisible)
                 MarkerCanvas.Children.Add(segment);
         }
+    }
+
+    /// <summary>Draws the in-progress bounding-box picker: the first picked
+    /// corner (while a second click is pending) and/or the finalised rectangle
+    /// for the waypoint currently being composed.</summary>
+    private void DrawPendingBoundingBox(double originX, double originY)
+    {
+        if (_vm is null) return;
+
+        if (_vm.IsPickingWaypointBoundingBox && _pendingBboxCorner is (double cLat, double cLon))
+        {
+            double cx = LonToX(cLon, _zoom) - originX;
+            double cy = LatToY(cLat, _zoom) - originY;
+            var corner = new Ellipse
+            {
+                Width = 10,
+                Height = 10,
+                Fill = Brushes.Transparent,
+                Stroke = GeofenceStrokeBrush,
+                StrokeThickness = 2,
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(corner, cx - 5);
+            Canvas.SetTop(corner, cy - 5);
+            Panel.SetZIndex(corner, 25);
+            MarkerCanvas.Children.Add(corner);
+        }
+
+        if (_vm.WaypointBboxWest is double west && _vm.WaypointBboxSouth is double south &&
+            _vm.WaypointBboxEast is double east && _vm.WaypointBboxNorth is double north)
+        {
+            AddGeofenceRectangle(west, south, east, north, originX, originY);
+        }
+    }
+
+    /// <summary>Draws a translucent rectangle for a waypoint's bounding-box
+    /// geofence (west/south/east/north, in degrees).</summary>
+    private void AddGeofenceRectangle(double west, double south, double east, double north,
+                                      double originX, double originY)
+    {
+        double x1 = LonToX(west, _zoom) - originX;
+        double x2 = LonToX(east, _zoom) - originX;
+        double y1 = LatToY(north, _zoom) - originY; // north = smaller Y
+        double y2 = LatToY(south, _zoom) - originY; // south = larger Y
+
+        var rect = new System.Windows.Shapes.Rectangle
+        {
+            Width = Math.Max(1, x2 - x1),
+            Height = Math.Max(1, y2 - y1),
+            Fill = GeofenceFillBrush,
+            Stroke = GeofenceStrokeBrush,
+            StrokeThickness = 1.5,
+            StrokeDashArray = new DoubleCollection { 4, 3 },
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(rect, x1);
+        Canvas.SetTop(rect, y1);
+        Panel.SetZIndex(rect, 5);
+        MarkerCanvas.Children.Add(rect);
+    }
+
+    /// <summary>Draws a translucent circle showing a waypoint's circular geofence,
+    /// sized from its real-world radius via the current zoom's ground resolution.</summary>
+    private void AddGeofenceCircle(MainViewModel.MapMarker mk, double px, double py)
+    {
+        double metersPerPixel = MetersPerPixel(mk.Lat, _zoom);
+        if (metersPerPixel <= 0 || double.IsNaN(metersPerPixel) || double.IsInfinity(metersPerPixel))
+            return;
+
+        double radiusPx = mk.GeofenceRadiusM / metersPerPixel;
+        if (radiusPx < 1 || double.IsNaN(radiusPx) || double.IsInfinity(radiusPx))
+            return;
+
+        var circle = new Ellipse
+        {
+            Width = radiusPx * 2,
+            Height = radiusPx * 2,
+            Fill = GeofenceFillBrush,
+            Stroke = GeofenceStrokeBrush,
+            StrokeThickness = 1.5,
+            StrokeDashArray = new DoubleCollection { 4, 3 },
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(circle, px - radiusPx);
+        Canvas.SetTop(circle, py - radiusPx);
+        Panel.SetZIndex(circle, 5);
+        MarkerCanvas.Children.Add(circle);
     }
 
     /// <summary>Draws a single marker dot with a hover tooltip.</summary>
@@ -1943,6 +2050,23 @@ public partial class MapView : UserControl
             double lon = XToLon(originX + p.X, _zoom);
             double lat = YToLat(originY + p.Y, _zoom);
             lon = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+            lat = ClampLat(lat);
+
+            if (_vm.IsPickingWaypointBoundingBox)
+            {
+                if (_pendingBboxCorner is (double cLat, double cLon))
+                {
+                    _pendingBboxCorner = null;
+                    _vm.SetWaypointBoundingBox(cLat, cLon, lat, lon);
+                }
+                else
+                {
+                    _pendingBboxCorner = (lat, lon);
+                }
+                OnMarkersChanged();
+                e.Handled = true;
+                return;
+            }
 
             var channel = PromptForWaypointChannel(_vm);
             if (channel is null)
@@ -1951,7 +2075,7 @@ public partial class MapView : UserControl
                 return;
             }
 
-            _ = _vm.SendWaypointFromMapAsync(ClampLat(lat), lon, channel);
+            _ = _vm.SendWaypointFromMapAsync(lat, lon, channel);
             e.Handled = true;
             return;
         }
@@ -2179,6 +2303,15 @@ public partial class MapView : UserControl
         if (!_clusterNodes)
             SpiderCollapse();
         RenderMarkersOnly();
+    }
+
+    /// <summary>Resets the in-progress bounding-box pick whenever "Pick corners
+    /// on map" is checked or unchecked, so a stale first corner from a
+    /// cancelled pick never silently completes a later one.</summary>
+    private void OnPickBoundingBoxCornersToggled(object sender, RoutedEventArgs e)
+    {
+        _pendingBboxCorner = null;
+        OnMarkersChanged();
     }
 
     private void ZoomAt(Point anchor, int delta)

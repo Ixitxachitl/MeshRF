@@ -517,7 +517,10 @@ public static class MeshEncoder
     /// <summary>
     /// Broadcast or unicast a waypoint (WAYPOINT_APP <c>Waypoint</c> protobuf).
     /// Mirrors the upstream fields: id, lat/lon, optional expiry/lock/name/
-    /// description/icon.
+    /// description/icon, plus the optional circular (<paramref name="geofenceRadiusM"/>)
+    /// and/or rectangular (<paramref name="bboxWest"/>/<paramref name="bboxSouth"/>/
+    /// <paramref name="bboxEast"/>/<paramref name="bboxNorth"/>) geofence and its
+    /// enter/exit/favorites-only notification flags.
     /// </summary>
     public static byte[] EncodeWaypoint(ChannelConfig channel,
                                         uint from,
@@ -530,6 +533,14 @@ public static class MeshEncoder
                                         uint expireEpoch = 0,
                                         uint lockedTo = 0,
                                         uint? icon = null,
+                                        uint geofenceRadiusM = 0,
+                                        double? bboxWest = null,
+                                        double? bboxSouth = null,
+                                        double? bboxEast = null,
+                                        double? bboxNorth = null,
+                                        bool notifyOnEnter = false,
+                                        bool notifyOnExit = false,
+                                        bool notifyFavoritesOnly = false,
                                         uint to = 0xFFFFFFFFu,
                                         byte hopLimit = 3,
                                         bool wantResponse = false,
@@ -549,11 +560,28 @@ public static class MeshEncoder
         if (!string.IsNullOrWhiteSpace(name)) wp.WriteStringField(6, name!);
         if (!string.IsNullOrWhiteSpace(description)) wp.WriteStringField(7, description!);
         if (icon is uint ic) wp.WriteFixed32Field(8, ic);
+        if (geofenceRadiusM != 0) wp.WriteVarintField(9, geofenceRadiusM);
+        if (bboxWest is double w && bboxSouth is double s && bboxEast is double e && bboxNorth is double n)
+            wp.WriteBytesField(10, BuildBoundingBox(w, s, e, n));
+        if (notifyOnEnter) wp.WriteVarintField(11, 1);
+        if (notifyOnExit) wp.WriteVarintField(12, 1);
+        if (notifyFavoritesOnly) wp.WriteVarintField(13, 1);
 
         return Encode(channel, from, to, packetId, PortNum.Waypoint,
                       wp.ToArray(), hopLimit, wantAck: false,
                       wantResponse: wantResponse, okToMqtt: okToMqtt,
                       xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
+    }
+
+    // BoundingBox: 1=west(sfixed32) 2=south(sfixed32) 3=east(sfixed32) 4=north(sfixed32)
+    private static byte[] BuildBoundingBox(double west, double south, double east, double north)
+    {
+        var bb = new ProtoWriter();
+        bb.WriteFixed32Field(1, (uint)(int)Math.Round(west / 1e-7));
+        bb.WriteFixed32Field(2, (uint)(int)Math.Round(south / 1e-7));
+        bb.WriteFixed32Field(3, (uint)(int)Math.Round(east / 1e-7));
+        bb.WriteFixed32Field(4, (uint)(int)Math.Round(north / 1e-7));
+        return bb.ToArray();
     }
 
     /// <summary>

@@ -460,9 +460,12 @@ public partial class MainWindow : Window
         Map.WaypointRightClicked += wp =>
         {
             if (DataContext is not MainViewModel vm) return;
+            string lockNote = vm.IsWaypointLockedByOther(wp)
+                ? $"\n\nThis waypoint is locked to !{wp.LockedTo:x8}. This only removes it from your local cache — other clients still honor the lock."
+                : string.Empty;
             var result = MessageBox.Show(
                 this,
-                $"Delete waypoint \"{wp.DisplayName}\"?",
+                $"Delete waypoint \"{wp.DisplayName}\"?{lockNote}",
                 "Delete waypoint",
                 MessageBoxButton.OKCancel,
                 MessageBoxImage.Warning);
@@ -959,9 +962,13 @@ public partial class MainWindow : Window
         var label = selected.Count == 1
             ? $"waypoint \"{selected[0].DisplayName}\""
             : $"{selected.Count} waypoints";
+        int lockedByOtherCount = selected.Count(vm.IsWaypointLockedByOther);
+        string lockNote = lockedByOtherCount > 0
+            ? $"\n\n{lockedByOtherCount} of these are locked to another node. This only removes your local cache — other clients still honor the lock."
+            : string.Empty;
         var result = MessageBox.Show(
             this,
-            $"Delete {label}? This removes them from the waypoint database.",
+            $"Delete {label}? This removes them from the waypoint database.{lockNote}",
             "Delete waypoints",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning);
