@@ -164,6 +164,68 @@ public static class MeshCrypto
         return plain;
     }
 
+    // -- XEdDSA packet signing (firmware 2.8+) -------------------------------
+    //
+    // Broadcast packets are signed with an Ed25519 signature derived from the
+    // node's existing X25519 PKI keypair (see XEdDSA.cs). A peer that verifies
+    // one of these marks us as a signer and shows the "shield" icon next to
+    // our name. Mirrors firmware CryptoEngine::xeddsa_sign/xeddsa_verify.
+
+    /// <summary>Size in bytes of an XEdDSA signature (<c>Data.xeddsa_signature</c>).</summary>
+    public const int XeddsaSignatureSize = XEdDSA.SignatureSize;
+
+    /// <summary>
+    /// Derive our Ed25519 signing keypair from our X25519 identity private key.
+    /// Cache the result — this only needs to be recomputed when the identity
+    /// key changes, not per packet.
+    /// </summary>
+    public static (byte[] edPrivateKey, byte[] edPublicKey) DeriveXeddsaKeys(byte[] curvePrivateKey)
+        => XEdDSA.DeriveEdKeysFromCurvePrivateKey(curvePrivateKey);
+
+    /// <summary>
+    /// Sign a broadcast packet's payload, mirroring firmware
+    /// <c>CryptoEngine::xeddsa_sign</c>: the signed buffer is
+    /// <c>fromNode(4,LE) || packetId(4,LE) || portnum(4,LE) || payload</c>, and
+    /// a fresh 32-byte random "hedge" is mixed into the nonce every call.
+    /// </summary>
+    public static byte[] XeddsaSign(uint fromNode, uint packetId, uint portnum,
+                                    ReadOnlySpan<byte> payload,
+                                    byte[] edPrivateKey, byte[] edPublicKey)
+    {
+        byte[] signingBuffer = BuildSigningBuffer(fromNode, packetId, portnum, payload);
+        byte[] hedge = RandomNumberGenerator.GetBytes(32);
+        return XEdDSA.Sign(edPrivateKey, edPublicKey, signingBuffer, hedge);
+    }
+
+    /// <summary>
+    /// Verify a broadcast packet's XEdDSA signature against the sender's known
+    /// X25519 (PKI) public key, mirroring firmware
+    /// <c>CryptoEngine::xeddsa_verify</c>. Returns false for a missing/wrong-size
+    /// signature, an unknown/malformed sender key, or a signature that doesn't
+    /// verify (tampered, wrong sender, or wrong key).
+    /// </summary>
+    public static bool XeddsaVerify(uint fromNode, uint packetId, uint portnum,
+                                    ReadOnlySpan<byte> payload,
+                                    byte[]? signature, byte[]? senderCurvePublicKey)
+    {
+        if (signature is null || signature.Length != XeddsaSignatureSize) return false;
+        if (senderCurvePublicKey is null || senderCurvePublicKey.Length != 32) return false;
+
+        byte[] signingBuffer = BuildSigningBuffer(fromNode, packetId, portnum, payload);
+        byte[] senderEdPublicKey = XEdDSA.CurveToEdPublic(senderCurvePublicKey);
+        return XEdDSA.Verify(senderEdPublicKey, signingBuffer, signature);
+    }
+
+    private static byte[] BuildSigningBuffer(uint fromNode, uint packetId, uint portnum, ReadOnlySpan<byte> payload)
+    {
+        var buf = new byte[12 + payload.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(0, 4), fromNode);
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(4, 4), packetId);
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(8, 4), portnum);
+        payload.CopyTo(buf.AsSpan(12));
+        return buf;
+    }
+
     // shared AES key = SHA256(X25519(ourPriv, theirPub)) — firmware setDHPublicKey + hash().
     private static byte[] DeriveSharedKey(byte[] myPrivateKey, byte[] peerPublicKey)
     {

@@ -1071,6 +1071,29 @@
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="&#xE83D;" Width="Auto"
+                                                        SortMemberPath="IsXeddsaVerified"
+                                                        CanUserResize="True">
+                                    <DataGridTemplateColumn.HeaderStyle>
+                                        <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                                            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+                                            <Setter Property="FontSize" Value="12" />
+                                            <Setter Property="ToolTip" Value="Verified (XEdDSA signature)" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                        </Style>
+                                    </DataGridTemplateColumn.HeaderStyle>
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="&#xE83D;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12"
+                                                       Foreground="#2E7D32"
+                                                       HorizontalAlignment="Center"
+                                                       ToolTip="Verified: we've confirmed a valid XEdDSA signature from this node"
+                                                       Visibility="{Binding IsXeddsaVerified, Converter={StaticResource BoolToVis}}" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTemplateColumn Header="&#xE198;" Width="Auto"
                                                         SortMemberPath="IsUnmessagable"
                                                         CanUserResize="True">

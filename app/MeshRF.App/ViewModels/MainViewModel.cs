@@ -726,6 +726,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _myPrivateKey = string.Empty;
     private byte[] _myPrivateKeyBytes = Array.Empty<byte>();
 
+    /// <summary>XEdDSA (Ed25519) signing keypair derived from
+    /// <see cref="_myPrivateKeyBytes"/> — see <see cref="RefreshMyPrivateKeyCache"/>.
+    /// Empty until we have a valid 32-byte identity key. Used to sign our
+    /// broadcasts so 2.8+ firmware peers show us as a verified (shield) node.</summary>
+    private byte[] _myXeddsaPrivateKey = Array.Empty<byte>();
+    private byte[] _myXeddsaPublicKey = Array.Empty<byte>();
+
     /// <summary>Default hop limit for transmitted packets (1..7). Mirrors the
     /// firmware LoRa config; broadcasts and DMs are sent with this many hops.</summary>
     [ObservableProperty] private int _hopLimit = 3;
@@ -3732,6 +3739,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var parsed = TryParseKeyBase64(MyPrivateKey);
         _myPrivateKeyBytes = parsed.Length == 32 ? parsed : Array.Empty<byte>();
+
+        if (_myPrivateKeyBytes.Length == 32)
+        {
+            var (edPriv, edPub) = MeshCrypto.DeriveXeddsaKeys(_myPrivateKeyBytes);
+            _myXeddsaPrivateKey = edPriv;
+            _myXeddsaPublicKey = edPub;
+        }
+        else
+        {
+            _myXeddsaPrivateKey = Array.Empty<byte>();
+            _myXeddsaPublicKey = Array.Empty<byte>();
+        }
     }
 
     partial void OnHomeLatitudeTextChanged(string value)
@@ -4562,7 +4581,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var frame = MeshEncoder.EncodeTextMessage(
                 ch.Config, _myNodeNum, packetId, text, hopLimit: (byte)HopLimit,
                 replyId: replyId,
-                okToMqtt: OkToMqtt);
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
@@ -4806,7 +4826,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     ch.Config, _myNodeNum, packetId, emoji,
                     hopLimit: (byte)HopLimit,
                     replyId: target.PacketId, emoji: 1,
-                    okToMqtt: OkToMqtt);
+                    okToMqtt: OkToMqtt,
+                    xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
                 ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
                 channelTag = ch.Config.Name;
             }
@@ -4882,7 +4903,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.EncodeNodeStatus(
                 selectedChannel, _myNodeNum, packetId, statusText,
-                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var channelName = ChannelDisplayName(selectedChannel);
 
@@ -4935,7 +4957,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 selectedChannel, _myNodeNum, packetId,
                 MyLongName ?? string.Empty, MyShortName ?? string.Empty,
                 hwModel: (uint)HardwareModels.Id(MyHwModel), role: role, publicKey: pubKey, hopLimit: (byte)HopLimit,
-                okToMqtt: OkToMqtt);
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var channelName = ChannelDisplayName(selectedChannel);
 
@@ -5007,7 +5030,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 selectedChannel, _myNodeNum, packetId,
                 lat, lon, altitudeM: HomeAltitude,
                 precisionBits: selectedChannel.PositionPrecision,
-                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+                hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var channelName = ChannelDisplayName(selectedChannel);
 
@@ -5088,7 +5112,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 airUtilTx: airUtilTx,
                 uptimeSeconds: uptime,
                 hopLimit: (byte)HopLimit,
-                okToMqtt: OkToMqtt);
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
 
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var channelName = ChannelDisplayName(selectedChannel);
@@ -5153,7 +5178,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 relativeHumidityPct: snapshot.RelativeHumidityPct,
                 barometricPressureHpa: snapshot.BarometricPressureHpa,
                 hopLimit: (byte)HopLimit,
-                okToMqtt: OkToMqtt);
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
 
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var channelName = ChannelDisplayName(selectedChannel);
@@ -5313,7 +5339,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 pm25Standard: snapshot.Pm25Standard,
                 pm100Standard: snapshot.Pm100Standard,
                 hopLimit: (byte)HopLimit,
-                okToMqtt: OkToMqtt);
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
 
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             var channelName = ChannelDisplayName(selectedChannel);
@@ -5477,7 +5504,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 expireEpoch: expireEpoch,
                 icon: icon,
                 hopLimit: (byte)HopLimit,
-                okToMqtt: OkToMqtt);
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
 
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
@@ -6170,7 +6198,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.Encode(
                 primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
-                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
@@ -6273,7 +6302,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.Encode(
                 primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
-                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
@@ -6376,7 +6406,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.Encode(
                 primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
-                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
@@ -6442,7 +6473,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             uint packetId = NextPacketId();
             var frame = MeshEncoder.Encode(
                 primaryCh.Config, _myNodeNum, 0xFFFFFFFFu, packetId,
-                PortNum.GameApp, payload, hopLimit: (byte)HopLimit);
+                PortNum.GameApp, payload, hopLimit: (byte)HopLimit,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
             var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
             Status = ok
@@ -7379,6 +7411,55 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// If <paramref name="result"/> is a broadcast carrying a 64-byte
+    /// <c>xeddsa_signature</c> (Data field 10), verify it against the
+    /// sender's known X25519 public key and — on success — mark the node as
+    /// a verified signer (persisted, mirrors firmware's per-node
+    /// <c>HAS_XEDDSA_SIGNED</c> bit). This is what makes MeshRF-originated
+    /// broadcasts show a shield icon on real Meshtastic 2.8+ clients (we
+    /// signed it) and lets MeshRF itself recognize signed peers (we verified
+    /// theirs).
+    ///
+    /// For a NODEINFO_APP broadcast we prefer the public key embedded in that
+    /// same packet over whatever key we already have on file — this covers
+    /// firmware's "first contact" bootstrap path, where trust is established
+    /// from a single self-consistent signed NodeInfo with no prior key
+    /// exchange. A key that would trigger the existing key-mismatch guard is
+    /// never used for verification either (mirrors: a substituted key is
+    /// never silently trusted).
+    /// </summary>
+    private void TryVerifyXeddsaBroadcast(MeshHeader header, MeshDecodeResult result)
+    {
+        if (!header.IsBroadcast || result.DataField10.Length != MeshCrypto.XeddsaSignatureSize)
+            return;
+
+        var existing = _nodesByNum.GetValueOrDefault(header.From) ?? _nodeStore.Get(header.From);
+
+        byte[]? senderCurvePublicKey = null;
+        if (result.Port == PortNum.NodeInfo && result.User is { PublicKey.Length: 32 } user)
+        {
+            string newKeyHex = Convert.ToHexString(user.PublicKey);
+            bool mismatchesExisting = !string.IsNullOrEmpty(existing?.PublicKey)
+                && !string.Equals(existing!.PublicKey, newKeyHex, StringComparison.OrdinalIgnoreCase);
+            if (!mismatchesExisting)
+                senderCurvePublicKey = user.PublicKey;
+        }
+        senderCurvePublicKey ??= TryParseHex(existing?.PublicKey);
+        if (senderCurvePublicKey is not { Length: 32 })
+            return;
+
+        bool verified = MeshCrypto.XeddsaVerify(header.From, header.PacketId, (uint)result.Port,
+            result.AppPayload, result.DataField10, senderCurvePublicKey);
+        if (!verified) return;
+
+        if (existing?.HasXeddsaSigned != true)
+            Log($"  {header.FromId}: XEdDSA signature verified — marking as a verified signer.");
+
+        EnqueueDbWrite((nodes, _) => nodes.SetXeddsaSigned(header.From, true));
+        MarkNodeDirty(header.From);
+    }
+
     private void ApplyDecodedPayloadResult(
         byte[] frame,
         MeshHeader header,
@@ -7480,6 +7561,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var decodedSummary = BuildDecodedPortSummary(header, result, senderName);
         Log(decodedSummary);
         AppendDecodedPacketJsonFeed(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, decodedSummary);
+        TryVerifyXeddsaBroadcast(header, result);
         switch (result.Port)
             {
                 case PortNum.TextMessage:

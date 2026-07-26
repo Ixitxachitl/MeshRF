@@ -36,6 +36,12 @@ public static class MeshEncoder
     /// <param name="wantAck">Request an ACK.</param>
     /// <param name="okToMqtt">Set Data.bitfield ok_to_mqtt so gateways may
     /// uplink this packet to the public MQTT broker.</param>
+    /// <param name="xeddsaPrivateKey">Our 32-byte Ed25519 signing private key
+    /// (from <see cref="MeshCrypto.DeriveXeddsaKeys"/>), or null to send
+    /// unsigned. Only used when <paramref name="to"/> is the broadcast address
+    /// (0xFFFFFFFF) — mirrors firmware, which only XEdDSA-signs broadcasts.</param>
+    /// <param name="xeddsaPublicKey">Our 32-byte Ed25519 public key paired with
+    /// <paramref name="xeddsaPrivateKey"/>.</param>
     public static byte[] Encode(ChannelConfig channel,
                                 uint from,
                                 uint to,
@@ -48,7 +54,9 @@ public static class MeshEncoder
                                 uint requestId = 0,
                                 uint replyId = 0,
                                 uint emoji = 0,
-                                bool okToMqtt = false)
+                                bool okToMqtt = false,
+                                byte[]? xeddsaPrivateKey = null,
+                                byte[]? xeddsaPublicKey = null)
     {
         ArgumentNullException.ThrowIfNull(channel);
 
@@ -71,6 +79,23 @@ public static class MeshEncoder
         ulong bitfield = (okToMqtt ? BitfieldOkToMqtt : 0) | (wantResponse ? BitfieldWantResponse : 0);
         if (bitfield != 0)
             data.WriteVarintField(9, bitfield);
+
+        // field 10 = xeddsa_signature. Broadcasts only (mirrors firmware
+        // Router::perhapsEncode, which signs broadcast Data packets so peers
+        // can mark us as a verified signer). Skipped if the signed frame
+        // wouldn't fit the LoRa payload budget (mirrors signedDataFits) — an
+        // unsigned send is still better than failing outright.
+        if (to == 0xFFFFFFFFu && xeddsaPrivateKey is { Length: 32 } && xeddsaPublicKey is { Length: 32 })
+        {
+            const int SigFieldOverhead = 2; // tag byte + 1-byte length varint (sig is always 64 bytes).
+            if (MeshHeader.Size + data.Length + SigFieldOverhead + MeshCrypto.XeddsaSignatureSize <= 255)
+            {
+                byte[] signature = MeshCrypto.XeddsaSign(from, packetId, (uint)port, payload,
+                                                          xeddsaPrivateKey, xeddsaPublicKey);
+                data.WriteBytesField(10, signature);
+            }
+        }
+
         var plain = data.ToArray();
 
         // 2. Encrypt with the channel's effective key. An empty key means the
@@ -103,11 +128,14 @@ public static class MeshEncoder
                                            bool wantAck = false,
                                            bool okToMqtt = false,
                                            uint replyId = 0,
-                                           uint emoji = 0)
+                                           uint emoji = 0,
+                                           byte[]? xeddsaPrivateKey = null,
+                                           byte[]? xeddsaPublicKey = null)
         => Encode(channel, from, to, packetId, PortNum.TextMessage,
                   Encoding.UTF8.GetBytes(text ?? string.Empty), hopLimit, wantAck,
                   replyId: replyId, emoji: emoji,
-                  okToMqtt: okToMqtt);
+                  okToMqtt: okToMqtt,
+                  xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     /// <summary>
     /// Encode a PKC (public-key) direct message addressed to a single peer,
     /// mirroring firmware <c>perhapsEncode</c>'s PKI path. The <c>Data</c>
@@ -231,7 +259,9 @@ public static class MeshEncoder
                                         uint to = 0xFFFFFFFFu,
                                         byte hopLimit = 3,
                                         bool wantResponse = false,
-                                        bool okToMqtt = false)
+                                        bool okToMqtt = false,
+                                        byte[]? xeddsaPrivateKey = null,
+                                        byte[]? xeddsaPublicKey = null)
     {
         var user = new ProtoWriter();
         user.WriteStringField(1, $"!{from:x8}");          // id
@@ -246,7 +276,8 @@ public static class MeshEncoder
 
         return Encode(channel, from, to, packetId, PortNum.NodeInfo,
                       user.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: wantResponse, okToMqtt: okToMqtt);
+                      wantResponse: wantResponse, okToMqtt: okToMqtt,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     }
 
     /// <summary>
@@ -287,7 +318,9 @@ public static class MeshEncoder
                                         byte hopLimit = 3,
                                         bool wantResponse = false,
                                         bool okToMqtt = false,
-                                        uint requestId = 0)
+                                        uint requestId = 0,
+                                        byte[]? xeddsaPrivateKey = null,
+                                        byte[]? xeddsaPublicKey = null)
     {
         if (precisionBits == 0)
             throw new ArgumentOutOfRangeException(nameof(precisionBits),
@@ -316,7 +349,8 @@ public static class MeshEncoder
         return Encode(channel, from, to, packetId, PortNum.Position,
                       pos.ToArray(), hopLimit, wantAck: false,
                       wantResponse: wantResponse, okToMqtt: okToMqtt,
-                      requestId: requestId);
+                      requestId: requestId,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     }
 
     /// <summary>
@@ -334,7 +368,9 @@ public static class MeshEncoder
                                                       uint to = 0xFFFFFFFFu,
                                                       byte hopLimit = 3,
                                                       bool okToMqtt = false,
-                                                      uint requestId = 0)
+                                                      uint requestId = 0,
+                                                      byte[]? xeddsaPrivateKey = null,
+                                                      byte[]? xeddsaPublicKey = null)
     {
         var device = new ProtoWriter();
         if (batteryLevel is byte batt)
@@ -355,7 +391,8 @@ public static class MeshEncoder
         return Encode(channel, from, to, packetId, PortNum.Telemetry,
                       telemetry.ToArray(), hopLimit, wantAck: false,
                       wantResponse: false, okToMqtt: okToMqtt,
-                      requestId: requestId);
+                      requestId: requestId,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     }
 
     /// <summary>
@@ -371,7 +408,9 @@ public static class MeshEncoder
                                                            uint to = 0xFFFFFFFFu,
                                                            byte hopLimit = 3,
                                                            bool okToMqtt = false,
-                                                           uint requestId = 0)
+                                                           uint requestId = 0,
+                                                           byte[]? xeddsaPrivateKey = null,
+                                                           byte[]? xeddsaPublicKey = null)
     {
         var environment = new ProtoWriter();
         if (temperatureC is float temp)
@@ -388,7 +427,8 @@ public static class MeshEncoder
         return Encode(channel, from, to, packetId, PortNum.Telemetry,
                       telemetry.ToArray(), hopLimit, wantAck: false,
                       wantResponse: false, okToMqtt: okToMqtt,
-                      requestId: requestId);
+                      requestId: requestId,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     }
 
     /// <summary>
@@ -408,7 +448,9 @@ public static class MeshEncoder
                                                           uint to = 0xFFFFFFFFu,
                                                           byte hopLimit = 3,
                                                           bool okToMqtt = false,
-                                                          uint requestId = 0)
+                                                          uint requestId = 0,
+                                                          byte[]? xeddsaPrivateKey = null,
+                                                          byte[]? xeddsaPublicKey = null)
     {
         var aq = new ProtoWriter();
         if (pm10Standard.HasValue)       aq.WriteVarintField(1, pm10Standard.Value);
@@ -425,7 +467,8 @@ public static class MeshEncoder
         return Encode(channel, from, to, packetId, PortNum.Telemetry,
                       telemetry.ToArray(), hopLimit, wantAck: false,
                       wantResponse: false, okToMqtt: okToMqtt,
-                      requestId: requestId);
+                      requestId: requestId,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     }
 
     /// <summary>
@@ -458,14 +501,17 @@ public static class MeshEncoder
                                           string status,
                                           uint to = 0xFFFFFFFFu,
                                           byte hopLimit = 3,
-                                          bool okToMqtt = false)
+                                          bool okToMqtt = false,
+                                          byte[]? xeddsaPrivateKey = null,
+                                          byte[]? xeddsaPublicKey = null)
     {
         var msg = new ProtoWriter();
         msg.WriteStringField(1, status ?? string.Empty);
 
         return Encode(channel, from, to, packetId, PortNum.NodeStatus,
                       msg.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: false, okToMqtt: okToMqtt);
+                      wantResponse: false, okToMqtt: okToMqtt,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     }
 
     /// <summary>
@@ -487,7 +533,9 @@ public static class MeshEncoder
                                         uint to = 0xFFFFFFFFu,
                                         byte hopLimit = 3,
                                         bool wantResponse = false,
-                                        bool okToMqtt = false)
+                                        bool okToMqtt = false,
+                                        byte[]? xeddsaPrivateKey = null,
+                                        byte[]? xeddsaPublicKey = null)
     {
         int latI = (int)Math.Round(latitude / 1e-7);
         int lonI = (int)Math.Round(longitude / 1e-7);
@@ -504,7 +552,8 @@ public static class MeshEncoder
 
         return Encode(channel, from, to, packetId, PortNum.Waypoint,
                       wp.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: wantResponse, okToMqtt: okToMqtt);
+                      wantResponse: wantResponse, okToMqtt: okToMqtt,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
     }
 
     /// <summary>

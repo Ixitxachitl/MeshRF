@@ -88,6 +88,16 @@ public sealed class NodeRecord
     /// Null when unknown / not advertised.</summary>
     public bool? IsUnmessagable { get; set; }
 
+    /// <summary>Set once we've verified a valid XEdDSA signature on a
+    /// broadcast from this node (mirrors firmware's per-node
+    /// <c>HAS_XEDDSA_SIGNED</c> bit — see <see cref="MeshRF.Mesh.MeshCrypto.XeddsaVerify"/>).
+    /// Monotonic like firmware: only ever set true, cleared only when the
+    /// node's public key changes. Null = never verified / no key on file.</summary>
+    public bool? HasXeddsaSigned { get; set; }
+
+    /// <summary>Convenience flag for the UI: show the "verified" shield icon.</summary>
+    public bool IsXeddsaVerified => HasXeddsaSigned == true;
+
     /// <summary>Convenience flag for UI visibility bindings.</summary>
     public bool IsUnmessagableTrue => IsUnmessagable == true;
 
