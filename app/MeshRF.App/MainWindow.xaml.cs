@@ -745,6 +745,58 @@ public partial class MainWindow : Window
 
     private void OnDeleteWaypoints(object sender, RoutedEventArgs e) => DeleteSelectedWaypoints();
 
+    // Right-click doesn't select a DataGridRow by itself in WPF, so the
+    // context menu would otherwise act on whatever was last left-clicked
+    // rather than the row actually under the cursor.
+    private void OnWaypointsGridPreviewRightMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject) is not { Item: MeshRF.Waypoints.WaypointRecord wp })
+            return;
+        WaypointsGrid.SelectedItem = wp;
+    }
+
+    private void OnWaypointsContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = WaypointsGrid.SelectedItems.OfType<MeshRF.Waypoints.WaypointRecord>().ToList();
+        EditWaypointMenuItem.IsEnabled = selected.Count == 1 && !vm.IsWaypointLockedByOther(selected[0]);
+        ResendWaypointMenuItem.IsEnabled = selected.Count >= 1;
+    }
+
+    private void OnWaypointsGridDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject) is null) return;
+        OnEditWaypoint(sender, e);
+    }
+
+    private async void OnEditWaypoint(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        if (WaypointsGrid.SelectedItem is not MeshRF.Waypoints.WaypointRecord wp) return;
+        if (vm.IsWaypointLockedByOther(wp))
+        {
+            MessageBox.Show(this,
+                $"This waypoint is locked to !{wp.LockedTo:x8} and can't be edited from here.",
+                "Waypoint locked",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var result = WaypointEditWindow.Edit(this, wp, vm.MyNodeNum);
+        if (result is null) return;
+
+        await vm.UpdateWaypointAsync(wp, result);
+    }
+
+    private async void OnResendWaypoints(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = WaypointsGrid.SelectedItems.OfType<MeshRF.Waypoints.WaypointRecord>().ToList();
+        foreach (var wp in selected)
+            await vm.ResendWaypointAsync(wp);
+    }
+
     // Context-menu "Traceroute" sends a Meshtastic-style route-discovery request
     // to the selected node (rate-limited to one per cooldown by the view model).
     private async void OnTraceroute(object sender, RoutedEventArgs e)

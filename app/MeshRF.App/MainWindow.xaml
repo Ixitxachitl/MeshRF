@@ -801,7 +801,9 @@
                                       SelectionMode="Extended"
                                       GridLinesVisibility="Horizontal"
                                       HeadersVisibility="Column"
-                                      KeyDown="WaypointsGrid_KeyDown">
+                                      KeyDown="WaypointsGrid_KeyDown"
+                                      PreviewMouseRightButtonDown="OnWaypointsGridPreviewRightMouseDown"
+                                      MouseDoubleClick="OnWaypointsGridDoubleClick">
                                 <DataGrid.RowStyle>
                                     <Style TargetType="DataGridRow">
                                         <Setter Property="ToolTip" Value="{Binding ToolTipText}" />
@@ -813,7 +815,26 @@
                                     </Style>
                                 </DataGrid.RowStyle>
                                 <DataGrid.ContextMenu>
-                                    <ContextMenu>
+                                    <ContextMenu Opened="OnWaypointsContextMenuOpened">
+                                        <MenuItem x:Name="EditWaypointMenuItem"
+                                                  Header="Edit..."
+                                                  Click="OnEditWaypoint">
+                                            <MenuItem.Icon>
+                                                <TextBlock Text="&#xE70F;"
+                                                           FontFamily="Segoe MDL2 Assets"
+                                                           FontSize="12" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem x:Name="ResendWaypointMenuItem"
+                                                  Header="Resend"
+                                                  Click="OnResendWaypoints">
+                                            <MenuItem.Icon>
+                                                <TextBlock Text="&#xE72C;"
+                                                           FontFamily="Segoe MDL2 Assets"
+                                                           FontSize="12" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator />
                                         <MenuItem Header="Delete"
                                                   Click="OnDeleteWaypoints"
                                                   InputGestureText="Del">
@@ -836,9 +857,15 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Type" Width="80"
+                                                        SortMemberPath="GeofenceKindText"
+                                                        Binding="{Binding GeofenceKindText}" />
                                     <DataGridTextColumn Header="Name" Width="2*"
                                                         SortMemberPath="Name"
                                                         Binding="{Binding DisplayName}" />
+                                    <DataGridTextColumn Header="Description" Width="2*"
+                                                        SortMemberPath="Description"
+                                                        Binding="{Binding Description}" />
                                     <DataGridTextColumn Header="From" Width="96"
                                                         SortMemberPath="FromNode"
                                                         Binding="{Binding FromId}"

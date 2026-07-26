@@ -1059,6 +1059,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsWaypointLockedByOther(WaypointRecord wp) =>
         wp.LockedTo != 0 && wp.LockedTo != _myNodeNum;
 
+    /// <summary>Our own node number (0 if not yet known), for dialogs that need
+    /// to know who "lock to me" refers to.</summary>
+    public uint MyNodeNum => _myNodeNum;
+
     /// <summary>
     /// Remove persisted waypoints and refresh the map. For each waypoint we're
     /// allowed to modify (unlocked, or locked to us) and can currently transmit
@@ -1125,6 +1129,165 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var wp in targets)
             Waypoints.Remove(wp);
         MapDataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Re-transmits a waypoint's stored content unchanged (same id, same
+    /// fields/expiry) — useful to make sure other nodes have it after being out
+    /// of range, without editing anything. No local state changes; this is
+    /// purely a courtesy retransmission.
+    /// </summary>
+    public async Task ResendWaypointAsync(WaypointRecord wp)
+    {
+        if (!CanTransmit || _myNodeNum == 0)
+        {
+            Status = "Set your node ID and a TX-capable device before resending waypoints.";
+            Log(Status);
+            return;
+        }
+
+        var channel = FindChannelByName(wp.Channel);
+        if (channel is null)
+        {
+            Status = "No enabled channel to resend waypoint on.";
+            Log(Status);
+            return;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeWaypoint(
+                channel,
+                _myNodeNum,
+                packetId,
+                wp.WaypointId,
+                wp.Latitude,
+                wp.Longitude,
+                name: wp.Name,
+                description: wp.Description,
+                expireEpoch: wp.ExpireEpoch,
+                lockedTo: wp.LockedTo,
+                icon: wp.Icon,
+                geofenceRadiusM: wp.GeofenceRadius,
+                bboxWest: wp.BboxWest, bboxSouth: wp.BboxSouth, bboxEast: wp.BboxEast, bboxNorth: wp.BboxNorth,
+                notifyOnEnter: wp.NotifyOnEnter,
+                notifyOnExit: wp.NotifyOnExit,
+                notifyFavoritesOnly: wp.NotifyFavoritesOnly,
+                hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            Status = ok
+                ? $"Resent waypoint \"{wp.DisplayName}\" ({frame.Length} B) on {channel.Name}"
+                : "Transmit failed (device cannot transmit).";
+            Log(Status);
+        }
+        catch (Exception ex)
+        {
+            Status = $"Resend error: {ex.Message}";
+            Log(Status);
+        }
+    }
+
+    /// <summary>
+    /// Applies an edit to an existing waypoint and resends it (same id, new
+    /// content) over the mesh, then updates our local cache. Callers must
+    /// already have checked <see cref="IsWaypointLockedByOther"/> — Meshtastic
+    /// waypoints locked to another node should not be edited.
+    /// </summary>
+    public async Task<bool> UpdateWaypointAsync(WaypointRecord original, WaypointEditResult edit)
+    {
+        if (!CanTransmit || _myNodeNum == 0)
+        {
+            Status = "Set your node ID and a TX-capable device before editing waypoints.";
+            Log(Status);
+            return false;
+        }
+
+        var channel = FindChannelByName(original.Channel);
+        if (channel is null)
+        {
+            Status = "No enabled channel to send the waypoint edit on.";
+            Log(Status);
+            return false;
+        }
+
+        try
+        {
+            uint packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeWaypoint(
+                channel,
+                _myNodeNum,
+                packetId,
+                original.WaypointId,
+                edit.Latitude,
+                edit.Longitude,
+                name: edit.Name,
+                description: edit.Description,
+                expireEpoch: edit.ExpireEpoch,
+                lockedTo: edit.LockedTo,
+                icon: edit.Icon,
+                geofenceRadiusM: edit.GeofenceRadius,
+                bboxWest: edit.BboxWest, bboxSouth: edit.BboxSouth, bboxEast: edit.BboxEast, bboxNorth: edit.BboxNorth,
+                notifyOnEnter: edit.NotifyOnEnter,
+                notifyOnExit: edit.NotifyOnExit,
+                notifyFavoritesOnly: edit.NotifyFavoritesOnly,
+                hopLimit: (byte)HopLimit,
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            bool ok = await TransmitAsync(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
+            if (!ok)
+            {
+                Status = "Transmit failed (device cannot transmit).";
+                Log(Status);
+                return false;
+            }
+
+            // Our own local index key is (from_node, waypoint_id); since editing
+            // an unlocked waypoint someone else authored can change from_node to
+            // us, forget the old row first so this doesn't leave a stale
+            // duplicate behind under the original sender's node number.
+            _waypointStore.Forget(original.Id);
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            _waypointStore.Upsert(new WaypointRecord
+            {
+                FromNode = _myNodeNum,
+                WaypointId = original.WaypointId,
+                PacketId = packetId,
+                Channel = channel.Name,
+                Name = edit.Name,
+                Description = edit.Description,
+                Icon = edit.Icon,
+                Latitude = edit.Latitude,
+                Longitude = edit.Longitude,
+                ExpireEpoch = edit.ExpireEpoch,
+                LockedTo = edit.LockedTo,
+                RxEpoch = now,
+                GeofenceRadius = edit.GeofenceRadius,
+                BboxWest = edit.BboxWest,
+                BboxSouth = edit.BboxSouth,
+                BboxEast = edit.BboxEast,
+                BboxNorth = edit.BboxNorth,
+                NotifyOnEnter = edit.NotifyOnEnter,
+                NotifyOnExit = edit.NotifyOnExit,
+                NotifyFavoritesOnly = edit.NotifyFavoritesOnly,
+            });
+            ReloadWaypoints();
+
+            Status = $"Updated waypoint \"{edit.Name}\" ({frame.Length} B) on {channel.Name}";
+            Log(Status);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Status = $"Waypoint edit error: {ex.Message}";
+            Log(Status);
+            return false;
+        }
     }
 
     /// <summary>Forget the stored public key for the given node(s) and ask them
@@ -1559,7 +1722,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (wp.NotifyFavoritesOnly) sb.Append(", favorites only");
             sb.Append(')');
         }
-        if (wp.ExpireEpoch != 0)
+        if (wp.HasExpiry)
             sb.Append("\nExpires ").Append(FormatLocalDateTime(DateTimeOffset.FromUnixTimeSeconds(wp.ExpireEpoch).LocalDateTime))
               .Append(wp.IsExpired ? "  [EXPIRED]" : string.Empty);
         sb.Append("\nReceived ").Append(FormatAge(wp.RxEpoch));
@@ -5767,8 +5930,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private uint BuildWaypointExpiryEpoch()
     {
+        // No expiration: mirror the official app, which sends Int.MAX_VALUE
+        // rather than 0 (firmware's single-slot OLED waypoint frame treats an
+        // expire of 0 as already-expired, so 0 alone isn't a safe "never" value).
         if (!UseWaypointExpiry || WaypointExpiryDate is not DateTime date)
-            return 0;
+            return WaypointRecord.NeverExpiresEpoch;
 
         if (!int.TryParse(WaypointExpiryHour12, NumberStyles.None, CultureInfo.InvariantCulture, out int hour12) ||
             hour12 is < 1 or > 12)
