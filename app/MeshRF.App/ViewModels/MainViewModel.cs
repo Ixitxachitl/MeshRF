@@ -85,6 +85,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // committed to _nodeStore when the dirty flush reads.
     private readonly HashSet<uint> _pendingXeddsaSigned = new();
     private readonly Dictionary<uint, int> _nodeLocationHistoryCounts = new();
+    // Last known inside/outside state per (waypoint, node) pair, so geofence
+    // alerts fire only on an enter/exit transition rather than every position
+    // update while a node stays put on one side of the boundary.
+    private readonly Dictionary<(long WaypointId, uint NodeNum), bool> _geofenceInsideState = new();
     private readonly Dictionary<uint, int> _nodeMapStateSignatures = new();
     private readonly Dictionary<uint, int> _nodeTooltipSignatures = new();
     private readonly Dictionary<uint, string> _nodeTooltipCache = new();
@@ -1288,6 +1292,113 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Log(Status);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Checks a node's new position against every active waypoint geofence and
+    /// raises an alert (log line + ringtone + a note in the waypoint's own
+    /// channel) on an enter/exit transition. Purely local — this never
+    /// broadcasts anything over the mesh. A node's first-ever sighting against
+    /// a given waypoint only establishes the baseline inside/outside state (no
+    /// alert), so a node already inside a freshly-created geofence doesn't
+    /// spam an "entered" alert on its next position packet.
+    /// </summary>
+    private void EvaluateGeofenceCrossing(uint nodeNum, double lat, double lon)
+    {
+        if (nodeNum == 0 || Waypoints.Count == 0) return;
+
+        foreach (var wp in Waypoints)
+        {
+            if (!wp.HasGeofence || wp.IsExpired) continue;
+            if (!wp.NotifyOnEnter && !wp.NotifyOnExit) continue;
+
+            if (wp.NotifyFavoritesOnly && _nodesByNum.GetValueOrDefault(nodeNum) is not { Favorite: true })
+                continue;
+
+            bool inside = IsInsideGeofence(wp, lat, lon);
+            var key = (wp.Id, nodeNum);
+            bool hadPrior = _geofenceInsideState.TryGetValue(key, out bool wasInside);
+            _geofenceInsideState[key] = inside;
+            if (!hadPrior || inside == wasInside) continue;
+
+            if (inside && wp.NotifyOnEnter) RaiseGeofenceAlert(wp, nodeNum, entered: true);
+            else if (!inside && wp.NotifyOnExit) RaiseGeofenceAlert(wp, nodeNum, entered: false);
+        }
+    }
+
+    /// <summary>True when (lat, lon) falls inside the waypoint's circular
+    /// radius and/or its rectangular bounding box — either shape counts when
+    /// both are configured, matching the Waypoint proto's "the circular radius
+    /// and/or the bounding box" notify semantics. Bounding boxes crossing the
+    /// antimeridian are not handled (uncommon for a local geofence).</summary>
+    private static bool IsInsideGeofence(WaypointRecord wp, double lat, double lon)
+    {
+        if (wp.HasCircularGeofence &&
+            HaversineKm(wp.Latitude, wp.Longitude, lat, lon) * 1000.0 <= wp.GeofenceRadius)
+            return true;
+
+        if (wp.HasBoundingBoxGeofence &&
+            lat >= wp.BboxSouth!.Value && lat <= wp.BboxNorth!.Value &&
+            lon >= wp.BboxWest!.Value && lon <= wp.BboxEast!.Value)
+            return true;
+
+        return false;
+    }
+
+    private void RaiseGeofenceAlert(WaypointRecord wp, uint nodeNum, bool entered)
+    {
+        string nodeName = NodeDisplayName(nodeNum);
+        string verb = entered ? "entered" : "exited";
+        string text = $"{nodeName} {verb} geofence \"{wp.DisplayName}\"";
+        Log($"  geofence: {text}");
+
+        var chanVm = ResolveChannelTab(wp.Channel);
+        if (chanVm is not null)
+        {
+            chanVm.Messages.Add(new ChannelMessage
+            {
+                FromId = string.IsNullOrWhiteSpace(wp.Name) ? "Geofence" : wp.Name,
+                Text = text,
+            });
+            if (chanVm.Messages.Count > 1000) chanVm.Messages.RemoveAt(0);
+            MarkTabNeedsAttention(chanVm);
+            PersistChannelNote(wp.Channel, text);
+        }
+
+        if (!IsNodeRtttlMuted(nodeNum) && chanVm?.MuteRtttl != true)
+        {
+            var rtttl = RingtoneRtttl; var mode = ParseRingtoneMode(RingtoneMode); var vol = RingtoneVolume / 100.0;
+            Task.Run(() => _ringtone.Play(rtttl, mode, vol));
+        }
+    }
+
+    /// <summary>Persist an app-generated channel-scoped note (e.g. a geofence
+    /// alert) so it survives a refresh/restart. Stored under
+    /// <see cref="MessageStore.ConversationNotePort"/> with the channel name in
+    /// the channel column — used both to route it back to the right tab on
+    /// reload via <see cref="ResolveChannelTab"/> and, in
+    /// <see cref="BuildHistoryMessage"/>, as the display "sender" label.
+    /// Mirrors <see cref="PersistConversationNote"/>, which does the same for
+    /// DM-scoped notes.</summary>
+    private void PersistChannelNote(string channelName, string text)
+    {
+        if (string.IsNullOrWhiteSpace(channelName)) return;
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = NextPacketId(),
+                FromNode = 0,
+                ToNode = 0xFFFFFFFFu,
+                Channel = channelName,
+                PortNum = MessageStore.ConversationNotePort,
+                Text = text,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Delivery = (int)MessageDelivery.None,
+            });
+        }
+        catch (Exception ex) { Log($"geofence note store failed: {ex.Message}"); }
     }
 
     /// <summary>Forget the stored public key for the given node(s) and ask them
@@ -8224,6 +8335,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 result.Position.AltitudeM);
                         });
                         _pendingNodePositions[header.From] = (result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM);
+                        EvaluateGeofenceCrossing(header.From, result.Position.Latitude, result.Position.Longitude);
                     }
                     if (positionChanged)
                         _nodeLocationHistoryCounts[header.From] = _nodeLocationHistoryCounts.TryGetValue(header.From, out int count)
@@ -8591,6 +8703,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _nodeLocationHistoryCounts[_myNodeNum] = _nodeLocationHistoryCounts.TryGetValue(_myNodeNum, out int count)
             ? count + 1
             : 1;
+        EvaluateGeofenceCrossing(_myNodeNum, latitude, longitude);
 
         ReloadNodes();
         RefreshOpenSelfHistoryTabs();
