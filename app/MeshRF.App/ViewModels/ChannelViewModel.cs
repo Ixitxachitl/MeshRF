@@ -169,7 +169,6 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
 
     public bool IsPrimary => Config.Role == ChannelRole.Primary;
 
-    [RelayCommand]
     private void Save()
     {
         Config.Name              = (EditName ?? string.Empty).Trim();
@@ -186,6 +185,18 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         OnPropertyChanged(nameof(IsPrimary));
     }
 
+    // Guards against RenameTo's programmatic EditName update re-entering
+    // Save() -> _onSave -> ReloadChannels -> SyncPrimaryChannelName ->
+    // RenameTo, which is exactly how RenameTo itself gets called.
+    private bool _suppressAutoSave;
+
+    partial void OnEditNameChanged(string value) { if (!_suppressAutoSave) Save(); }
+    partial void OnEditRoleChanged(ChannelRole value) => Save();
+    partial void OnEditPskChanged(byte[] value) => Save();
+    partial void OnEditPositionPrecisionChanged(byte value) => Save();
+    partial void OnEditUplinkEnabledChanged(bool value) => Save();
+    partial void OnEditDownlinkEnabledChanged(bool value) => Save();
+
     /// <summary>
     /// Rename the channel in place (used to keep the default Primary channel's
     /// name in sync with the active modem preset) and refresh the tab header.
@@ -193,7 +204,9 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     public void RenameTo(string name)
     {
         Config.Name = name ?? string.Empty;
+        _suppressAutoSave = true;
         EditName = Config.Name;
+        _suppressAutoSave = false;
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(TabHeader));
         OnPropertyChanged(nameof(Hash));
@@ -204,16 +217,6 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     {
         _positionPrecisionOptions = DisplayUnits.BuildPositionPrecisionOptions(unitSystem);
         OnPropertyChanged(nameof(PositionPrecisionOptions));
-    }
-
-    [RelayCommand]
-    private void Revert()
-    {        EditName              = Config.Name;
-        EditRole              = Config.Role;
-        EditPsk               = (byte[])Config.Psk.Clone();
-        EditPositionPrecision = Config.PositionPrecision;
-        EditUplinkEnabled     = Config.UplinkEnabled;
-        EditDownlinkEnabled   = Config.DownlinkEnabled;
     }
 
     [RelayCommand]

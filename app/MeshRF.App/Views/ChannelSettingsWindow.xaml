@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:conv="clr-namespace:MeshRF.App.Converters"
         Title="Channel Settings"
-        Width="620" Height="300"
-        MinWidth="480" MinHeight="260"
+        Width="620" Height="260"
+        MinWidth="480" MinHeight="230"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}"
@@ -26,12 +26,11 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Margin="0,4,8,4" VerticalAlignment="Center" />
             <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4,0,4"
-                     Text="{Binding EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                     Text="{Binding EditName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
             <TextBlock Grid.Row="0" Grid.Column="2" Margin="8,4,0,4"
                        Foreground="{DynamicResource BrushSubtle}" VerticalAlignment="Center"
                        Text="{Binding Hash, StringFormat=hash 0x{0:X2}}" />
@@ -79,12 +78,6 @@
                           Content="Downlink"
                           IsChecked="{Binding EditDownlinkEnabled, Mode=TwoWay}"
                           ToolTip="Accept this channel's traffic from the MQTT broker and inject it into the local mesh (requires the MQTT bridge to be enabled)." />
-            </StackPanel>
-
-            <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"
-                        Margin="0,8,0,0" HorizontalAlignment="Right">
-                <Button Content="Revert" Margin="0,0,4,0" Padding="14,4" Command="{Binding RevertCommand}" />
-                <Button Content="Save" Padding="14,4" Command="{Binding SaveCommand}" />
             </StackPanel>
         </Grid>
     </Border>
