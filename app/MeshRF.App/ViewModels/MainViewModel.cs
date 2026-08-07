@@ -816,7 +816,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly object _rxBusyLock = new();
     private DateTime _rxBusyUntilUtc = DateTime.MinValue;
     private readonly object _relayScheduleLock = new();
-    private readonly Dictionary<ulong, CancellationTokenSource> _pendingRelayCancels = new();
+    /// <summary>A scheduled-but-not-yet-sent relay, keyed by (from, packetId).
+    /// <see cref="NextHopLimit"/> is tracked so a later duplicate with MORE
+    /// hops remaining can upgrade (reschedule) rather than just cancel it —
+    /// mirrors firmware FloodingRouter::perhapsHandleUpgradedPacket.</summary>
+    private readonly record struct PendingRelay(CancellationTokenSource Cts, byte NextHopLimit);
+    private readonly Dictionary<ulong, PendingRelay> _pendingRelayCancels = new();
     private readonly Dispatcher _uiDispatcher;
     private readonly Channel<PkcDecodeWorkItem> _pkcDecodeQueue;
     private readonly CancellationTokenSource _pkcDecodeCts = new();
@@ -8032,13 +8037,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (!RememberUndecodedPacket(header))
             {
-                CancelPendingRelay(header.From, header.PacketId);
+                HandleDuplicateForRelay(frame, header, result, snrDb);
                 Log($"  (dup) rx undecoded from {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2})");
                 MarkNodeDirty(header.From);
                 return;
             }
 
-            RelayIfEligible(frame, header, result);
+            RelayIfEligible(frame, header, result, snrDb);
             Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
             MarkNodeDirty(header.From);
             return;
@@ -8075,14 +8080,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (!isNew)
         {
-            CancelPendingRelay(header.From, header.PacketId);
+            HandleDuplicateForRelay(frame, header, result, snrDb);
             // Still refresh the sighting timestamp (done above), but don't echo.
             MarkNodeDirty(header.From);
             Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
             return;
         }
 
-        RelayIfEligible(frame, header, result);
+        RelayIfEligible(frame, header, result, snrDb);
 
         Messages.Insert(0, record);
 
@@ -8878,7 +8883,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         where T : struct, IFormattable =>
         value.HasValue ? value.Value.ToString(null, CultureInfo.InvariantCulture) : string.Empty;
 
-    private void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result)
+    private void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
     {
         if (!RoutingRelayEnabled) return;
         if (!CanTransmit || _myNodeNum == 0) return;
@@ -8902,7 +8907,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         relayFrame[14] = 0x00;
         relayFrame[15] = myRelayByte;
 
-        var relayDelayMs = ComputeRelayDelayMs(header);
+        bool isRouterRole = string.Equals((MyRole ?? string.Empty).Trim(), "Router", StringComparison.OrdinalIgnoreCase);
+        var relayDelayMs = GetTxDelayMsecWeighted(snrDb ?? 0f, isRouterRole);
         ScheduleDelayedRelay(header, relayFrame, nextHopLimit, relayDelayMs);
     }
 
@@ -8943,54 +8949,133 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private int ComputeRelayDelayMs(MeshHeader header)
+    // ---- Firmware-mirrored CSMA-style relay TX delay (RadioInterface.cpp: ----
+    // ---- getTxDelayMsecWeighted / getCWsize / computeSlotTimeMsec) -----------
+    private const int CwMin = 3; // RadioInterface.h: minimum CWsize
+    private const int CwMax = 8; // RadioInterface.h: maximum CWsize
+    private const double SnrMinDb = -20.0; // RadioInterface.cpp getCWsize: worst LoRa SNR
+    private const double SnrMaxDb = 10.0;  // RadioInterface.cpp getCWsize: best LoRa SNR
+
+    /// <summary>Arduino-style map(), clamped to the output range (firmware's
+    /// raw map() doesn't clamp, but relies on snr/channelUtil staying within
+    /// their expected bounds in practice — clamping here just makes that
+    /// assumption safe instead of implicit).</summary>
+    private static double MapClamped(double value, double inMin, double inMax, double outMin, double outMax)
     {
-        string role = (MyRole ?? string.Empty).Trim().ToUpperInvariant();
-        int minBase, maxBase;
+        double t = Math.Clamp((value - inMin) / (inMax - inMin), 0.0, 1.0);
+        return outMin + t * (outMax - outMin);
+    }
 
-        if (role == "ROUTER")
-        {
-            minBase = 80;
-            maxBase = 160;
-        }
-        else if (role is "ROUTERLATE" or "CLIENTBASE")
-        {
-            minBase = 150;
-            maxBase = 280;
-        }
-        else
-        {
-            minBase = 220;
-            maxBase = 420;
-        }
+    private static int GetCwSize(double snrDb) =>
+        (int)Math.Round(MapClamped(snrDb, SnrMinDb, SnrMaxDb, CwMin, CwMax), MidpointRounding.AwayFromZero);
 
-        int hopsAway = header.HopStart >= header.HopLimit
-            ? header.HopStart - header.HopLimit
-            : 0;
-        int hopPenalty = Math.Min(200, hopsAway * 25);
-        return Random.Shared.Next(minBase, maxBase + 1) + hopPenalty;
+    /// <summary>Firmware RadioInterface::computeSlotTimeMsec() for sub-GHz
+    /// (SX126x/SX127x) hardware — MeshRF never runs the 2.4 GHz (wideLora)
+    /// branch, so that path is omitted.</summary>
+    private double ComputeSlotTimeMsec()
+    {
+        var p = LoraParamsHelper.FromPreset(SelectedPreset);
+        double symbolTimeMs = Math.Pow(2.0, p.Sf) / p.BwKhz;
+        // CAD duration: max(2.25, NUM_SYM_CAD + 0.5) symbols; NUM_SYM_CAD = 2
+        // (RadioLib >= 6.3.0 default) => max(2.25, 2.5) = 2.5 symbols.
+        const double kCadSymbols = 2.5;
+        // CAD/propagation/turnaround/MAC processing constants from firmware's
+        // computeSlotTimeMsec: 0.2 + 0.4 + 7 ms.
+        const double kFixedOverheadMs = 0.2 + 0.4 + 7.0;
+        return kCadSymbols * symbolTimeMs + kFixedOverheadMs;
+    }
+
+    /// <summary>Firmware RadioInterface::getTxDelayMsecWeighted(): the delay
+    /// before relaying an overheard packet, weighted by its RX SNR. ROUTER
+    /// gets a short, tight window (relays early); everyone else (including
+    /// ROUTER_LATE, by design) waits a base offset plus a wider window so
+    /// routers get first shot at the channel.</summary>
+    private int GetTxDelayMsecWeighted(float snrDb, bool isRouterRole)
+    {
+        int cwSize = GetCwSize(snrDb);
+        double slotMs = ComputeSlotTimeMsec();
+        double delayMs = isRouterRole
+            ? Random.Shared.Next(0, Math.Max(1, 2 * cwSize)) * slotMs
+            : (2 * CwMax * slotMs) + Random.Shared.Next(0, 1 << cwSize) * slotMs;
+        return (int)Math.Round(delayMs);
     }
 
     private static ulong RelayKey(uint from, uint packetId) => ((ulong)from << 32) | packetId;
 
-    private void CancelPendingRelay(uint from, uint packetId)
+    /// <summary>
+    /// Firmware FloodingRouter::roleAllowsCancelingDupe: ROUTER/ROUTER_LATE
+    /// never cancel a scheduled rebroadcast just because we heard another
+    /// station's copy first — those roles always relay. CLIENT_BASE gets the
+    /// same treatment, but only for traffic from/to a favorited node;
+    /// everything else (including CLIENT_BASE's non-favorited traffic)
+    /// cancels normally.
+    /// </summary>
+    private bool RoleAllowsCancelingScheduledRelay(MeshHeader header)
     {
-        if (packetId == 0) return;
-        CancellationTokenSource? cts = null;
+        string role = (MyRole ?? string.Empty).Trim().ToUpperInvariant();
+
+        if (role is "ROUTER" or "ROUTERLATE")
+            return false;
+
+        if (role == "CLIENTBASE")
+            return !IsFromOrToFavoritedNode(header);
+
+        return true;
+    }
+
+    private bool IsFromOrToFavoritedNode(MeshHeader header)
+    {
+        if (_nodeStore.Get(header.From)?.Favorite == true) return true;
+        if (!header.IsBroadcast && _nodeStore.Get(header.To)?.Favorite == true) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Called when a duplicate copy of an already-scheduled-or-handled packet
+    /// arrives. Mirrors firmware's two-step handling in
+    /// FloodingRouter::shouldFilterReceived:
+    /// 1. perhapsHandleUpgradedPacket — if this copy has MORE hops remaining
+    ///    than the one we already queued to relay, drop the queued (worse)
+    ///    copy and reschedule with this better one instead of just canceling.
+    /// 2. Otherwise, perhapsCancelDupe — cancel our scheduled relay, unless
+    ///    our role disallows canceling (see RoleAllowsCancelingScheduledRelay).
+    /// </summary>
+    private void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
+    {
+        if (header.PacketId == 0) return;
+
+        var key = RelayKey(header.From, header.PacketId);
+        PendingRelay pending = default;
+        bool hasPending;
+        lock (_relayScheduleLock)
+            hasPending = _pendingRelayCancels.TryGetValue(key, out pending);
+
+        if (hasPending && header.HopLimit > pending.NextHopLimit &&
+            header.HopLimit > 0 && IsRoutingRoleEnabled(MyRole))
+        {
+            CancelPendingRelayCts(key, pending, logCancel: false);
+            Log($"  relay upgraded for packet {header.PacketId:x8} (hop_limit {pending.NextHopLimit} -> {header.HopLimit})");
+            RelayIfEligible(frame, header, result, snrDb);
+            return;
+        }
+
+        if (!RoleAllowsCancelingScheduledRelay(header)) return;
+        if (hasPending) CancelPendingRelayCts(key, pending, logCancel: true);
+    }
+
+    private void CancelPendingRelayCts(ulong key, PendingRelay pending, bool logCancel)
+    {
         lock (_relayScheduleLock)
         {
-            var key = RelayKey(from, packetId);
-            if (_pendingRelayCancels.TryGetValue(key, out cts))
+            if (_pendingRelayCancels.TryGetValue(key, out var current) && current.Cts == pending.Cts)
                 _pendingRelayCancels.Remove(key);
         }
 
-        if (cts is not null)
-        {
-            try { cts.Cancel(); }
-            catch { }
-            cts.Dispose();
-            Log($"  relay canceled for duplicate packet {packetId:x8}");
-        }
+        try { pending.Cts.Cancel(); }
+        catch { }
+        pending.Cts.Dispose();
+        if (logCancel)
+            Log($"  relay canceled for duplicate packet {(uint)key:x8}");
     }
 
     private void ScheduleDelayedRelay(MeshHeader header, byte[] relayFrame,
@@ -9004,7 +9089,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (_pendingRelayCancels.ContainsKey(key))
                 return;
             cts = new CancellationTokenSource();
-            _pendingRelayCancels[key] = cts;
+            _pendingRelayCancels[key] = new PendingRelay(cts, nextHopLimit);
         }
 
         _ = Task.Run(async () =>
@@ -9025,7 +9110,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             finally
             {
                 lock (_relayScheduleLock)
-                    _pendingRelayCancels.Remove(key);
+                {
+                    if (_pendingRelayCancels.TryGetValue(key, out var current) && current.Cts == cts)
+                        _pendingRelayCancels.Remove(key);
+                }
                 cts.Dispose();
             }
         });
