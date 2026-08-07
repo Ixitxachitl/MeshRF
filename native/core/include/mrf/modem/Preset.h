@@ -24,6 +24,10 @@ enum class Preset : std::uint8_t {
     NarrowSlow,    // SF8  /  62.5 kHz / 4-6
     TinyFast,      // SF7  /  15.6 kHz / 4-5
     TinySlow,      // SF8  /  15.6 kHz / 4-6  (LDRO)
+    MediumTurbo,   // SF9  / 500 kHz / 4-5 (appended, not grouped with the
+                   // other Medium* entries above, to keep every existing
+                   // preset's ordinal — and therefore its native/managed
+                   // interop value — unchanged)
 };
 
 struct LoraParams {
@@ -54,6 +58,7 @@ constexpr LoraParams params_for(Preset p) noexcept {
         case Preset::NarrowSlow:    return {8,   62'500, 6};
         case Preset::TinyFast:      return {7,   15'600, 5};
         case Preset::TinySlow:      return {8,   15'600, 6, 0x2B, 16, true, true, true};
+        case Preset::MediumTurbo:   return {9,  500'000, 5};
     }
     return params_for(Preset::LongFast);
 }

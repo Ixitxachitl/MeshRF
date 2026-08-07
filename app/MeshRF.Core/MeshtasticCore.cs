@@ -24,6 +24,7 @@ public enum LoraPreset
     NarrowSlow,
     TinyFast,
     TinySlow,
+    MediumTurbo,
 }
 
 /// <summary>Immutable snapshot of receiver signal statistics.</summary>

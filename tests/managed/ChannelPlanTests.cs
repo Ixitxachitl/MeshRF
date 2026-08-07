@@ -69,6 +69,7 @@ public class ChannelPlanTests
     [InlineData(LoraPreset.NarrowSlow)]
     [InlineData(LoraPreset.TinyFast)]
     [InlineData(LoraPreset.TinySlow)]
+    [InlineData(LoraPreset.MediumTurbo)]
     public void DefaultSlotIsAlwaysInRange(LoraPreset preset)
     {
         var n = ChannelPlan.SlotCount(Region.US, preset);

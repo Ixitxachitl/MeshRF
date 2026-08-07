@@ -65,7 +65,7 @@ public static class ChannelPlan
 
     public static double BandwidthMHz(LoraPreset preset) => preset switch
     {
-        LoraPreset.ShortTurbo or LoraPreset.LongTurbo                                        => 0.500,
+        LoraPreset.ShortTurbo or LoraPreset.LongTurbo or LoraPreset.MediumTurbo               => 0.500,
         LoraPreset.LongModerate or LoraPreset.LongSlow
             or LoraPreset.LiteFast or LoraPreset.LiteSlow                                    => 0.125,
         LoraPreset.NarrowFast or LoraPreset.NarrowSlow                                       => 0.0625,
@@ -93,6 +93,7 @@ public static class ChannelPlan
         LoraPreset.NarrowSlow   => "NarrowSlow",
         LoraPreset.TinyFast     => "TinyFast",
         LoraPreset.TinySlow     => "TinySlow",
+        LoraPreset.MediumTurbo  => "MediumTurbo",
         _                       => "Invalid",
     };
 

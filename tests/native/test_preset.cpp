@@ -80,3 +80,10 @@ TEST(Preset, TinySlowIsSF8With15_6kHzAndLdro) {
     EXPECT_EQ(p.coding_rate, 6);
     EXPECT_TRUE(p.low_data_rate_optimize);
 }
+
+TEST(Preset, MediumTurboIsSF9With500kHz) {
+    const auto p = params_for(Preset::MediumTurbo);
+    EXPECT_EQ(p.spreading_factor, 9);
+    EXPECT_EQ(p.bandwidth_hz, 500'000u);
+    EXPECT_EQ(p.coding_rate, 5);
+}

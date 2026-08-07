@@ -31,6 +31,7 @@ public static class LoraParamsHelper
         LoraPreset.NarrowSlow   => new(8,  62.5,   6),
         LoraPreset.TinyFast     => new(7,  15.6,   5),
         LoraPreset.TinySlow     => new(8,  15.6,   6),
+        LoraPreset.MediumTurbo  => new(9,  500.0,  5),
         _                       => new(11, 250.0,  5),  // LongFast default
     };
 }
