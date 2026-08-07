@@ -7,7 +7,7 @@ and performs LoRa demodulation/modulation in software on the host CPU. It
 decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-Current release line: **v1.0.5**
+Current release line: **v1.0.6**
 
 <img width="1386" height="993" alt="image" src="https://github.com/user-attachments/assets/108e4d84-f767-44c0-a9bb-2750e67c33d7" />
 
@@ -42,10 +42,25 @@ Current release line: **v1.0.5**
 - Waypoint send/receive support, including circular and bounding-box
   geofences with enter/exit alerts.
 - Traceroute and request-position / node-info exchanges.
-- Optional `ok_to_mqtt` transmit flag.
+- MQTT bridge with per-channel uplink/downlink, mirroring firmware's MQTT
+  module: same default server/credentials/root topic
+  (`mqtt.meshtastic.org` / `meshdev` / `large4cats` / `msh`), encrypted
+  ServiceEnvelope publishing (both the channel-encrypted and, when disabled,
+  the plaintext-decoded wire forms), self-originated packets uplinked the
+  same as received ones, SNR-independent gating rules (`ok_to_mqtt`,
+  default-server port suppression, PKI-aware). Off by default; configured
+  from the MQTT toolbar button, with Uplink/Downlink toggles per channel in
+  that channel's Settings. Optional periodic MapReport publishing (name,
+  role, hardware, firmware version, region/preset, fuzzed location) to the
+  broker's map topic, matching firmware's map-reporting feature. Optional
+  parallel JSON publish/subscribe (firmware `json_enabled`): human-readable
+  per-port JSON alongside every uplink, plus "sendtext"/"sendposition"
+  remote-command downlink on a channel named "mqtt".
+- Self-reported firmware version/edition (Identity settings) surfaced to MQTT
+  map reports, defaulting to the same baseline as stock firmware
+  (`2.8.0` / `VANILLA`).
 - Snake, Tetris, Breakout, and Chirpy Runner high-score leaderboards received
-  over the mesh (toggle in the node identity/settings window; off by
-  default).
+  over the mesh (toggle in the About window; off by default).
 
 ### Nodes, Telemetry, and Mapping
 

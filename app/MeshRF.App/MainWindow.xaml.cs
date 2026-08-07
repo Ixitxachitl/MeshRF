@@ -238,6 +238,22 @@ public partial class MainWindow : Window
         w.Show();
     }
 
+    private void OnOpenMqttSettings(object sender, RoutedEventArgs e)
+    {
+        foreach (Window window in OwnedWindows)
+        {
+            if (window is MqttSettingsWindow existing)
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                    existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return;
+            }
+        }
+        var w = new MqttSettingsWindow { Owner = this, DataContext = DataContext };
+        w.Show();
+    }
+
     private void OnRemoveChannelClicked(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;

@@ -102,6 +102,19 @@ public sealed class AppSettings
     /// <summary>Hardware model name (e.g. "HELTEC_V3"). Display / future TX use.</summary>
     public string UserHwModel { get; set; } = "UNSET";
 
+    /// <summary>Self-reported firmware version string (firmware
+    /// DeviceMetadata.firmware_version / MQTT MapReport.firmware_version).
+    /// MeshRF isn't running real Meshtastic firmware, so this is the protocol
+    /// compatibility baseline it presents to consumers of that field (e.g.
+    /// the MQTT map).</summary>
+    public string UserFirmwareVersion { get; set; } = "2.8.0";
+
+    /// <summary>Self-reported firmware edition (firmware <c>FirmwareEdition</c>
+    /// enum name — MyNodeInfo.firmware_edition / MQTT MapReport doesn't
+    /// actually carry this one, but DeviceMetadata does). "VANILLA" is the
+    /// standard (non-event-special) firmware build.</summary>
+    public string UserFirmwareEdition { get; set; } = "VANILLA";
+
     /// <summary>Rebroadcast mode for when TX is added (firmware
     /// <c>Config.DeviceConfig.RebroadcastMode</c>).</summary>
     public string RebroadcastMode { get; set; } = "ALL";
@@ -118,6 +131,65 @@ public sealed class AppSettings
     /// <summary>When true, rebroadcast eligible received packets using the
     /// current role/rebroadcast policy.</summary>
     public bool RoutingRelayEnabled { get; set; } = false;
+
+    // -- MQTT bridge (uplink/downlink gateway) --------------------------------
+    // Field names and defaults mirror firmware ModuleConfig.MQTTConfig /
+    // src/mesh/Default.h default_mqtt_*. Disabled by default, matching
+    // firmware's ModuleConfig.MQTTConfig.enabled default of false.
+
+    /// <summary>Master switch for the MQTT bridge. Off by default.</summary>
+    public bool MqttEnabled { get; set; } = false;
+
+    /// <summary>MQTT broker address, optionally "host:port". Empty means the
+    /// default public Meshtastic broker (mqtt.meshtastic.org).</summary>
+    public string MqttAddress { get; set; } = string.Empty;
+
+    /// <summary>MQTT username. Empty means the firmware default ("meshdev").</summary>
+    public string MqttUsername { get; set; } = string.Empty;
+
+    /// <summary>MQTT password, decrypted in memory. Not serialized directly —
+    /// routed through <see cref="MqttPasswordOnDisk"/> so the on-disk copy is
+    /// DPAPI-protected rather than plaintext, same as <see cref="UserPrivateKey"/>.
+    /// Empty means the firmware default ("large4cats").</summary>
+    [JsonIgnore]
+    public string MqttPassword { get; set; } = string.Empty;
+
+    /// <summary>DPAPI-protected on-disk form of <see cref="MqttPassword"/>.</summary>
+    [JsonPropertyName("MqttPassword")]
+    public string MqttPasswordOnDisk { get; set; } = string.Empty;
+
+    /// <summary>Publish/subscribe the still-channel-PSK-encrypted packet
+    /// bytes (true, the firmware default) rather than decrypted contents.</summary>
+    public bool MqttEncryptionEnabled { get; set; } = true;
+
+    /// <summary>Also publish a parallel human-readable JSON copy of every
+    /// uplinked packet ("&lt;root&gt;/2/json/...", firmware
+    /// ModuleConfig.MQTTConfig.json_enabled) and accept "sendtext"/
+    /// "sendposition" JSON downlink commands on a channel named "mqtt". Off
+    /// by default, matching firmware.</summary>
+    public bool MqttJsonEnabled { get; set; } = false;
+
+    /// <summary>Connect to the broker over TLS. Off by default.</summary>
+    public bool MqttTlsEnabled { get; set; } = false;
+
+    /// <summary>MQTT root topic. Empty means the firmware default ("msh").</summary>
+    public string MqttRootTopic { get; set; } = string.Empty;
+
+    /// <summary>Periodically publish an unencrypted MapReport (name, role,
+    /// hw model, firmware version, region/preset, approximate location) to
+    /// the broker's map topic — firmware ModuleConfig.MQTTConfig
+    /// .map_reporting_enabled AND MapReportSettings.should_report_location
+    /// combined into one opt-in toggle. Off by default.</summary>
+    public bool MqttMapReportingEnabled { get; set; } = false;
+
+    /// <summary>Seconds between MapReport publishes. Firmware default: 3600
+    /// (1 hour).</summary>
+    public int MqttMapReportIntervalSeconds { get; set; } = 3600;
+
+    /// <summary>Bits of location precision included in MapReport (12..15;
+    /// out-of-range values are coerced back to the default). Firmware
+    /// default: 14 (~1.5 km fuzz radius).</summary>
+    public int MqttMapReportPositionPrecision { get; set; } = 14;
 
     /// <summary>Automatically transmit NODEINFO_APP at a fixed interval.</summary>
     public bool AutoReportNodeInfoEnabled { get; set; } = false;
@@ -489,6 +561,7 @@ public sealed class AppSettings
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             settings.NormalizeUnitSystem();
             settings.UserPrivateKey = UnprotectPrivateKey(settings.UserPrivateKeyOnDisk);
+            settings.MqttPassword = UnprotectSecretText(settings.MqttPasswordOnDisk, s_mqttPasswordEntropy);
             return settings;
         }
         catch
@@ -504,6 +577,7 @@ public sealed class AppSettings
         {
             NormalizeUnitSystem();
             UserPrivateKeyOnDisk = ProtectPrivateKey(UserPrivateKey);
+            MqttPasswordOnDisk = ProtectSecretText(MqttPassword, s_mqttPasswordEntropy);
             // Serialize on the caller's thread (fast, <1 ms), then write the
             // file on a thread-pool thread so the UI never blocks on disk I/O.
             // Each call captures its own snapshot so concurrent calls are safe.
@@ -559,6 +633,43 @@ public sealed class AppSettings
             // added, or a blob from a different Windows user account/machine.
             // Treat it as plaintext so an existing install keeps its node
             // identity; the next Save() re-persists it DPAPI-protected.
+            return onDisk;
+        }
+    }
+
+    // DPAPI protection for arbitrary UTF-8 text secrets (e.g. the MQTT
+    // broker password) — same approach as the private key above, but
+    // operating directly on the text rather than base64-decoded key bytes.
+    private static readonly byte[] s_mqttPasswordEntropy = Encoding.UTF8.GetBytes("MeshRF.MqttPassword.v1");
+
+    private static string ProtectSecretText(string plain, byte[] entropy)
+    {
+        if (string.IsNullOrEmpty(plain)) return string.Empty;
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(plain);
+            var protectedBytes = ProtectedData.Protect(bytes, entropy, DataProtectionScope.CurrentUser);
+            return Convert.ToBase64String(protectedBytes);
+        }
+        catch
+        {
+            return plain;
+        }
+    }
+
+    private static string UnprotectSecretText(string onDisk, byte[] entropy)
+    {
+        if (string.IsNullOrEmpty(onDisk)) return string.Empty;
+        try
+        {
+            var blob = Convert.FromBase64String(onDisk);
+            var bytes = ProtectedData.Unprotect(blob, entropy, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch
+        {
+            // Legacy plaintext (written before protection was added) or a
+            // blob from a different user/machine — treat as plaintext.
             return onDisk;
         }
     }

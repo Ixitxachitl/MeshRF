@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Globalization;
 using MeshRF.App.ViewModels;
+using MeshRF.Mqtt;
 
 namespace MeshRF.App.Units;
 
@@ -114,6 +115,16 @@ public static class DisplayUnits
         options.Add(new PositionPrecisionOption(32, "Precise"));
         return options;
     }
+
+    /// <summary>Selectable MQTT MapReport position precisions — firmware
+    /// restricts map-report fuzzing to 12-15 bits (~5.8 km down to ~700 m),
+    /// unlike the wider 0-32 range channels offer for on-air position
+    /// sharing.</summary>
+    public static IReadOnlyList<PositionPrecisionOption> BuildMapReportPrecisionOptions(UnitSystem unitSystem) =>
+        s_positionPrecisions
+            .Where(p => p.Bits >= MqttPolicy.MinMapPositionPrecision && p.Bits <= MqttPolicy.MaxMapPositionPrecision)
+            .Select(p => new PositionPrecisionOption(p.Bits, $"Within {FormatRadius(p.RadiusMeters, unitSystem)}"))
+            .ToList();
 
     private static string FormatRadius(double radiusMeters, UnitSystem unitSystem)
     {

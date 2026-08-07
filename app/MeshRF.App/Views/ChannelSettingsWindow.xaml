@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:conv="clr-namespace:MeshRF.App.Converters"
         Title="Channel Settings"
-        Width="620" Height="260"
-        MinWidth="480" MinHeight="220"
+        Width="620" Height="300"
+        MinWidth="480" MinHeight="260"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}"
@@ -20,6 +20,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -68,7 +69,19 @@
                       IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
                       ToolTip="Mute RTTTL ringtone for text messages on this channel" />
 
-            <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4">
+                <CheckBox VerticalAlignment="Center"
+                          Content="Uplink"
+                          IsChecked="{Binding EditUplinkEnabled, Mode=TwoWay}"
+                          ToolTip="Publish this channel's traffic to the configured MQTT broker (requires the MQTT bridge to be enabled)." />
+                <CheckBox VerticalAlignment="Center" Margin="16,0,0,0"
+                          Content="Downlink"
+                          IsChecked="{Binding EditDownlinkEnabled, Mode=TwoWay}"
+                          ToolTip="Accept this channel's traffic from the MQTT broker and inject it into the local mesh (requires the MQTT bridge to be enabled)." />
+            </StackPanel>
+
+            <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"
                         Margin="0,8,0,0" HorizontalAlignment="Right">
                 <Button Content="Revert" Margin="0,0,4,0" Padding="14,4" Command="{Binding RevertCommand}" />
                 <Button Content="Save" Padding="14,4" Command="{Binding SaveCommand}" />

@@ -22,13 +22,24 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.App.Audio;
 using MeshRF.App.Location;
+using MeshRF.App.Mqtt;
 using MeshRF.App.Units;
 using MeshRF.App.Views;
 using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
+using MeshRF.Mqtt;
 using MeshRF.Nodes;
 using MeshRF.Waypoints;
+using ServiceEnvelope = Meshtastic.Protobufs.ServiceEnvelope;
+using ProtoMeshPacket = Meshtastic.Protobufs.MeshPacket;
+using ProtoData = Meshtastic.Protobufs.Data;
+using ProtoPortNum = Meshtastic.Protobufs.PortNum;
+using ProtoMapReport = Meshtastic.Protobufs.MapReport;
+using ProtoRole = Meshtastic.Protobufs.Config.Types.DeviceConfig.Types.Role;
+using ProtoRegionCode = Meshtastic.Protobufs.Config.Types.LoRaConfig.Types.RegionCode;
+using ProtoModemPreset = Meshtastic.Protobufs.Config.Types.LoRaConfig.Types.ModemPreset;
+using ProtoHardwareModel = Meshtastic.Protobufs.HardwareModel;
 
 namespace MeshRF.App.ViewModels;
 
@@ -40,6 +51,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ChannelStore _channelStore = new();
     private readonly MessageStore _messageStore = new();
     private readonly UsbSerialGpsService _gpsService = new();
+    private readonly MqttBridge _mqttBridge = new();
     private readonly AppSettings _settings;
     private DateTime? _lastRxPlayUtc;
     private bool _settingsLoaded;
@@ -734,6 +746,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // -- Hardware model / rebroadcast / TX keys / home location -------------
 
     [ObservableProperty] private string _myHwModel = "UNSET";
+
+    /// <summary>Self-reported firmware version (MQTT MapReport.firmware_version,
+    /// firmware DeviceMetadata.firmware_version). MeshRF isn't real Meshtastic
+    /// firmware; this is the compatibility baseline it presents.</summary>
+    [ObservableProperty] private string _myFirmwareVersion = "2.8.0";
+
+    /// <summary>Self-reported firmware edition (firmware FirmwareEdition enum
+    /// name). Only meaningful to consumers of DeviceMetadata/MyNodeInfo — the
+    /// MQTT MapReport does not carry this field.</summary>
+    [ObservableProperty] private string _myFirmwareEdition = "VANILLA";
+
+    public IReadOnlyList<string> FirmwareEditionOptions { get; } = new[]
+    {
+        "VANILLA", "SMART_CITIZEN", "OPEN_SAUCE", "DEFCON", "BURNING_MAN", "HAMVENTION", "FAB", "DIY_EDITION",
+    };
+
     [ObservableProperty] private string _rebroadcastMode = "ALL";
     [ObservableProperty] private string _myPublicKey = string.Empty;
     [ObservableProperty] private string _myPrivateKey = string.Empty;
@@ -751,6 +779,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void ToggleRevealPrivateKey() => IsPrivateKeyRevealed = !IsPrivateKeyRevealed;
+
+    /// <summary>Whether the MQTT password field shows the real value or a
+    /// masked placeholder. Defaults to hidden, same as the private key.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMqttPasswordHidden))]
+    private bool _isMqttPasswordRevealed;
+
+    public bool IsMqttPasswordHidden => !IsMqttPasswordRevealed;
+
+    [RelayCommand]
+    private void ToggleRevealMqttPassword() => IsMqttPasswordRevealed = !IsMqttPasswordRevealed;
 
     /// <summary>Show the Snake/Tetris/Breakout/Chirpy Runner high-score
     /// buttons on the primary channel tab. Off by default.</summary>
@@ -772,6 +811,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// may uplink them to the public MQTT broker.</summary>
     [ObservableProperty] private bool _okToMqtt;
     [ObservableProperty] private bool _routingRelayEnabled;
+
+    // -- MQTT bridge (uplink/downlink gateway) -------------------------------
+    [ObservableProperty] private bool _mqttEnabled;
+    [ObservableProperty] private string _mqttAddress = string.Empty;
+    [ObservableProperty] private string _mqttUsername = string.Empty;
+    [ObservableProperty] private string _mqttPassword = string.Empty;
+    [ObservableProperty] private bool _mqttEncryptionEnabled = true;
+    [ObservableProperty] private bool _mqttJsonEnabled;
+    [ObservableProperty] private bool _mqttTlsEnabled;
+    [ObservableProperty] private string _mqttRootTopic = string.Empty;
+    [ObservableProperty] private bool _mqttMapReportingEnabled;
+    [ObservableProperty] private int _mqttMapReportIntervalSeconds = 3600;
+    // byte (not int) so it matches PositionPrecisionOption.Bits exactly —
+    // WPF's ComboBox SelectedValue/SelectedValuePath TwoWay binding silently
+    // fails to push a selection back when the bound property's type doesn't
+    // match the source values' type.
+    [ObservableProperty] private byte _mqttMapReportPositionPrecision = 14;
+
+    /// <summary>Selectable map-report precisions (12-15 bits), labeled as an
+    /// approximate radius in the user's chosen distance unit. Recomputed on
+    /// unit system change, matching <see cref="ChannelViewModel.PositionPrecisionOptions"/>.</summary>
+    public IReadOnlyList<PositionPrecisionOption> MqttMapReportPrecisionOptions =>
+        DisplayUnits.BuildMapReportPrecisionOptions(CurrentUnitSystem);
+
+    /// <summary>Live human-readable connection status ("Disabled",
+    /// "Connecting…", "Connected", "Disconnected", "Error: …"), for display
+    /// in the MQTT settings window.</summary>
+    [ObservableProperty] private string _mqttStatus = "Disabled";
 
     [ObservableProperty] private bool _autoReportNodeInfoEnabled;
     [ObservableProperty] private int _autoReportNodeInfoSeconds = 3600;
@@ -802,6 +869,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _nextAutoEnvironmentMetricsUtc = DateTime.MinValue;
     private DateTime _nextAutoNodeStatusUtc = DateTime.MinValue;
     private DateTime _nextAutoAirQualityMetricsUtc = DateTime.MinValue;
+    private DateTime _nextMapReportUtc = DateTime.MinValue;
     private int _autoReportTickInFlight;
     private readonly SemaphoreSlim _weatherFetchSemaphore = new(1, 1);
     private readonly SemaphoreSlim _airQualityFetchSemaphore = new(1, 1);
@@ -2008,6 +2076,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NodesView.Filter = o => o is NodeRecord n && NodePassesFilter(n);
         _gpsService.StatusChanged += HandleGpsStatusChanged;
         _gpsService.FixReceived += HandleGpsFixReceived;
+        _mqttBridge.StatusChanged += HandleMqttStatusChanged;
+        _mqttBridge.EnvelopeReceived += HandleMqttEnvelopeReceived;
+        _mqttBridge.JsonMessageReceived += HandleMqttJsonMessageReceived;
 
         // Apply persisted values BEFORE wiring change handlers fire usefully.
         // We rely on the [ObservableProperty] setters to fire OnXChanged,
@@ -2056,10 +2127,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MyRole = string.IsNullOrEmpty(_settings.UserRole) ? "Client" : _settings.UserRole;
 
         MyHwModel = string.IsNullOrEmpty(_settings.UserHwModel) ? "UNSET" : _settings.UserHwModel;
+        MyFirmwareVersion = string.IsNullOrEmpty(_settings.UserFirmwareVersion) ? "2.8.0" : _settings.UserFirmwareVersion;
+        MyFirmwareEdition = string.IsNullOrEmpty(_settings.UserFirmwareEdition) ? "VANILLA" : _settings.UserFirmwareEdition;
         RebroadcastMode = string.IsNullOrEmpty(_settings.RebroadcastMode) ? "ALL" : _settings.RebroadcastMode;
         HopLimit = Math.Clamp(_settings.HopLimit, 1, 7);
         OkToMqtt = _settings.OkToMqtt;
         RoutingRelayEnabled = _settings.RoutingRelayEnabled;
+        // Fields show firmware's real default values (not blank) when unset,
+        // matching what a stock Meshtastic device already ships with.
+        MqttAddress = string.IsNullOrEmpty(_settings.MqttAddress) ? MqttPolicy.DefaultAddress : _settings.MqttAddress;
+        MqttUsername = string.IsNullOrEmpty(_settings.MqttUsername) ? MqttPolicy.DefaultUsername : _settings.MqttUsername;
+        MqttPassword = string.IsNullOrEmpty(_settings.MqttPassword) ? MqttPolicy.DefaultPassword : _settings.MqttPassword;
+        MqttEncryptionEnabled = _settings.MqttEncryptionEnabled;
+        MqttJsonEnabled = _settings.MqttJsonEnabled;
+        MqttTlsEnabled = _settings.MqttTlsEnabled;
+        MqttRootTopic = string.IsNullOrEmpty(_settings.MqttRootTopic) ? MqttPolicy.DefaultRootTopic : _settings.MqttRootTopic;
+        MqttMapReportIntervalSeconds = Math.Max(60, _settings.MqttMapReportIntervalSeconds);
+        MqttMapReportPositionPrecision = (byte)MqttPolicy.CoerceMapPositionPrecision(_settings.MqttMapReportPositionPrecision);
+        MqttMapReportingEnabled = _settings.MqttMapReportingEnabled;
+        MqttEnabled = _settings.MqttEnabled; // set last: its OnChanged is what actually starts the bridge
         AutoReportNodeInfoEnabled = _settings.AutoReportNodeInfoEnabled;
         AutoReportNodeInfoSeconds = Math.Max(5, _settings.AutoReportNodeInfoSeconds);
         AutoReportPositionEnabled = _settings.AutoReportPositionEnabled;
@@ -2219,6 +2305,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Bring up channel and node tabs before logging anything, so boot
         // messages land on the Primary tab.
         ReloadChannels();
+        // MqttEnabled's OnChanged fired above (during settings load) with
+        // Channels still empty, so its downlink subscription list would have
+        // been wrong/empty — recompute now that channels are actually loaded.
+        RefreshMqttBridge();
         UpsertSelf();
         ReloadNodes();
         ReloadWaypoints();
@@ -2865,7 +2955,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// responsive during transmit (stop-RX + USB streaming + restart-RX).
     /// </summary>
     private async Task<bool> TransmitAsync(LoraPreset preset, ulong hz, byte[] frame,
-                                           byte gain, bool amp)
+                                           byte gain, bool amp, bool selfOriginated = true)
     {
         bool showPausedStatus = IsSharedHackRfRxTxActive();
         if (showPausedStatus)
@@ -2878,7 +2968,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             bool ok = await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
                                 .ConfigureAwait(false);
             if (ok)
+            {
                 RecordAirtimeSample(EstimatePacketAirtimeMs(preset, frame?.Length ?? 0), isTx: true);
+                if (selfOriginated && frame is not null) UplinkSelfOriginatedIfEligible(frame);
+            }
             return ok;
         }
         finally
@@ -2896,7 +2989,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Any exception is silently swallowed — auto-replies are best-effort.
     /// </summary>
     private void TransmitBackground(LoraPreset preset, ulong hz, byte[] frame,
-                                    byte gain, bool amp)
+                                    byte gain, bool amp, bool selfOriginated = true)
     {
         _ = Task.Run(async () =>
         {
@@ -2905,7 +2998,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 await WaitForTxOpportunityAsync().ConfigureAwait(false);
                 if (_core.Transmit(preset, hz, frame, gain, amp))
+                {
                     RecordAirtimeSample(EstimatePacketAirtimeMs(preset, frame?.Length ?? 0), isTx: true);
+                    if (selfOriginated && frame is not null) UplinkSelfOriginatedIfEligible(frame);
+                }
             }
             catch { /* best-effort */ }
             finally { _txSemaphore.Release(); }
@@ -3644,6 +3740,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var idx = Channels.IndexOf(Channels.First(c => c.Config.Index == cfg.Index));
         var keepSelected = SelectedChannel?.Config.Index;
         ReloadChannels();
+        // A channel's Uplink/Downlink flags may have just changed — resync
+        // the MQTT broker subscriptions (no-op if nothing MQTT-relevant changed).
+        RefreshMqttBridge();
         // ReloadChannels rebuilds the channel view models with empty message
         // lists, so repopulate them from history (otherwise saving settings
         // appears to wipe the chat).
@@ -3923,6 +4022,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(MaxDistanceFilterToolTip));
         OnPropertyChanged(nameof(HomeLocationLabel));
         OnPropertyChanged(nameof(HomeAltitudeToolTip));
+        OnPropertyChanged(nameof(MqttMapReportPrecisionOptions));
         if (!_settingsLoaded) return;
 
         _suppressHomeTextUpdate = true;
@@ -3994,11 +4094,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserNodeStatus = MyNodeStatus ?? string.Empty;
         _settings.UserRole = MyRole ?? "Client";
         _settings.UserHwModel = MyHwModel ?? "UNSET";
+        _settings.UserFirmwareVersion = MyFirmwareVersion ?? "2.8.0";
+        _settings.UserFirmwareEdition = MyFirmwareEdition ?? "VANILLA";
         _settings.RebroadcastMode = RebroadcastMode ?? "ALL";
         _settings.ShowGameHighScores = ShowGameHighScores;
         _settings.HopLimit = Math.Clamp(HopLimit, 1, 7);
         _settings.OkToMqtt = OkToMqtt;
         _settings.RoutingRelayEnabled = RoutingRelayEnabled;
+        _settings.MqttEnabled = MqttEnabled;
+        _settings.MqttAddress = MqttAddress ?? string.Empty;
+        _settings.MqttUsername = MqttUsername ?? string.Empty;
+        _settings.MqttPassword = MqttPassword ?? string.Empty;
+        _settings.MqttEncryptionEnabled = MqttEncryptionEnabled;
+        _settings.MqttJsonEnabled = MqttJsonEnabled;
+        _settings.MqttTlsEnabled = MqttTlsEnabled;
+        _settings.MqttRootTopic = MqttRootTopic ?? string.Empty;
+        _settings.MqttMapReportingEnabled = MqttMapReportingEnabled;
+        _settings.MqttMapReportIntervalSeconds = Math.Max(60, MqttMapReportIntervalSeconds);
+        _settings.MqttMapReportPositionPrecision = MqttPolicy.CoerceMapPositionPrecision(MqttMapReportPositionPrecision);
         _settings.AutoReportNodeInfoEnabled = AutoReportNodeInfoEnabled;
         _settings.AutoReportNodeInfoSeconds = Math.Max(5, AutoReportNodeInfoSeconds);
         _settings.AutoReportPositionEnabled = AutoReportPositionEnabled;
@@ -4067,9 +4180,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
     partial void OnMyRoleChanged(string value) => SaveSettings();
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyFirmwareVersionChanged(string value) => SaveSettings();
+    partial void OnMyFirmwareEditionChanged(string value) => SaveSettings();
     partial void OnRebroadcastModeChanged(string value) => SaveSettings();
     partial void OnOkToMqttChanged(bool value) => SaveSettings();
     partial void OnRoutingRelayEnabledChanged(bool value) => SaveSettings();
+
+    partial void OnMqttEnabledChanged(bool value) { SaveSettings(); RefreshMqttBridge(); }
+    partial void OnMqttAddressChanged(string value) { SaveSettings(); RefreshMqttBridge(); }
+    partial void OnMqttUsernameChanged(string value) { SaveSettings(); RefreshMqttBridge(); }
+    partial void OnMqttPasswordChanged(string value) { SaveSettings(); RefreshMqttBridge(); }
+    partial void OnMqttEncryptionEnabledChanged(bool value) => SaveSettings(); // affects publish encoding only, no reconnect needed
+    partial void OnMqttJsonEnabledChanged(bool value) { SaveSettings(); RefreshMqttBridge(); } // affects subscriptions
+    partial void OnMqttTlsEnabledChanged(bool value) { SaveSettings(); RefreshMqttBridge(); }
+    partial void OnMqttRootTopicChanged(string value) { SaveSettings(); RefreshMqttBridge(); }
+    partial void OnMqttMapReportingEnabledChanged(bool value)
+    {
+        SaveSettings();
+        _nextMapReportUtc = value ? DateTime.UtcNow : DateTime.MinValue; // report promptly on enable
+    }
+    partial void OnMqttMapReportIntervalSecondsChanged(int value) => SaveSettings();
+    partial void OnMqttMapReportPositionPrecisionChanged(byte value) => SaveSettings();
+
+    /// <summary>Recomputes and (re)applies the MQTT bridge's connection/
+    /// subscription options from current settings + each channel's
+    /// Uplink/Downlink flags. Call after any of those change; cheap no-op if
+    /// nothing actually changed (see <see cref="MqttBridgeOptions.IsEquivalentTo"/>).</summary>
+    private void RefreshMqttBridge()
+    {
+        var downlinkChannelNames = Channels
+            .Where(c => c.Config.DownlinkEnabled)
+            .Select(c => string.IsNullOrWhiteSpace(c.Config.Name) ? c.DisplayName : c.Config.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        bool anyDownlink = downlinkChannelNames.Count > 0;
+
+        var options = new MqttBridgeOptions(
+            Enabled: MqttEnabled,
+            Address: MqttAddress,
+            Username: MqttUsername,
+            Password: MqttPassword,
+            TlsEnabled: MqttTlsEnabled,
+            RootTopic: MqttRootTopic,
+            DownlinkChannelNames: downlinkChannelNames,
+            AnyDownlinkEnabled: anyDownlink,
+            JsonEnabled: MqttJsonEnabled);
+
+        _mqttBridge.ApplyOptions(options);
+    }
 
     partial void OnAutoReportNodeInfoEnabledChanged(bool value)
     {
@@ -4422,6 +4580,170 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (fix.AltitudeM is int alt)
             HomeAltitude = alt;
         ApplyResolvedHomeLocation(fix.Latitude, fix.Longitude);
+    }
+
+    private void HandleMqttStatusChanged(string status)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null) { MqttStatus = status; return; }
+        _ = dispatcher.InvokeAsync(() => MqttStatus = status);
+    }
+
+    private void HandleMqttEnvelopeReceived(ServiceEnvelope envelope)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null) { ApplyMqttEnvelope(envelope); return; }
+        _ = dispatcher.InvokeAsync(() => ApplyMqttEnvelope(envelope));
+    }
+
+    /// <summary>
+    /// Validates an incoming ServiceEnvelope against downlink policy
+    /// (<see cref="MeshRF.Mqtt.MqttPolicy.ShouldAcceptDownlink"/>), and if
+    /// accepted, synthesizes an on-air-shaped frame from it and feeds that
+    /// into the same <see cref="ProcessReceivedFrame"/> path real RX uses —
+    /// so a downlinked packet gets identical dedup/relay/store/UI handling to
+    /// one actually demodulated off the air. Both firmware wire forms are
+    /// supported: the common encryption_enabled=true "encrypted" payload
+    /// variant is carried straight through; the unencrypted "decoded"
+    /// variant (a non-default firmware configuration on both ends) is
+    /// re-encrypted with our own copy of the channel PSK before injection, so
+    /// downstream decode/dedup/store/UI code never needs to know which wire
+    /// form it arrived as. PKI downlinks have no channel PSK to encrypt with,
+    /// so the decoded variant is not PKI-eligible.
+    /// </summary>
+    private void ApplyMqttEnvelope(ServiceEnvelope envelope)
+    {
+        if (_myNodeNum == 0) return;
+        var packet = envelope.Packet;
+        if (packet is null || (!packet.HasEncrypted && packet.Decoded is null)) return;
+
+        var channelConfigs = Channels.Select(c => c.Config).ToList();
+        bool isPki = envelope.ChannelId == MqttPolicy.PkiChannelId;
+        var matchedChannel = isPki
+            ? null
+            : channelConfigs.FirstOrDefault(c =>
+                string.Equals(c.Name, envelope.ChannelId, StringComparison.OrdinalIgnoreCase));
+
+        var ctx = new MqttPolicy.DownlinkContext(
+            ChannelId: envelope.ChannelId,
+            GatewayId: envelope.GatewayId,
+            OurNodeId: $"!{_myNodeNum:x8}",
+            MatchedLocalChannelDownlinkEnabled: matchedChannel?.DownlinkEnabled ?? false,
+            AnyChannelDownlinkEnabled: channelConfigs.Any(c => c.DownlinkEnabled),
+            PacketFrom: packet.From,
+            OurNodeNum: _myNodeNum,
+            HopLimit: (int)packet.HopLimit,
+            HopStart: (int)packet.HopStart);
+
+        if (!MqttPolicy.ShouldAcceptDownlink(ctx)) return;
+        if (!isPki && matchedChannel is null) return; // matched-by-policy but we can't find it (shouldn't happen)
+
+        byte channelHash = isPki ? (byte)0x00 : matchedChannel!.Hash;
+
+        byte[] payload;
+        if (packet.HasEncrypted)
+        {
+            payload = packet.Encrypted.ToByteArray();
+        }
+        else
+        {
+            if (isPki || matchedChannel is null) return;
+            var plain = packet.Decoded.ToByteArray();
+            var key = matchedChannel.EffectiveKey;
+            payload = (key.Length == 16 || key.Length == 32)
+                ? MeshCrypto.Ctr(plain, key, packet.From, packet.Id)
+                : plain;
+        }
+
+        var frame = new byte[MeshHeader.Size + payload.Length];
+        BitConverter.GetBytes(packet.To).CopyTo(frame, 0);
+        BitConverter.GetBytes(packet.From).CopyTo(frame, 4);
+        BitConverter.GetBytes(packet.Id).CopyTo(frame, 8);
+        byte flags = (byte)(packet.HopLimit & 0x07);
+        if (packet.WantAck) flags |= 0x08;
+        flags |= 0x10; // via_mqtt
+        flags |= (byte)((packet.HopStart & 0x07) << 5);
+        frame[12] = flags;
+        frame[13] = channelHash;
+        frame[14] = (byte)packet.NextHop;
+        frame[15] = (byte)packet.RelayNode;
+        payload.CopyTo(frame.AsSpan(MeshHeader.Size));
+
+        if (!MeshHeader.TryParse(frame, out var header)) return;
+        Log($"  rx downlink from MQTT: {header.FromId} chan={envelope.ChannelId} gw={envelope.GatewayId}");
+        ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null);
+    }
+
+    private void HandleMqttJsonMessageReceived(string topic, string json)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null) { ApplyMqttJsonEnvelope(topic, json); return; }
+        _ = dispatcher.InvokeAsync(() => ApplyMqttJsonEnvelope(topic, json));
+    }
+
+    /// <summary>
+    /// Firmware MQTT::onReceive's JSON branch + onReceiveJson: a JSON
+    /// downlink is only honored on a channel literally named "mqtt" (with
+    /// downlink enabled) and only commands our OWN node to send something —
+    /// it's a remote-control mechanism (e.g. a webhook triggering "this node,
+    /// say X"), not general packet injection like the crypt topic. Firmware
+    /// builds the frame with <c>router-&gt;allocForSending()</c> +
+    /// <c>service-&gt;sendToMesh()</c>; we build+encrypt with the channel PSK
+    /// and transmit exactly like any other self-originated send, so it also
+    /// gets echoed to MQTT afterward via the normal self-uplink path.
+    /// </summary>
+    private void ApplyMqttJsonEnvelope(string topic, string json)
+    {
+        if (!MqttEnabled || !MqttJsonEnabled || _myNodeNum == 0) return;
+
+        var channelName = MqttPolicy.ChannelNameFromJsonTopic(MqttRootTopic, topic);
+        if (!string.Equals(channelName, MqttPolicy.JsonCommandChannelName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var commandChannel = Channels.Select(c => c.Config).FirstOrDefault(c =>
+            string.Equals(c.Name, channelName, StringComparison.OrdinalIgnoreCase) && c.DownlinkEnabled);
+        if (commandChannel is null) return;
+
+        var ourNodeId = $"!{_myNodeNum:x8}";
+        var cmd = MqttJsonSerializer.TryParseDownlinkCommand(json, _myNodeNum, ourNodeId);
+        if (cmd is null) return;
+
+        var targetChannel = cmd.Channel is uint chIdx
+            ? Channels.FirstOrDefault(c => c.Config.Index == (int)chIdx)?.Config ?? commandChannel
+            : commandChannel;
+
+        byte[] payload;
+        PortNum port;
+        switch (cmd.Type)
+        {
+            case "sendtext" when cmd.Text is not null:
+                port = PortNum.TextMessage;
+                payload = Encoding.UTF8.GetBytes(cmd.Text);
+                break;
+            case "sendposition" when cmd.LatitudeI is not null && cmd.LongitudeI is not null:
+            {
+                port = PortNum.Position;
+                var pos = new ProtoWriter();
+                pos.WriteFixed32Field(1, (uint)cmd.LatitudeI.Value);
+                pos.WriteFixed32Field(2, (uint)cmd.LongitudeI.Value);
+                if (cmd.Altitude is int alt) pos.WriteVarintField(3, (ulong)(long)alt);
+                payload = pos.ToArray();
+                break;
+            }
+            default:
+                return;
+        }
+
+        uint packetId = NextPacketId();
+        uint to = cmd.To ?? 0xFFFFFFFFu;
+        byte hopLimit = cmd.HopLimit ?? (byte)HopLimit;
+        var frame = MeshEncoder.Encode(targetChannel, _myNodeNum, to, packetId, port, payload,
+            hopLimit: hopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: _myXeddsaPrivateKey, xeddsaPublicKey: _myXeddsaPublicKey);
+        var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+
+        Log($"  MQTT JSON command '{cmd.Type}' -> {ChannelDisplayName(targetChannel)}");
+        TransmitBackground(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable);
     }
 
     private GpsSerialOptions BuildGpsSerialOptions() => new(
@@ -7782,6 +8104,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (frame.Length < MeshHeader.Size) return;
         if (!MeshHeader.TryParse(frame, out var header)) return;
 
+        // SNR estimate captured from this frame's preamble (peak above noise).
+        float? snrDb = float.IsNaN(_lastPreamblePeakDb) ? null : _lastPreamblePeakDb;
+        _lastPreamblePeakDb = float.NaN; // consume it so it can't bleed to the next
+        float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
+
+        ProcessReceivedFrame(frame, header, snrDb, packetRssiDbm);
+    }
+
+    /// <summary>
+    /// Shared tail of the RX pipeline: decode (channel PSK, falling back to
+    /// PKC), then hand off to <see cref="ApplyDecodedPayloadResult"/>. Used
+    /// both for frames actually demodulated off the air
+    /// (<see cref="DecodePayloadIfPossible"/>) and for frames synthesized
+    /// from an accepted MQTT downlink envelope (<see cref="OnMqttEnvelopeReceived"/>),
+    /// so both paths get identical dedup/relay/uplink/store/UI handling.
+    /// <paramref name="snrDb"/>/<paramref name="packetRssiDbm"/> are null for
+    /// downlink-injected frames — there was no real RF reception to measure.
+    /// </summary>
+    private void ProcessReceivedFrame(byte[] frame, MeshHeader header, float? snrDb, float? packetRssiDbm)
+    {
         // Own packet heard back (Meshtastic `isFromUs`): when a neighbour
         // rebroadcasts a frame we sent, we receive our own transmission. The
         // firmware never re-processes these — it treats hearing your own packet
@@ -7802,14 +8144,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var rxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        // SNR estimate captured from this frame's preamble (peak above noise).
-        float? snrDb = float.IsNaN(_lastPreamblePeakDb) ? null : _lastPreamblePeakDb;
-        _lastPreamblePeakDb = float.NaN; // consume it so it can't bleed to the next
-
         byte hopsAway = (byte)(header.HopStart >= header.HopLimit
             ? header.HopStart - header.HopLimit
             : 0);
-        float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
 
         var channels = Channels.Select(c => c.Config).ToList();
         var result = MeshDecoder.Decode(frame, channels);
@@ -8044,6 +8381,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             RelayIfEligible(frame, header, result, snrDb);
+            UplinkIfEligible(frame, header, result, snrDb: snrDb, rssiDbm: packetRssiDbm);
             Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
             MarkNodeDirty(header.From);
             return;
@@ -8088,6 +8426,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         RelayIfEligible(frame, header, result, snrDb);
+        UplinkIfEligible(frame, header, result);
 
         Messages.Insert(0, record);
 
@@ -8913,6 +9252,228 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Publish a received (not self-originated — the caller already filters
+    /// those out before reaching here) packet to MQTT if eligible. Independent
+    /// of <see cref="RelayIfEligible"/>: firmware uplinks and rebroadcasts as
+    /// two separate, parallel side-effects of processing an incoming packet,
+    /// not a chained decision.
+    /// </summary>
+    private void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs = false,
+                                  float? snrDb = null, float? rssiDbm = null)
+    {
+        if (!MqttEnabled) return;
+        if (header.ViaMqtt) return; // never re-publish something that came from MQTT
+        if (_myNodeNum == 0) return;
+
+        var channelConfigs = Channels.Select(c => c.Config).ToList();
+        bool anyChannelUplink = channelConfigs.Any(c => c.UplinkEnabled);
+        if (!anyChannelUplink) return;
+
+        bool isPki;
+        ChannelConfig? matchedChannel = null;
+        if (result is not null && !string.IsNullOrEmpty(result.ChannelName))
+        {
+            isPki = false;
+            matchedChannel = channelConfigs.FirstOrDefault(c =>
+                string.Equals(c.Name, result.ChannelName, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            // Either PKC-decoded (MeshDecoder.DecodePkc never sets ChannelName)
+            // or entirely undecodable. Firmware itself can only meaningfully
+            // uplink the PKI case here — an undecodable normal-channel packet
+            // has no channel_id it could publish under (comment in MQTT.cpp:
+            // "we can not forward those messages to the cloud - because no way
+            // to find a global channel ID"). Match that: only the PKI-shaped
+            // frame (hash 0x00, unicast) is upload-eligible when undecoded.
+            isPki = header.ChannelHash == 0x00 && !header.IsBroadcast;
+            if (!isPki) return;
+        }
+
+        var ctx = new MqttPolicy.UplinkContext(
+            ViaMqtt: header.ViaMqtt,
+            AnyChannelUplinkEnabled: anyChannelUplink,
+            ChannelUplinkEnabled: matchedChannel?.UplinkEnabled ?? false,
+            IsPki: isPki,
+            IsFromUs: isFromUs,
+            IsDefaultServer: MqttPolicy.IsDefaultServer(MqttAddress),
+            ServerIsPrivate: MqttPolicy.IsPrivateHost(MqttPolicy.EffectiveHost(MqttAddress)),
+            HasOkToMqttBit: true,
+            OkToMqtt: result?.OkToMqtt ?? false,
+            IsRangeTestOrDetectionSensorPort: result is not null &&
+                (result.Port == PortNum.RangeTest || result.Port == PortNum.DetectionSensor));
+
+        if (!MqttPolicy.ShouldUplink(ctx)) return;
+
+        var channelId = isPki ? MqttPolicy.PkiChannelId : (matchedChannel?.Name ?? string.Empty);
+        if (string.IsNullOrEmpty(channelId)) return;
+
+        var packet = new ProtoMeshPacket
+        {
+            From = header.From,
+            To = header.To,
+            Channel = (uint)(matchedChannel?.Index ?? 0),
+            Id = header.PacketId,
+            HopLimit = header.HopLimit,
+            HopStart = header.HopStart,
+            WantAck = header.WantAck,
+        };
+        if (MqttEncryptionEnabled)
+        {
+            packet.Encrypted = ByteString.CopyFrom(frame, MeshHeader.Size, frame.Length - MeshHeader.Size);
+        }
+        else
+        {
+            // Non-default mode: publish the decoded (plaintext) Data message
+            // instead of the still-encrypted channel bytes — matches firmware
+            // publishing mp_decoded rather than mp_encrypted when
+            // encryption_enabled is off. Only possible if we actually decoded
+            // it (never true for PKI, which we can't re-encode generically
+            // here) — matches firmware's "don't upload a still-encrypted PKI
+            // packet if not encryption_enabled".
+            if (isPki || result is null) return;
+            packet.Decoded = new ProtoData
+            {
+                Portnum = (ProtoPortNum)(int)result.Port,
+                Payload = ByteString.CopyFrom(result.AppPayload),
+                WantResponse = result.WantResponse,
+                RequestId = result.RequestId,
+                ReplyId = result.ReplyId,
+                Emoji = result.Emoji,
+            };
+        }
+
+        var envelope = new ServiceEnvelope
+        {
+            Packet = packet,
+            ChannelId = channelId,
+            GatewayId = $"!{_myNodeNum:x8}",
+        };
+
+        var topic = MqttPolicy.UplinkTopic(MqttRootTopic, channelId, envelope.GatewayId);
+        _mqttBridge.Publish(topic, envelope.ToByteArray());
+
+        // Parallel human-readable JSON publish (firmware json_enabled) — only
+        // possible when we actually decoded the packet (matches firmware's
+        // JsonSerialize requiring mp_decoded to have a decoded payload
+        // variant); PKI packets we can't read never reach here as a match.
+        if (MqttJsonEnabled && result is not null)
+        {
+            var json = MqttJsonSerializer.Serialize(result, header, envelope.GatewayId,
+                channelIndex: (uint)(matchedChannel?.Index ?? 0),
+                rxTimeEpoch: (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                rssi: rssiDbm.HasValue ? (int)Math.Round(rssiDbm.Value) : null,
+                snrDb: snrDb);
+            var jsonTopic = MqttPolicy.JsonUplinkTopic(MqttRootTopic, channelId, envelope.GatewayId);
+            _mqttBridge.Publish(jsonTopic, Encoding.UTF8.GetBytes(json));
+        }
+    }
+
+    /// <summary>
+    /// Firmware Router::send's isFromUs branch: a packet we ourselves just
+    /// transmitted is offered to MQTT exactly like a received one (same
+    /// <see cref="UplinkIfEligible"/> gating), just with <c>IsFromUs</c> true
+    /// so the public-server "DontMqttMeBro" opt-in check is skipped — a node
+    /// always uplinks its own traffic. Decodes the frame we just built via our
+    /// own channel PSKs (cheap, local — no different from decoding an
+    /// over-the-air capture of the same bytes) rather than threading portnum
+    /// context through every SendXxxAsync call site.
+    /// </summary>
+    private void UplinkSelfOriginatedIfEligible(byte[] frame)
+    {
+        if (!MqttEnabled || _myNodeNum == 0) return;
+        if (!MeshHeader.TryParse(frame, out var header)) return;
+        if (header.From != _myNodeNum) return;
+
+        var channelConfigs = Channels.Select(c => c.Config).ToList();
+        var result = MeshDecoder.Decode(frame, channelConfigs);
+        UplinkIfEligible(frame, header, result, isFromUs: true);
+    }
+
+    /// <summary>
+    /// Firmware MQTT::perhapsReportToMap(): publish an unencrypted, unrouted
+    /// MapReport straight to the broker's map topic (never sent over the air).
+    /// Location is fuzzed to <see cref="MqttMapReportPositionPrecision"/> bits,
+    /// exactly like a channel position broadcast (see
+    /// <see cref="MeshEncoder.EncodePosition"/>), and the plaintext payload is
+    /// wrapped in a ServiceEnvelope with an empty channel id, matching
+    /// firmware's map-report publish (it isn't scoped to any channel).
+    /// </summary>
+    private void PerhapsReportToMap()
+    {
+        if (!MqttEnabled || !MqttMapReportingEnabled) return;
+        if (_myNodeNum == 0) return;
+        if (HomeLatitude is not double lat || HomeLongitude is not double lon) return;
+
+        int precisionBits = MqttPolicy.CoerceMapPositionPrecision(MqttMapReportPositionPrecision);
+        int latI = (int)Math.Round(lat / 1e-7);
+        int lonI = (int)Math.Round(lon / 1e-7);
+        if (precisionBits < 32)
+        {
+            latI = (int)((uint)latI & (uint.MaxValue << (32 - precisionBits)));
+            lonI = (int)((uint)lonI & (uint.MaxValue << (32 - precisionBits)));
+            latI += 1 << (31 - precisionBits);
+            lonI += 1 << (31 - precisionBits);
+        }
+
+        // "Auto-named" here must match SyncPrimaryChannelName's own definition
+        // exactly (empty, or still equal to a bare LoraPreset enum name) —
+        // NOT ChannelPlan.PresetName, which diverges for LongModerate
+        // ("LongMod" vs the enum's own "LongModerate") and would wrongly
+        // report has_default_channel=false for that preset.
+        var primary = Channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config;
+        bool hasDefaultChannel = primary is not null && primary.UsesDefaultKey &&
+            (string.IsNullOrEmpty(primary.Name) || Enum.GetNames<LoraPreset>().Contains(primary.Name));
+
+        var twoHoursAgoEpoch = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds();
+        int numOnlineLocalNodes = _nodeStore.All()
+            .Count(n => !n.SeenViaMqtt && n.LastHeardEpoch >= twoHoursAgoEpoch);
+
+        if (!Enum.TryParse<ProtoRegionCode>(SelectedRegion.ToString(), out var region))
+            region = ProtoRegionCode.Unset;
+        if (!Enum.TryParse<ProtoModemPreset>(SelectedPreset.ToString(), out var modemPreset))
+            modemPreset = ProtoModemPreset.LongFast;
+
+        var report = new ProtoMapReport
+        {
+            LongName = MyLongName ?? string.Empty,
+            ShortName = MyShortName ?? string.Empty,
+            Role = (ProtoRole)RoleEnumValue(MyRole),
+            HwModel = (ProtoHardwareModel)HardwareModels.Id(MyHwModel),
+            FirmwareVersion = MyFirmwareVersion ?? string.Empty,
+            Region = region,
+            ModemPreset = modemPreset,
+            HasDefaultChannel = hasDefaultChannel,
+            LatitudeI = latI,
+            LongitudeI = lonI,
+            PositionPrecision = (uint)precisionBits,
+            NumOnlineLocalNodes = (uint)numOnlineLocalNodes,
+            HasOptedReportLocation = true,
+        };
+        if (HomeAltitude is int alt) report.Altitude = alt;
+
+        var packet = new ProtoMeshPacket
+        {
+            From = _myNodeNum,
+            Id = NextPacketId(),
+            Decoded = new ProtoData
+            {
+                Portnum = ProtoPortNum.MapReportApp,
+                Payload = report.ToByteString(),
+            },
+        };
+        var envelope = new ServiceEnvelope
+        {
+            Packet = packet,
+            ChannelId = string.Empty,
+            GatewayId = $"!{_myNodeNum:x8}",
+        };
+
+        _mqttBridge.Publish(MqttPolicy.MapReportTopic(MqttRootTopic), envelope.ToByteArray());
+        Log($"MQTT map report sent ({numOnlineLocalNodes} local nodes online).");
+    }
+
+    /// <summary>
     /// Firmware-compatible hop decrement logic: ROUTER/ROUTER_LATE/CLIENT_BASE
     /// roles preserve hop_limit when the previous relay was a favorited router.
     /// First hop always decrements to prevent retry issues.
@@ -9100,7 +9661,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (cts.IsCancellationRequested) return;
 
                 var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-                TransmitBackground(SelectedPreset, hz, relayFrame, TxGainDb, TxAmpEnable);
+                TransmitBackground(SelectedPreset, hz, relayFrame, TxGainDb, TxAmpEnable, selfOriginated: false);
                 Log($"  relayed packet {header.PacketId:x8} ({header.HopLimit}->{nextHopLimit}) after {delayMs} ms mode={RebroadcastMode}");
             }
             catch (TaskCanceledException)
@@ -9369,6 +9930,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     _lastAutoNodeStatusUtc = now;
                     UpdateAutoReportLastSentSummary();
                 }
+            }
+
+            now = DateTime.UtcNow;
+            if (MqttMapReportingEnabled &&
+                MqttEnabled &&
+                now >= _nextMapReportUtc)
+            {
+                _nextMapReportUtc = now.AddSeconds(Math.Max(60, MqttMapReportIntervalSeconds));
+                PerhapsReportToMap();
             }
         }
         finally
@@ -9865,6 +10435,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _gpsService.StatusChanged -= HandleGpsStatusChanged;
         _gpsService.FixReceived -= HandleGpsFixReceived;
         _gpsService.Dispose();
+        _mqttBridge.StatusChanged -= HandleMqttStatusChanged;
+        _mqttBridge.EnvelopeReceived -= HandleMqttEnvelopeReceived;
+        _mqttBridge.Dispose();
         _core.Dispose();
         _dbWriteNodeStore.Dispose();
         _dbWriteWaypointStore.Dispose();

@@ -179,14 +179,22 @@
                        Text="{Binding Status}" />
                 </ToolBar>
 
-                <Button Grid.Column="1"
-                        Width="32" Height="28"
-                        Margin="6,0,0,0"
-                        VerticalAlignment="Center"
-                        Click="OnAboutClick"
-                        ToolTip="About MeshRF">
-                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE946;" />
-                </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Width="32" Height="28"
+                            Margin="6,0,0,0"
+                            VerticalAlignment="Center"
+                            Click="OnOpenMqttSettings"
+                            ToolTip="MQTT bridge settings (uplink/downlink)">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE753;" />
+                    </Button>
+                    <Button Width="32" Height="28"
+                            Margin="6,0,0,0"
+                            VerticalAlignment="Center"
+                            Click="OnAboutClick"
+                            ToolTip="About MeshRF">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE946;" />
+                    </Button>
+                </StackPanel>
             </Grid>
         </Border>
 

@@ -39,6 +39,8 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         _editRole = cfg.Role;
         _editPsk = (byte[])cfg.Psk.Clone();
         _editPositionPrecision = cfg.PositionPrecision;
+        _editUplinkEnabled = cfg.UplinkEnabled;
+        _editDownlinkEnabled = cfg.DownlinkEnabled;
         _muteRtttl = muteRtttl;
         UpdatePositionPrecisionOptions(unitSystem);
         SnakeScores.CollectionChanged += (_, _) => HasSnakeScores = SnakeScores.Count > 0;
@@ -125,6 +127,17 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private byte _editPositionPrecision;
 
+    /// <summary>Uplink this channel's traffic to the MQTT bridge, if enabled
+    /// and connected (firmware <c>Channel.settings.uplink_enabled</c>).</summary>
+    [ObservableProperty]
+    private bool _editUplinkEnabled;
+
+    /// <summary>Accept downlinked traffic for this channel from the MQTT
+    /// bridge and inject it into the local mesh (firmware
+    /// <c>Channel.settings.downlink_enabled</c>).</summary>
+    [ObservableProperty]
+    private bool _editDownlinkEnabled;
+
     /// <summary>
     /// Discrete location-sharing precisions offered per channel, matching the
     /// official Meshtastic clients: 0 disables sharing, 32 sends the exact
@@ -163,6 +176,8 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         Config.Role              = EditRole;
         Config.Psk               = EditPsk ?? ChannelConfig.DefaultPsk;
         Config.PositionPrecision = EditPositionPrecision;
+        Config.UplinkEnabled     = EditUplinkEnabled;
+        Config.DownlinkEnabled   = EditDownlinkEnabled;
         _onSave?.Invoke(Config);
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(TabHeader));
@@ -197,6 +212,8 @@ public partial class ChannelViewModel : ObservableObject, ITabItem
         EditRole              = Config.Role;
         EditPsk               = (byte[])Config.Psk.Clone();
         EditPositionPrecision = Config.PositionPrecision;
+        EditUplinkEnabled     = Config.UplinkEnabled;
+        EditDownlinkEnabled   = Config.DownlinkEnabled;
     }
 
     [RelayCommand]
