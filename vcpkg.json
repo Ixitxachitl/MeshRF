@@ -16,5 +16,5 @@
     "spdlog",
     "fmt"
   ],
-  "builtin-baseline": "0000000000000000000000000000000000000000"
+  "builtin-baseline": "d92484ed3c5020c6679d095ad3e5add907887b62"
 }

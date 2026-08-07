@@ -48,6 +48,16 @@ public sealed record NodeTelemetryHistoryRecord(
 /// </summary>
 public sealed class NodeStore : IDisposable
 {
+    // Microsoft.Data.Sqlite does not guarantee a single SqliteConnection is
+    // safe for concurrent commands from multiple threads, and this store's
+    // single connection is shared across whatever threads call into it (e.g.
+    // a background RX/decode thread alongside the UI thread) — so every
+    // public method below takes this lock for its full SqliteCommand/
+    // SqliteDataReader lifetime. Monitor (which `lock` uses) is reentrant on
+    // the same thread, so methods that call other locking methods (e.g.
+    // RecordSighting -> Upsert, AddLocationHistory -> TrimLocationHistory)
+    // nest safely.
+    private readonly object _gate = new();
     private readonly SqliteConnection _conn;
     private bool _disposed;
 
@@ -213,160 +223,172 @@ public sealed class NodeStore : IDisposable
     public void Upsert(NodeRecord rec)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO nodes (node_num, user_id, long_name, short_name,
-                               hw_model, role, last_heard_epoch, seen_via_mqtt,
-                               snr_db, rssi_dbm, hops_away,
-                               latitude, longitude, altitude_m,
-                               battery_pct, voltage_v,
-                               channel_util_pct, air_util_tx_pct,
-                               uptime_seconds, temperature_c,
-                                   relative_humidity_pct, barometric_pressure_hpa,
-                                   gas_resistance_mohm, iaq, public_key, key_mismatch,
-                                   is_unmessagable, has_xeddsa_signed,
-                                   mute_rtttl, ignored, node_status,
-                                   pm10_std, pm25_std, pm100_std,
-                                   pm10_env, pm25_env, pm100_env,
-                                   ch1_voltage_v, ch1_current_ma,
-                                   ch2_voltage_v, ch2_current_ma,
-                                   ch3_voltage_v, ch3_current_ma)
-            VALUES ($node_num, $user_id, $long_name, $short_name,
-                    $hw_model, $role, $last_heard, $seen_via_mqtt,
-                    $snr, $rssi, $hops,
-                    $lat, $lon, $alt,
-                    $batt, $volt,
-                    $chan, $airx,
-                    $uptime, $temp,
-                    $hum, $pres,
-                                $gas, $iaq, $pubkey, $mismatch,
-                                $isunmessagable, $xeddsasigned,
-                                $mute_rtttl, $ignored, $node_status,
-                                $pm10std, $pm25std, $pm100std,
-                                $pm10env, $pm25env, $pm100env,
-                                $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i)
-            ON CONFLICT(node_num) DO UPDATE SET
-                user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
-                long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
-                short_name       = COALESCE(NULLIF(excluded.short_name, ''), short_name),
-                hw_model         = COALESCE(NULLIF(excluded.hw_model, ''),   hw_model),
-                role             = COALESCE(NULLIF(excluded.role, ''),       role),
-                last_heard_epoch = MAX(excluded.last_heard_epoch, last_heard_epoch),
-                seen_via_mqtt    = MAX(excluded.seen_via_mqtt, seen_via_mqtt),
-                snr_db           = COALESCE(excluded.snr_db, snr_db),
-                rssi_dbm         = COALESCE(excluded.rssi_dbm, rssi_dbm),
-                hops_away        = COALESCE(excluded.hops_away, hops_away),
-                latitude         = COALESCE(excluded.latitude, latitude),
-                longitude        = COALESCE(excluded.longitude, longitude),
-                altitude_m       = COALESCE(excluded.altitude_m, altitude_m),
-                battery_pct      = COALESCE(excluded.battery_pct, battery_pct),
-                voltage_v        = COALESCE(excluded.voltage_v, voltage_v),
-                channel_util_pct = COALESCE(excluded.channel_util_pct, channel_util_pct),
-                air_util_tx_pct  = COALESCE(excluded.air_util_tx_pct,  air_util_tx_pct),
-                uptime_seconds   = COALESCE(excluded.uptime_seconds, uptime_seconds),
-                temperature_c    = COALESCE(excluded.temperature_c, temperature_c),
-                relative_humidity_pct   = COALESCE(excluded.relative_humidity_pct, relative_humidity_pct),
-                barometric_pressure_hpa = COALESCE(excluded.barometric_pressure_hpa, barometric_pressure_hpa),
-                gas_resistance_mohm     = COALESCE(excluded.gas_resistance_mohm, gas_resistance_mohm),
-                iaq              = COALESCE(excluded.iaq, iaq),
-                public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key),
-                key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch),
-                is_unmessagable  = COALESCE(excluded.is_unmessagable, is_unmessagable),
-                has_xeddsa_signed = COALESCE(excluded.has_xeddsa_signed, has_xeddsa_signed),
-                node_status      = COALESCE(NULLIF(excluded.node_status, ''), node_status),
-                pm10_std         = COALESCE(excluded.pm10_std,  pm10_std),
-                pm25_std         = COALESCE(excluded.pm25_std,  pm25_std),
-                pm100_std        = COALESCE(excluded.pm100_std, pm100_std),
-                pm10_env         = COALESCE(excluded.pm10_env,  pm10_env),
-                pm25_env         = COALESCE(excluded.pm25_env,  pm25_env),
-                pm100_env        = COALESCE(excluded.pm100_env, pm100_env),
-                ch1_voltage_v    = COALESCE(excluded.ch1_voltage_v,  ch1_voltage_v),
-                ch1_current_ma   = COALESCE(excluded.ch1_current_ma, ch1_current_ma),
-                ch2_voltage_v    = COALESCE(excluded.ch2_voltage_v,  ch2_voltage_v),
-                ch2_current_ma   = COALESCE(excluded.ch2_current_ma, ch2_current_ma),
-                ch3_voltage_v    = COALESCE(excluded.ch3_voltage_v,  ch3_voltage_v),
-                ch3_current_ma   = COALESCE(excluded.ch3_current_ma, ch3_current_ma);
-            """;
-        cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
-        cmd.Parameters.AddWithValue("$user_id", rec.UserId ?? string.Empty);
-        cmd.Parameters.AddWithValue("$long_name", rec.LongName ?? string.Empty);
-        cmd.Parameters.AddWithValue("$short_name", rec.ShortName ?? string.Empty);
-        cmd.Parameters.AddWithValue("$hw_model", rec.HwModel ?? string.Empty);
-        cmd.Parameters.AddWithValue("$role", rec.Role ?? string.Empty);
-        cmd.Parameters.AddWithValue("$last_heard", rec.LastHeardEpoch);
-        cmd.Parameters.AddWithValue("$seen_via_mqtt", rec.SeenViaMqtt ? 1 : 0);
-        cmd.Parameters.AddWithValue("$snr",  (object?)rec.SnrDb       ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$rssi", (object?)rec.RssiDbm     ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$hops", (object?)rec.HopsAway    ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$lat",  (object?)rec.Latitude    ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$lon",  (object?)rec.Longitude   ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$alt",  (object?)rec.AltitudeM   ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$batt", (object?)rec.BatteryPct  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$volt", (object?)rec.VoltageV    ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$chan", (object?)rec.ChannelUtilPct ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$airx", (object?)rec.AirUtilTxPct   ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$uptime", (object?)rec.UptimeSeconds ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$temp", (object?)rec.TemperatureC ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$hum",  (object?)rec.RelativeHumidityPct ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pres", (object?)rec.BarometricPressureHpa ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$gas",  (object?)rec.GasResistanceMohm ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$iaq",  (object?)rec.Iaq ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pubkey", rec.PublicKey ?? string.Empty);
-        cmd.Parameters.AddWithValue("$mismatch",
-            rec.KeyMismatch is bool km ? (km ? 1 : 0) : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("$isunmessagable",
-            rec.IsUnmessagable is bool iu ? (iu ? 1 : 0) : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("$xeddsasigned",
-            rec.HasXeddsaSigned is bool xs ? (xs ? 1 : 0) : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("$mute_rtttl", rec.MuteRtttl ? 1 : 0);
-        cmd.Parameters.AddWithValue("$ignored", rec.Ignored ? 1 : 0);
-        cmd.Parameters.AddWithValue("$node_status", rec.NodeStatus ?? string.Empty);
-        cmd.Parameters.AddWithValue("$pm10std",  (object?)rec.Pm10Standard       ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm25std",  (object?)rec.Pm25Standard       ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm100std", (object?)rec.Pm100Standard      ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch1v", (object?)rec.Ch1VoltageV  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch1i", (object?)rec.Ch1CurrentMa ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch2v", (object?)rec.Ch2VoltageV  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO nodes (node_num, user_id, long_name, short_name,
+                                   hw_model, role, last_heard_epoch, seen_via_mqtt,
+                                   snr_db, rssi_dbm, hops_away,
+                                   latitude, longitude, altitude_m,
+                                   battery_pct, voltage_v,
+                                   channel_util_pct, air_util_tx_pct,
+                                   uptime_seconds, temperature_c,
+                                       relative_humidity_pct, barometric_pressure_hpa,
+                                       gas_resistance_mohm, iaq, public_key, key_mismatch,
+                                       is_unmessagable, has_xeddsa_signed,
+                                       mute_rtttl, ignored, node_status,
+                                       pm10_std, pm25_std, pm100_std,
+                                       pm10_env, pm25_env, pm100_env,
+                                       ch1_voltage_v, ch1_current_ma,
+                                       ch2_voltage_v, ch2_current_ma,
+                                       ch3_voltage_v, ch3_current_ma)
+                VALUES ($node_num, $user_id, $long_name, $short_name,
+                        $hw_model, $role, $last_heard, $seen_via_mqtt,
+                        $snr, $rssi, $hops,
+                        $lat, $lon, $alt,
+                        $batt, $volt,
+                        $chan, $airx,
+                        $uptime, $temp,
+                        $hum, $pres,
+                                    $gas, $iaq, $pubkey, $mismatch,
+                                    $isunmessagable, $xeddsasigned,
+                                    $mute_rtttl, $ignored, $node_status,
+                                    $pm10std, $pm25std, $pm100std,
+                                    $pm10env, $pm25env, $pm100env,
+                                    $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i)
+                ON CONFLICT(node_num) DO UPDATE SET
+                    user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
+                    long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
+                    short_name       = COALESCE(NULLIF(excluded.short_name, ''), short_name),
+                    hw_model         = COALESCE(NULLIF(excluded.hw_model, ''),   hw_model),
+                    role             = COALESCE(NULLIF(excluded.role, ''),       role),
+                    last_heard_epoch = MAX(excluded.last_heard_epoch, last_heard_epoch),
+                    seen_via_mqtt    = MAX(excluded.seen_via_mqtt, seen_via_mqtt),
+                    snr_db           = COALESCE(excluded.snr_db, snr_db),
+                    rssi_dbm         = COALESCE(excluded.rssi_dbm, rssi_dbm),
+                    hops_away        = COALESCE(excluded.hops_away, hops_away),
+                    latitude         = COALESCE(excluded.latitude, latitude),
+                    longitude        = COALESCE(excluded.longitude, longitude),
+                    altitude_m       = COALESCE(excluded.altitude_m, altitude_m),
+                    battery_pct      = COALESCE(excluded.battery_pct, battery_pct),
+                    voltage_v        = COALESCE(excluded.voltage_v, voltage_v),
+                    channel_util_pct = COALESCE(excluded.channel_util_pct, channel_util_pct),
+                    air_util_tx_pct  = COALESCE(excluded.air_util_tx_pct,  air_util_tx_pct),
+                    uptime_seconds   = COALESCE(excluded.uptime_seconds, uptime_seconds),
+                    temperature_c    = COALESCE(excluded.temperature_c, temperature_c),
+                    relative_humidity_pct   = COALESCE(excluded.relative_humidity_pct, relative_humidity_pct),
+                    barometric_pressure_hpa = COALESCE(excluded.barometric_pressure_hpa, barometric_pressure_hpa),
+                    gas_resistance_mohm     = COALESCE(excluded.gas_resistance_mohm, gas_resistance_mohm),
+                    iaq              = COALESCE(excluded.iaq, iaq),
+                    public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key),
+                    key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch),
+                    is_unmessagable  = COALESCE(excluded.is_unmessagable, is_unmessagable),
+                    has_xeddsa_signed = COALESCE(excluded.has_xeddsa_signed, has_xeddsa_signed),
+                    node_status      = COALESCE(NULLIF(excluded.node_status, ''), node_status),
+                    pm10_std         = COALESCE(excluded.pm10_std,  pm10_std),
+                    pm25_std         = COALESCE(excluded.pm25_std,  pm25_std),
+                    pm100_std        = COALESCE(excluded.pm100_std, pm100_std),
+                    pm10_env         = COALESCE(excluded.pm10_env,  pm10_env),
+                    pm25_env         = COALESCE(excluded.pm25_env,  pm25_env),
+                    pm100_env        = COALESCE(excluded.pm100_env, pm100_env),
+                    ch1_voltage_v    = COALESCE(excluded.ch1_voltage_v,  ch1_voltage_v),
+                    ch1_current_ma   = COALESCE(excluded.ch1_current_ma, ch1_current_ma),
+                    ch2_voltage_v    = COALESCE(excluded.ch2_voltage_v,  ch2_voltage_v),
+                    ch2_current_ma   = COALESCE(excluded.ch2_current_ma, ch2_current_ma),
+                    ch3_voltage_v    = COALESCE(excluded.ch3_voltage_v,  ch3_voltage_v),
+                    ch3_current_ma   = COALESCE(excluded.ch3_current_ma, ch3_current_ma);
+                """;
+            cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
+            cmd.Parameters.AddWithValue("$user_id", rec.UserId ?? string.Empty);
+            cmd.Parameters.AddWithValue("$long_name", rec.LongName ?? string.Empty);
+            cmd.Parameters.AddWithValue("$short_name", rec.ShortName ?? string.Empty);
+            cmd.Parameters.AddWithValue("$hw_model", rec.HwModel ?? string.Empty);
+            cmd.Parameters.AddWithValue("$role", rec.Role ?? string.Empty);
+            cmd.Parameters.AddWithValue("$last_heard", rec.LastHeardEpoch);
+            cmd.Parameters.AddWithValue("$seen_via_mqtt", rec.SeenViaMqtt ? 1 : 0);
+            cmd.Parameters.AddWithValue("$snr",  (object?)rec.SnrDb       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$rssi", (object?)rec.RssiDbm     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$hops", (object?)rec.HopsAway    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$lat",  (object?)rec.Latitude    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$lon",  (object?)rec.Longitude   ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$alt",  (object?)rec.AltitudeM   ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$batt", (object?)rec.BatteryPct  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$volt", (object?)rec.VoltageV    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$chan", (object?)rec.ChannelUtilPct ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$airx", (object?)rec.AirUtilTxPct   ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$uptime", (object?)rec.UptimeSeconds ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$temp", (object?)rec.TemperatureC ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$hum",  (object?)rec.RelativeHumidityPct ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pres", (object?)rec.BarometricPressureHpa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$gas",  (object?)rec.GasResistanceMohm ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$iaq",  (object?)rec.Iaq ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pubkey", rec.PublicKey ?? string.Empty);
+            cmd.Parameters.AddWithValue("$mismatch",
+                rec.KeyMismatch is bool km ? (km ? 1 : 0) : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$isunmessagable",
+                rec.IsUnmessagable is bool iu ? (iu ? 1 : 0) : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$xeddsasigned",
+                rec.HasXeddsaSigned is bool xs ? (xs ? 1 : 0) : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$mute_rtttl", rec.MuteRtttl ? 1 : 0);
+            cmd.Parameters.AddWithValue("$ignored", rec.Ignored ? 1 : 0);
+            cmd.Parameters.AddWithValue("$node_status", rec.NodeStatus ?? string.Empty);
+            cmd.Parameters.AddWithValue("$pm10std",  (object?)rec.Pm10Standard       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm25std",  (object?)rec.Pm25Standard       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm100std", (object?)rec.Pm100Standard      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch1v", (object?)rec.Ch1VoltageV  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch1i", (object?)rec.Ch1CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch2v", (object?)rec.Ch2VoltageV  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Persist the UI's per-node RTTTL ignore flag without affecting any other fields.</summary>
     public void SetMuteRtttl(uint nodeNum, bool muted)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "UPDATE nodes SET mute_rtttl = $mute WHERE node_num = $node_num";
-        cmd.Parameters.AddWithValue("$node_num", nodeNum);
-        cmd.Parameters.AddWithValue("$mute", muted ? 1 : 0);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE nodes SET mute_rtttl = $mute WHERE node_num = $node_num";
+            cmd.Parameters.AddWithValue("$node_num", nodeNum);
+            cmd.Parameters.AddWithValue("$mute", muted ? 1 : 0);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Persist the UI's per-node ignore flag without affecting any other fields.</summary>
     public void SetIgnored(uint nodeNum, bool ignored)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "UPDATE nodes SET ignored = $ignored WHERE node_num = $node_num";
-        cmd.Parameters.AddWithValue("$node_num", nodeNum);
-        cmd.Parameters.AddWithValue("$ignored", ignored ? 1 : 0);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE nodes SET ignored = $ignored WHERE node_num = $node_num";
+            cmd.Parameters.AddWithValue("$node_num", nodeNum);
+            cmd.Parameters.AddWithValue("$ignored", ignored ? 1 : 0);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Persist the UI's per-node favorite flag without affecting any other fields.</summary>
     public void SetFavorite(uint nodeNum, bool favorite)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "UPDATE nodes SET favorite = $favorite WHERE node_num = $node_num";
-        cmd.Parameters.AddWithValue("$node_num", nodeNum);
-        cmd.Parameters.AddWithValue("$favorite", favorite ? 1 : 0);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE nodes SET favorite = $favorite WHERE node_num = $node_num";
+            cmd.Parameters.AddWithValue("$node_num", nodeNum);
+            cmd.Parameters.AddWithValue("$favorite", favorite ? 1 : 0);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Record that we've verified an XEdDSA-signed broadcast from this
@@ -377,11 +399,14 @@ public sealed class NodeStore : IDisposable
     public void SetXeddsaSigned(uint nodeNum, bool signed)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "UPDATE nodes SET has_xeddsa_signed = $signed WHERE node_num = $node_num";
-        cmd.Parameters.AddWithValue("$node_num", nodeNum);
-        cmd.Parameters.AddWithValue("$signed", signed ? 1 : 0);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE nodes SET has_xeddsa_signed = $signed WHERE node_num = $node_num";
+            cmd.Parameters.AddWithValue("$node_num", nodeNum);
+            cmd.Parameters.AddWithValue("$signed", signed ? 1 : 0);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Touch last-heard / RSSI / SNR for an existing or new node.</summary>
@@ -405,11 +430,14 @@ public sealed class NodeStore : IDisposable
     public NodeRecord? Get(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM nodes WHERE node_num = $n";
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        using var rd = cmd.ExecuteReader();
-        return rd.Read() ? Read(rd) : null;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM nodes WHERE node_num = $n";
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            using var rd = cmd.ExecuteReader();
+            return rd.Read() ? Read(rd) : null;
+        }
     }
 
     /// <summary>All nodes, newest-heard first.</summary>
@@ -417,58 +445,70 @@ public sealed class NodeStore : IDisposable
     {
         ThrowIfDisposed();
         var list = new List<NodeRecord>();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM nodes ORDER BY node_num ASC";
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read()) list.Add(Read(rd));
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM nodes ORDER BY node_num ASC";
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) list.Add(Read(rd));
+        }
         return list;
     }
 
     public int Count()
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM nodes";
-        return Convert.ToInt32(cmd.ExecuteScalar());
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM nodes";
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
     }
 
     public void Forget(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            DELETE FROM nodes WHERE node_num = $n;
-            DELETE FROM node_location_history WHERE node_num = $n;
-            DELETE FROM node_telemetry_history WHERE node_num = $n;
-            """;
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                DELETE FROM nodes WHERE node_num = $n;
+                DELETE FROM node_location_history WHERE node_num = $n;
+                DELETE FROM node_telemetry_history WHERE node_num = $n;
+                """;
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public IReadOnlyList<NodeLocationHistoryRecord> LocationHistory(uint nodeNum, int limit = 500)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT id, node_num, timestamp_epoch, latitude, longitude, altitude_m
-            FROM node_location_history
-            WHERE node_num = $n
-            ORDER BY timestamp_epoch DESC, id DESC
-            LIMIT $limit
-            """;
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.Parameters.AddWithValue("$limit", limit);
         var rows = new List<NodeLocationHistoryRecord>();
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read())
+        lock (_gate)
         {
-            rows.Add(new NodeLocationHistoryRecord(
-                rd.GetInt64(rd.GetOrdinal("id")),
-                (uint)rd.GetInt64(rd.GetOrdinal("node_num")),
-                DateTimeOffset.FromUnixTimeSeconds(rd.GetInt64(rd.GetOrdinal("timestamp_epoch"))).UtcDateTime,
-                rd.GetDouble(rd.GetOrdinal("latitude")),
-                rd.GetDouble(rd.GetOrdinal("longitude")),
-                Nullable<int>(rd, "altitude_m")));
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT id, node_num, timestamp_epoch, latitude, longitude, altitude_m
+                FROM node_location_history
+                WHERE node_num = $n
+                ORDER BY timestamp_epoch DESC, id DESC
+                LIMIT $limit
+                """;
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.Parameters.AddWithValue("$limit", limit);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read())
+            {
+                rows.Add(new NodeLocationHistoryRecord(
+                    rd.GetInt64(rd.GetOrdinal("id")),
+                    (uint)rd.GetInt64(rd.GetOrdinal("node_num")),
+                    DateTimeOffset.FromUnixTimeSeconds(rd.GetInt64(rd.GetOrdinal("timestamp_epoch"))).UtcDateTime,
+                    rd.GetDouble(rd.GetOrdinal("latitude")),
+                    rd.GetDouble(rd.GetOrdinal("longitude")),
+                    Nullable<int>(rd, "altitude_m")));
+            }
         }
         rows.Reverse();
         return rows;
@@ -477,21 +517,27 @@ public sealed class NodeStore : IDisposable
     public int LocationHistoryCount(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM node_location_history WHERE node_num = $n";
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        return Convert.ToInt32(cmd.ExecuteScalar());
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM node_location_history WHERE node_num = $n";
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
     }
 
     public IReadOnlyDictionary<uint, int> LocationHistoryCounts()
     {
         ThrowIfDisposed();
         var counts = new Dictionary<uint, int>();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT node_num, COUNT(*) AS cnt FROM node_location_history GROUP BY node_num";
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read())
-            counts[(uint)rd.GetInt64(0)] = rd.GetInt32(1);
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT node_num, COUNT(*) AS cnt FROM node_location_history GROUP BY node_num";
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read())
+                counts[(uint)rd.GetInt64(0)] = rd.GetInt32(1);
+        }
         return counts;
     }
 
@@ -499,99 +545,114 @@ public sealed class NodeStore : IDisposable
                                    double latitude, double longitude, int? altitudeM)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO node_location_history
-                (node_num, timestamp_epoch, latitude, longitude, altitude_m)
-            VALUES ($node_num, $ts, $lat, $lon, $alt);
-            SELECT last_insert_rowid();
-            """;
-        cmd.Parameters.AddWithValue("$node_num", nodeNum);
-        cmd.Parameters.AddWithValue("$ts", new DateTimeOffset(timestampUtc).ToUnixTimeSeconds());
-        cmd.Parameters.AddWithValue("$lat", latitude);
-        cmd.Parameters.AddWithValue("$lon", longitude);
-        cmd.Parameters.AddWithValue("$alt", (object?)altitudeM ?? DBNull.Value);
-        var id = Convert.ToInt64(cmd.ExecuteScalar());
-        TrimLocationHistory(nodeNum, 500);
-        return id;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO node_location_history
+                    (node_num, timestamp_epoch, latitude, longitude, altitude_m)
+                VALUES ($node_num, $ts, $lat, $lon, $alt);
+                SELECT last_insert_rowid();
+                """;
+            cmd.Parameters.AddWithValue("$node_num", nodeNum);
+            cmd.Parameters.AddWithValue("$ts", new DateTimeOffset(timestampUtc).ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$lat", latitude);
+            cmd.Parameters.AddWithValue("$lon", longitude);
+            cmd.Parameters.AddWithValue("$alt", (object?)altitudeM ?? DBNull.Value);
+            var id = Convert.ToInt64(cmd.ExecuteScalar());
+            TrimLocationHistory(nodeNum, 500);
+            return id;
+        }
     }
 
     public void DeleteLocationHistory(long id)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM node_location_history WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM node_location_history WHERE id = $id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public void ClearLocationHistory(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM node_location_history WHERE node_num = $n";
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM node_location_history WHERE node_num = $n";
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Wipe the stored position (lat/lon/alt) from the node row itself.</summary>
     public void ClearNodeLocation(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            UPDATE nodes
-            SET latitude = NULL, longitude = NULL, altitude_m = NULL
-            WHERE node_num = $n
-            """;
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE nodes
+                SET latitude = NULL, longitude = NULL, altitude_m = NULL
+                WHERE node_num = $n
+                """;
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public IReadOnlyList<NodeTelemetryHistoryRecord> TelemetryHistory(uint nodeNum, int limit = 500)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT *
-            FROM node_telemetry_history
-            WHERE node_num = $n
-            ORDER BY timestamp_epoch DESC, id DESC
-            LIMIT $limit
-            """;
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.Parameters.AddWithValue("$limit", limit);
         var rows = new List<NodeTelemetryHistoryRecord>();
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read())
+        lock (_gate)
         {
-            rows.Add(new NodeTelemetryHistoryRecord(
-                rd.GetInt64(rd.GetOrdinal("id")),
-                (uint)rd.GetInt64(rd.GetOrdinal("node_num")),
-                DateTimeOffset.FromUnixTimeSeconds(rd.GetInt64(rd.GetOrdinal("timestamp_epoch"))).UtcDateTime,
-                Nullable<double>(rd, "battery_pct"),
-                Nullable<double>(rd, "voltage_v"),
-                Nullable<double>(rd, "channel_util_pct"),
-                Nullable<double>(rd, "air_util_tx_pct"),
-                Nullable<double>(rd, "uptime_seconds"),
-                Nullable<double>(rd, "temperature_c"),
-                Nullable<double>(rd, "relative_humidity_pct"),
-                Nullable<double>(rd, "barometric_pressure_hpa"),
-                Nullable<double>(rd, "gas_resistance_mohm"),
-                Nullable<double>(rd, "iaq"),
-                Nullable<double>(rd, "pm10_std"),
-                Nullable<double>(rd, "pm25_std"),
-                Nullable<double>(rd, "pm100_std"),
-                Nullable<double>(rd, "pm10_env"),
-                Nullable<double>(rd, "pm25_env"),
-                Nullable<double>(rd, "pm100_env"),
-                Nullable<double>(rd, "ch1_voltage_v"),
-                Nullable<double>(rd, "ch1_current_ma"),
-                Nullable<double>(rd, "ch2_voltage_v"),
-                Nullable<double>(rd, "ch2_current_ma"),
-                Nullable<double>(rd, "ch3_voltage_v"),
-                Nullable<double>(rd, "ch3_current_ma"),
-                ReadStringOrEmpty(rd, "signature")));
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT *
+                FROM node_telemetry_history
+                WHERE node_num = $n
+                ORDER BY timestamp_epoch DESC, id DESC
+                LIMIT $limit
+                """;
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.Parameters.AddWithValue("$limit", limit);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read())
+            {
+                rows.Add(new NodeTelemetryHistoryRecord(
+                    rd.GetInt64(rd.GetOrdinal("id")),
+                    (uint)rd.GetInt64(rd.GetOrdinal("node_num")),
+                    DateTimeOffset.FromUnixTimeSeconds(rd.GetInt64(rd.GetOrdinal("timestamp_epoch"))).UtcDateTime,
+                    Nullable<double>(rd, "battery_pct"),
+                    Nullable<double>(rd, "voltage_v"),
+                    Nullable<double>(rd, "channel_util_pct"),
+                    Nullable<double>(rd, "air_util_tx_pct"),
+                    Nullable<double>(rd, "uptime_seconds"),
+                    Nullable<double>(rd, "temperature_c"),
+                    Nullable<double>(rd, "relative_humidity_pct"),
+                    Nullable<double>(rd, "barometric_pressure_hpa"),
+                    Nullable<double>(rd, "gas_resistance_mohm"),
+                    Nullable<double>(rd, "iaq"),
+                    Nullable<double>(rd, "pm10_std"),
+                    Nullable<double>(rd, "pm25_std"),
+                    Nullable<double>(rd, "pm100_std"),
+                    Nullable<double>(rd, "pm10_env"),
+                    Nullable<double>(rd, "pm25_env"),
+                    Nullable<double>(rd, "pm100_env"),
+                    Nullable<double>(rd, "ch1_voltage_v"),
+                    Nullable<double>(rd, "ch1_current_ma"),
+                    Nullable<double>(rd, "ch2_voltage_v"),
+                    Nullable<double>(rd, "ch2_current_ma"),
+                    Nullable<double>(rd, "ch3_voltage_v"),
+                    Nullable<double>(rd, "ch3_current_ma"),
+                    ReadStringOrEmpty(rd, "signature")));
+            }
         }
         rows.Reverse();
         return rows;
@@ -603,118 +664,134 @@ public sealed class NodeStore : IDisposable
         if (string.IsNullOrWhiteSpace(kindPrefix))
             return null;
 
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT signature
-            FROM node_telemetry_history
-            WHERE node_num = $n
-              AND signature LIKE ($kind || '|%')
-            ORDER BY timestamp_epoch DESC, id DESC
-            LIMIT 1
-            """;
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.Parameters.AddWithValue("$kind", kindPrefix);
-        var scalar = cmd.ExecuteScalar();
-        return scalar is string s && !string.IsNullOrWhiteSpace(s)
-            ? s
-            : null;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT signature
+                FROM node_telemetry_history
+                WHERE node_num = $n
+                  AND signature LIKE ($kind || '|%')
+                ORDER BY timestamp_epoch DESC, id DESC
+                LIMIT 1
+                """;
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.Parameters.AddWithValue("$kind", kindPrefix);
+            var scalar = cmd.ExecuteScalar();
+            return scalar is string s && !string.IsNullOrWhiteSpace(s)
+                ? s
+                : null;
+        }
     }
 
     public long AddTelemetryHistory(NodeTelemetryHistoryRecord rec)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO node_telemetry_history
-                (node_num, timestamp_epoch, battery_pct, voltage_v,
-                 channel_util_pct, air_util_tx_pct, uptime_seconds,
-                 temperature_c, relative_humidity_pct, barometric_pressure_hpa,
-                 gas_resistance_mohm, iaq,
-                 pm10_std, pm25_std, pm100_std, pm10_env, pm25_env, pm100_env,
-                 ch1_voltage_v, ch1_current_ma, ch2_voltage_v, ch2_current_ma,
-                 ch3_voltage_v, ch3_current_ma,
-                 signature)
-            VALUES ($node_num, $ts, $batt, $volt,
-                    $chan, $airx, $uptime,
-                    $temp, $hum, $pres,
-                    $gas, $iaq,
-                    $pm10std, $pm25std, $pm100std, $pm10env, $pm25env, $pm100env,
-                    $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i,
-                    $sig);
-            SELECT last_insert_rowid();
-            """;
-        cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
-        cmd.Parameters.AddWithValue("$ts", new DateTimeOffset(rec.TimestampUtc).ToUnixTimeSeconds());
-        cmd.Parameters.AddWithValue("$batt", (object?)rec.BatteryPct ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$volt", (object?)rec.VoltageV ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$chan", (object?)rec.ChannelUtilPct ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$airx", (object?)rec.AirUtilTxPct ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$uptime", (object?)rec.UptimeSeconds ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$temp", (object?)rec.TemperatureC ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$hum", (object?)rec.RelativeHumidityPct ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pres", (object?)rec.BarometricPressureHpa ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$gas", (object?)rec.GasResistanceMohm ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$iaq", (object?)rec.IaqValue ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm10std",  (object?)rec.Pm10Standard       ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm25std",  (object?)rec.Pm25Standard       ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm100std", (object?)rec.Pm100Standard      ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch1v", (object?)rec.Ch1VoltageV  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch1i", (object?)rec.Ch1CurrentMa ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch2v", (object?)rec.Ch2VoltageV  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$sig", rec.Signature ?? string.Empty);
-        var id = Convert.ToInt64(cmd.ExecuteScalar());
-        TrimTelemetryHistory(rec.NodeNum, 500);
-        return id;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO node_telemetry_history
+                    (node_num, timestamp_epoch, battery_pct, voltage_v,
+                     channel_util_pct, air_util_tx_pct, uptime_seconds,
+                     temperature_c, relative_humidity_pct, barometric_pressure_hpa,
+                     gas_resistance_mohm, iaq,
+                     pm10_std, pm25_std, pm100_std, pm10_env, pm25_env, pm100_env,
+                     ch1_voltage_v, ch1_current_ma, ch2_voltage_v, ch2_current_ma,
+                     ch3_voltage_v, ch3_current_ma,
+                     signature)
+                VALUES ($node_num, $ts, $batt, $volt,
+                        $chan, $airx, $uptime,
+                        $temp, $hum, $pres,
+                        $gas, $iaq,
+                        $pm10std, $pm25std, $pm100std, $pm10env, $pm25env, $pm100env,
+                        $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i,
+                        $sig);
+                SELECT last_insert_rowid();
+                """;
+            cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
+            cmd.Parameters.AddWithValue("$ts", new DateTimeOffset(rec.TimestampUtc).ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$batt", (object?)rec.BatteryPct ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$volt", (object?)rec.VoltageV ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$chan", (object?)rec.ChannelUtilPct ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$airx", (object?)rec.AirUtilTxPct ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$uptime", (object?)rec.UptimeSeconds ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$temp", (object?)rec.TemperatureC ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$hum", (object?)rec.RelativeHumidityPct ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pres", (object?)rec.BarometricPressureHpa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$gas", (object?)rec.GasResistanceMohm ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$iaq", (object?)rec.IaqValue ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm10std",  (object?)rec.Pm10Standard       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm25std",  (object?)rec.Pm25Standard       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm100std", (object?)rec.Pm100Standard      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm10env",  (object?)rec.Pm10Environmental  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm25env",  (object?)rec.Pm25Environmental  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pm100env", (object?)rec.Pm100Environmental ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch1v", (object?)rec.Ch1VoltageV  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch1i", (object?)rec.Ch1CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch2v", (object?)rec.Ch2VoltageV  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$sig", rec.Signature ?? string.Empty);
+            var id = Convert.ToInt64(cmd.ExecuteScalar());
+            TrimTelemetryHistory(rec.NodeNum, 500);
+            return id;
+        }
     }
 
     public void DeleteTelemetryHistory(long id)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM node_telemetry_history WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM node_telemetry_history WHERE id = $id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public void ClearTelemetryHistory(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM node_telemetry_history WHERE node_num = $n";
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM node_telemetry_history WHERE node_num = $n";
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Wipe all telemetry fields from the node row itself.</summary>
     public void ClearNodeTelemetry(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            UPDATE nodes
-            SET battery_pct = NULL, voltage_v = NULL,
-                channel_util_pct = NULL, air_util_tx_pct = NULL,
-                uptime_seconds = NULL,
-                temperature_c = NULL, relative_humidity_pct = NULL,
-                barometric_pressure_hpa = NULL, gas_resistance_mohm = NULL,
-                iaq = NULL,
-                pm10_std = NULL, pm25_std = NULL, pm100_std = NULL,
-                pm10_env = NULL, pm25_env = NULL, pm100_env = NULL,
-                ch1_voltage_v = NULL, ch1_current_ma = NULL,
-                ch2_voltage_v = NULL, ch2_current_ma = NULL,
-                ch3_voltage_v = NULL, ch3_current_ma = NULL
-            WHERE node_num = $n
-            """;
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE nodes
+                SET battery_pct = NULL, voltage_v = NULL,
+                    channel_util_pct = NULL, air_util_tx_pct = NULL,
+                    uptime_seconds = NULL,
+                    temperature_c = NULL, relative_humidity_pct = NULL,
+                    barometric_pressure_hpa = NULL, gas_resistance_mohm = NULL,
+                    iaq = NULL,
+                    pm10_std = NULL, pm25_std = NULL, pm100_std = NULL,
+                    pm10_env = NULL, pm25_env = NULL, pm100_env = NULL,
+                    ch1_voltage_v = NULL, ch1_current_ma = NULL,
+                    ch2_voltage_v = NULL, ch2_current_ma = NULL,
+                    ch3_voltage_v = NULL, ch3_current_ma = NULL
+                WHERE node_num = $n
+                """;
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.ExecuteNonQuery();
+        }
     }
 
+    // Callers already hold _gate (Monitor is reentrant on the same thread).
     private void TrimLocationHistory(uint nodeNum, int keep)
     {
         using var cmd = _conn.CreateCommand();
@@ -755,23 +832,29 @@ public sealed class NodeStore : IDisposable
     public void ClearPublicKey(uint nodeNum)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText =
-            "UPDATE nodes SET public_key = '', key_mismatch = 0, has_xeddsa_signed = 0 WHERE node_num = $n";
-        cmd.Parameters.AddWithValue("$n", nodeNum);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText =
+                "UPDATE nodes SET public_key = '', key_mismatch = 0, has_xeddsa_signed = 0 WHERE node_num = $n";
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public void Clear()
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            DELETE FROM nodes;
-            DELETE FROM node_location_history;
-            DELETE FROM node_telemetry_history;
-            """;
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                DELETE FROM nodes;
+                DELETE FROM node_location_history;
+                DELETE FROM node_telemetry_history;
+                """;
+            cmd.ExecuteNonQuery();
+        }
     }
 
     private static NodeRecord Read(SqliteDataReader r)
@@ -849,8 +932,11 @@ public sealed class NodeStore : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _conn.Dispose();
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _conn.Dispose();
+        }
     }
 }

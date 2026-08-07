@@ -7,7 +7,7 @@ and performs LoRa demodulation/modulation in software on the host CPU. It
 decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-Current release line: **v1.0.4**
+Current release line: **v1.0.5**
 
 <img width="1386" height="993" alt="image" src="https://github.com/user-attachments/assets/108e4d84-f767-44c0-a9bb-2750e67c33d7" />
 
@@ -39,9 +39,13 @@ Current release line: **v1.0.4**
   protection for DM payloads.
 - Routing ACK/NACK-based delivery state.
 - Reply-linked messages and per-message emoji reactions.
-- Waypoint send/receive support.
+- Waypoint send/receive support, including circular and bounding-box
+  geofences with enter/exit alerts.
 - Traceroute and request-position / node-info exchanges.
 - Optional `ok_to_mqtt` transmit flag.
+- Snake, Tetris, Breakout, and Chirpy Runner high-score leaderboards received
+  over the mesh (toggle in the node identity/settings window; off by
+  default).
 
 ### Nodes, Telemetry, and Mapping
 
@@ -101,7 +105,12 @@ Notes:
 - On Windows, CMake auto-provisions a repo-local `.vcpkg` and installs required
   native packages (currently `libusb` and `pthreads`) when needed.
 - Meshtastic protobuf schemas are linked via git submodule at
-  `third_party/meshtastic_protobufs`.
+  `third_party/meshtastic_protobufs`, tracking the `games` branch of
+  [Ixitxachitl/meshtastic-protobufs](https://github.com/Ixitxachitl/meshtastic-protobufs/tree/games)
+  — a fork of upstream [meshtastic/protobufs](https://github.com/meshtastic/protobufs)
+  that adds the game/leaderboard protobuf messages MeshRF's high-score
+  windows decode. All other fields (geofence, ATAK, etc.) come from upstream
+  Meshtastic.
 - Default development flow expects native `RelWithDebInfo` for practical SDR
   throughput.
 
@@ -116,7 +125,8 @@ For CLI/manual workflows, initialize linked dependencies after clone:
 git submodule update --init --recursive
 ```
 
-Update Meshtastic protobuf schemas later:
+Update Meshtastic protobuf schemas later (pulls the latest commit on the
+fork's `games` branch, per `.gitmodules`):
 
 ```powershell
 git submodule update --remote -- third_party/meshtastic_protobufs
@@ -222,7 +232,9 @@ This project is licensed under **GPL-3.0-or-later**. See [LICENSE](LICENSE).
 Upstream references influencing licensing and implementation include:
 
 - [gr-lora_sdr](https://github.com/tapparelj/gr-lora_sdr)
-- [meshtastic/protobufs](https://github.com/meshtastic/protobufs)
+- [meshtastic/protobufs](https://github.com/meshtastic/protobufs) (via the
+  [Ixitxachitl/meshtastic-protobufs](https://github.com/Ixitxachitl/meshtastic-protobufs/tree/games)
+  fork linked as `third_party/meshtastic_protobufs`)
 - [meshtastic/firmware](https://github.com/meshtastic/firmware)
 
 ## Disclaimer

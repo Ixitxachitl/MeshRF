@@ -47,6 +47,14 @@ public class MeshDecoderTests
     }
 
     [Fact]
+    public void Ctr_InvalidKeyLength_Throws()
+    {
+        var plain = Encoding.UTF8.GetBytes("hi");
+        var badKey = new byte[15]; // must be 16 or 32
+        Assert.Throws<ArgumentException>(() => MeshCrypto.Ctr(plain, badKey, 0, 0));
+    }
+
+    [Fact]
     public void DecodesEncryptedTextMessageOnDefaultChannel()
     {
         const uint from = 0x4FA54F59u;
@@ -292,6 +300,63 @@ public class MeshDecoderTests
         Assert.NotNull(result.User);
         Assert.Equal("Router", result.User!.Role);
         Assert.Equal("Test Router", result.User.LongName);
+    }
+
+    // ---- Malformed / truncated input (untrusted radio data boundary) ----
+
+    [Fact]
+    public void Decode_EmptyFrame_ReturnsNull()
+    {
+        var channel = new ChannelConfig { Index = 0, Psk = new byte[] { 0x01 } };
+        var result = MeshDecoder.Decode(ReadOnlySpan<byte>.Empty, new[] { channel });
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Decode_TooShortForHeader_ReturnsNull()
+    {
+        var channel = new ChannelConfig { Index = 0, Psk = new byte[] { 0x01 } };
+        var frame = new byte[10]; // MeshHeader.Size is 16
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Decode_HeaderOnlyNoCiphertext_ReturnsNull()
+    {
+        var channel = new ChannelConfig { Index = 0, Psk = new byte[] { 0x01 } };
+        var frame = new byte[MeshHeader.Size]; // exactly 16 bytes, nothing to decrypt
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Decode_RandomGarbageCiphertext_NeverThrows()
+    {
+        // Fuzz-lite regression guard: feed random bytes (not a valid encrypted
+        // protobuf) behind a header whose channel-hash hint matches a real
+        // channel, so the full decrypt+parse path runs. This is the
+        // untrusted-radio-input boundary (MeshHeader.TryParse, ProtoReader,
+        // IsPlausible) — it must reject cleanly (null) and never throw,
+        // regardless of what garbage bytes happen to decrypt to.
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "LongFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+
+        var rng = new Random(12345);
+        for (int trial = 0; trial < 50; trial++)
+        {
+            var frame = new byte[MeshHeader.Size + rng.Next(1, 64)];
+            rng.NextBytes(frame);
+            frame[13] = channel.Hash; // force the channel-hash hint to match
+
+            var ex = Record.Exception(() => MeshDecoder.Decode(frame, new[] { channel }));
+            Assert.Null(ex);
+        }
     }
 
     [Fact]

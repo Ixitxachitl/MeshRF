@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace MeshRF.App;
@@ -155,8 +158,26 @@ public sealed class AppSettings
     /// <summary>Base64 X25519 public key for PKI direct messages (TX).</summary>
     public string UserPublicKey  { get; set; } = string.Empty;
 
-    /// <summary>Base64 X25519 private key for PKI direct messages (TX).</summary>
+    /// <summary>
+    /// Base64 X25519 private key for PKI direct messages (TX), decrypted in
+    /// memory. Not serialized directly — <see cref="Load"/>/<see cref="Save"/>
+    /// route it through <see cref="UserPrivateKeyOnDisk"/> so the on-disk copy
+    /// is DPAPI-protected (CurrentUser scope) rather than plaintext.
+    /// </summary>
+    [JsonIgnore]
     public string UserPrivateKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// On-disk form of <see cref="UserPrivateKey"/>. Written DPAPI-protected
+    /// by this version; also accepts a legacy plaintext key from a
+    /// settings.json written before this protection was added (settings.json
+    /// is a local single-user file whose format has otherwise been plaintext
+    /// JSON since the app's first release, so migrating in place — rather
+    /// than requiring a fresh key — avoids silently invalidating every
+    /// existing node's PKI identity on upgrade).
+    /// </summary>
+    [JsonPropertyName("UserPrivateKey")]
+    public string UserPrivateKeyOnDisk { get; set; } = string.Empty;
 
     // -- Home / base-station location (shown on the map) ---------------------
 
@@ -278,6 +299,10 @@ public sealed class AppSettings
 
     /// <summary>Whether the identity expander is open.</summary>
     public bool IdentityExpanded { get; set; } = false;
+
+    /// <summary>Show the Snake/Tetris/Breakout/Chirpy Runner high-score
+    /// buttons on the primary channel tab. Off by default.</summary>
+    public bool ShowGameHighScores { get; set; } = false;
 
     /// <summary>Persisted selected channel index; -1 when a DM tab was active.</summary>
     public int SelectedChannelIndex { get; set; } = -1;
@@ -463,6 +488,7 @@ public sealed class AppSettings
             var json = File.ReadAllText(path);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             settings.NormalizeUnitSystem();
+            settings.UserPrivateKey = UnprotectPrivateKey(settings.UserPrivateKeyOnDisk);
             return settings;
         }
         catch
@@ -477,6 +503,7 @@ public sealed class AppSettings
         try
         {
             NormalizeUnitSystem();
+            UserPrivateKeyOnDisk = ProtectPrivateKey(UserPrivateKey);
             // Serialize on the caller's thread (fast, <1 ms), then write the
             // file on a thread-pool thread so the UI never blocks on disk I/O.
             // Each call captures its own snapshot so concurrent calls are safe.
@@ -490,6 +517,49 @@ public sealed class AppSettings
         catch
         {
             // Persistence failures are non-fatal.
+        }
+    }
+
+    // DPAPI (CurrentUser scope) protection for the private key at rest.
+    // Entropy is a fixed app-specific constant, not a secret — it just scopes
+    // the protected blob to this app so another app decrypting under the same
+    // Windows user account can't casually unprotect it with a generic call.
+    private static readonly byte[] s_privateKeyEntropy = Encoding.UTF8.GetBytes("MeshRF.UserPrivateKey.v1");
+
+    private static string ProtectPrivateKey(string base64Key)
+    {
+        if (string.IsNullOrEmpty(base64Key)) return string.Empty;
+        try
+        {
+            var keyBytes = Convert.FromBase64String(base64Key);
+            var protectedBytes = ProtectedData.Protect(keyBytes, s_privateKeyEntropy, DataProtectionScope.CurrentUser);
+            return Convert.ToBase64String(protectedBytes);
+        }
+        catch
+        {
+            // Best-effort: don't lose the key if it's not valid base64 or DPAPI
+            // is unavailable for some reason — fall back to storing it as-is.
+            return base64Key;
+        }
+    }
+
+    private static string UnprotectPrivateKey(string onDisk)
+    {
+        if (string.IsNullOrEmpty(onDisk)) return string.Empty;
+        try
+        {
+            var blob = Convert.FromBase64String(onDisk);
+            var keyBytes = ProtectedData.Unprotect(blob, s_privateKeyEntropy, DataProtectionScope.CurrentUser);
+            return Convert.ToBase64String(keyBytes);
+        }
+        catch
+        {
+            // Not a DPAPI blob for this app/user — either a legacy plaintext
+            // key from a settings.json written before this protection was
+            // added, or a blob from a different Windows user account/machine.
+            // Treat it as plaintext so an existing install keeps its node
+            // identity; the next Save() re-persists it DPAPI-protected.
+            return onDisk;
         }
     }
 

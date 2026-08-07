@@ -494,27 +494,6 @@ void ChirpChatRx::emit_symbol_(int peak_bin, float peak_db, float peak_frac,
     header_symbols_.clear();
 }
 
-float ChirpChatRx::upchirp_peak_db_() {
-    // Multiply current symbol window by upchirp template, FFT, return peak_db.
-    for (int k = 0; k < n_; ++k) {
-        const int idx = (sym_pos_ + k) % n_;
-        fft_buf_[static_cast<std::size_t>(k)] =
-            sym_buf_[static_cast<std::size_t>(idx)] *
-            upchirp_[static_cast<std::size_t>(k)];
-    }
-    fft_.forward(std::span<std::complex<float>>(fft_buf_.data(),
-                                                 static_cast<std::size_t>(n_)));
-    std::vector<float> mags(static_cast<std::size_t>(n_));
-    for (int k = 0; k < n_; ++k) {
-        const auto& c = fft_buf_[static_cast<std::size_t>(k)];
-        mags[static_cast<std::size_t>(k)] = c.real() * c.real() + c.imag() * c.imag();
-    }
-    const auto pk = find_peak(mags);
-    // Record the SFD down-chirp peak bin for CFO/STO disentanglement.
-    sfd_down_bin_ = pk.bin;
-    return pk.peak_db;
-}
-
 float ChirpChatRx::peak_magsq_(const std::vector<std::complex<float>>& templ,
                                int& out_bin) {
     for (int k = 0; k < n_; ++k) {
@@ -556,28 +535,6 @@ void ChirpChatRx::disentangle_cfo_sto(int up_bin, int down_bin, int n,
     sto_int = static_cast<int>(std::lround((sd - su) / 2.0));
     // Fold CFO back into signed range (sum could exceed N/2).
     cfo_int = fold(cfo_int);
-}
-
-void ChirpChatRx::retrack_cfo_(float peak_frac, float peak_db) {
-    // Gate: weak symbols give noisy parabolic estimates that would jitter
-    // the loop. Skip retrack for any symbol below a strong-peak threshold.
-    if (peak_db < 12.0f) return;
-    // peak_frac is the parabolic sub-bin offset of THIS symbol's FFT peak
-    // from its integer bin. After preamble lock, residual CFO drift shows
-    // up here as a non-zero average frac. Nudge nco_phase_inc_ by a small
-    // fraction so drift is absorbed continuously without overreacting to
-    // single noisy symbols.
-    //
-    // We run the modem at the chip rate, so a frac of +1 bin corresponds
-    // to a phase-increment delta of -2π/N per sample.
-    if (!std::isfinite(peak_frac)) return;
-    if (peak_frac >  0.5f) peak_frac =  0.5f;
-    if (peak_frac < -0.5f) peak_frac = -0.5f;
-    constexpr double kTwoPi = 6.283185307179586476925286766559;
-    constexpr double kAlpha = 0.03; // EMA gain — small to ride out per-symbol noise
-    const double delta_inc = -kTwoPi * static_cast<double>(peak_frac) /
-                              static_cast<double>(n_);
-    nco_phase_inc_ += kAlpha * delta_inc;
 }
 
 void ChirpChatRx::decode_header_() {

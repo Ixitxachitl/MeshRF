@@ -77,7 +77,10 @@ public sealed class ChannelConfig
                 key[^1] = (byte)(DefaultPsk[^1] + index - 1);
                 return key;
             }
-            return Psk;
+            // Return a copy, not the live backing array: callers that treat
+            // this as "their" key (e.g. zeroing it after use) must not
+            // corrupt the channel's actual stored PSK.
+            return (byte[])Psk.Clone();
         }
     }
 

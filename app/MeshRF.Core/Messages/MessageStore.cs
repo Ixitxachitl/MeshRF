@@ -16,6 +16,13 @@ public sealed class MessageStore : IDisposable
     /// real Meshtastic port range so it never collides with a decoded packet.</summary>
     public const int ConversationNotePort = 0x10000;
 
+    // Microsoft.Data.Sqlite does not guarantee a single SqliteConnection is
+    // safe for concurrent commands from multiple threads, and this store's
+    // single connection is shared across whatever threads call into it (e.g.
+    // a background RX/decode thread alongside the UI thread) — so every
+    // public method below takes this lock for its full SqliteCommand/
+    // SqliteDataReader lifetime.
+    private readonly object _gate = new();
     private readonly SqliteConnection _conn;
     private bool _disposed;
 
@@ -116,32 +123,35 @@ public sealed class MessageStore : IDisposable
     public bool Add(MessageRecord m)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT OR IGNORE INTO messages
-                (packet_id, from_node, to_node, channel, portnum, reply_id,
-                 emoji, is_reaction, text,
-                 payload_hex, decrypted, via_mqtt, rx_epoch, rssi_dbfs, snr_db, delivery)
-                VALUES ($pid, $from, $to, $chan, $port, $reply, $emoji, $isReaction, $text,
-                    $hex, $dec, $mqtt, $rx, $rssi, $snr, $del);
-            """;
-        cmd.Parameters.AddWithValue("$pid",  m.PacketId);
-        cmd.Parameters.AddWithValue("$from", m.FromNode);
-        cmd.Parameters.AddWithValue("$to",   m.ToNode);
-        cmd.Parameters.AddWithValue("$chan", m.Channel ?? string.Empty);
-        cmd.Parameters.AddWithValue("$port", m.PortNum);
-        cmd.Parameters.AddWithValue("$reply", m.ReplyId);
-        cmd.Parameters.AddWithValue("$emoji", m.Emoji);
-        cmd.Parameters.AddWithValue("$isReaction", m.IsReaction ? 1 : 0);
-        cmd.Parameters.AddWithValue("$text", m.Text ?? string.Empty);
-        cmd.Parameters.AddWithValue("$hex",  m.PayloadHex ?? string.Empty);
-        cmd.Parameters.AddWithValue("$dec",  m.Decrypted ? 1 : 0);
-        cmd.Parameters.AddWithValue("$mqtt", m.ViaMqtt ? 1 : 0);
-        cmd.Parameters.AddWithValue("$rx",   m.RxEpoch);
-        cmd.Parameters.AddWithValue("$rssi", (object?)m.RssiDbfs ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$snr",  (object?)m.SnrDb ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$del",  m.Delivery);
-        return cmd.ExecuteNonQuery() > 0;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT OR IGNORE INTO messages
+                    (packet_id, from_node, to_node, channel, portnum, reply_id,
+                     emoji, is_reaction, text,
+                     payload_hex, decrypted, via_mqtt, rx_epoch, rssi_dbfs, snr_db, delivery)
+                    VALUES ($pid, $from, $to, $chan, $port, $reply, $emoji, $isReaction, $text,
+                        $hex, $dec, $mqtt, $rx, $rssi, $snr, $del);
+                """;
+            cmd.Parameters.AddWithValue("$pid",  m.PacketId);
+            cmd.Parameters.AddWithValue("$from", m.FromNode);
+            cmd.Parameters.AddWithValue("$to",   m.ToNode);
+            cmd.Parameters.AddWithValue("$chan", m.Channel ?? string.Empty);
+            cmd.Parameters.AddWithValue("$port", m.PortNum);
+            cmd.Parameters.AddWithValue("$reply", m.ReplyId);
+            cmd.Parameters.AddWithValue("$emoji", m.Emoji);
+            cmd.Parameters.AddWithValue("$isReaction", m.IsReaction ? 1 : 0);
+            cmd.Parameters.AddWithValue("$text", m.Text ?? string.Empty);
+            cmd.Parameters.AddWithValue("$hex",  m.PayloadHex ?? string.Empty);
+            cmd.Parameters.AddWithValue("$dec",  m.Decrypted ? 1 : 0);
+            cmd.Parameters.AddWithValue("$mqtt", m.ViaMqtt ? 1 : 0);
+            cmd.Parameters.AddWithValue("$rx",   m.RxEpoch);
+            cmd.Parameters.AddWithValue("$rssi", (object?)m.RssiDbfs ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$snr",  (object?)m.SnrDb ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$del",  m.Delivery);
+            return cmd.ExecuteNonQuery() > 0;
+        }
     }
 
     /// <summary>Update the persisted delivery state for a message we sent,
@@ -150,13 +160,16 @@ public sealed class MessageStore : IDisposable
     public void UpdateDelivery(uint packetId, uint fromNode, int delivery)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText =
-            "UPDATE messages SET delivery = $del WHERE packet_id = $pid AND from_node = $from";
-        cmd.Parameters.AddWithValue("$del", delivery);
-        cmd.Parameters.AddWithValue("$pid", packetId);
-        cmd.Parameters.AddWithValue("$from", fromNode);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText =
+                "UPDATE messages SET delivery = $del WHERE packet_id = $pid AND from_node = $from";
+            cmd.Parameters.AddWithValue("$del", delivery);
+            cmd.Parameters.AddWithValue("$pid", packetId);
+            cmd.Parameters.AddWithValue("$from", fromNode);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Most recent messages, newest first.</summary>
@@ -164,11 +177,14 @@ public sealed class MessageStore : IDisposable
     {
         ThrowIfDisposed();
         var list = new List<MessageRecord>();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM messages ORDER BY rx_epoch DESC, id DESC LIMIT $n";
-        cmd.Parameters.AddWithValue("$n", limit);
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read()) list.Add(Read(rd));
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM messages ORDER BY rx_epoch DESC, id DESC LIMIT $n";
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) list.Add(Read(rd));
+        }
         return list;
     }
 
@@ -180,18 +196,21 @@ public sealed class MessageStore : IDisposable
     {
         ThrowIfDisposed();
         var list = new List<MessageRecord>();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT * FROM (
-                SELECT * FROM messages
-                WHERE portnum = 1 AND decrypted = 1
-                ORDER BY rx_epoch DESC, id DESC
-                LIMIT $n
-            ) ORDER BY rx_epoch ASC, id ASC;
-            """;
-        cmd.Parameters.AddWithValue("$n", limit);
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read()) list.Add(Read(rd));
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT * FROM (
+                    SELECT * FROM messages
+                    WHERE portnum = 1 AND decrypted = 1
+                    ORDER BY rx_epoch DESC, id DESC
+                    LIMIT $n
+                ) ORDER BY rx_epoch ASC, id ASC;
+                """;
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) list.Add(Read(rd));
+        }
         return list;
     }
 
@@ -205,23 +224,26 @@ public sealed class MessageStore : IDisposable
         ThrowIfDisposed();
         var peers = new List<uint>();
         if (myNode == 0) return peers;
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT peer FROM (
-                SELECT CASE WHEN from_node = $me THEN to_node ELSE from_node END AS peer,
-                       MAX(rx_epoch) AS last
-                FROM messages
-                WHERE portnum = 1
-                  AND to_node != 4294967295
-                  AND (from_node = $me OR to_node = $me)
-                GROUP BY peer
-            )
-            WHERE peer != $me
-            ORDER BY last ASC;
-            """;
-        cmd.Parameters.AddWithValue("$me", myNode);
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read()) peers.Add((uint)rd.GetInt64(0));
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT peer FROM (
+                    SELECT CASE WHEN from_node = $me THEN to_node ELSE from_node END AS peer,
+                           MAX(rx_epoch) AS last
+                    FROM messages
+                    WHERE portnum = 1
+                      AND to_node != 4294967295
+                      AND (from_node = $me OR to_node = $me)
+                    GROUP BY peer
+                )
+                WHERE peer != $me
+                ORDER BY last ASC;
+                """;
+            cmd.Parameters.AddWithValue("$me", myNode);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) peers.Add((uint)rd.GetInt64(0));
+        }
         return peers;
     }
 
@@ -234,23 +256,26 @@ public sealed class MessageStore : IDisposable
         ThrowIfDisposed();
         var list = new List<MessageRecord>();
         if (myNode == 0) return list;
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT * FROM (
-                SELECT * FROM messages
-                WHERE portnum IN (1, $note)
-                  AND ((from_node = $peer AND to_node = $me)
-                    OR (from_node = $me   AND to_node = $peer))
-                ORDER BY rx_epoch DESC, id DESC
-                LIMIT $n
-            ) ORDER BY rx_epoch ASC, id ASC;
-            """;
-        cmd.Parameters.AddWithValue("$peer", peerNode);
-        cmd.Parameters.AddWithValue("$me", myNode);
-        cmd.Parameters.AddWithValue("$note", ConversationNotePort);
-        cmd.Parameters.AddWithValue("$n", limit);
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read()) list.Add(Read(rd));
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT * FROM (
+                    SELECT * FROM messages
+                    WHERE portnum IN (1, $note)
+                      AND ((from_node = $peer AND to_node = $me)
+                        OR (from_node = $me   AND to_node = $peer))
+                    ORDER BY rx_epoch DESC, id DESC
+                    LIMIT $n
+                ) ORDER BY rx_epoch ASC, id ASC;
+                """;
+            cmd.Parameters.AddWithValue("$peer", peerNode);
+            cmd.Parameters.AddWithValue("$me", myNode);
+            cmd.Parameters.AddWithValue("$note", ConversationNotePort);
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) list.Add(Read(rd));
+        }
         return list;
     }
 
@@ -258,44 +283,56 @@ public sealed class MessageStore : IDisposable
     public void ClearChannel(string channel)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText =
-            "DELETE FROM messages WHERE portnum = 1 AND channel = $c AND to_node = 4294967295";
-        cmd.Parameters.AddWithValue("$c", channel ?? string.Empty);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText =
+                "DELETE FROM messages WHERE portnum = 1 AND channel = $c AND to_node = 4294967295";
+            cmd.Parameters.AddWithValue("$c", channel ?? string.Empty);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Delete the direct messages exchanged with one peer node.</summary>
     public void ClearConversation(uint peerNode, uint myNode)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            DELETE FROM messages
-            WHERE portnum IN (1, $note)
-              AND ((from_node = $peer AND to_node = $me)
-                OR (from_node = $me   AND to_node = $peer));
-            """;
-        cmd.Parameters.AddWithValue("$peer", peerNode);
-        cmd.Parameters.AddWithValue("$me", myNode);
-        cmd.Parameters.AddWithValue("$note", ConversationNotePort);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                DELETE FROM messages
+                WHERE portnum IN (1, $note)
+                  AND ((from_node = $peer AND to_node = $me)
+                    OR (from_node = $me   AND to_node = $peer));
+                """;
+            cmd.Parameters.AddWithValue("$peer", peerNode);
+            cmd.Parameters.AddWithValue("$me", myNode);
+            cmd.Parameters.AddWithValue("$note", ConversationNotePort);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public int Count()
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM messages";
-        return Convert.ToInt32(cmd.ExecuteScalar());
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM messages";
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
     }
 
     public void Clear()
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM messages";
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM messages";
+            cmd.ExecuteNonQuery();
+        }
     }
 
     private static MessageRecord Read(SqliteDataReader r)
@@ -334,8 +371,11 @@ public sealed class MessageStore : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _conn.Dispose();
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _conn.Dispose();
+        }
     }
 }

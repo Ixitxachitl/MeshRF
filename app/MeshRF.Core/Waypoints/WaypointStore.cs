@@ -10,6 +10,13 @@ namespace MeshRF.Waypoints;
 /// </summary>
 public sealed class WaypointStore : IDisposable
 {
+    // Microsoft.Data.Sqlite does not guarantee a single SqliteConnection is
+    // safe for concurrent commands from multiple threads, and this store's
+    // single connection is shared across whatever threads call into it (e.g.
+    // a background RX/decode thread alongside the UI thread) — so every
+    // public method below takes this lock for its full SqliteCommand/
+    // SqliteDataReader/transaction lifetime.
+    private readonly object _gate = new();
     private readonly SqliteConnection _conn;
     private bool _disposed;
 
@@ -85,100 +92,112 @@ public sealed class WaypointStore : IDisposable
     public void Upsert(WaypointRecord rec)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO waypoints
-                (from_node, waypoint_id, packet_id, channel,
-                 name, description, icon,
-                 latitude, longitude, altitude_m,
-                 expire_epoch, locked_to, rx_epoch,
-                 geofence_radius, bbox_west, bbox_south, bbox_east, bbox_north,
-                 notify_on_enter, notify_on_exit, notify_favorites_only)
-            VALUES
-                ($from, $wid, $pid, $chan,
-                 $name, $desc, $icon,
-                 $lat, $lon, $alt,
-                 $exp, $lock, $rx,
-                 $geor, $bw, $bs, $be, $bn,
-                 $nen, $nex, $nfav)
-            ON CONFLICT(from_node, waypoint_id) DO UPDATE SET
-                packet_id             = excluded.packet_id,
-                channel               = excluded.channel,
-                name                  = excluded.name,
-                description           = excluded.description,
-                icon                  = excluded.icon,
-                latitude              = excluded.latitude,
-                longitude             = excluded.longitude,
-                altitude_m            = excluded.altitude_m,
-                expire_epoch          = excluded.expire_epoch,
-                locked_to             = excluded.locked_to,
-                rx_epoch              = MAX(excluded.rx_epoch, waypoints.rx_epoch),
-                geofence_radius       = excluded.geofence_radius,
-                bbox_west             = excluded.bbox_west,
-                bbox_south            = excluded.bbox_south,
-                bbox_east             = excluded.bbox_east,
-                bbox_north            = excluded.bbox_north,
-                notify_on_enter       = excluded.notify_on_enter,
-                notify_on_exit        = excluded.notify_on_exit,
-                notify_favorites_only = excluded.notify_favorites_only;
-            """;
-        cmd.Parameters.AddWithValue("$from", rec.FromNode);
-        cmd.Parameters.AddWithValue("$wid", rec.WaypointId);
-        cmd.Parameters.AddWithValue("$pid", rec.PacketId);
-        cmd.Parameters.AddWithValue("$chan", rec.Channel ?? string.Empty);
-        cmd.Parameters.AddWithValue("$name", rec.Name ?? string.Empty);
-        cmd.Parameters.AddWithValue("$desc", rec.Description ?? string.Empty);
-        cmd.Parameters.AddWithValue("$icon", (object?)rec.Icon ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$lat", rec.Latitude);
-        cmd.Parameters.AddWithValue("$lon", rec.Longitude);
-        cmd.Parameters.AddWithValue("$alt", (object?)rec.AltitudeM ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$exp", rec.ExpireEpoch);
-        cmd.Parameters.AddWithValue("$lock", rec.LockedTo);
-        cmd.Parameters.AddWithValue("$rx", rec.RxEpoch);
-        cmd.Parameters.AddWithValue("$geor", rec.GeofenceRadius);
-        cmd.Parameters.AddWithValue("$bw", (object?)rec.BboxWest ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$bs", (object?)rec.BboxSouth ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$be", (object?)rec.BboxEast ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$bn", (object?)rec.BboxNorth ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$nen", rec.NotifyOnEnter);
-        cmd.Parameters.AddWithValue("$nex", rec.NotifyOnExit);
-        cmd.Parameters.AddWithValue("$nfav", rec.NotifyFavoritesOnly);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO waypoints
+                    (from_node, waypoint_id, packet_id, channel,
+                     name, description, icon,
+                     latitude, longitude, altitude_m,
+                     expire_epoch, locked_to, rx_epoch,
+                     geofence_radius, bbox_west, bbox_south, bbox_east, bbox_north,
+                     notify_on_enter, notify_on_exit, notify_favorites_only)
+                VALUES
+                    ($from, $wid, $pid, $chan,
+                     $name, $desc, $icon,
+                     $lat, $lon, $alt,
+                     $exp, $lock, $rx,
+                     $geor, $bw, $bs, $be, $bn,
+                     $nen, $nex, $nfav)
+                ON CONFLICT(from_node, waypoint_id) DO UPDATE SET
+                    packet_id             = excluded.packet_id,
+                    channel               = excluded.channel,
+                    name                  = excluded.name,
+                    description           = excluded.description,
+                    icon                  = excluded.icon,
+                    latitude              = excluded.latitude,
+                    longitude             = excluded.longitude,
+                    altitude_m            = excluded.altitude_m,
+                    expire_epoch          = excluded.expire_epoch,
+                    locked_to             = excluded.locked_to,
+                    rx_epoch              = MAX(excluded.rx_epoch, waypoints.rx_epoch),
+                    geofence_radius       = excluded.geofence_radius,
+                    bbox_west             = excluded.bbox_west,
+                    bbox_south            = excluded.bbox_south,
+                    bbox_east             = excluded.bbox_east,
+                    bbox_north            = excluded.bbox_north,
+                    notify_on_enter       = excluded.notify_on_enter,
+                    notify_on_exit        = excluded.notify_on_exit,
+                    notify_favorites_only = excluded.notify_favorites_only;
+                """;
+            cmd.Parameters.AddWithValue("$from", rec.FromNode);
+            cmd.Parameters.AddWithValue("$wid", rec.WaypointId);
+            cmd.Parameters.AddWithValue("$pid", rec.PacketId);
+            cmd.Parameters.AddWithValue("$chan", rec.Channel ?? string.Empty);
+            cmd.Parameters.AddWithValue("$name", rec.Name ?? string.Empty);
+            cmd.Parameters.AddWithValue("$desc", rec.Description ?? string.Empty);
+            cmd.Parameters.AddWithValue("$icon", (object?)rec.Icon ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$lat", rec.Latitude);
+            cmd.Parameters.AddWithValue("$lon", rec.Longitude);
+            cmd.Parameters.AddWithValue("$alt", (object?)rec.AltitudeM ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$exp", rec.ExpireEpoch);
+            cmd.Parameters.AddWithValue("$lock", rec.LockedTo);
+            cmd.Parameters.AddWithValue("$rx", rec.RxEpoch);
+            cmd.Parameters.AddWithValue("$geor", rec.GeofenceRadius);
+            cmd.Parameters.AddWithValue("$bw", (object?)rec.BboxWest ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$bs", (object?)rec.BboxSouth ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$be", (object?)rec.BboxEast ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$bn", (object?)rec.BboxNorth ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$nen", rec.NotifyOnEnter);
+            cmd.Parameters.AddWithValue("$nex", rec.NotifyOnExit);
+            cmd.Parameters.AddWithValue("$nfav", rec.NotifyFavoritesOnly);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public IReadOnlyList<WaypointRecord> All()
     {
         ThrowIfDisposed();
         var list = new List<WaypointRecord>();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM waypoints ORDER BY rx_epoch DESC, id DESC";
-        using var rd = cmd.ExecuteReader();
-        while (rd.Read()) list.Add(Read(rd));
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM waypoints ORDER BY rx_epoch DESC, id DESC";
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) list.Add(Read(rd));
+        }
         return list;
     }
 
     public void Forget(long id)
     {
         ThrowIfDisposed();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM waypoints WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM waypoints WHERE id = $id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public void ForgetRange(IEnumerable<long> ids)
     {
         ThrowIfDisposed();
-        using var tx = _conn.BeginTransaction();
-        foreach (var id in ids)
+        lock (_gate)
         {
-            using var cmd = _conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = "DELETE FROM waypoints WHERE id = $id";
-            cmd.Parameters.AddWithValue("$id", id);
-            cmd.ExecuteNonQuery();
+            using var tx = _conn.BeginTransaction();
+            foreach (var id in ids)
+            {
+                using var cmd = _conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = "DELETE FROM waypoints WHERE id = $id";
+                cmd.Parameters.AddWithValue("$id", id);
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
         }
-        tx.Commit();
     }
 
     private static WaypointRecord Read(SqliteDataReader r)
@@ -218,10 +237,13 @@ public sealed class WaypointStore : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _conn.Dispose();
-        _disposed = true;
-        GC.SuppressFinalize(this);
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _conn.Dispose();
+            _disposed = true;
+            GC.SuppressFinalize(this);
+        }
     }
 
     private void ThrowIfDisposed()

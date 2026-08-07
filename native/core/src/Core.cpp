@@ -922,10 +922,15 @@ bool Core::set_tx_device(hal::DeviceKind kind) {
 }
 
 hal::DeviceKind Core::rx_device_kind() const noexcept {
+    // rx_radio/tx_radio/*_requested_kind are all mutated under start_mu by
+    // set_rx_device()/set_tx_device()/start_rx(); take the same lock here so
+    // a concurrent reconfiguration can't be observed mid-update.
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
     return impl_->rx_radio ? impl_->rx_radio->kind() : hal::DeviceKind::Null;
 }
 
 hal::DeviceKind Core::tx_device_kind() const noexcept {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
     const hal::IRadioDevice* tx =
         (!impl_->tx_radio && impl_->rx_radio &&
          impl_->rx_radio->kind() == impl_->tx_requested_kind)
@@ -939,11 +944,24 @@ bool Core::is_device_available(hal::DeviceKind kind) const noexcept {
 }
 
 const char* Core::device_name() const noexcept {
-    return impl_->rx_device_name.c_str();
+    // impl_->rx_device_name is mutated under start_mu, and callers (the C ABI
+    // in particular) read through the returned pointer via a separate
+    // strlen()+copy pass after this function returns — a raw pointer into
+    // that shared std::string would be a use-after-free/torn-read hazard if
+    // a reconfiguration reassigned it in between. Snapshot into a
+    // thread_local buffer under the lock instead: the returned pointer then
+    // refers to storage only this calling thread can mutate.
+    thread_local std::string cache;
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    cache = impl_->rx_device_name;
+    return cache.c_str();
 }
 
 const char* Core::tx_device_name() const noexcept {
-    return impl_->tx_device_name.c_str();
+    thread_local std::string cache;
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    cache = impl_->tx_device_name;
+    return cache.c_str();
 }
 
 const char* Core::device_status() const noexcept {

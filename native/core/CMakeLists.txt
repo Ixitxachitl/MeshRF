@@ -46,6 +46,12 @@ if(spdlog_FOUND)
     target_compile_definitions(mrf_core PUBLIC MRF_HAVE_SPDLOG=1)
 endif()
 
+if(WIN32)
+    # AES-CTR for channel crypto is implemented via Windows CNG (bcrypt.lib),
+    # since libsodium does not expose a generic AES-128/256-CTR primitive.
+    target_link_libraries(mrf_core PUBLIC bcrypt)
+endif()
+
 # Radio backends are loaded at runtime via LoadLibrary (see hal/*DynLoad.cpp).
 # Runtime DLL staging is handled by native/bridge/CMakeLists.txt.
 

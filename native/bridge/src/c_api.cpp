@@ -37,6 +37,12 @@ MRF_API int MRF_CALL mrf_core_start_rx_params(mrf_core_t* core,
                                               uint8_t cr,
                                               uint64_t center_freq_hz) {
     if (!core) return -1;
+    // sf/bw_hz cross the ABI from managed code as plain integers with no
+    // prior validation; sf must stay in the modem's supported range (see
+    // make_modem() in LoraModem.cpp) before it's used as a shift amount below
+    // (1u << sf is undefined behavior for sf >= 32), and bw_hz must be
+    // non-zero to avoid dividing by zero.
+    if (sf < 7 || sf > 12 || bw_hz == 0) return -3;
     try {
         mrf::modem::LoraParams p{};
         p.spreading_factor = sf;
@@ -260,6 +266,37 @@ MRF_API int32_t MRF_CALL mrf_core_transmit(mrf_core_t* core,
     try {
         const bool ok = core->core.transmit(
             static_cast<mrf::modem::Preset>(preset), center_freq_hz,
+            std::span<const std::uint8_t>(payload, payload_len),
+            txvga_gain_db, amp_enable != 0);
+        return ok ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+MRF_API int32_t MRF_CALL mrf_core_transmit_params(mrf_core_t* core,
+                                                  uint8_t sf,
+                                                  uint32_t bw_hz,
+                                                  uint8_t cr,
+                                                  uint64_t center_freq_hz,
+                                                  const uint8_t* payload,
+                                                  uint32_t payload_len,
+                                                  uint8_t txvga_gain_db,
+                                                  int32_t amp_enable) {
+    if (!core || !payload || payload_len == 0) return 0;
+    // ChirpChatTx (the modulator this ultimately reaches) only supports
+    // SF 7..12; reject out of range here rather than letting a throw from
+    // deep in the modem propagate, and to avoid `1u << sf` being UB below.
+    if (sf < 7 || sf > 12 || bw_hz == 0) return 0;
+    try {
+        mrf::modem::LoraParams p{};
+        p.spreading_factor = sf;
+        p.bandwidth_hz     = bw_hz;
+        p.coding_rate      = cr;
+        const double t_sym_ms = static_cast<double>(1u << sf) / (bw_hz / 1000.0);
+        p.low_data_rate_optimize = (t_sym_ms >= 16.0);
+        const bool ok = core->core.transmit(
+            p, center_freq_hz,
             std::span<const std::uint8_t>(payload, payload_len),
             txvga_gain_db, amp_enable != 0);
         return ok ? 1 : 0;

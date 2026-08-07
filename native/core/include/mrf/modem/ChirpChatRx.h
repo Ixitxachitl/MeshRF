@@ -171,19 +171,8 @@ public:
 private:
     void emit_symbol_(int peak_bin, float peak_db, float peak_frac, std::uint64_t first_sample_index);
     void reset_frame_state_();
-    // Per-symbol CFO retrack: small EMA correction of the NCO based on
-    // each symbol's residual sub-bin frequency offset.
-    void retrack_cfo_(float peak_frac, float peak_db);
     void decode_header_();
     void decode_payload_();
-
-    // Compute the magnitude-spectrum peak strength of the current rolling
-    // buffer multiplied by the *upchirp* template. The SFD (start-of-frame
-    // delimiter) is 2.25 downchirps; multiplying downchirps by an upchirp
-    // dechirps them to a CW tone, producing a strong peak. Used to find the
-    // SFD position to sample-accuracy after preamble lock. Also records the
-    // peak bin in `sfd_down_bin_` for CFO/STO disentanglement.
-    [[nodiscard]] float upchirp_peak_db_();
 
     // Dechirp the current rolling window with `templ` (downchirp_ for the
     // preamble ramp, upchirp_ for the SFD ramp), FFT, and return the peak

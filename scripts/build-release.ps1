@@ -54,7 +54,15 @@ if (-not $Version) {
 Write-Host "Building MeshRF v$Version ($NativeConfig)" -ForegroundColor Cyan
 
 # --- Don't fight a running instance for the DLL --------------------------
-Get-Process -Name MeshRF -ErrorAction SilentlyContinue | Stop-Process -Force
+# Warn before killing: this runs before any build step has proven it will
+# succeed, so silently ending the user's running instance (and any unsaved
+# session state) on every invocation is a bad trade for a build that might
+# fail moments later.
+$runningMeshRf = Get-Process -Name MeshRF -ErrorAction SilentlyContinue
+if ($runningMeshRf) {
+    Write-Host "==> Stopping running MeshRF instance(s) (PID $($runningMeshRf.Id -join ', ')) to release the native DLL" -ForegroundColor Yellow
+    $runningMeshRf | Stop-Process -Force
+}
 
 # --- 1. Native build -----------------------------------------------------
 Write-Host '==> Configuring + building native core' -ForegroundColor Yellow

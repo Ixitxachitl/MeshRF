@@ -40,7 +40,17 @@ public static class Curve25519
             throw new ArgumentException("X25519 private key must be 32 bytes.", nameof(privateKey));
         var clamped = (byte[])privateKey.Clone();
         Clamp(clamped);
-        return ScalarMult(clamped, BasePoint);
+        try
+        {
+            return ScalarMult(clamped, BasePoint);
+        }
+        finally
+        {
+            // Best-effort: the scalar is also carried as a BigInteger inside
+            // ScalarMult/DecodeScalar, which is immutable/GC-managed and
+            // cannot be zeroed the same way — this clears the one copy we can.
+            CryptographicOperations.ZeroMemory(clamped);
+        }
     }
 
     /// <summary>
@@ -59,7 +69,15 @@ public static class Curve25519
 
         var clamped = (byte[])privateKey.Clone();
         Clamp(clamped);
-        var secret = ScalarMult(clamped, peerPublicKey);
+        byte[] secret;
+        try
+        {
+            secret = ScalarMult(clamped, peerPublicKey);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(clamped);
+        }
 
         // Weak-key check: an all-zero shared secret means a low-order public key
         // was supplied. The firmware (Curve25519::dh2) rejects this too.
@@ -134,7 +152,14 @@ public static class Curve25519
     {
         var c = (byte[])k.Clone();
         Clamp(c);
-        return DecodeLittleEndian(c);
+        try
+        {
+            return DecodeLittleEndian(c);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(c);
+        }
     }
 
     private static BigInteger DecodeUCoordinate(byte[] u)

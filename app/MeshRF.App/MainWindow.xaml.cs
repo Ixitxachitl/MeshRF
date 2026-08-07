@@ -188,7 +188,7 @@ public partial class MainWindow : Window
 
     private void OnAboutClick(object sender, RoutedEventArgs e)
     {
-        var about = new AboutWindow { Owner = this };
+        var about = new AboutWindow(DataContext as MainViewModel) { Owner = this };
         about.ShowDialog();
     }
 
@@ -488,6 +488,7 @@ public partial class MainWindow : Window
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         SaveLayout();
+        (DataContext as MainViewModel)?.Dispose();
     }
 
     // Marks that a CRC-valid packet was just decoded. A bad frame or a false

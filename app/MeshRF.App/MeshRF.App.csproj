@@ -25,6 +25,7 @@
     <PackageReference Include="Emoji.Wpf" Version="0.3.4" />
     <PackageReference Include="System.Management" Version="9.0.0" />
     <PackageReference Include="System.IO.Ports" Version="9.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MeshRF.Core\MeshRF.Core.csproj" />

@@ -229,7 +229,11 @@ private:
 } // namespace
 
 std::unique_ptr<ILoraModem> make_modem(const LoraParams& params) {
-    if (params.spreading_factor < 5 || params.spreading_factor > 12)
+    // ChirpChatTx (built lazily inside encode(), see above) only supports
+    // SF 7..12, so accepting 5/6 here would create a modem that can receive
+    // but throws the moment anything calls encode()/transmit() on it. No
+    // Meshtastic preset uses SF5/6, so require 7..12 uniformly.
+    if (params.spreading_factor < 7 || params.spreading_factor > 12)
         throw std::invalid_argument("spreading_factor out of range");
     if (params.coding_rate < 5 || params.coding_rate > 8)
         throw std::invalid_argument("coding_rate out of range");

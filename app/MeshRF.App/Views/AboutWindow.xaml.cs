@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Navigation;
+using MeshRF.App.ViewModels;
 
 namespace MeshRF.App.Views;
 
@@ -19,11 +20,18 @@ public partial class AboutWindow : Window
     public string CommitText { get; }
     public string RuntimeText { get; }
 
+    /// <summary>The owning window's view model, so the game high-score
+    /// toggle can bind to it directly without disturbing this window's own
+    /// DataContext (set to <c>this</c> for the version/commit/runtime text
+    /// bindings above).</summary>
+    public MainViewModel? Vm { get; }
+
     private readonly string _fullVersionInfo;
 
-    public AboutWindow()
+    public AboutWindow(MainViewModel? vm = null)
     {
         InitializeComponent();
+        Vm = vm;
 
         var asm = Assembly.GetExecutingAssembly();
         var informational = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?

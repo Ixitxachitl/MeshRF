@@ -5,6 +5,7 @@
 #include "mrf/hal/RadioDevice.h"
 #include "HackRfDynLoad.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -24,10 +25,26 @@ std::unique_ptr<IRadioDevice> open_rtlsdr_device(std::string& status);
 bool rtlsdr_backend_available();
 
 namespace {
+// Process-global (not per-Core) diagnostic string set by open_device() and
+// friends, and polled from managed code via Core::device_status(). Writers
+// run under the owning Core's start_mu, but that only serializes writers
+// against each other for a single Core instance — the read side here had no
+// synchronization at all, so a poll could race a concurrent device-open
+// reassigning this string. Guard both sides with a dedicated mutex.
+std::mutex g_open_status_mu;
 std::string g_open_status = "not attempted";
 } // namespace
 
-const char* open_default_device_status() { return g_open_status.c_str(); }
+const char* open_default_device_status() {
+    // Snapshot into a thread_local buffer under the lock so the returned
+    // pointer refers to storage only this calling thread can mutate, rather
+    // than a live pointer into g_open_status that could be reassigned out
+    // from under the caller after this function returns.
+    thread_local std::string cache;
+    std::lock_guard<std::mutex> lk(g_open_status_mu);
+    cache = g_open_status;
+    return cache.c_str();
+}
 
 namespace {
 
@@ -73,11 +90,14 @@ public:
         ring_.assign(kRingCapacity, SampleType{0.0f, 0.0f});
         ring_rpos_ = ring_wpos_ = ring_count_ = 0;
         ring_drops_ = 0;
-        worker_run_ = true;
-        rx_worker_ = std::thread(&HackRfDevice::rx_worker_loop, this);
-        // Order matches SDRangel/gqrx: sample_rate -> baseband_bw -> freq ->
-        // gains -> start_rx. The baseband filter call is REQUIRED — without
-        // it the first hackrf_start_rx after open often delivers no samples.
+
+        // Configure the device BEFORE starting the worker thread: any of
+        // these can throw on a bad parameter or a device that went away
+        // mid-configuration, and there is nothing to tear down yet if they
+        // do (the worker thread doesn't exist). Order matches SDRangel/gqrx:
+        // sample_rate -> baseband_bw -> freq -> gains -> start_rx. The
+        // baseband filter call is REQUIRED — without it the first
+        // hackrf_start_rx after open often delivers no samples.
         check(api_.hackrf_set_sample_rate(dev_, static_cast<double>(cfg.sample_rate_hz)),
               "hackrf_set_sample_rate");
         const std::uint32_t bw =
@@ -89,8 +109,26 @@ public:
         check(api_.hackrf_set_vga_gain(dev_, cfg.vga_gain_db), "hackrf_set_vga_gain");
         check(api_.hackrf_set_amp_enable(dev_, cfg.amp_enable ? 1 : 0),
               "hackrf_set_amp_enable");
-        check(api_.hackrf_start_rx(dev_, &HackRfDevice::rx_thunk, this),
-              "hackrf_start_rx");
+
+        // Configuration succeeded; now bring up the worker thread and the
+        // actual USB streaming. If hackrf_start_rx itself fails, tear the
+        // worker thread back down before propagating — otherwise it would be
+        // orphaned (running, but with rx_running_ still false so a later
+        // stop_rx()/stop() sees "nothing to stop" and never joins it).
+        worker_run_ = true;
+        rx_worker_ = std::thread(&HackRfDevice::rx_worker_loop, this);
+        try {
+            check(api_.hackrf_start_rx(dev_, &HackRfDevice::rx_thunk, this),
+                  "hackrf_start_rx");
+        } catch (...) {
+            {
+                std::lock_guard<std::mutex> lk(ring_mu_);
+                worker_run_ = false;
+            }
+            ring_cv_.notify_all();
+            if (rx_worker_.joinable()) rx_worker_.join();
+            throw;
+        }
         rx_running_ = true;
     }
     void stop_rx() override {
@@ -241,14 +279,24 @@ private:
         }
     }
 
+    // Clamps to the int8 sample range. The only current caller (Core::transmit)
+    // always normalizes the TX buffer to peak magnitude 0.95 first, so this is
+    // a defensive bound rather than a live bug: without it, a future/direct
+    // start_tx() caller feeding a sample with |value| > 1.0 (e.g. resampler
+    // overshoot) would hit undefined behavior on the float -> int8_t cast.
+    static std::int8_t to_int8_sample(float v) {
+        v = std::clamp(v, -1.0f, 1.0f);
+        return static_cast<std::int8_t>(v * 127.0f);
+    }
+
     int on_tx(hackrf_dyn::hackrf_transfer* t) {
         const std::size_t cap = static_cast<std::size_t>(t->valid_length) / 2;
         if (scratch_.size() < cap) scratch_.resize(cap);
         const std::size_t produced = tx_cb_ ? tx_cb_(scratch_.data(), cap) : 0;
         auto* dst = reinterpret_cast<std::int8_t*>(t->buffer);
         for (std::size_t i = 0; i < produced; ++i) {
-            dst[2 * i]     = static_cast<std::int8_t>(scratch_[i].real() * 127.0f);
-            dst[2 * i + 1] = static_cast<std::int8_t>(scratch_[i].imag() * 127.0f);
+            dst[2 * i]     = to_int8_sample(scratch_[i].real());
+            dst[2 * i + 1] = to_int8_sample(scratch_[i].imag());
         }
         for (std::size_t i = produced; i < cap; ++i) {
             dst[2 * i] = 0;
@@ -290,14 +338,19 @@ std::unique_ptr<IRadioDevice> try_open_hackrf() {
     if (hackrf_dyn::load(api)) {
         try {
             auto dev = std::make_unique<HackRfDevice>(api);
-            g_open_status = std::string("HackRF open OK \u2014 ") +
-                            hackrf_dyn::last_status();
+            {
+                std::lock_guard<std::mutex> lk(g_open_status_mu);
+                g_open_status = std::string("HackRF open OK \u2014 ") +
+                                hackrf_dyn::last_status();
+            }
             return dev;
         } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lk(g_open_status_mu);
             g_open_status = std::string("HackRF detected but open failed: ") +
                             e.what() + " (loader: " + hackrf_dyn::last_status() + ")";
         }
     } else {
+        std::lock_guard<std::mutex> lk(g_open_status_mu);
         g_open_status = std::string("libhackrf load failed: ") +
                         hackrf_dyn::last_status();
     }
@@ -307,7 +360,10 @@ std::unique_ptr<IRadioDevice> try_open_hackrf() {
 std::unique_ptr<IRadioDevice> try_open_rtlsdr() {
     std::string status;
     auto dev = open_rtlsdr_device(status);
-    g_open_status = status;
+    {
+        std::lock_guard<std::mutex> lk(g_open_status_mu);
+        g_open_status = status;
+    }
     return dev; // may be nullptr
 }
 
@@ -319,11 +375,14 @@ std::unique_ptr<IRadioDevice> open_device(DeviceKind kind) {
             return try_open_hackrf();
         case DeviceKind::RtlSdr:
             return try_open_rtlsdr();
-        case DeviceKind::Null:
+        case DeviceKind::Null: {
+            std::lock_guard<std::mutex> lk(g_open_status_mu);
             g_open_status = "No device selected";
             return nullptr;
+        }
         case DeviceKind::Auto:
         default: {
+            std::lock_guard<std::mutex> lk(g_open_status_mu);
             g_open_status = "Auto-detect disabled; select RX/TX device explicitly";
             return nullptr;
         }

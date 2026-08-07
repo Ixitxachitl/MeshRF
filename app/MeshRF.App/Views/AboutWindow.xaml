@@ -36,6 +36,11 @@
                        Foreground="{DynamicResource BrushSubtle}"
                        Text="Licensed under GPL-3.0-or-later. This project is not affiliated with or endorsed by the Meshtastic project." />
 
+            <CheckBox Margin="0,14,0,0"
+                      Content="Show game high scores (Snake / Tetris / Breakout / Chirpy Runner)"
+                      IsChecked="{Binding Vm.ShowGameHighScores, Mode=TwoWay}"
+                      ToolTip="Shows buttons on the primary channel tab for high-score leaderboards broadcast by the mesh's built-in games. Off by default." />
+
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                         Margin="0,18,0,0">
                 <Button Content="Copy version info" MinWidth="120" Padding="10,4"

@@ -132,9 +132,26 @@
                             Margin="6,0,0,0" Padding="8,2"
                             Command="{Binding GenerateKeyPairCommand}"
                             ToolTip="Generate a new random key pair" />
-                    <TextBox FontFamily="Consolas"
-                             ToolTip="Base64 X25519 private key (kept locally)"
-                             Text="{Binding MyPrivateKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                    <Button DockPanel.Dock="Right" Content="Show"
+                            Margin="6,0,0,0" Padding="8,2"
+                            Visibility="{Binding IsPrivateKeyHidden, Converter={StaticResource BoolToVis}}"
+                            Command="{Binding ToggleRevealPrivateKeyCommand}"
+                            ToolTip="Reveal the private key" />
+                    <Button DockPanel.Dock="Right" Content="Hide"
+                            Margin="6,0,0,0" Padding="8,2"
+                            Visibility="{Binding IsPrivateKeyRevealed, Converter={StaticResource BoolToVis}}"
+                            Command="{Binding ToggleRevealPrivateKeyCommand}"
+                            ToolTip="Hide the private key" />
+                    <Grid>
+                        <TextBox FontFamily="Consolas"
+                                 Visibility="{Binding IsPrivateKeyRevealed, Converter={StaticResource BoolToVis}}"
+                                 ToolTip="Base64 X25519 private key (kept locally)"
+                                 Text="{Binding MyPrivateKey, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                        <TextBox FontFamily="Consolas" IsReadOnly="True" Focusable="False"
+                                 Visibility="{Binding IsPrivateKeyHidden, Converter={StaticResource BoolToVis}}"
+                                 ToolTip="Private key is hidden — click Show to reveal or edit"
+                                 Text="●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●" />
+                    </Grid>
                 </DockPanel>
 
                 <!-- Row 9: Location source -->

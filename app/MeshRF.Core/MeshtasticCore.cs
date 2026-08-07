@@ -49,9 +49,16 @@ public enum RadioDeviceKind
 
 /// <summary>
 /// Managed wrapper around the native <c>mrf::Core</c> facade.
+///
+/// Every access to <see cref="_handle"/> is guarded by <see cref="_lock"/>: a
+/// read lock is held for the full duration of any native call, and
+/// <see cref="Dispose"/> takes the write lock before destroying the handle.
+/// This prevents a background thread from entering the native library with a
+/// handle that <see cref="Dispose"/> is concurrently freeing (use-after-free).
 /// </summary>
 public sealed class MeshtasticCore : IDisposable
 {
+    private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     private nint _handle;
     private bool _disposed;
 
@@ -102,85 +109,147 @@ public sealed class MeshtasticCore : IDisposable
     /// <summary>Select the RX radio backend used for the next <see cref="StartRx"/>.</summary>
     public bool SetRxDevice(RadioDeviceKind kind)
     {
-        if (_disposed || _handle == 0) return false;
-        return NativeMethods.CoreSetRxDevice(_handle, (int)kind) == 0;
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return false;
+            return NativeMethods.CoreSetRxDevice(_handle, (int)kind) == 0;
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>Select the TX radio backend. HackRF can transmit; RTL-SDR cannot.</summary>
     public bool SetTxDevice(RadioDeviceKind kind)
     {
-        if (_disposed || _handle == 0) return false;
-        return NativeMethods.CoreSetTxDevice(_handle, (int)kind) == 0;
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return false;
+            return NativeMethods.CoreSetTxDevice(_handle, (int)kind) == 0;
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>The RX backend that actually opened (may differ from the request).</summary>
-    public RadioDeviceKind DeviceKind =>
-        _disposed || _handle == 0
-            ? RadioDeviceKind.Null
-            : (RadioDeviceKind)NativeMethods.CoreGetRxDeviceKind(_handle);
+    public RadioDeviceKind DeviceKind
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                return _disposed ? RadioDeviceKind.Null : (RadioDeviceKind)NativeMethods.CoreGetRxDeviceKind(_handle);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>The TX backend that actually opened/selected.</summary>
-    public RadioDeviceKind TxDeviceKind =>
-        _disposed || _handle == 0
-            ? RadioDeviceKind.Null
-            : (RadioDeviceKind)NativeMethods.CoreGetTxDeviceKind(_handle);
+    public RadioDeviceKind TxDeviceKind
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                return _disposed ? RadioDeviceKind.Null : (RadioDeviceKind)NativeMethods.CoreGetTxDeviceKind(_handle);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// True if the given backend's runtime library can be loaded (so the user
     /// could select it). Does not require hardware to be connected.
     /// </summary>
-    public bool IsDeviceAvailable(RadioDeviceKind kind) =>
-        !_disposed && _handle != 0 &&
-        NativeMethods.CoreDeviceAvailable(_handle, (int)kind) != 0;
+    public bool IsDeviceAvailable(RadioDeviceKind kind)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return !_disposed && NativeMethods.CoreDeviceAvailable(_handle, (int)kind) != 0;
+        }
+        finally { _lock.ExitReadLock(); }
+    }
 
     private string ReadDeviceName()
     {
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            const int cap = 128;
-            byte* buf = stackalloc byte[cap];
-            var n = NativeMethods.CoreGetDeviceName(_handle, buf, cap);
-            if (n == 0) return "(none)";
-            int len = (int)Math.Min(n, (uint)(cap - 1));
-            return System.Text.Encoding.UTF8.GetString(buf, len);
+            if (_disposed) return "(none)";
+            unsafe
+            {
+                const int cap = 128;
+                byte* buf = stackalloc byte[cap];
+                var n = NativeMethods.CoreGetDeviceName(_handle, buf, cap);
+                if (n == 0) return "(none)";
+                int len = (int)Math.Min(n, (uint)(cap - 1));
+                return System.Text.Encoding.UTF8.GetString(buf, len);
+            }
         }
+        finally { _lock.ExitReadLock(); }
     }
 
     private string ReadTxDeviceName()
     {
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            const int cap = 128;
-            byte* buf = stackalloc byte[cap];
-            var n = NativeMethods.CoreGetTxDeviceName(_handle, buf, cap);
-            if (n == 0) return "(none)";
-            int len = (int)Math.Min(n, (uint)(cap - 1));
-            return System.Text.Encoding.UTF8.GetString(buf, len);
+            if (_disposed) return "(none)";
+            unsafe
+            {
+                const int cap = 128;
+                byte* buf = stackalloc byte[cap];
+                var n = NativeMethods.CoreGetTxDeviceName(_handle, buf, cap);
+                if (n == 0) return "(none)";
+                int len = (int)Math.Min(n, (uint)(cap - 1));
+                return System.Text.Encoding.UTF8.GetString(buf, len);
+            }
         }
+        finally { _lock.ExitReadLock(); }
     }
 
     private string ReadDeviceStatus()
     {
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            const int cap = 4096;
-            byte* buf = stackalloc byte[cap];
-            var n = NativeMethods.CoreGetDeviceStatus(_handle, buf, cap);
-            if (n == 0) return string.Empty;
-            int len = (int)Math.Min(n, (uint)(cap - 1));
-            return System.Text.Encoding.UTF8.GetString(buf, len);
+            if (_disposed) return string.Empty;
+            unsafe
+            {
+                const int cap = 4096;
+                byte* buf = stackalloc byte[cap];
+                var n = NativeMethods.CoreGetDeviceStatus(_handle, buf, cap);
+                if (n == 0) return string.Empty;
+                int len = (int)Math.Min(n, (uint)(cap - 1));
+                return System.Text.Encoding.UTF8.GetString(buf, len);
+            }
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    public bool IsRunning
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return !_disposed && NativeMethods.CoreIsRunning(_handle) != 0; }
+            finally { _lock.ExitReadLock(); }
         }
     }
 
-    public bool IsRunning =>
-        !_disposed && _handle != 0 && NativeMethods.CoreIsRunning(_handle) != 0;
-
     public void StartRx(LoraPreset preset, ulong centerFreqHz)
     {
-        ThrowIfDisposed();
-        var rc = NativeMethods.CoreStartRx(_handle, (int)preset, centerFreqHz);
-        if (rc != 0)
-            throw new InvalidOperationException($"mrf_core_start_rx failed (rc={rc})");
+        _lock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            var rc = NativeMethods.CoreStartRx(_handle, (int)preset, centerFreqHz);
+            if (rc != 0)
+                throw new InvalidOperationException($"mrf_core_start_rx failed (rc={rc})");
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>
@@ -189,23 +258,40 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public void StartRxParams(byte sf, uint bwHz, byte cr, ulong centerFreqHz)
     {
-        ThrowIfDisposed();
-        var rc = NativeMethods.CoreStartRxParams(_handle, sf, bwHz, cr, centerFreqHz);
-        if (rc != 0)
-            throw new InvalidOperationException($"mrf_core_start_rx_params failed (rc={rc})");
+        _lock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            var rc = NativeMethods.CoreStartRxParams(_handle, sf, bwHz, cr, centerFreqHz);
+            if (rc != 0)
+                throw new InvalidOperationException($"mrf_core_start_rx_params failed (rc={rc})");
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     public void Stop()
     {
-        if (_disposed || _handle == 0) return;
-        NativeMethods.CoreStop(_handle);
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return;
+            NativeMethods.CoreStop(_handle);
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>
     /// True if the selected TX radio backend can transmit (HackRF only).
     /// </summary>
-    public bool CanTransmit =>
-        !_disposed && _handle != 0 && NativeMethods.CoreCanTransmit(_handle) != 0;
+    public bool CanTransmit
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return !_disposed && NativeMethods.CoreCanTransmit(_handle) != 0; }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// Transmit a LoRa burst carrying <paramref name="payload"/> (the fully
@@ -220,21 +306,33 @@ public sealed class MeshtasticCore : IDisposable
                          ReadOnlySpan<byte> payload,
                          byte txvgaGainDb = 30, bool ampEnable = false)
     {
-        ThrowIfDisposed();
-        if (payload.IsEmpty) return false;
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            fixed (byte* p = payload)
+            ThrowIfDisposed();
+            if (payload.IsEmpty) return false;
+            unsafe
             {
-                return NativeMethods.CoreTransmit(_handle, (int)preset, centerFreqHz,
-                    p, (uint)payload.Length, txvgaGainDb, ampEnable ? 1 : 0) != 0;
+                fixed (byte* p = payload)
+                {
+                    return NativeMethods.CoreTransmit(_handle, (int)preset, centerFreqHz,
+                        p, (uint)payload.Length, txvgaGainDb, ampEnable ? 1 : 0) != 0;
+                }
             }
         }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>True while an IQ capture is in progress.</summary>
-    public bool IsCapturing =>
-        !_disposed && _handle != 0 && NativeMethods.CoreIsCapturing(_handle) != 0;
+    public bool IsCapturing
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return !_disposed && NativeMethods.CoreIsCapturing(_handle) != 0; }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// Begin capturing the decimated modem-input IQ stream (interleaved
@@ -243,22 +341,37 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public bool StartCapture(string path)
     {
-        if (_disposed || _handle == 0) return false;
-        return NativeMethods.CoreStartCapture(_handle, path) != 0;
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return false;
+            return NativeMethods.CoreStartCapture(_handle, path) != 0;
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>Stop and flush any in-progress IQ capture.</summary>
     public void StopCapture()
     {
-        if (_disposed || _handle == 0) return;
-        NativeMethods.CoreStopCapture(_handle);
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return;
+            NativeMethods.CoreStopCapture(_handle);
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>Live update of receiver gains. Safe to call any time.</summary>
     public void SetGains(byte lnaDb, byte vgaDb, bool ampEnable)
     {
-        if (_disposed || _handle == 0) return;
-        NativeMethods.CoreSetGains(_handle, lnaDb, vgaDb, ampEnable ? 1 : 0);
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return;
+            NativeMethods.CoreSetGains(_handle, lnaDb, vgaDb, ampEnable ? 1 : 0);
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>
@@ -268,8 +381,13 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public void SetDeviceOption(string key, int value)
     {
-        if (_disposed || _handle == 0) return;
-        NativeMethods.CoreSetDeviceOption(_handle, key, value);
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return;
+            NativeMethods.CoreSetDeviceOption(_handle, key, value);
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>
@@ -286,31 +404,57 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public SignalStatsSnapshot GetSignalStats()
     {
-        ThrowIfDisposed();
-        NativeMethods.CoreGetSignalStats(_handle, out var s);
-        return new SignalStatsSnapshot(
-            s.RssiDbfs, s.PeakDbfs, s.DcRe, s.DcIm, s.TotalSamples);
+        _lock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            NativeMethods.CoreGetSignalStats(_handle, out var s);
+            return new SignalStatsSnapshot(
+                s.RssiDbfs, s.PeakDbfs, s.DcRe, s.DcIm, s.TotalSamples);
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>FFT size of the running spectrum analyzer. 0 if RX is stopped.</summary>
-    public int SpectrumSize =>
-        _disposed || _handle == 0 ? 0 : (int)NativeMethods.CoreSpectrumSize(_handle);
+    public int SpectrumSize
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return _disposed ? 0 : (int)NativeMethods.CoreSpectrumSize(_handle); }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// Device sample rate in Hz of the running pipeline. This equals the full
     /// span of the spectrum/waterfall (DC at the tuned center frequency).
     /// 0 if RX is stopped.
     /// </summary>
-    public uint SampleRateHz =>
-        _disposed || _handle == 0 ? 0u : NativeMethods.CoreSampleRateHz(_handle);
+    public uint SampleRateHz
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return _disposed ? 0u : NativeMethods.CoreSampleRateHz(_handle); }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// Actual center frequency of the displayed spectrum in Hz. Because the
     /// radio is offset-tuned, this is the channel frequency plus the LO offset
     /// (~500 kHz). Use this for frequency-axis labels. 0 if RX is stopped.
     /// </summary>
-    public ulong SpectrumCenterHz =>
-        _disposed || _handle == 0 ? 0ul : NativeMethods.CoreSpectrumCenterHz(_handle);
+    public ulong SpectrumCenterHz
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return _disposed ? 0ul : NativeMethods.CoreSpectrumCenterHz(_handle); }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// Copies the latest dBFS spectrum frame into <paramref name="buffer"/>.
@@ -319,15 +463,20 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public int PullSpectrum(Span<float> buffer)
     {
-        if (_disposed || _handle == 0 || buffer.IsEmpty) return 0;
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            fixed (float* p = buffer)
+            if (_disposed || buffer.IsEmpty) return 0;
+            unsafe
             {
-                return (int)NativeMethods.CorePullSpectrum(
-                    _handle, p, (uint)buffer.Length);
+                fixed (float* p = buffer)
+                {
+                    return (int)NativeMethods.CorePullSpectrum(
+                        _handle, p, (uint)buffer.Length);
+                }
             }
         }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>
@@ -337,8 +486,15 @@ public sealed class MeshtasticCore : IDisposable
     /// Use this to advance the waterfall in step with received data rather than
     /// the UI refresh rate. 0 if RX is stopped.
     /// </summary>
-    public ulong SpectrumFrameCount =>
-        _disposed || _handle == 0 ? 0ul : NativeMethods.CoreSpectrumFrameCount(_handle);
+    public ulong SpectrumFrameCount
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return _disposed ? 0ul : NativeMethods.CoreSpectrumFrameCount(_handle); }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// Effective frame rate (Hz) of the spectrum history stream used by
@@ -347,8 +503,15 @@ public sealed class MeshtasticCore : IDisposable
     /// be lower than <see cref="SampleRateHz"/> / <see cref="SpectrumSize"/>.
     /// 0 if RX is stopped.
     /// </summary>
-    public uint SpectrumHistoryFrameRateHz =>
-        _disposed || _handle == 0 ? 0u : NativeMethods.CoreSpectrumHistoryFrameRateHz(_handle);
+    public uint SpectrumHistoryFrameRateHz
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return _disposed ? 0u : NativeMethods.CoreSpectrumHistoryFrameRateHz(_handle); }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
 
     /// <summary>
     /// Extracts up to <paramref name="maxCount"/> individual spectrum frames
@@ -359,16 +522,21 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public int PullSpectrumFrames(Span<float> buffer, ulong afterFrameIdx, int maxCount)
     {
-        if (_disposed || _handle == 0 || maxCount <= 0) return 0;
-        if (buffer.Length < maxCount * SpectrumSize) return 0;
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            fixed (float* p = buffer)
+            if (_disposed || maxCount <= 0) return 0;
+            if (buffer.Length < maxCount * (int)NativeMethods.CoreSpectrumSize(_handle)) return 0;
+            unsafe
             {
-                return (int)NativeMethods.CorePullSpectrumFrames(
-                    _handle, afterFrameIdx, (uint)maxCount, p, (uint)buffer.Length);
+                fixed (float* p = buffer)
+                {
+                    return (int)NativeMethods.CorePullSpectrumFrames(
+                        _handle, afterFrameIdx, (uint)maxCount, p, (uint)buffer.Length);
+                }
             }
         }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>
@@ -381,16 +549,21 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public int PullPacketSpectrogram(Span<float> buffer, int nTime, int nFreq)
     {
-        if (_disposed || _handle == 0 || nTime <= 0 || nFreq <= 0) return 0;
-        if (buffer.Length < nTime * nFreq) return 0;
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            fixed (float* p = buffer)
+            if (_disposed || nTime <= 0 || nFreq <= 0) return 0;
+            if (buffer.Length < nTime * nFreq) return 0;
+            unsafe
             {
-                return (int)NativeMethods.CorePullPacketSpectrogram(
-                    _handle, p, (uint)nTime, (uint)nFreq);
+                fixed (float* p = buffer)
+                {
+                    return (int)NativeMethods.CorePullPacketSpectrogram(
+                        _handle, p, (uint)nTime, (uint)nFreq);
+                }
             }
         }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>
@@ -399,28 +572,50 @@ public sealed class MeshtasticCore : IDisposable
     /// </summary>
     public string? PullEvent()
     {
-        if (_disposed || _handle == 0) return null;
-        unsafe
+        _lock.EnterReadLock();
+        try
         {
-            const int cap = 4096;
-            byte* buf = stackalloc byte[cap];
-            var n = NativeMethods.CorePullEvent(_handle, buf, cap);
-            if (n == 0) return null;
-            int len = (int)Math.Min(n, (uint)(cap - 1));
-            return System.Text.Encoding.UTF8.GetString(buf, len);
+            if (_disposed) return null;
+            unsafe
+            {
+                const int cap = 4096;
+                byte* buf = stackalloc byte[cap];
+                var n = NativeMethods.CorePullEvent(_handle, buf, cap);
+                if (n == 0) return null;
+                int len = (int)Math.Min(n, (uint)(cap - 1));
+                return System.Text.Encoding.UTF8.GetString(buf, len);
+            }
         }
+        finally { _lock.ExitReadLock(); }
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        if (_handle != 0)
+        bool didDispose = false;
+        _lock.EnterWriteLock();
+        try
         {
-            NativeMethods.CoreDestroy(_handle);
-            _handle = 0;
+            if (!_disposed)
+            {
+                _disposed = true;
+                if (_handle != 0)
+                {
+                    NativeMethods.CoreDestroy(_handle);
+                    _handle = 0;
+                }
+                didDispose = true;
+            }
         }
-        GC.SuppressFinalize(this);
+        finally { _lock.ExitWriteLock(); }
+
+        // Only the call that actually performed the transition disposes the
+        // lock itself, so a concurrent/duplicate Dispose() (or the finalizer
+        // racing an explicit Dispose()) never double-disposes it.
+        if (didDispose)
+        {
+            GC.SuppressFinalize(this);
+            _lock.Dispose();
+        }
     }
 
     private void ThrowIfDisposed()

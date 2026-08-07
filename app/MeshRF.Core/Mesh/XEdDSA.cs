@@ -74,6 +74,10 @@ public static class XEdDSA
         if ((edPub[31] & 0x80) != 0)
         {
             a = Mod(L - a, L);
+            // The pre-negation scalar bytes are about to be discarded in
+            // favor of the negated form below; clear them rather than
+            // leaving raw key-derived material to linger until GC.
+            CryptographicOperations.ZeroMemory(edPriv);
             edPriv = EncodeScalarLE(a);
             pub = ScalarMult(a, BasePoint);
             edPub = EncodePoint(pub);
@@ -131,7 +135,15 @@ public static class XEdDSA
         byte[] hashedPriv = SHA512.HashData(edPrivateKey);
         var messageBytes = message.ToArray();
 
-        byte[] rHash = SHA512.HashData(Concat(hashedPriv.AsSpan(32, 32).ToArray(), messageBytes, hedge));
+        byte[] rHash;
+        try
+        {
+            rHash = SHA512.HashData(Concat(hashedPriv.AsSpan(32, 32).ToArray(), messageBytes, hedge));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(hashedPriv);
+        }
         BigInteger r = Mod(DecodeLE(rHash), L);
 
         var rPoint = ScalarMult(r, BasePoint);

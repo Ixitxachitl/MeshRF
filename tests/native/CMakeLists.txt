@@ -15,6 +15,7 @@ endif()
 add_executable(mrf_core_tests
     test_packet_header.cpp
     test_channel_hash.cpp
+    test_channel_crypto.cpp
     test_flooding_router.cpp
     test_preset.cpp
     test_dsp_fir.cpp

@@ -83,7 +83,12 @@ public partial class MapView : UserControl
     private static readonly string s_cacheDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "MeshRF", "tiles");
+    // Bounded FIFO cache: unbounded growth here means a long-running session
+    // panning/zooming across the world leaks decoded tile bitmaps for the
+    // life of the process.
+    private const int MaxMemCacheTiles = 1000;
     private static readonly ConcurrentDictionary<string, BitmapSource> s_memCache = new();
+    private static readonly ConcurrentQueue<string> s_memCacheOrder = new();
 
     private MainViewModel? _vm;
 
@@ -880,7 +885,7 @@ public partial class MapView : UserControl
                 }
 
                 // Find marker index in cache for coordinate lookup
-                int markerIndex = _cachedMapMarkers.FindIndex(m => m.NodeNum == nodeNum);
+                int markerIndex = _cachedNodeMarkerIndices.TryGetValue(nodeNum, out int idx) ? idx : -1;
                 var (worldX, worldY) = markerIndex >= 0
                     ? GetMarkerScreenCoords(markerIndex, mk)
                     : (LonToX(mk.Lon, _zoom), LatToY(mk.Lat, _zoom));
@@ -928,7 +933,7 @@ public partial class MapView : UserControl
             }
 
             // Find marker index in cache for coordinate lookup
-            int markerIndex = _cachedMapMarkers.FindIndex(m => m.NodeNum == nodeNum);
+            int markerIndex = _cachedNodeMarkerIndices.TryGetValue(nodeNum, out int idx) ? idx : -1;
             var (worldX, worldY) = markerIndex >= 0
                 ? GetMarkerScreenCoords(markerIndex, mk)
                 : (LonToX(mk.Lon, _zoom), LatToY(mk.Lat, _zoom));
@@ -1265,7 +1270,12 @@ public partial class MapView : UserControl
         {
             var bmp = await GetTileBitmapAsync(provider, x, y, zoom);
             if (bmp is null) return;
-            s_memCache[key] = bmp;
+            if (s_memCache.TryAdd(key, bmp))
+            {
+                s_memCacheOrder.Enqueue(key);
+                while (s_memCache.Count > MaxMemCacheTiles && s_memCacheOrder.TryDequeue(out var oldestKey))
+                    s_memCache.TryRemove(oldestKey, out _);
+            }
             // The image may have been recycled by a re-render; only set if it's
             // still the tile we asked for (same canvas position key in Tag).
             target.Source = bmp;

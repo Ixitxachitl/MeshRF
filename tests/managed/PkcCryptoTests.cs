@@ -172,6 +172,66 @@ public class PkcCryptoTests
         Assert.Equal(0x3333u, result.RequestId);
     }
 
+    // ---- Malformed / truncated input (untrusted radio data boundary) ----
+
+    [Fact]
+    public void PkcDecrypt_Empty_ReturnsNull()
+    {
+        var bobPriv = Curve25519.GeneratePrivateKey();
+        var alicePub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
+        var opened = MeshCrypto.PkcDecrypt(Array.Empty<byte>(), bobPriv, alicePub, 1, 2);
+        Assert.Null(opened);
+    }
+
+    [Fact]
+    public void PkcDecrypt_AtOrBelowOverhead_ReturnsNull()
+    {
+        var bobPriv = Curve25519.GeneratePrivateKey();
+        var alicePub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
+        // data.Length <= PkcOverhead must be rejected before any AES-CCM call.
+        var tooShort = new byte[MeshCrypto.PkcOverhead];
+        var opened = MeshCrypto.PkcDecrypt(tooShort, bobPriv, alicePub, 1, 2);
+        Assert.Null(opened);
+    }
+
+    [Fact]
+    public void DecodePkc_EmptyFrame_ReturnsNull()
+    {
+        var bobPriv = Curve25519.GeneratePrivateKey();
+        var alicePub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
+        var result = MeshDecoder.DecodePkc(ReadOnlySpan<byte>.Empty, bobPriv, alicePub);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void DecodePkc_HeaderOnlyNoSealedPayload_ReturnsNull()
+    {
+        var bobPriv = Curve25519.GeneratePrivateKey();
+        var alicePub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
+        // Exactly at the header+overhead boundary: nothing left to decrypt.
+        var frame = new byte[MeshHeader.Size + MeshCrypto.PkcOverhead];
+        var result = MeshDecoder.DecodePkc(frame, bobPriv, alicePub);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void DecodePkc_RandomGarbageSealedPayload_NeverThrows()
+    {
+        var bobPriv = Curve25519.GeneratePrivateKey();
+        var alicePub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
+
+        var rng = new Random(54321);
+        for (int trial = 0; trial < 50; trial++)
+        {
+            var frame = new byte[MeshHeader.Size + MeshCrypto.PkcOverhead + rng.Next(1, 64)];
+            rng.NextBytes(frame);
+            frame[13] = 0x00; // PKC signal channel-hash
+
+            var ex = Record.Exception(() => MeshDecoder.DecodePkc(frame, bobPriv, alicePub));
+            Assert.Null(ex);
+        }
+    }
+
     [Fact]
     public void EncodePkc_WantResponse_IsDecoded()
     {

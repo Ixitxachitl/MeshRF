@@ -15,6 +15,3 @@
 	path = third_party/libusb
 	url = https://github.com/libusb/libusb
 	shallow = true
-[submodule "third_party/libusb"]
-	path = third_party/libusb
-	url = https://github.com/libusb/libusb

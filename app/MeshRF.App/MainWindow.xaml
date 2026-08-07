@@ -18,6 +18,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <conv:InverseBoolConverter x:Key="InverseBool" />
         <conv:BoolToOpacityConverter x:Key="BoolToOpacity" />
+        <conv:BoolAndToVisibilityConverter x:Key="BoolAndToVis" />
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
@@ -1452,8 +1453,14 @@
                                                     Margin="4,0,0,0"
                                                     VerticalAlignment="Center"
                                                     ToolTip="Snake high scores received from the mesh"
-                                                    Click="OnOpenSnakeScores"
-                                                    Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
+                                                    Click="OnOpenSnakeScores">
+                                                <Button.Visibility>
+                                                    <MultiBinding Converter="{StaticResource BoolAndToVis}">
+                                                        <Binding Path="IsPrimary" />
+                                                        <Binding Path="DataContext.ShowGameHighScores"
+                                                                 RelativeSource="{RelativeSource AncestorType=TabControl}" />
+                                                    </MultiBinding>
+                                                </Button.Visibility>
                                                 <emoji:TextBlock Text="🐍" FontSize="11" />
                                             </Button>
                                             <Button DockPanel.Dock="Right"
@@ -1461,8 +1468,14 @@
                                                     Margin="4,0,0,0"
                                                     VerticalAlignment="Center"
                                                     ToolTip="Tetris high scores received from the mesh"
-                                                    Click="OnOpenTetrisScores"
-                                                    Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
+                                                    Click="OnOpenTetrisScores">
+                                                <Button.Visibility>
+                                                    <MultiBinding Converter="{StaticResource BoolAndToVis}">
+                                                        <Binding Path="IsPrimary" />
+                                                        <Binding Path="DataContext.ShowGameHighScores"
+                                                                 RelativeSource="{RelativeSource AncestorType=TabControl}" />
+                                                    </MultiBinding>
+                                                </Button.Visibility>
                                                 <emoji:TextBlock Text="🧱" FontSize="11" />
                                             </Button>
                                             <Button DockPanel.Dock="Right"
@@ -1470,8 +1483,14 @@
                                                     Margin="4,0,0,0"
                                                     VerticalAlignment="Center"
                                                     ToolTip="Breakout high scores received from the mesh"
-                                                    Click="OnOpenBreakoutScores"
-                                                    Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
+                                                    Click="OnOpenBreakoutScores">
+                                                <Button.Visibility>
+                                                    <MultiBinding Converter="{StaticResource BoolAndToVis}">
+                                                        <Binding Path="IsPrimary" />
+                                                        <Binding Path="DataContext.ShowGameHighScores"
+                                                                 RelativeSource="{RelativeSource AncestorType=TabControl}" />
+                                                    </MultiBinding>
+                                                </Button.Visibility>
                                                 <emoji:TextBlock Text="🏓" FontSize="11" />
                                             </Button>
                                             <Button DockPanel.Dock="Right"
@@ -1479,8 +1498,14 @@
                                                     Margin="4,0,0,0"
                                                     VerticalAlignment="Center"
                                                     ToolTip="Chirpy Runner high scores received from the mesh"
-                                                    Click="OnOpenChirpyRunnerScores"
-                                                    Visibility="{Binding IsPrimary, Converter={StaticResource BoolToVis}}">
+                                                    Click="OnOpenChirpyRunnerScores">
+                                                <Button.Visibility>
+                                                    <MultiBinding Converter="{StaticResource BoolAndToVis}">
+                                                        <Binding Path="IsPrimary" />
+                                                        <Binding Path="DataContext.ShowGameHighScores"
+                                                                 RelativeSource="{RelativeSource AncestorType=TabControl}" />
+                                                    </MultiBinding>
+                                                </Button.Visibility>
                                                 <emoji:TextBlock Text="🐦" FontSize="11" />
                                             </Button>
                                             <ToggleButton DockPanel.Dock="Right"

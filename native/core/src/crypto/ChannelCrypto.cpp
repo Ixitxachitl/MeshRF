@@ -3,9 +3,12 @@
 
 #include <stdexcept>
 
-#if defined(MRF_HAVE_SODIUM)
-#  include <sodium.h>
-#endif
+// Windows CNG (bcrypt.lib) provides the AES-ECB primitive used below to build
+// AES-CTR. libsodium (linked elsewhere in this target) does not expose a
+// generic AES-128/256-CTR primitive, so we use the platform crypto library
+// instead (this project targets Windows only).
+#include <windows.h>
+#include <bcrypt.h>
 
 namespace mrf::crypto {
 
@@ -18,6 +21,66 @@ std::uint8_t channel_hash(std::string_view name, std::span<const std::uint8_t> p
     return h;
 }
 
+namespace {
+
+// RAII wrapper around a BCrypt AES-ECB key, used only to encrypt individual
+// 16-byte counter blocks (i.e. to build CTR mode out of ECB, the standard
+// construction: keystream_block = AES_ECB_Encrypt(key, counter_block)).
+class AesEcbKey {
+public:
+    explicit AesEcbKey(std::span<const std::uint8_t> key) {
+        NTSTATUS status = BCryptOpenAlgorithmProvider(&alg_, BCRYPT_AES_ALGORITHM, nullptr, 0);
+        if (status < 0) throw std::runtime_error("aes_ctr_xcrypt: BCryptOpenAlgorithmProvider failed");
+
+        status = BCryptSetProperty(alg_, BCRYPT_CHAINING_MODE,
+                                    reinterpret_cast<PUCHAR>(const_cast<wchar_t*>(BCRYPT_CHAIN_MODE_ECB)),
+                                    sizeof(BCRYPT_CHAIN_MODE_ECB), 0);
+        if (status < 0) {
+            BCryptCloseAlgorithmProvider(alg_, 0);
+            throw std::runtime_error("aes_ctr_xcrypt: BCryptSetProperty(ECB) failed");
+        }
+
+        status = BCryptGenerateSymmetricKey(alg_, &hkey_, nullptr, 0,
+                                             reinterpret_cast<PUCHAR>(const_cast<std::uint8_t*>(key.data())),
+                                             static_cast<ULONG>(key.size()), 0);
+        if (status < 0) {
+            BCryptCloseAlgorithmProvider(alg_, 0);
+            throw std::runtime_error("aes_ctr_xcrypt: BCryptGenerateSymmetricKey failed");
+        }
+    }
+
+    ~AesEcbKey() {
+        if (hkey_) BCryptDestroyKey(hkey_);
+        if (alg_) BCryptCloseAlgorithmProvider(alg_, 0);
+    }
+
+    AesEcbKey(const AesEcbKey&) = delete;
+    AesEcbKey& operator=(const AesEcbKey&) = delete;
+
+    // Encrypts exactly one 16-byte block in place.
+    void encrypt_block(std::array<std::uint8_t, 16>& block) const {
+        ULONG out_len = 0;
+        NTSTATUS status = BCryptEncrypt(hkey_, block.data(), static_cast<ULONG>(block.size()), nullptr,
+                                         nullptr, 0, block.data(), static_cast<ULONG>(block.size()), &out_len, 0);
+        if (status < 0 || out_len != block.size())
+            throw std::runtime_error("aes_ctr_xcrypt: BCryptEncrypt failed");
+    }
+
+private:
+    BCRYPT_ALG_HANDLE alg_ = nullptr;
+    BCRYPT_KEY_HANDLE hkey_ = nullptr;
+};
+
+// Increments a 16-byte big-endian counter (matches mbedtls_aes_crypt_ctr's
+// default nonce_counter increment, used by firmware's CryptoEngine).
+void increment_counter(std::array<std::uint8_t, 16>& ctr) noexcept {
+    for (int i = 15; i >= 0; --i) {
+        if (++ctr[i] != 0) break;
+    }
+}
+
+} // namespace
+
 void aes_ctr_xcrypt(std::span<const std::uint8_t> key,
                     std::uint64_t packet_id,
                     std::uint64_t sender_node_id,
@@ -27,18 +90,25 @@ void aes_ctr_xcrypt(std::span<const std::uint8_t> key,
 
     // Nonce layout (16 bytes): packet_id (8 LE) || sender (8 LE). Matches
     // firmware CryptoEngine::initNonce.
-    [[maybe_unused]] std::array<std::uint8_t, 16> nonce{};
-    for (int i = 0; i < 8; ++i) nonce[i]     = static_cast<std::uint8_t>((packet_id >> (8 * i)) & 0xFF);
-    for (int i = 0; i < 8; ++i) nonce[8 + i] = static_cast<std::uint8_t>((sender_node_id >> (8 * i)) & 0xFF);
+    std::array<std::uint8_t, 16> counter{};
+    for (int i = 0; i < 8; ++i) counter[i]     = static_cast<std::uint8_t>((packet_id >> (8 * i)) & 0xFF);
+    for (int i = 0; i < 8; ++i) counter[8 + i] = static_cast<std::uint8_t>((sender_node_id >> (8 * i)) & 0xFF);
 
-#if defined(MRF_HAVE_SODIUM)
-    // TODO(phase-4): libsodium does not expose raw AES-CTR; we'll use either
-    // its AES256-GCM primitive in CTR-only mode (advanced API) or link
-    // BoringSSL/OpenSSL for AES-CTR. Placeholder: leave data unmodified.
-    (void)key; (void)data;
-#else
-    (void)key; (void)data;
-#endif
+    AesEcbKey aes(key);
+    std::size_t offset = 0;
+    while (offset < data.size()) {
+        std::array<std::uint8_t, 16> keystream = counter;
+        aes.encrypt_block(keystream);
+
+        const std::size_t block_len = std::min<std::size_t>(16, data.size() - offset);
+        for (std::size_t i = 0; i < block_len; ++i)
+            data[offset + i] ^= keystream[i];
+
+        offset += block_len;
+        increment_counter(counter);
+    }
+
+    SecureZeroMemory(counter.data(), counter.size());
 }
 
 } // namespace mrf::crypto

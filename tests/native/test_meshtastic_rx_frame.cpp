@@ -271,7 +271,13 @@ TEST(MeshtasticRxFrame, CfoSweepOs4) {
                     ok ? "OK" : "FAIL");
     }
     std::printf("CFO sweep: %d/%d decoded\n", n_ok, n_total);
-    SUCCEED();
+    // This is a diagnostic sweep (not every impairment level is expected to
+    // decode), but it must never regress to zero: cfos[0] == 0.0 is the exact
+    // same clean signal HeaderDecodesOs4 asserts decodes correctly, so at
+    // least that case — and in practice most of the small-offset cases —
+    // must still succeed.
+    EXPECT_GT(n_ok, 0) << "CFO sweep: none of " << n_total
+                        << " cases decoded (including cfo=0) — likely a real regression";
 }
 
 // Full radio-path reproduction: synthesize the frame at the HackRF rate
@@ -501,7 +507,10 @@ TEST(MeshtasticRxFrame, TimingOffsetSweepOs4) {
         std::printf("\n");
     }
     std::printf("Timing sweep: %d/%d decoded\n", n_ok, n_total);
-    SUCCEED();
+    // lead=0 is the exact construction RadioPathDecimatedOs4 already asserts
+    // decodes, so this sweep must never regress to zero decodes.
+    EXPECT_GT(n_ok, 0) << "Timing sweep: none of " << n_total
+                        << " lead offsets decoded (including lead=0) — likely a real regression";
 }
 
 // Combined CFO + timing sweep — the TRUE live condition. Live frames had BOTH
@@ -580,7 +589,10 @@ TEST(MeshtasticRxFrame, CfoPlusTimingSweepOs4) {
         std::printf("\n");
     }
     std::printf("CFO+timing sweep: %d/%d decoded\n", n_ok, n_total);
-    SUCCEED();
+    // Diagnostic sweep across timing phases at a fixed ~20-bin CFO; must not
+    // regress to zero decodes across every phase.
+    EXPECT_GT(n_ok, 0) << "CFO+timing sweep: none of " << n_total
+                        << " lead offsets decoded — likely a real regression";
 }
 
 // Reproduce live packet 1 PRECISELY through the full 4 MHz front end. After
@@ -665,7 +677,10 @@ TEST(MeshtasticRxFrame, FractionalCfoStoSweepOs4) {
         }
     }
     std::printf("Fractional CFO/STO sweep: %d/%d decoded\n", n_ok, n_total);
-    SUCCEED();
+    // Diagnostic sweep across fractional CFO/STO combinations; must not
+    // regress to zero decodes across every combination.
+    EXPECT_GT(n_ok, 0) << "Fractional CFO/STO sweep: none of " << n_total
+                        << " combinations decoded — likely a real regression";
 }
 
 // Offline replay of a real captured modem-input stream. Capture with the app:

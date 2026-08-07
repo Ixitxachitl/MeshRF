@@ -739,6 +739,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _myPrivateKey = string.Empty;
     private byte[] _myPrivateKeyBytes = Array.Empty<byte>();
 
+    /// <summary>Whether the private-key field in the identity window shows the
+    /// real value or a masked placeholder. Defaults to hidden — this is
+    /// long-lived local key material, not something that needs to be visible
+    /// on screen by default.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPrivateKeyHidden))]
+    private bool _isPrivateKeyRevealed;
+
+    public bool IsPrivateKeyHidden => !IsPrivateKeyRevealed;
+
+    [RelayCommand]
+    private void ToggleRevealPrivateKey() => IsPrivateKeyRevealed = !IsPrivateKeyRevealed;
+
+    /// <summary>Show the Snake/Tetris/Breakout/Chirpy Runner high-score
+    /// buttons on the primary channel tab. Off by default.</summary>
+    [ObservableProperty]
+    private bool _showGameHighScores;
+
     /// <summary>XEdDSA (Ed25519) signing keypair derived from
     /// <see cref="_myPrivateKeyBytes"/> — see <see cref="RefreshMyPrivateKeyCache"/>.
     /// Empty until we have a valid 32-byte identity key. Used to sign our
@@ -2071,6 +2089,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UpdateAutoReportLastSentSummary();
         MyPublicKey = _settings.UserPublicKey;
         MyPrivateKey = _settings.UserPrivateKey;
+        ShowGameHighScores = _settings.ShowGameHighScores;
 
         // Ensure we always have a valid X25519 keypair so PKC direct messages
         // work out of the box. Generate one on first run (or if the stored key
@@ -3971,6 +3990,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings.UserRole = MyRole ?? "Client";
         _settings.UserHwModel = MyHwModel ?? "UNSET";
         _settings.RebroadcastMode = RebroadcastMode ?? "ALL";
+        _settings.ShowGameHighScores = ShowGameHighScores;
         _settings.HopLimit = Math.Clamp(HopLimit, 1, 7);
         _settings.OkToMqtt = OkToMqtt;
         _settings.RoutingRelayEnabled = RoutingRelayEnabled;
@@ -4173,6 +4193,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     partial void OnMyPublicKeyChanged(string value) => SaveSettings();
+
+    partial void OnShowGameHighScoresChanged(bool value) => SaveSettings();
 
     partial void OnMyPrivateKeyChanged(string value)
     {
