@@ -107,7 +107,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly Dictionary<uint, byte[]> _pkcSenderPublicKeyBytes = new();
     private readonly Queue<ulong> _recentUndecodedPacketOrder = new();
     private readonly HashSet<ulong> _recentUndecodedPacketKeys = new();
-    
+
+    // Cheap, thread-safe dedup for MQTT downlink — checked directly on the
+    // MQTT worker thread, before ever posting to the UI dispatcher. A busy
+    // public-broker channel republishes the same packet once per real-world
+    // gateway that relayed it; without this, every one of those republishes
+    // got marshaled onto the UI thread for full processing (decode/store/log)
+    // only to be discarded there as a duplicate, which was enough volume to
+    // visibly stall the waterfall and bury real RF activity in the log.
+    private readonly object _recentMqttDownlinkLock = new();
+    private readonly Queue<ulong> _recentMqttDownlinkOrder = new();
+    private readonly HashSet<ulong> _recentMqttDownlinkKeys = new();
+    private const int RecentMqttDownlinkLimit = 512;
+
+    private bool IsRecentMqttDownlinkDuplicate(uint from, uint packetId)
+    {
+        ulong key = ((ulong)from << 32) ^ packetId;
+        lock (_recentMqttDownlinkLock)
+        {
+            if (!_recentMqttDownlinkKeys.Add(key)) return true;
+            _recentMqttDownlinkOrder.Enqueue(key);
+            while (_recentMqttDownlinkOrder.Count > RecentMqttDownlinkLimit)
+                _recentMqttDownlinkKeys.Remove(_recentMqttDownlinkOrder.Dequeue());
+        }
+        return false;
+    }
+
+
     // Filter optimization: pre-computed set of nodes that pass current filter criteria.
     // Computed on background thread and marshaled to UI thread for display.
     private readonly HashSet<uint> _nodeFilterCache = new();
@@ -4591,9 +4617,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void HandleMqttEnvelopeReceived(ServiceEnvelope envelope)
     {
+        var packet = envelope.Packet;
+        if (packet is not null && IsRecentMqttDownlinkDuplicate(packet.From, packet.Id))
+            return;
+
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null) { ApplyMqttEnvelope(envelope); return; }
-        _ = dispatcher.InvokeAsync(() => ApplyMqttEnvelope(envelope));
+        // Background (below Render): a burst of downlinked packets must not
+        // be able to starve the waterfall/UI from redrawing, which Normal
+        // priority (the InvokeAsync default) does not guarantee — Normal
+        // actually outranks Render in WPF's DispatcherPriority ordering.
+        _ = dispatcher.InvokeAsync(() => ApplyMqttEnvelope(envelope), DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -4670,7 +4704,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         payload.CopyTo(frame.AsSpan(MeshHeader.Size));
 
         if (!MeshHeader.TryParse(frame, out var header)) return;
-        Log($"  rx downlink from MQTT: {header.FromId} chan={envelope.ChannelId} gw={envelope.GatewayId}");
+        // No log line here: ProcessReceivedFrame already logs every packet it
+        // handles (new, duplicate, or undecoded) regardless of origin — an
+        // extra "rx downlink from MQTT" line here was pure duplication that
+        // buried real RF activity under MQTT volume.
         ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null);
     }
 
