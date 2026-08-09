@@ -2406,13 +2406,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var node = _nodesByNum.GetValueOrDefault(nodeNum);
         foreach (var convo in Tabs.OfType<ConversationViewModel>())
-            if (convo.NodeNum == nodeNum)
+        {
+            if (convo.NodeNum != nodeNum) continue;
+            // Records are updated in place, so the instance often hasn't
+            // changed; refresh the snapshot explicitly since the Node setter
+            // won't fire for the same reference.
+            if (ReferenceEquals(convo.Node, node))
+                convo.RefreshNodeSnapshot();
+            else
                 convo.Node = node;
+        }
     }
+
+    // Last display name applied to message FromId references, per node. The
+    // rescan below walks every message in every channel and open tab, so it
+    // must only run when the resolved name actually changed — not on every
+    // telemetry/position update that marks the node dirty.
+    private readonly Dictionary<uint, string> _appliedNodeDisplayNames = new();
 
     private void RefreshNodeDisplayNameReferences(uint nodeNum)
     {
         var resolvedName = NodeDisplayName(nodeNum);
+        if (_appliedNodeDisplayNames.TryGetValue(nodeNum, out var applied) &&
+            string.Equals(applied, resolvedName, StringComparison.Ordinal))
+            return;
+        _appliedNodeDisplayNames[nodeNum] = resolvedName;
 
         foreach (var channel in Channels)
         {
@@ -2607,43 +2625,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     _nodeFilterCache.Remove(nodeNum);
             }
 
-            bool keepDefaultOrder = ShouldKeepDefaultNodeOrder();
             if (existing is null)
             {
-                if (keepDefaultOrder)
+                if (ShouldKeepDefaultNodeOrder())
                     InsertNodeByDefaultOrder(latest);
                 else
                     Nodes.Add(latest);
+                _nodesByNum[nodeNum] = latest;
             }
             else
             {
-                if (keepDefaultOrder)
-                {
-                    int existingIndex = Nodes.IndexOf(existing);
-                    // Keep existing rows in place so a fresh sighting only
-                    // updates the content instead of re-sorting the whole grid.
-                    // That avoids the row-move stutter the user sees when many
-                    // packets arrive in a burst.
-                    if (existingIndex >= 0)
-                    {
-                        Nodes[existingIndex] = latest;
-                    }
-                    else
-                    {
-                        int targetIndex = FindDefaultInsertIndex(latest);
-                        targetIndex = Math.Clamp(targetIndex, 0, Nodes.Count);
-                        Nodes.Insert(targetIndex, latest);
-                    }
-                }
-                else
-                {
-                    int index = Nodes.IndexOf(existing);
-                    if (index >= 0)
-                        Nodes[index] = latest;
-                }
+                // Refresh the existing row in place: NodeRecord raises a single
+                // all-properties change so bound cells re-read their values
+                // without the DataGrid discarding and rebuilding the row
+                // container (the row-flicker the user sees during packet
+                // bursts). Sorted/grouped/filtered views are re-shaped by the
+                // debounced refresh in RefreshNodesViewIfNeeded.
+                existing.UpdateFrom(latest);
+                _nodesByNum[nodeNum] = existing;
+                latest = existing;
             }
-
-            _nodesByNum[nodeNum] = latest;
             if (UpdateNodeMapStateSignature(nodeNum, latest))
                 mapChangedNodeNums.Add(nodeNum);
 
@@ -2759,10 +2760,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         bool hasSortOrGroup = view.SortDescriptions.Count > 0 || view.GroupDescriptions?.Count > 0;
 
-        // Collection change notifications already keep sorted/grouped views in
-        // sync for our add/remove/replace updates; avoid forcing extra refresh
-        // pulses unless a filter is active.
-        if (!hasActiveFilter)
+        // Rows are updated in place (no collection Replace events), so sorted,
+        // grouped, or filtered views need a periodic refresh to re-shape.
+        // The default unshaped view needs none: in-place property updates
+        // repaint cells directly and adds/removes flow through normally.
+        if (!hasActiveFilter && !hasSortOrGroup)
         {
             _nodesViewRefreshPending = false;
             if (_nodesViewRefreshTimer.IsEnabled)
@@ -3707,13 +3709,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (NodeLocationFilter == "Has position history (>1)")
             RefreshNodesFilter();
 
-        // NodeRecord is not INotifyPropertyChanged, so WPF never re-evaluates
-        // cell template bindings (e.g. the HasLocation icon) when properties
-        // change directly. Force a full CollectionView refresh to repaint all rows.
-        NodesView?.Refresh();
-
-        // Also refresh the map marker for this node.
+        // Repaint just this node's row (e.g. the HasLocation icon) instead of
+        // forcing a full CollectionView refresh, which rebuilds every row.
         var node = convo.Node;
+        node?.NotifyChanged();
         if (node is not null && UpdateNodeMapStateSignature(convo.NodeNum, node))
             NodeMarkersChanged?.Invoke(new[] { convo.NodeNum });
     }

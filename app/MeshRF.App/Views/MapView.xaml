@@ -47,13 +47,22 @@
                 Background="#FF1B1B1B"
                 IsHitTestVisible="False" />
         <!-- Overlay layer: node markers + interaction. Transparent background
-             keeps the full canvas area hit-testable for dragging/right-click. -->
+             keeps the full canvas area hit-testable for dragging/right-click.
+             BitmapCache rasterizes the marker layer once so drag-preview
+             transforms move a cached texture instead of re-rendering hundreds
+             of vector dots and emoji labels every frame; ClipToBounds keeps
+             the cached surface viewport-sized. -->
         <Canvas x:Name="MarkerCanvas"
                 Background="Transparent"
+                ClipToBounds="True"
                 MouseLeftButtonDown="OnMouseDown"
                 MouseLeftButtonUp="OnMouseUp"
                 MouseMove="OnMouseMove"
-                MouseRightButtonUp="OnRightClick" />
+                MouseRightButtonUp="OnRightClick">
+            <Canvas.CacheMode>
+                <BitmapCache />
+            </Canvas.CacheMode>
+        </Canvas>
 
         <TextBlock x:Name="AttributionText"
                    Text="© OpenStreetMap contributors  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location"

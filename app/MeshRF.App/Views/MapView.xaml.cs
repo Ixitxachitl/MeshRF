@@ -107,6 +107,17 @@ public partial class MapView : UserControl
     // Temporary elements added when a cluster of stacked nodes is "spidered"
     // out on hover; removed on collapse or on the next full Render.
     private readonly List<UIElement> _spiderElements = new();
+
+    // Tile images currently on the tile canvas, keyed by viewport slot
+    // (provider/zoom/unwrapped tile x/y). Reusing slots across renders means a
+    // pan commit repositions existing tiles instead of clearing the canvas,
+    // which removes the blank-tile flash while dragging.
+    private readonly Dictionary<string, Image> _tileSlots = new(StringComparer.Ordinal);
+
+    // Non-node marker elements (home, waypoints, geofences, polylines, cluster
+    // badges, bbox picker) rebuilt on every marker pass. Node dot/label visuals
+    // live in _nodeVisuals and are diffed instead of rebuilt.
+    private readonly List<UIElement> _decorationElements = new();
     private string? _activeSpiderClusterKey;
     private bool _pendingMarkerRefresh;
     private int _openNodeToolTips;
@@ -469,6 +480,13 @@ public partial class MapView : UserControl
         if (MapPerfLoggingEnabled)
             _perfNodeMarkerTimerTicks++;
 
+        if (_dragging)
+        {
+            // Leave the pending set intact; OnMouseUp flushes it in one pass.
+            _nodeMarkerUpdateTimer.Stop();
+            return;
+        }
+
         if (_pendingNodeMarkerNums.Count == 0)
         {
             _nodeMarkerUpdateTimer.Stop();
@@ -603,11 +621,12 @@ public partial class MapView : UserControl
 
         if (_dragging)
         {
-            // Keep marker-only refreshes flowing while dragging; tile redraws
-            // are still handled by coarse drag commits.
+            // Defer marker refreshes while dragging: existing markers ride the
+            // drag-preview transform, and the deferred refresh is flushed on
+            // mouse-up. Running full marker passes per data event mid-drag
+            // made dragging stutter once many nodes were on screen.
             _pendingMarkerRefresh = true;
-            RenderMarkersOnly();
-            PerfMaybeLog("markers-dragging-markers-only");
+            PerfMaybeLog("markers-dragging-deferred");
             return;
         }
 
@@ -773,14 +792,6 @@ public partial class MapView : UserControl
         var h = MarkerCanvas.ActualHeight;
         if (w <= 0 || h <= 0) return;
 
-        TileCanvas.Children.Clear();
-        MarkerCanvas.Children.Clear();
-        _nodeVisuals.Clear();
-        _nodeVisualLayout.Clear();
-        _nodeVisualBuckets.Clear();
-        _clusteredNodeNums.Clear();
-        _lastNodeMarkerCoords.Clear();
-
         // World-pixel coordinate of the viewport center.
         double cx = LonToX(_centerLon, _zoom);
         double cy = LatToY(_centerLat, _zoom);
@@ -795,6 +806,8 @@ public partial class MapView : UserControl
         int tilesX = (int)Math.Ceiling(w / TileSize) + 2;
         int tilesY = (int)Math.Ceiling(h / TileSize) + 2;
 
+        var provider = CurrentTiles;
+        var neededSlots = new HashSet<string>(StringComparer.Ordinal);
         for (int tx = firstTileX; tx < firstTileX + tilesX; tx++)
         {
             for (int ty = firstTileY; ty < firstTileY + tilesY; ty++)
@@ -803,7 +816,29 @@ public partial class MapView : UserControl
                 int wrappedX = ((tx % n) + n) % n; // wrap horizontally
                 double left = tx * TileSize - originX;
                 double top = ty * TileSize - originY;
-                PlaceTile(wrappedX, ty, _zoom, left, top);
+                // Slot key uses the unwrapped x so a world-wrapped viewport can
+                // show the same tile twice via two distinct slots.
+                var slotKey = $"{provider.Id}/{_zoom}/{tx}/{ty}";
+                neededSlots.Add(slotKey);
+                PlaceTile(slotKey, provider, wrappedX, ty, _zoom, left, top);
+            }
+        }
+
+        // Drop tiles that scrolled out of view (or belong to another
+        // zoom/provider) only after the new set is placed.
+        if (_tileSlots.Count > neededSlots.Count)
+        {
+            List<string>? stale = null;
+            foreach (var pair in _tileSlots)
+                if (!neededSlots.Contains(pair.Key))
+                    (stale ??= new List<string>()).Add(pair.Key);
+            if (stale is not null)
+            {
+                foreach (var key in stale)
+                {
+                    TileCanvas.Children.Remove(_tileSlots[key]);
+                    _tileSlots.Remove(key);
+                }
             }
         }
 
@@ -833,12 +868,6 @@ public partial class MapView : UserControl
         if (w <= 0 || h <= 0) return;
         double originX = LonToX(_centerLon, _zoom) - w / 2.0;
         double originY = LatToY(_centerLat, _zoom) - h / 2.0;
-        MarkerCanvas.Children.Clear();
-        _nodeVisuals.Clear();
-        _nodeVisualLayout.Clear();
-        _nodeVisualBuckets.Clear();
-        _clusteredNodeNums.Clear();
-        _lastNodeMarkerCoords.Clear();
         DrawMarkers(originX, originY);
 
         _liveRenderCount++;
@@ -1138,16 +1167,23 @@ public partial class MapView : UserControl
 
             if (changedMarkers.TryGetValue(nodeNum, out var updated))
             {
+                int index;
                 if (hadExisting)
                 {
-                    _cachedMapMarkers[existingIndex] = updated;
+                    index = existingIndex;
+                    _cachedMapMarkers[index] = updated;
                 }
                 else
                 {
-                    _cachedNodeMarkerIndices[nodeNum] = _cachedMapMarkers.Count;
+                    index = _cachedMapMarkers.Count;
+                    _cachedNodeMarkerIndices[nodeNum] = index;
                     _cachedMapMarkers.Add(updated);
                 }
 
+                // Keep the screen-coordinate cache in step so a moved node's
+                // dot doesn't stay at its old position until the next zoom.
+                _cachedMarkerScreenCoords[index] =
+                    (LonToX(updated.Lon, _zoom), LatToY(updated.Lat, _zoom));
                 continue;
             }
 
@@ -1159,6 +1195,17 @@ public partial class MapView : UserControl
             _cachedMapMarkers[existingIndex] = swappedMarker;
             _cachedMapMarkers.RemoveAt(lastIndex);
             _cachedNodeMarkerIndices.Remove(nodeNum);
+
+            // Move the swapped marker's cached coords along with it.
+            if (_cachedMarkerScreenCoords.TryGetValue(lastIndex, out var lastCoords))
+            {
+                _cachedMarkerScreenCoords[existingIndex] = lastCoords;
+                _cachedMarkerScreenCoords.Remove(lastIndex);
+            }
+            else
+            {
+                _cachedMarkerScreenCoords.Remove(existingIndex);
+            }
 
             if (existingIndex < _cachedMapMarkers.Count && swappedMarker.NodeNum is uint swappedNodeNum)
                 _cachedNodeMarkerIndices[swappedNodeNum] = existingIndex;
@@ -1242,26 +1289,36 @@ public partial class MapView : UserControl
         _perfQueueFullRefreshReasons.Clear();
     }
 
-    private void PlaceTile(int x, int y, int zoom, double left, double top)
+    private void PlaceTile(string slotKey, TileProvider provider, int x, int y, int zoom, double left, double top)
     {
+        var fetchKey = $"{provider.Id}/{zoom}/{x}/{y}";
+        if (_tileSlots.TryGetValue(slotKey, out var existing))
+        {
+            // Same tile already on the canvas: just move it to its new
+            // viewport position. Its bitmap (or in-flight fetch) carries over.
+            Canvas.SetLeft(existing, left);
+            Canvas.SetTop(existing, top);
+            return;
+        }
+
         var img = new Image
         {
             Width = TileSize,
             Height = TileSize,
             SnapsToDevicePixels = true,
+            Tag = fetchKey,
         };
         Canvas.SetLeft(img, left);
         Canvas.SetTop(img, top);
         TileCanvas.Children.Add(img);
+        _tileSlots[slotKey] = img;
 
-        var provider = CurrentTiles;
-        var key = $"{provider.Id}/{zoom}/{x}/{y}";
-        if (s_memCache.TryGetValue(key, out var cached))
+        if (s_memCache.TryGetValue(fetchKey, out var cached))
         {
             img.Source = cached;
             return;
         }
-        _ = LoadTileAsync(key, provider, x, y, zoom, img);
+        _ = LoadTileAsync(fetchKey, provider, x, y, zoom, img);
     }
 
     private async Task LoadTileAsync(string key, TileProvider provider, int x, int y, int zoom, Image target)
@@ -1276,9 +1333,10 @@ public partial class MapView : UserControl
                 while (s_memCache.Count > MaxMemCacheTiles && s_memCacheOrder.TryDequeue(out var oldestKey))
                     s_memCache.TryRemove(oldestKey, out _);
             }
-            // The image may have been recycled by a re-render; only set if it's
-            // still the tile we asked for (same canvas position key in Tag).
-            target.Source = bmp;
+            // The image may have been removed and later re-created for another
+            // tile; only set the bitmap if it's still the tile we asked for.
+            if (target.Tag is string tag && string.Equals(tag, key, StringComparison.Ordinal))
+                target.Source = bmp;
         }
         catch { /* tile fetch failed; leave blank */ }
     }
@@ -1353,15 +1411,32 @@ public partial class MapView : UserControl
         return wb;
     }
 
+    /// <summary>Removes all rebuilt-per-pass decoration elements (home,
+    /// waypoints, geofences, polylines, cluster badges) from the canvas.
+    /// Node dot/label visuals are kept and diffed instead.</summary>
+    private void ClearDecorations()
+    {
+        foreach (var el in _decorationElements)
+            MarkerCanvas.Children.Remove(el);
+        _decorationElements.Clear();
+    }
+
+    private void AddDecoration(UIElement element)
+    {
+        MarkerCanvas.Children.Add(element);
+        _decorationElements.Add(element);
+    }
+
     private void DrawMarkers(double originX, double originY)
     {
         if (_vm is null) return;
         EnsureMapDataCache();
         SpiderCollapseImmediate();
-        _nodeVisuals.Clear();
-        _nodeVisualLayout.Clear();
-        _nodeVisualBuckets.Clear();
+        ClearDecorations();
         _clusteredNodeNums.Clear();
+        // Node nums drawn as individual dots this pass; visuals for any other
+        // node (clustered, culled, or gone) are removed after the pass.
+        var drawnNodeNums = new HashSet<uint>();
         bool restoredActiveSpider = false;
         double viewportW = MarkerCanvas.ActualWidth;
         double viewportH = MarkerCanvas.ActualHeight;
@@ -1399,7 +1474,7 @@ public partial class MapView : UserControl
                 };
                 Canvas.SetLeft(home, px - 8);
                 Canvas.SetTop(home, py - 12);
-                MarkerCanvas.Children.Add(home);
+                AddDecoration(home);
                 AddNodeLabel(mk.Label, px, py);
             }
             else if (mk.IsWaypoint)
@@ -1423,7 +1498,12 @@ public partial class MapView : UserControl
         if (!_clusterNodes)
         {
             foreach (var n in nodes)
+            {
                 AddOrUpdateNodeVisual(n.mk, n.px, n.py);
+                if (n.mk.NodeNum is uint drawn)
+                    drawnNodeNums.Add(drawn);
+            }
+            PruneNodeVisuals(drawnNodeNums);
             _activeSpiderClusterKey = null;
             return;
         }
@@ -1456,10 +1536,37 @@ public partial class MapView : UserControl
 
         // Keep individual node markers above cluster badges.
         foreach (var s in singletons)
+        {
             AddOrUpdateNodeVisual(s.mk, s.px, s.py);
+            if (s.mk.NodeNum is uint drawn)
+                drawnNodeNums.Add(drawn);
+        }
+
+        PruneNodeVisuals(drawnNodeNums);
 
         if (!restoredActiveSpider)
             _activeSpiderClusterKey = null;
+    }
+
+    /// <summary>Removes node visuals whose node was not drawn as an individual
+    /// dot this pass (clustered, scrolled off-screen, filtered out, or gone).</summary>
+    private void PruneNodeVisuals(HashSet<uint> keep)
+    {
+        if (_nodeVisuals.Count == keep.Count)
+            return;
+
+        List<uint>? stale = null;
+        foreach (var nodeNum in _nodeVisuals.Keys)
+            if (!keep.Contains(nodeNum))
+                (stale ??= new List<uint>()).Add(nodeNum);
+
+        if (stale is null)
+            return;
+
+        // Keep _lastNodeMarkerCoords: clustered nodes rely on it to detect
+        // telemetry-only updates without forcing another full marker pass.
+        foreach (var nodeNum in stale)
+            RemoveNodeVisual(nodeNum, forgetCoords: false);
     }
 
     private void DrawLocationHistory(double originX, double originY, double viewportW, double viewportH)
@@ -1504,7 +1611,7 @@ public partial class MapView : UserControl
                     if (Math.Abs(current.X - prior.X) > 2048 || Math.Abs(current.Y - prior.Y) > 2048)
                     {
                         if (segment.Points.Count >= 2 && anyVisible)
-                            MarkerCanvas.Children.Add(segment);
+                            AddDecoration(segment);
 
                         segment = new Polyline
                         {
@@ -1525,7 +1632,7 @@ public partial class MapView : UserControl
             }
 
             if (segment.Points.Count >= 2 && anyVisible)
-                MarkerCanvas.Children.Add(segment);
+                AddDecoration(segment);
         }
     }
 
@@ -1552,7 +1659,7 @@ public partial class MapView : UserControl
             Canvas.SetLeft(corner, cx - 5);
             Canvas.SetTop(corner, cy - 5);
             Panel.SetZIndex(corner, 25);
-            MarkerCanvas.Children.Add(corner);
+            AddDecoration(corner);
         }
 
         if (_vm.WaypointBboxWest is double west && _vm.WaypointBboxSouth is double south &&
@@ -1585,7 +1692,7 @@ public partial class MapView : UserControl
         Canvas.SetLeft(rect, x1);
         Canvas.SetTop(rect, y1);
         Panel.SetZIndex(rect, 5);
-        MarkerCanvas.Children.Add(rect);
+        AddDecoration(rect);
     }
 
     /// <summary>Draws a translucent circle showing a waypoint's circular geofence,
@@ -1613,7 +1720,7 @@ public partial class MapView : UserControl
         Canvas.SetLeft(circle, px - radiusPx);
         Canvas.SetTop(circle, py - radiusPx);
         Panel.SetZIndex(circle, 5);
-        MarkerCanvas.Children.Add(circle);
+        AddDecoration(circle);
     }
 
     /// <summary>Draws a single marker dot with a hover tooltip.</summary>
@@ -1624,7 +1731,7 @@ public partial class MapView : UserControl
         Canvas.SetTop(dot, py - 6);
         Panel.SetZIndex(dot, 20);
         AttachNodeInteraction(dot, mk);
-        MarkerCanvas.Children.Add(dot);
+        AddDecoration(dot);
     }
 
     private Ellipse CreateNodeDot(MainViewModel.MapMarker mk)
@@ -1654,7 +1761,7 @@ public partial class MapView : UserControl
         Canvas.SetLeft(label, px + 8);
         Canvas.SetTop(label, py - 8);
         Panel.SetZIndex(label, 21);
-        MarkerCanvas.Children.Add(label);
+        AddDecoration(label);
     }
 
     private FrameworkElement CreateNodeLabel(string text)
@@ -1738,14 +1845,15 @@ public partial class MapView : UserControl
         element.ToolTip = BuildNodeToolTip(mk.Title, liveText);
     }
 
-    private void RemoveNodeVisual(uint nodeNum)
+    private void RemoveNodeVisual(uint nodeNum, bool forgetCoords = true)
     {
         if (!_nodeVisuals.TryGetValue(nodeNum, out var visual)) return;
         MarkerCanvas.Children.Remove(visual.Dot);
         MarkerCanvas.Children.Remove(visual.Label);
         _nodeVisuals.Remove(nodeNum);
         RemoveNodeVisualSpatialIndex(nodeNum);
-        _lastNodeMarkerCoords.Remove(nodeNum);
+        if (forgetCoords)
+            _lastNodeMarkerCoords.Remove(nodeNum);
     }
 
     /// <summary>Draws a count badge for a group of overlapping nodes. Hovering
@@ -1784,7 +1892,7 @@ public partial class MapView : UserControl
             SpiderExpand(members, cx, cy);
             e.Handled = true;
         };
-        MarkerCanvas.Children.Add(badge);
+        AddDecoration(badge);
     }
 
     private static string GetClusterKey(List<(MainViewModel.MapMarker mk, double px, double py)> members) =>

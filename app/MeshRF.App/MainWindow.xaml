@@ -913,6 +913,7 @@
                                   Grid.Row="0"
                                   ItemsSource="{Binding NodesView}"
                                   AutoGenerateColumns="False"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
                                   IsReadOnly="True"
                                   CanUserSortColumns="True"
                                   CanUserAddRows="False"

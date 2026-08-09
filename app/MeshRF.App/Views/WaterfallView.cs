@@ -680,6 +680,11 @@ public sealed class WaterfallView : Image
         var cmap = Colormap;
         if (cmap == _lutMap) return;
         _lutMap = cmap;
+        FillLut(_lut, cmap);
+    }
+
+    private static void FillLut(uint[] lut, WaterfallColormap cmap)
+    {
         for (int i = 0; i < 256; i++)
         {
             float t = i / 255f;
@@ -687,7 +692,7 @@ public sealed class WaterfallView : Image
             if (cmap == WaterfallColormap.Turbo) TurboMap(t, out r, out g, out b);
             else if (cmap == WaterfallColormap.Meshtastic) MeshtasticMap(t, out r, out g, out b);
             else                                 InfernoMap(t, out r, out g, out b);
-            _lut[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
+            lut[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
         }
     }
 
@@ -883,17 +888,25 @@ public sealed class WaterfallView : Image
         fixed (uint* lut = _lut)
         fixed (float* frames = _scaleFrames)
         {
-            for (int x = 0; x < w; x++)
+            RenderScaledTimeHorizontalCore(
+                (uint*)back, stride / 4, w, h, frames, numFrames, n, floorF, invRange, lut);
+        }
+    }
+
+    private static unsafe void RenderScaledTimeHorizontalCore(
+        uint* dst, int stridePx, int w, int h,
+        float* frames, int numFrames, int n, float floorF, float invRange, uint* lut)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            double tx = ((x + 0.5) * numFrames / w) - 0.5;
+            for (int y = 0; y < h; y++)
             {
-                double tx = ((x + 0.5) * numFrames / w) - 0.5;
-                for (int y = 0; y < h; y++)
-                {
-                    double fy = ((h - 0.5 - y) * n / h) - 0.5;
-                    float v = SampleScaleFrameBicubic(frames, numFrames, n, tx, fy, floorF);
-                    int idx = (int)((v - floorF) * invRange);
-                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
-                    ((uint*)(back + y * stride))[x] = lut[idx];
-                }
+                double fy = ((h - 0.5 - y) * n / h) - 0.5;
+                float v = SampleScaleFrameBicubic(frames, numFrames, n, tx, fy, floorF);
+                int idx = (int)((v - floorF) * invRange);
+                if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                dst[y * stridePx + x] = lut[idx];
             }
         }
     }
@@ -918,21 +931,124 @@ public sealed class WaterfallView : Image
         fixed (uint* lut = _lut)
         fixed (float* frames = _scaleFrames)
         {
-            for (int y = 0; y < h; y++)
-            {
-                uint* dstRow = (uint*)(back + y * stride);
-                double ty = ((h - 0.5 - y) * numFrames / h) - 0.5;
+            RenderScaledTimeVerticalCore(
+                (uint*)back, stride / 4, w, h, frames, numFrames, n, floorF, invRange, lut);
+        }
+    }
 
-                for (int x = 0; x < w; x++)
-                {
-                    double fx = ((x + 0.5) * n / w) - 0.5;
-                    float v = SampleScaleFrameBicubic(frames, numFrames, n, ty, fx, floorF);
-                    int idx = (int)((v - floorF) * invRange);
-                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
-                    dstRow[x] = lut[idx];
-                }
+    private static unsafe void RenderScaledTimeVerticalCore(
+        uint* dst, int stridePx, int w, int h,
+        float* frames, int numFrames, int n, float floorF, float invRange, uint* lut)
+    {
+        for (int y = 0; y < h; y++)
+        {
+            uint* dstRow = dst + (long)y * stridePx;
+            double ty = ((h - 0.5 - y) * numFrames / h) - 0.5;
+
+            for (int x = 0; x < w; x++)
+            {
+                double fx = ((x + 0.5) * n / w) - 0.5;
+                float v = SampleScaleFrameBicubic(frames, numFrames, n, ty, fx, floorF);
+                int idx = (int)((v - floorF) * invRange);
+                if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                dstRow[x] = lut[idx];
             }
         }
+    }
+
+    /// <summary>Rasterizes a scale-to-fit snapshot into <paramref name="pixels"/>
+    /// (BGRA, row-major, stride = <paramref name="w"/>). Pure function safe to
+    /// call from a background thread — this keeps the expensive per-pixel
+    /// bicubic resample out of the UI thread, where it stalled the live
+    /// waterfall for tens of milliseconds after every decoded packet.</summary>
+    public static void RenderScaledSnapshotPixels(
+        float[] frames, int frameCount, int bins,
+        int w, int h, bool timeHorizontal,
+        double floorDb, double ceilDb, WaterfallColormap colormap,
+        uint[] pixels)
+    {
+        if (frames is null || frameCount <= 0 || bins <= 0 || w <= 0 || h <= 0) return;
+        if ((long)frameCount * bins > frames.Length) return;
+        if ((long)w * h > pixels.Length) return;
+
+        if (ceilDb <= floorDb) ceilDb = floorDb + 1.0;
+        float invRange = 255f / (float)(ceilDb - floorDb);
+        float floorF = (float)floorDb;
+        var lut = new uint[256];
+        FillLut(lut, colormap);
+
+        unsafe
+        {
+            fixed (uint* dst = pixels)
+            fixed (float* src = frames)
+            fixed (uint* lutPtr = lut)
+            {
+                if (timeHorizontal)
+                    RenderScaledTimeHorizontalCore(dst, w, w, h, src, frameCount, bins, floorF, invRange, lutPtr);
+                else
+                    RenderScaledTimeVerticalCore(dst, w, w, h, src, frameCount, bins, floorF, invRange, lutPtr);
+            }
+        }
+    }
+
+    /// <summary>Ensures the backing bitmap exists at the current layout size and
+    /// returns its pixel dimensions, so a caller can rasterize a matching
+    /// snapshot off the UI thread before presenting it.</summary>
+    public (int Width, int Height) GetSnapshotTargetSize()
+    {
+        if (_bmp is null) EnsureBitmap();
+        return (_w, _h);
+    }
+
+    /// <summary>Presents a snapshot rasterized off-thread by
+    /// <see cref="RenderScaledSnapshotPixels"/>: applies levels/colormap without
+    /// triggering intermediate renders (each DP setter would otherwise re-render
+    /// the previous snapshot), adopts <paramref name="frames"/> for later
+    /// re-renders (resize, level changes), then blits the pixels. Falls back to
+    /// one normal render when the bitmap size changed since rasterization.</summary>
+    public void PresentSnapshot(
+        double floorDb, double ceilDb, WaterfallColormap colormap,
+        uint[] pixels, int pixelWidth, int pixelHeight,
+        float[] frames, int frameCount, int bins)
+    {
+        _suppressRender = true;
+        try
+        {
+            FloorDb = floorDb;
+            CeilDb = ceilDb;
+            Colormap = colormap;
+        }
+        finally
+        {
+            _suppressRender = false;
+        }
+
+        if (frames is null || frameCount <= 0 || bins <= 0)
+        {
+            Clear();
+            return;
+        }
+
+        if (_bmp is null) EnsureBitmap();
+
+        if (!ScaleToFit)
+        {
+            ReplaceFramesOwned(frames, frameCount, bins);
+            return;
+        }
+
+        _scaleBinCount = bins;
+        _scaleFrameCount = frameCount;
+        _scaleFrames = frames;
+
+        if (_bmp is not null && pixelWidth == _w && pixelHeight == _h &&
+            (long)_w * _h <= pixels.LongLength)
+        {
+            _bmp.WritePixels(new Int32Rect(0, 0, _w, _h), pixels, _w * 4, 0);
+            return;
+        }
+
+        Render();
     }
 
     private static unsafe float SampleScaleFrameBicubic(

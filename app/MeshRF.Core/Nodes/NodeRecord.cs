@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.ComponentModel;
+
 namespace MeshRF.Nodes;
 
 /// <summary>
@@ -6,8 +8,74 @@ namespace MeshRF.Nodes;
 /// <c>NodeInfo</c> protobuf. We persist the union so the UI / future MQTT
 /// bridge can use it directly.
 /// </summary>
-public sealed class NodeRecord
+/// <remarks>
+/// Implements <see cref="INotifyPropertyChanged"/> coarsely: callers that
+/// mutate a record bound to the UI use <see cref="UpdateFrom"/> (or
+/// <see cref="NotifyChanged"/>) to raise a single all-properties change
+/// notification. This lets list rows update in place instead of being
+/// replaced, which avoids DataGrid row-container churn (visible flicker).
+/// </remarks>
+public sealed class NodeRecord : INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private static readonly PropertyChangedEventArgs AllPropertiesChanged = new(string.Empty);
+
+    /// <summary>Raises a single "every property changed" notification so all
+    /// bindings on this record re-read their values.</summary>
+    public void NotifyChanged() => PropertyChanged?.Invoke(this, AllPropertiesChanged);
+
+    /// <summary>Copies every persisted field from <paramref name="source"/>
+    /// into this record and raises one all-properties change notification.
+    /// Used to refresh a UI-bound row without replacing the instance.</summary>
+    public void UpdateFrom(NodeRecord source)
+    {
+        NodeNum         = source.NodeNum;
+        UserId          = source.UserId;
+        LongName        = source.LongName;
+        ShortName       = source.ShortName;
+        HwModel         = source.HwModel;
+        Role            = source.Role;
+        LastHeardEpoch  = source.LastHeardEpoch;
+        SeenViaMqtt     = source.SeenViaMqtt;
+        SnrDb           = source.SnrDb;
+        RssiDbm         = source.RssiDbm;
+        HopsAway        = source.HopsAway;
+        Latitude        = source.Latitude;
+        Longitude       = source.Longitude;
+        AltitudeM       = source.AltitudeM;
+        BatteryPct      = source.BatteryPct;
+        VoltageV        = source.VoltageV;
+        ChannelUtilPct  = source.ChannelUtilPct;
+        AirUtilTxPct    = source.AirUtilTxPct;
+        UptimeSeconds   = source.UptimeSeconds;
+        TemperatureC          = source.TemperatureC;
+        RelativeHumidityPct   = source.RelativeHumidityPct;
+        BarometricPressureHpa = source.BarometricPressureHpa;
+        GasResistanceMohm     = source.GasResistanceMohm;
+        Iaq                   = source.Iaq;
+        Pm10Standard          = source.Pm10Standard;
+        Pm25Standard          = source.Pm25Standard;
+        Pm100Standard         = source.Pm100Standard;
+        Pm10Environmental     = source.Pm10Environmental;
+        Pm25Environmental     = source.Pm25Environmental;
+        Pm100Environmental    = source.Pm100Environmental;
+        Ch1VoltageV     = source.Ch1VoltageV;
+        Ch1CurrentMa    = source.Ch1CurrentMa;
+        Ch2VoltageV     = source.Ch2VoltageV;
+        Ch2CurrentMa    = source.Ch2CurrentMa;
+        Ch3VoltageV     = source.Ch3VoltageV;
+        Ch3CurrentMa    = source.Ch3CurrentMa;
+        NodeStatus      = source.NodeStatus;
+        PublicKey       = source.PublicKey;
+        KeyMismatch     = source.KeyMismatch;
+        IsUnmessagable  = source.IsUnmessagable;
+        HasXeddsaSigned = source.HasXeddsaSigned;
+        MuteRtttl       = source.MuteRtttl;
+        Ignored         = source.Ignored;
+        Favorite        = source.Favorite;
+        NotifyChanged();
+    }
     /// <summary>32-bit Meshtastic node number (e.g. 0xAABBCCDD).</summary>
     public uint NodeNum { get; set; }
 

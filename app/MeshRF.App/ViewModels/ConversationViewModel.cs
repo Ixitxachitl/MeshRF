@@ -201,8 +201,15 @@ public partial class ConversationViewModel : ObservableObject, ITabItem
 
     partial void OnPeerNameChanged(string value) => OnPropertyChanged(nameof(TabHeader));
 
-    partial void OnNodeChanged(NodeRecord? value)
+    partial void OnNodeChanged(NodeRecord? value) => RefreshNodeSnapshot();
+
+    /// <summary>Re-reads the bound node's values into the telemetry panel and
+    /// location history. Called automatically when the <see cref="Node"/>
+    /// instance changes; call directly when the record was updated in place
+    /// (same instance), which does not raise the property-changed setter.</summary>
+    public void RefreshNodeSnapshot()
     {
+        var value = Node;
         _syncingNodeMute = true;
         MuteRtttl = value?.MuteRtttl == true;
         _syncingNodeMute = false;

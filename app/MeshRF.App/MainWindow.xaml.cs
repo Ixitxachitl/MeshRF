@@ -56,6 +56,14 @@ public partial class MainWindow : Window
     private long _wfAccumFrames;
     private bool _layoutApplied;
     private int _snapshotInFlight;
+    // Ping-pong pool for the packet-snapshot spectrogram grid: LastPacket keeps
+    // the presented buffer for resize re-renders, so alternate between two
+    // instead of allocating a fresh multi-megabyte array (LOH churn) per packet.
+    private readonly float[]?[] _snapshotGridPool = new float[2][];
+    private int _snapshotGridPoolIndex;
+    // Reusable BGRA buffer for the off-thread snapshot rasterization; consumed
+    // synchronously by WritePixels, so a single buffer suffices.
+    private uint[] _snapshotPixelBuffer = Array.Empty<uint>();
     private bool _lastPacketExpanded = true;
     private GridLength _lastPacketSavedHeight = new GridLength(84);
     private double? _conversationMessagesPaneStar;
@@ -1432,15 +1440,33 @@ public partial class MainWindow : Window
             int nTime = Math.Max(2048, (int)Math.Ceiling((maxSamples - kFft) / kHop) + 1);
             nTime = Math.Min(nTime, 16384); // Cap at 16K to avoid huge allocations
 
+            // Read the presentation parameters on the UI thread up front so the
+            // whole pull + contrast + rasterize pipeline can run off-thread.
+            var (targetW, targetH) = LastPacket.GetSnapshotTargetSize();
+            bool timeHorizontal = LastPacket.TimeHorizontal;
+            var colormap = ParseColormap(vm.WaterfallColormap);
+            int poolIndex = _snapshotGridPoolIndex ^ 1;
+
             (int rows, float[] grid, double floor, double ceil) PullAndComputeContrast()
             {
-                var grid = new float[nTime * nFreq];
+                var grid = _snapshotGridPool[poolIndex];
+                if (grid is null || grid.Length < nTime * nFreq)
+                    _snapshotGridPool[poolIndex] = grid = new float[nTime * nFreq];
                 int written = vm.Core.PullPacketSpectrogram(grid, nTime, nFreq);
                 if (written <= 0)
                     return (0, Array.Empty<float>(), -100.0, 0.0);
 
                 int sampleCount = written * nFreq;
                 var (floor, ceil) = ComputeContrastLevels(grid.AsSpan(0, sampleCount));
+
+                // Rasterize here, off the UI thread: the per-pixel bicubic
+                // resample is far too slow to run on the UI thread without
+                // visibly stalling the live waterfall right after a decode.
+                if (_snapshotPixelBuffer.Length < targetW * targetH)
+                    _snapshotPixelBuffer = new uint[targetW * targetH];
+                WaterfallView.RenderScaledSnapshotPixels(
+                    grid, written, nFreq, targetW, targetH, timeHorizontal,
+                    floor, ceil, colormap, _snapshotPixelBuffer);
                 return (written, grid, floor, ceil);
             }
 
@@ -1477,10 +1503,15 @@ public partial class MainWindow : Window
                 return;
             }
 
-            LastPacket.FloorDb = floor;
-            LastPacket.CeilDb = ceil;
-            LastPacket.Colormap = ParseColormap(vm.WaterfallColormap);
-            LastPacket.ReplaceFramesOwned(grid, rows, nFreq);
+            // Single blit of the pre-rasterized pixels; setting the levels via
+            // PresentSnapshot avoids the DP setters each re-rendering the
+            // previous snapshot on the UI thread (up to 4 full bicubic passes
+            // per packet before this change).
+            LastPacket.PresentSnapshot(
+                floor, ceil, colormap,
+                _snapshotPixelBuffer, targetW, targetH,
+                grid, rows, nFreq);
+            _snapshotGridPoolIndex = poolIndex;
             LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
         }
         finally
