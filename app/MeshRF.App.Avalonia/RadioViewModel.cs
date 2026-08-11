@@ -26,6 +26,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         @"payload(?:\[(?<status>OK|BAD)\])?\s+len=(?<len>\d+)(?:\s+crc=(?<rx>[0-9A-Fa-f]+)/(?<calc>[0-9A-Fa-f]+))?\s+(?<hex>[0-9A-Fa-f]+)",
         RegexOptions.Compiled);
 
+    private readonly AvaloniaAppSettings _settings;
     private readonly MeshtasticCore? _core;
     private readonly DispatcherTimer _pollTimer;
     private readonly NodeStore _nodeStore = new();
@@ -86,6 +87,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         };
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
         SelectedTab = Tabs.FirstOrDefault();
+
+        _settings = AvaloniaAppSettings.Load();
+        if (Enum.TryParse<RadioDeviceKind>(_settings.RxDeviceKind, out var savedDevice))
+            SelectedDevice = savedDevice;
+        if (Enum.TryParse<LoraPreset>(_settings.Preset, out var savedPreset))
+            SelectedPreset = savedPreset;
+        if (_settings.CenterFreqMHz > 0)
+            CenterFreqMHz = _settings.CenterFreqMHz;
+        // The property setters above are no-ops when the loaded value equals
+        // the field's compile-time default, so a fresh run with no settings
+        // file yet wouldn't otherwise write one. Save unconditionally so the
+        // file always exists (and self-heals if deleted).
+        SaveSettings();
 
         try
         {
@@ -179,6 +193,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     }
 
     private bool CanToggleRx() => _core is not null;
+
+    partial void OnSelectedDeviceChanged(RadioDeviceKind value) => SaveSettings();
+    partial void OnSelectedPresetChanged(LoraPreset value) => SaveSettings();
+    partial void OnCenterFreqMHzChanged(double value) => SaveSettings();
+
+    private void SaveSettings()
+    {
+        _settings.RxDeviceKind = SelectedDevice.ToString();
+        _settings.Preset = SelectedPreset.ToString();
+        _settings.CenterFreqMHz = CenterFreqMHz;
+        _settings.Save();
+    }
 
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
     private async Task SendMessageAsync()
