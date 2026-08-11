@@ -42,7 +42,7 @@ using ProtoHardwareModel = Meshtastic.Protobufs.HardwareModel;
 
 namespace MeshRF.App.ViewModels;
 
-public partial class MainViewModel : ObservableObject, IDisposable
+public partial class MainViewModel : ObservableObject, IDisposable, IMeshRxHost
 {
     private readonly MeshtasticCore _core = new();
     private readonly NodeStore _nodeStore = new();
@@ -916,9 +916,58 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly record struct PendingRelay(CancellationTokenSource Cts, byte NextHopLimit);
     private readonly Dictionary<ulong, PendingRelay> _pendingRelayCancels = new();
     private readonly IUiDispatcher _uiDispatcher;
-    private readonly Channel<PkcDecodeWorkItem> _pkcDecodeQueue;
-    private readonly CancellationTokenSource _pkcDecodeCts = new();
-    private const int MaxQueuedPkcDecodes = 256;
+    private readonly MeshRxRouter _rxRouter;
+
+    // -------------------------------------------------------------------
+    // IMeshRxHost: forwards to existing members so MeshRxRouter (shared,
+    // in MeshRF.Core) can drive the same decode/dedup/dispatch pipeline
+    // that used to be inlined here. Explicit interface implementations so
+    // none of this widens MainViewModel's regular public/private surface.
+    // -------------------------------------------------------------------
+    uint IMeshRxHost.MyNodeNum => _myNodeNum;
+    byte[] IMeshRxHost.MyPrivateKeyBytes => _myPrivateKeyBytes;
+    IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Channels.Select(c => c.Config).ToList();
+    float IMeshRxHost.CurrentRssiDbfs => RssiDbfs;
+
+    string? IMeshRxHost.GetStoredPublicKeyHex(uint nodeNum) =>
+        (_nodesByNum.GetValueOrDefault(nodeNum) ?? _nodeStore.Get(nodeNum))?.PublicKey;
+
+    void IMeshRxHost.Log(string message) => Log(message);
+    void IMeshRxHost.MarkNodeDirty(uint nodeNum) => MarkNodeDirty(nodeNum);
+    bool IMeshRxHost.RememberUndecodedPacket(MeshHeader header) => RememberUndecodedPacket(header);
+
+    void IMeshRxHost.HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
+        => HandleDuplicateForRelay(frame, header, result, snrDb);
+
+    void IMeshRxHost.RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
+        => RelayIfEligible(frame, header, result, snrDb);
+
+    void IMeshRxHost.UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm)
+        => UplinkIfEligible(frame, header, result, isFromUs, snrDb, rssiDbm);
+
+    void IMeshRxHost.RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt)
+    {
+        // NodeInfo records fold these fields into their own upsert instead
+        // (see the NodeInfo case in OnMessageDecoded) so a key-bearing
+        // NodeInfo doesn't do two SQLite writes on the same UI tick — the
+        // router already skips calling this for that case.
+        EnqueueDbWrite((nodes, _) =>
+            nodes.RecordSighting(fromNode, rssiDbm: rssiDbm, snrDb: snrDb, hopsAway: hopsAway, seenViaMqtt: viaMqtt));
+        // Optimistic in-memory overlay: the async write may not commit before
+        // the next dirty flush reads _nodeStore; record sighting here so the
+        // UI always shows a fresh last-heard time regardless of timing.
+        _pendingNodeSightings[fromNode] = (rxEpoch, snrDb, rssiDbm, hopsAway, viaMqtt);
+    }
+
+    void IMeshRxHost.OnOwnPacketHeard(MeshHeader header, MeshDecodeResult? ownDecode)
+    {
+        // Decode our own frame to surface the ok_to_mqtt bitfield, so the
+        // user can confirm the flag is actually present on the wire.
+        string mqttNote = ownDecode is not null
+            ? $", ok_to_mqtt={(ownDecode.OkToMqtt ? "yes" : "no")}"
+            : string.Empty;
+        Log($"  tx confirmed (heard own packet id {header.PacketId:x8}{mqttNote})");
+    }
 
     // Dedicated async DB writer for receive-path node/waypoint writes.
     // Uses its own SQLite connections so UI-thread store instances never
@@ -931,15 +980,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly Task _dbWriteWorkerTask;
     private const int MaxQueuedDbWrites = 1024;
 
-    private sealed record PkcDecodeWorkItem(
-        byte[] Frame,
-        MeshHeader Header,
-        long RxEpoch,
-        float? SnrDb,
-        float? PacketRssiDbm,
-        byte HopsAway,
-        byte[] MyPrivateKey,
-        byte[] SenderPublicKey);
 
     private sealed record WeatherTelemetrySnapshot(
         float TemperatureC,
@@ -2058,13 +2098,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel()
     {
         _uiDispatcher = new WpfUiDispatcher(Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher);
-        _pkcDecodeQueue = Channel.CreateBounded<PkcDecodeWorkItem>(new BoundedChannelOptions(MaxQueuedPkcDecodes)
-        {
-            SingleReader = true,
-            SingleWriter = true,
-            FullMode = BoundedChannelFullMode.Wait,
-        });
-        _ = Task.Run(RunPkcDecodeWorkerAsync);
+        _rxRouter = new MeshRxRouter(this, _messageStore, _uiDispatcher);
 
         _dbWriteNodeStore = new NodeStore(NodeStore.DefaultPath);
         _dbWriteWaypointStore = new WaypointStore(NodeStore.DefaultPath);
@@ -4706,7 +4740,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // handles (new, duplicate, or undecoded) regardless of origin — an
         // extra "rx downlink from MQTT" line here was pure duplication that
         // buried real RF activity under MQTT volume.
-        ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null);
+        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null);
     }
 
     private void HandleMqttJsonMessageReceived(string topic, string json)
@@ -8144,132 +8178,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _lastPreamblePeakDb = float.NaN; // consume it so it can't bleed to the next
         float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
 
-        ProcessReceivedFrame(frame, header, snrDb, packetRssiDbm);
-    }
-
-    /// <summary>
-    /// Shared tail of the RX pipeline: decode (channel PSK, falling back to
-    /// PKC), then hand off to <see cref="ApplyDecodedPayloadResult"/>. Used
-    /// both for frames actually demodulated off the air
-    /// (<see cref="DecodePayloadIfPossible"/>) and for frames synthesized
-    /// from an accepted MQTT downlink envelope (<see cref="OnMqttEnvelopeReceived"/>),
-    /// so both paths get identical dedup/relay/uplink/store/UI handling.
-    /// <paramref name="snrDb"/>/<paramref name="packetRssiDbm"/> are null for
-    /// downlink-injected frames — there was no real RF reception to measure.
-    /// </summary>
-    private void ProcessReceivedFrame(byte[] frame, MeshHeader header, float? snrDb, float? packetRssiDbm)
-    {
-        // Own packet heard back (Meshtastic `isFromUs`): when a neighbour
-        // rebroadcasts a frame we sent, we receive our own transmission. The
-        // firmware never re-processes these — it treats hearing your own packet
-        // only as an implicit ACK that it was relayed, and never adds it to the
-        // node DB or message list again. We already echoed the message locally
-        // when the user pressed send, so just note the confirmation and drop it.
-        if (_myNodeNum != 0 && header.From == _myNodeNum)
-        {
-            // Decode our own frame to surface the ok_to_mqtt bitfield, so the
-            // user can confirm the flag is actually present on the wire.
-            var ownChannels = Channels.Select(c => c.Config).ToList();
-            var own = MeshDecoder.Decode(frame, ownChannels);
-            string mqttNote = own is not null
-                ? $", ok_to_mqtt={(own.OkToMqtt ? "yes" : "no")}"
-                : string.Empty;
-            Log($"  tx confirmed (heard own packet id {header.PacketId:x8}{mqttNote})");
-            return;
-        }
-
-        var rxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        byte hopsAway = (byte)(header.HopStart >= header.HopLimit
-            ? header.HopStart - header.HopLimit
-            : 0);
-
-        var channels = Channels.Select(c => c.Config).ToList();
-        var result = MeshDecoder.Decode(frame, channels);
-
-        // PKC fallback: modern firmware seals direct messages to us with
-        // X25519 + AES-CCM (channel-hash byte 0x00) instead of a channel PSK,
-        // so MeshDecoder.Decode (PSK-only) can't read them. Mirroring firmware
-        // perhapsDecode, attempt a PKC decrypt when the frame is a unicast DM
-        // addressed to us, the channel hash is 0, and we hold both keys.
-        if (result is null && _myNodeNum != 0 &&
-            header.To == _myNodeNum && !header.IsBroadcast &&
-            header.ChannelHash == 0x00)
-        {
-            if (TryQueuePkcDecode(frame, header, rxEpoch, snrDb, packetRssiDbm, hopsAway))
-                return;
-
-            result = TryDecodePkc(frame, header);
-        }
-
-        ApplyDecodedPayloadResult(frame, header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway);
-    }
-
-    private bool TryQueuePkcDecode(
-        byte[] frame,
-        MeshHeader header,
-        long rxEpoch,
-        float? snrDb,
-        float? packetRssiDbm,
-        byte hopsAway)
-    {
-        if (_pkcDecodeCts.IsCancellationRequested) return false;
-        if (_myPrivateKeyBytes.Length != 32) return false;
-
-        var senderPub = GetSenderPublicKeyBytes(header.From);
-        if (senderPub.Length != 32) return false;
-
-        var myPrivCopy = _myPrivateKeyBytes.ToArray();
-        var senderPubCopy = senderPub.ToArray();
-
-        return _pkcDecodeQueue.Writer.TryWrite(new PkcDecodeWorkItem(
-            frame,
-            header,
-            rxEpoch,
-            snrDb,
-            packetRssiDbm,
-            hopsAway,
-            myPrivCopy,
-            senderPubCopy));
-    }
-
-    private async Task RunPkcDecodeWorkerAsync()
-    {
-        try
-        {
-            var reader = _pkcDecodeQueue.Reader;
-            while (await reader.WaitToReadAsync(_pkcDecodeCts.Token).ConfigureAwait(false))
-            {
-                while (reader.TryRead(out var item))
-                {
-                    MeshDecodeResult? result = null;
-                    try
-                    {
-                        result = MeshDecoder.DecodePkc(item.Frame, item.MyPrivateKey, item.SenderPublicKey);
-                    }
-                    catch
-                    {
-                        result = null;
-                    }
-
-                    if (_pkcDecodeCts.IsCancellationRequested)
-                        return;
-
-                    await _uiDispatcher.InvokeAsync(
-                        () => ApplyDecodedPayloadResult(
-                            item.Frame,
-                            item.Header,
-                            result,
-                            item.RxEpoch,
-                            item.SnrDb,
-                            item.PacketRssiDbm,
-                            item.HopsAway));
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Normal shutdown path.
-        }
+        _rxRouter.ProcessReceivedFrame(frame, header, snrDb, packetRssiDbm);
     }
 
     private void EnqueueDbWrite(Action<NodeStore, WaypointStore> write)
@@ -8367,104 +8276,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MarkNodeDirty(header.From);
     }
 
-    private void ApplyDecodedPayloadResult(
-        byte[] frame,
-        MeshHeader header,
-        MeshDecodeResult? result,
-        long rxEpoch,
-        float? snrDb,
-        float? packetRssiDbm,
-        byte hopsAway)
+    /// <summary>
+    /// A frame decoded successfully and is new (not a dedup hit) — the
+    /// per-port-type tail of the RX pipeline. Decode, PKC fallback, dedup,
+    /// node sighting, and relay/uplink eligibility all happen upstream in
+    /// <see cref="MeshRxRouter"/> (shared with any other frontend); this is
+    /// the app-specific part: populate the message list, chat tabs,
+    /// node/telemetry/position/waypoint stores, geofencing, and games.
+    /// </summary>
+    void IMeshRxHost.OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
+        long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway)
     {
-        bool nodeInfoRecord = result is { Port: PortNum.NodeInfo, User: not null } && result.AppPayload.Length != 0;
-
-        // Always record the sender sighting (RSSI/last-heard), decoded or not.
-        // NodeInfo records fold these fields into their own upsert below so a
-        // key-bearing NodeInfo doesn't do two SQLite writes on the UI tick.
-        if (!nodeInfoRecord)
-        {
-            EnqueueDbWrite((nodes, _) =>
-                nodes.RecordSighting(header.From,
-                    rssiDbm: packetRssiDbm,
-                    snrDb: snrDb,
-                    hopsAway: hopsAway,
-                    seenViaMqtt: header.ViaMqtt));
-            // Optimistic in-memory overlay: the async write may not commit before
-            // the next dirty flush reads _nodeStore; record sighting here so the
-            // UI always shows a fresh last-heard time regardless of timing.
-            _pendingNodeSightings[header.From] = (rxEpoch, snrDb, packetRssiDbm, hopsAway, header.ViaMqtt);
-        }
-
-        uint normalizedReplyId = 0;
-        if (result is not null && result.Port == PortNum.TextMessage)
-            normalizedReplyId = ResolveReactionTargetId(result);
-
-        bool isReactionRecord = false;
-        if (result is not null && result.Port == PortNum.TextMessage)
-            isReactionRecord = normalizedReplyId != 0
-                && result.Emoji != 0;
-
-        if (result is null)
-        {
-            if (!RememberUndecodedPacket(header))
-            {
-                HandleDuplicateForRelay(frame, header, result, snrDb);
-                Log($"  (dup) rx undecoded from {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2})");
-                MarkNodeDirty(header.From);
-                return;
-            }
-
-            RelayIfEligible(frame, header, result, snrDb);
-            UplinkIfEligible(frame, header, result, snrDb: snrDb, rssiDbm: packetRssiDbm);
-            Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
-            MarkNodeDirty(header.From);
-            return;
-        }
-
-        var record = new MessageRecord
-        {
-            PacketId = header.PacketId,
-            FromNode = header.From,
-            ToNode = header.To,
-            PortNum = (int)result.Port,
-            Channel = result.ChannelName,
-            ReplyId = normalizedReplyId,
-            Emoji = result.Emoji,
-            IsReaction = isReactionRecord,
-            Decrypted = true,
-            ViaMqtt = header.ViaMqtt,
-            RxEpoch = rxEpoch,
-            RssiDbfs = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs,
-            SnrDb = snrDb,
-        };
-
-        record.PayloadHex = BytesToHex(result.AppPayload);
-        if (result.Port == PortNum.TextMessage)
-            record.Text = result.Text ?? string.Empty;
-
-        // Dedup: Meshtastic floods packets, so the same message arrives several
-        // times (different relays). MessageStore.Add returns false for a packet
-        // we've already stored — skip ALL UI updates for repeats so each unique
-        // message shows exactly once, like the Meshtastic app.
-        bool isNew;
-        try { isNew = _messageStore.Add(record); }
-        catch (Exception ex) { Log($"message store failed: {ex.Message}"); isNew = false; }
-
-        if (!isNew)
-        {
-            HandleDuplicateForRelay(frame, header, result, snrDb);
-            // Still refresh the sighting timestamp (done above), but don't echo.
-            MarkNodeDirty(header.From);
-            Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
-            return;
-        }
-
-        RelayIfEligible(frame, header, result, snrDb);
-        UplinkIfEligible(frame, header, result);
-
         Messages.Insert(0, record);
 
-        bool nodeChanged = false;
         var senderName = NodeDisplayName(header.From);
         bool senderIgnored = IsNodeIgnored(header.From);
         var decodedSummary = BuildDecodedPortSummary(header, result, senderName);
@@ -8618,7 +8442,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         }
                         break;
                     }
-                    nodeChanged = true;
                     {
                         string newKeyHex = result.User.PublicKey.Length == 32
                             ? Convert.ToHexString(result.User.PublicKey)
@@ -8703,7 +8526,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         }
                         break;
                     }
-                    nodeChanged = true;
                     var existingPositionNode = _nodesByNum.GetValueOrDefault(header.From)
                         ?? _nodeStore.Get(header.From);
                     bool positionChanged = existingPositionNode?.Latitude is not double oldLat
@@ -8795,7 +8617,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             channel: FindChannelByName(result.ChannelName));
                         break;
                     }
-                    nodeChanged = true;
                     var t = result.Telemetry;
                     var telemetryUpsert = new NodeRecord
                     {
@@ -8830,7 +8651,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     PersistTelemetryHistory(header.From, rxEpoch, t);
                     break;
                 case PortNum.NodeStatus when result.StatusMessage is not null:
-                    nodeChanged = true;
                     var statusText = (result.StatusMessage.Status ?? string.Empty).Trim();
                     if (!string.IsNullOrEmpty(statusText))
                     {
@@ -8862,9 +8682,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 default:
                     break;
             }
-
-        MarkNodeDirty(header.From);
-        if (nodeChanged) { /* names refreshed on the next dirty-node apply */ }
     }
 
     private void AppendDecodedPacketJsonFeed(
@@ -10490,9 +10307,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _dbWriteCts.Cancel();
         try { _dbWriteWorkerTask.Wait(200); } catch { }
         _dbWriteCts.Dispose();
-        _pkcDecodeQueue.Writer.TryComplete();
-        _pkcDecodeCts.Cancel();
-        _pkcDecodeCts.Dispose();
+        _rxRouter.Dispose();
         _filterComputeCts?.Cancel();
         _filterChangeDebounceTimer?.Stop();
         _gpsService.Stop();

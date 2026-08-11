@@ -1,30 +1,55 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        xmlns:mesh="clr-namespace:MeshRF;assembly=MeshRF.Core"
+        xmlns:nodes="clr-namespace:MeshRF.Nodes;assembly=MeshRF.Core"
         x:Class="MeshRF.AvaloniaApp.MainWindow"
         x:DataType="local:RadioViewModel"
         Title="MeshRF (cross-platform scaffold)"
-        Width="480" Height="320">
+        Width="640" Height="520">
 
-    <StackPanel Margin="24" Spacing="12">
-        <TextBlock Text="MeshRF — Avalonia scaffold" FontSize="20" FontWeight="Bold" />
-        <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" />
-        <TextBlock Text="{Binding DeviceStatus}" TextWrapping="Wrap" />
+    <Grid Margin="24" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" ColumnDefinitions="*,*">
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="MeshRF — Avalonia scaffold" FontSize="20" FontWeight="Bold" />
+        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,8,0,0" />
+        <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding DeviceStatus}" TextWrapping="Wrap" />
 
-        <StackPanel Orientation="Horizontal" Spacing="8">
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
             <TextBlock Text="RX device:" VerticalAlignment="Center" />
             <ComboBox ItemsSource="{Binding AvailableDevices}"
                       SelectedItem="{Binding SelectedDevice}"
                       IsEnabled="{Binding !IsRunning}"
                       Width="140" />
+            <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" />
+            <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}"
+                       IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="12,0,0,0" />
         </StackPanel>
 
-        <Button Content="{Binding ToggleButtonText}"
-                Command="{Binding ToggleRxCommand}"
-                HorizontalAlignment="Left" />
+        <TextBlock Grid.Row="4" Grid.ColumnSpan="2" Margin="0,16,0,4" FontWeight="Bold"
+                   Text="{Binding Messages.Count, StringFormat='Messages ({0})'}" />
 
-        <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}"
-                   IsVisible="{Binding IsRunning}" />
-    </StackPanel>
+        <ListBox Grid.Row="5" Grid.Column="0" Margin="0,0,6,0"
+                 ItemsSource="{Binding Messages}">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="mesh:ChannelMessage">
+                    <StackPanel>
+                        <TextBlock Text="{Binding FromId}" FontWeight="Bold" />
+                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Grid.Row="5" Grid.Column="1" Margin="6,0,0,0">
+            <TextBlock FontWeight="Bold" Margin="0,0,0,4"
+                       Text="{Binding Nodes.Count, StringFormat='Nodes ({0})'}" />
+            <ListBox ItemsSource="{Binding Nodes}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="nodes:NodeRecord">
+                        <TextBlock Text="{Binding LongName}" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </StackPanel>
+    </Grid>
 
 </Window>
