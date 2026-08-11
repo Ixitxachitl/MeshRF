@@ -8,28 +8,26 @@ using MeshRF.Nodes;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// Minimal <see cref="IMeshRxHost"/> for the Avalonia scaffold: decodes
-/// public-channel (default-PSK LongFast) broadcast traffic into a flat
-/// message list and keeps <see cref="NodeStore"/> updated from NodeInfo/
-/// Position/Telemetry. No chat tabs, relay, MQTT, geofencing, or games yet —
+/// <see cref="IMeshRxHost"/> for the Avalonia app: decodes traffic on any
+/// configured channel (persisted via <see cref="ChannelStore"/>, same
+/// %APPDATA%/config path the WPF app uses) into per-channel message tabs,
+/// and keeps <see cref="NodeStore"/> updated from NodeInfo/Position/
+/// Telemetry. No DM chat tabs, relay, MQTT, geofencing, or games yet —
 /// those stay WPF-only until ported. Node identity (PKC direct messages) is
-/// intentionally unset, so only public-channel broadcasts decode for now.
+/// intentionally unset, so only channel-PSK traffic decodes for now.
 /// </summary>
-public sealed class AvaloniaMeshRxHost : IMeshRxHost
+public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 {
     private readonly NodeStore _nodeStore;
+    private readonly ChannelStore _channelStore;
     private readonly HashSet<ulong> _recentUndecodedKeys = new();
     private readonly Queue<ulong> _recentUndecodedOrder = new();
     private const int RecentUndecodedLimit = 512;
+    private const int MaxMessagesPerChannel = 500;
 
-    public ObservableCollection<ChannelMessage> Messages { get; } = new();
+    public ObservableCollection<ChannelTabViewModel> ChannelTabs { get; } = new();
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
-
-    public IReadOnlyList<ChannelConfig> Channels { get; } =
-    [
-        new ChannelConfig { Index = 0, Name = "LongFast", Role = ChannelRole.Primary },
-    ];
 
     /// <summary>
     /// Ephemeral session node number (random, not persisted) — needed so a
@@ -41,13 +39,57 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost
 
     uint IMeshRxHost.MyNodeNum => MyNodeNum;
     byte[] IMeshRxHost.MyPrivateKeyBytes => Array.Empty<byte>();
-    IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Channels;
+    IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => ChannelTabs.Select(t => t.Config).ToList();
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
 
-    public AvaloniaMeshRxHost(NodeStore nodeStore)
+    public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore)
     {
         _nodeStore = nodeStore;
+        _channelStore = channelStore;
+        LoadChannels();
+    }
+
+    private void LoadChannels()
+    {
+        var configs = _channelStore.All();
+        if (configs.Count == 0)
+        {
+            var primary = new ChannelConfig { Index = 0, Name = "LongFast", Role = ChannelRole.Primary };
+            _channelStore.Upsert(primary);
+            configs = new[] { primary };
+        }
+
+        foreach (var c in configs.OrderBy(c => c.Index))
+            ChannelTabs.Add(new ChannelTabViewModel(c));
+    }
+
+    /// <summary>Adds and persists a new secondary channel with a fresh random PSK.</summary>
+    public ChannelTabViewModel AddChannel(string name)
+    {
+        int nextIndex = ChannelTabs.Count == 0 ? 0 : ChannelTabs.Max(t => t.Config.Index) + 1;
+        var config = new ChannelConfig
+        {
+            Index = nextIndex,
+            Name = name,
+            Role = ChannelRole.Secondary,
+            Psk = ChannelConfig.NewRandomPsk(),
+        };
+        _channelStore.Upsert(config);
+        var tab = new ChannelTabViewModel(config);
+        ChannelTabs.Add(tab);
+        return tab;
+    }
+
+    private ChannelTabViewModel? ResolveChannelTab(string? channelName)
+    {
+        if (!string.IsNullOrEmpty(channelName))
+        {
+            var match = ChannelTabs.FirstOrDefault(t =>
+                string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return match;
+        }
+        return ChannelTabs.FirstOrDefault();
     }
 
     string? IMeshRxHost.GetStoredPublicKeyHex(uint nodeNum) => _nodeStore.Get(nodeNum)?.PublicKey;
@@ -100,17 +142,23 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost
         switch (result.Port)
         {
             case PortNum.TextMessage:
-                Messages.Insert(0, new ChannelMessage
+                var tab = ResolveChannelTab(result.ChannelName);
+                if (tab is not null)
                 {
-                    Timestamp = DateTimeOffset.FromUnixTimeSeconds(rxEpoch).LocalDateTime,
-                    FromId = header.FromId,
-                    SenderNodeNum = header.From,
-                    Text = record.Text,
-                    RssiDbm = record.RssiDbfs,
-                    SnrDb = record.SnrDb,
-                    PacketId = header.PacketId,
-                });
-                while (Messages.Count > 500) Messages.RemoveAt(Messages.Count - 1);
+                    tab.Messages.Insert(0, new ChannelMessage
+                    {
+                        Timestamp = DateTimeOffset.FromUnixTimeSeconds(rxEpoch).LocalDateTime,
+                        FromId = header.FromId,
+                        SenderNodeNum = header.From,
+                        Text = record.Text,
+                        RssiDbm = record.RssiDbfs,
+                        SnrDb = record.SnrDb,
+                        PacketId = header.PacketId,
+                    });
+                    while (tab.Messages.Count > MaxMessagesPerChannel)
+                        tab.Messages.RemoveAt(tab.Messages.Count - 1);
+                    tab.TabNeedsAttention = true;
+                }
                 break;
 
             case PortNum.NodeInfo when result.User is not null:
@@ -160,4 +208,6 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost
                 break;
         }
     }
+
+    public void Dispose() => _channelStore.Dispose();
 }

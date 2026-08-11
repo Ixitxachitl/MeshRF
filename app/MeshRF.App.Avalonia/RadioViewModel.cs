@@ -34,11 +34,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _pollTimer;
     private readonly NodeStore _nodeStore = new();
     private readonly MessageStore _messageStore = new();
+    private readonly ChannelStore _channelStore = new();
     private readonly AvaloniaMeshRxHost _rxHost;
     private readonly MeshRxRouter _rxRouter;
 
-    public ObservableCollection<ChannelMessage> Messages => _rxHost.Messages;
+    public ObservableCollection<ChannelTabViewModel> ChannelTabs => _rxHost.ChannelTabs;
     public ObservableCollection<NodeRecord> Nodes => _rxHost.Nodes;
+
+    [ObservableProperty]
+    private ChannelTabViewModel? _selectedChannelTab;
+
+    [ObservableProperty]
+    private string _newChannelName = string.Empty;
 
     [ObservableProperty]
     private RadioDeviceKind _selectedDevice = RadioDeviceKind.Auto;
@@ -64,7 +71,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     public RadioViewModel()
     {
-        _rxHost = new AvaloniaMeshRxHost(_nodeStore)
+        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore)
         {
             // Ephemeral session identity (random, not persisted) — see
             // AvaloniaMeshRxHost.MyNodeNum. Avoid 0 (unset) and the
@@ -72,6 +79,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             MyNodeNum = (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE),
         };
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
+        SelectedChannelTab = ChannelTabs.FirstOrDefault();
 
         try
         {
@@ -169,14 +177,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
     private async Task SendMessageAsync()
     {
-        if (_core is null || string.IsNullOrWhiteSpace(MessageText)) return;
+        if (_core is null || SelectedChannelTab is null || string.IsNullOrWhiteSpace(MessageText)) return;
 
+        var tab = SelectedChannelTab;
         var text = MessageText.Trim();
-        var channel = _rxHost.Channels[0];
         var packetId = (uint)Random.Shared.NextInt64(1, uint.MaxValue);
         var hz = (ulong)(DefaultCenterFreqMHz * 1_000_000);
 
-        var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text);
+        var frame = MeshEncoder.EncodeTextMessage(tab.Config, _rxHost.MyNodeNum, packetId, text);
 
         bool ok = await Task.Run(() => _core.Transmit(LoraPreset.LongFast, hz, frame)).ConfigureAwait(true);
         if (!ok)
@@ -187,7 +195,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         // Echo locally — we won't decode our own transmission back off the
         // air (MeshRxRouter treats hearing it as isFromUs and drops it).
-        Messages.Insert(0, new ChannelMessage
+        tab.Messages.Insert(0, new ChannelMessage
         {
             FromId = $"!{_rxHost.MyNodeNum:x8}",
             SenderNodeNum = _rxHost.MyNodeNum,
@@ -198,9 +206,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         MessageText = string.Empty;
     }
 
-    private bool CanSendMessage() => _core?.CanTransmit == true && !string.IsNullOrWhiteSpace(MessageText);
+    private bool CanSendMessage() =>
+        _core?.CanTransmit == true && SelectedChannelTab is not null && !string.IsNullOrWhiteSpace(MessageText);
 
     partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedChannelTabChanged(ChannelTabViewModel? value) => SendMessageCommand.NotifyCanExecuteChanged();
 
     partial void OnIsRunningChanged(bool value)
     {
@@ -208,10 +218,26 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SendMessageCommand.NotifyCanExecuteChanged();
     }
 
+    [RelayCommand(CanExecute = nameof(CanAddChannel))]
+    private void AddChannel()
+    {
+        var name = NewChannelName.Trim();
+        if (name.Length == 0) return;
+        SelectedChannelTab = _rxHost.AddChannel(name);
+        NewChannelName = string.Empty;
+    }
+
+    private bool CanAddChannel() => !string.IsNullOrWhiteSpace(NewChannelName);
+
+    partial void OnNewChannelNameChanged(string value) => AddChannelCommand.NotifyCanExecuteChanged();
+
     public void Dispose()
     {
         _pollTimer.Stop();
         _rxRouter.Dispose();
+        _rxHost.Dispose();
+        _nodeStore.Dispose();
+        _messageStore.Dispose();
         _core?.Dispose();
     }
 }
