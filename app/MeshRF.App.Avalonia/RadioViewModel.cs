@@ -20,10 +20,6 @@ namespace MeshRF.AvaloniaApp;
 /// </summary>
 public partial class RadioViewModel : ObservableObject, IDisposable
 {
-    // 906.875 MHz = US LongFast slot 20, same default MeshRF.App's
-    // MainViewModel starts from.
-    private const double DefaultCenterFreqMHz = 906.875;
-
     // Mirrors MainViewModel.PayloadLineRegex; matches lines like
     // "  payload[OK] len=31 crc=E511/E511 FFFFFFFF594FA54F...".
     private static readonly Regex PayloadLineRegex = new(
@@ -49,6 +45,16 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private RadioDeviceKind _selectedDevice = RadioDeviceKind.Auto;
+
+    // 906.875 MHz = US LongFast slot 20, same default MeshRF.App's
+    // MainViewModel starts from.
+    [ObservableProperty]
+    private double _centerFreqMHz = 906.875;
+
+    [ObservableProperty]
+    private LoraPreset _selectedPreset = LoraPreset.LongFast;
+
+    public LoraPreset[] AvailablePresets { get; } = Enum.GetValues<LoraPreset>();
 
     [ObservableProperty]
     private bool _isRunning;
@@ -159,10 +165,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         else
         {
             _core.SetRxDevice(SelectedDevice);
-            var hz = (ulong)(DefaultCenterFreqMHz * 1_000_000);
+            var hz = (ulong)(CenterFreqMHz * 1_000_000);
             try
             {
-                _core.StartRx(LoraPreset.LongFast, hz);
+                _core.StartRx(SelectedPreset, hz);
             }
             catch (InvalidOperationException ex)
             {
@@ -182,11 +188,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var tab = SelectedChannelTab;
         var text = MessageText.Trim();
         var packetId = (uint)Random.Shared.NextInt64(1, uint.MaxValue);
-        var hz = (ulong)(DefaultCenterFreqMHz * 1_000_000);
+        var hz = (ulong)(CenterFreqMHz * 1_000_000);
 
         var frame = MeshEncoder.EncodeTextMessage(tab.Config, _rxHost.MyNodeNum, packetId, text);
 
-        bool ok = await Task.Run(() => _core.Transmit(LoraPreset.LongFast, hz, frame)).ConfigureAwait(true);
+        bool ok = await Task.Run(() => _core.Transmit(SelectedPreset, hz, frame)).ConfigureAwait(true);
         if (!ok)
         {
             StatusText = "Failed to transmit (no TX-capable device selected?).";

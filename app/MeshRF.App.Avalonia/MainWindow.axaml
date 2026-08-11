@@ -19,6 +19,13 @@
                       SelectedItem="{Binding SelectedDevice}"
                       IsEnabled="{Binding !IsRunning}"
                       Width="140" />
+            <TextBlock Text="Preset:" VerticalAlignment="Center" />
+            <ComboBox ItemsSource="{Binding AvailablePresets}"
+                      SelectedItem="{Binding SelectedPreset}"
+                      IsEnabled="{Binding !IsRunning}"
+                      Width="140" />
+            <TextBlock Text="MHz:" VerticalAlignment="Center" />
+            <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}" Width="90" />
             <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" />
             <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}"
                        IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="12,0,0,0" />
