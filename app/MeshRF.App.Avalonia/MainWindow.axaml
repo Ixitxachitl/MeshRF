@@ -7,36 +7,69 @@
         x:Name="RootWindow"
         x:DataType="local:RadioViewModel"
         Title="MeshRF (cross-platform scaffold)"
-        Width="820" Height="600">
+        Width="900" Height="680">
 
-    <Grid Margin="24" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto,Auto" ColumnDefinitions="2*,1*">
+    <Grid Margin="24" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto" ColumnDefinitions="2*,1*">
         <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="MeshRF — Avalonia scaffold" FontSize="20" FontWeight="Bold" />
         <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,8,0,0" />
         <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding DeviceStatus}" TextWrapping="Wrap" />
 
-        <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
-            <TextBlock Text="RX device:" VerticalAlignment="Center" />
+        <WrapPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,12,0,0">
+            <TextBlock Text="RX:" VerticalAlignment="Center" Margin="0,0,4,4" />
             <ComboBox ItemsSource="{Binding AvailableDevices}"
                       SelectedItem="{Binding SelectedDevice}"
                       IsEnabled="{Binding !IsRunning}"
-                      Width="140" />
-            <TextBlock Text="Preset:" VerticalAlignment="Center" />
+                      Width="100" Margin="0,0,10,4" />
+            <TextBlock Text="Region:" VerticalAlignment="Center" Margin="0,0,4,4" />
+            <ComboBox ItemsSource="{Binding AvailableRegions}"
+                      SelectedItem="{Binding SelectedRegion}"
+                      IsEnabled="{Binding !IsRunning}"
+                      Width="80" Margin="0,0,10,4" />
+            <TextBlock Text="Preset:" VerticalAlignment="Center" Margin="0,0,4,4" />
             <ComboBox ItemsSource="{Binding AvailablePresets}"
                       SelectedItem="{Binding SelectedPreset}"
                       IsEnabled="{Binding !IsRunning}"
-                      Width="140" />
-            <TextBlock Text="MHz:" VerticalAlignment="Center" />
-            <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}" Width="90" />
-            <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" />
+                      Width="120" Margin="0,0,10,4" />
+            <TextBlock Text="Slot:" VerticalAlignment="Center" Margin="0,0,4,4" />
+            <ComboBox ItemsSource="{Binding Slots}"
+                      SelectedItem="{Binding SelectedSlot}"
+                      IsEnabled="{Binding !IsRunning}"
+                      Width="60" Margin="0,0,10,4" />
+            <TextBlock Text="MHz:" VerticalAlignment="Center" Margin="0,0,4,4" />
+            <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}" Width="80" Margin="0,0,10,4" />
+            <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" Margin="0,0,10,4" />
             <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}"
-                       IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="12,0,0,0" />
-        </StackPanel>
+                       IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,4" />
+        </WrapPanel>
 
-        <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,16,0,4" FontWeight="Bold" Text="Channels &amp; conversations" />
-        <TextBlock Grid.Row="4" Grid.Column="1" Margin="6,16,0,4" FontWeight="Bold"
+        <WrapPanel Grid.Row="4" Grid.ColumnSpan="2" Margin="0,4,0,0">
+            <TextBlock Text="SF:" VerticalAlignment="Center" Margin="0,0,4,4"
+                       ToolTip.Tip="Spreading factor — auto-filled from preset; edit to override" />
+            <TextBox Text="{Binding OverrideSf}" IsEnabled="{Binding !IsRunning}" Width="40" Margin="0,0,10,4" />
+            <TextBlock Text="BW (kHz):" VerticalAlignment="Center" Margin="0,0,4,4"
+                       ToolTip.Tip="Bandwidth — auto-filled from preset; edit to override" />
+            <TextBox Text="{Binding OverrideBwKhz}" IsEnabled="{Binding !IsRunning}" Width="60" Margin="0,0,10,4" />
+            <TextBlock Text="CR:" VerticalAlignment="Center" Margin="0,0,4,4"
+                       ToolTip.Tip="Coding rate denominator (4/N) — auto-filled from preset; edit to override" />
+            <TextBox Text="{Binding OverrideCr}" IsEnabled="{Binding !IsRunning}" Width="40" Margin="0,0,10,4" />
+            <TextBlock Text="LNA:" VerticalAlignment="Center" Margin="0,0,4,4"
+                       ToolTip.Tip="HackRF LNA gain (dB)" />
+            <TextBox Text="{Binding LnaGainDb}" Width="40" Margin="0,0,10,4" />
+            <TextBlock Text="VGA:" VerticalAlignment="Center" Margin="0,0,4,4"
+                       ToolTip.Tip="HackRF VGA gain (dB)" />
+            <TextBox Text="{Binding VgaGainDb}" Width="40" Margin="0,0,10,4" />
+            <CheckBox Content="Amp" IsChecked="{Binding AmpEnable}" Margin="0,0,10,4"
+                      ToolTip.Tip="HackRF RF amplifier" />
+            <TextBlock Text="RTL gain:" VerticalAlignment="Center" Margin="0,0,4,4" />
+            <TextBox Text="{Binding RtlGainDb}" IsEnabled="{Binding !RtlAgcEnable}" Width="40" Margin="0,0,10,4" />
+            <CheckBox Content="RTL AGC" IsChecked="{Binding RtlAgcEnable}" Margin="0,0,10,4" />
+        </WrapPanel>
+
+        <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,16,0,4" FontWeight="Bold" Text="Channels &amp; conversations" />
+        <TextBlock Grid.Row="5" Grid.Column="1" Margin="6,16,0,4" FontWeight="Bold"
                    Text="{Binding Nodes.Count, StringFormat='Nodes ({0})'}" />
 
-        <TabControl Grid.Row="5" Grid.Column="0" Margin="0,0,6,0"
+        <TabControl Grid.Row="6" Grid.Column="0" Margin="0,0,6,0"
                     ItemsSource="{Binding Tabs}"
                     SelectedItem="{Binding SelectedTab}">
             <TabControl.ItemTemplate>
@@ -60,7 +93,7 @@
             </TabControl.ContentTemplate>
         </TabControl>
 
-        <ListBox Grid.Row="5" Grid.Column="1" Margin="6,0,0,0" ItemsSource="{Binding Nodes}">
+        <ListBox Grid.Row="6" Grid.Column="1" Margin="6,0,0,0" ItemsSource="{Binding Nodes}">
             <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="nodes:NodeRecord">
                     <Grid ColumnDefinitions="*,Auto" Margin="0,4">
@@ -81,12 +114,12 @@
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+        <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
             <TextBox Text="{Binding NewChannelName}" PlaceholderText="New channel name..." Width="180" />
             <Button Content="Add channel" Command="{Binding AddChannelCommand}" />
         </StackPanel>
 
-        <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+        <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
             <TextBox Text="{Binding MessageText}" PlaceholderText="Message..." Width="440" />
             <Button Content="Send" Command="{Binding SendMessageCommand}" />
         </StackPanel>

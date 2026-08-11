@@ -58,6 +58,57 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public LoraPreset[] AvailablePresets { get; } = Enum.GetValues<LoraPreset>();
 
     [ObservableProperty]
+    private Region _selectedRegion = Region.US;
+
+    public Region[] AvailableRegions { get; } = Enum.GetValues<Region>();
+
+    [ObservableProperty]
+    private ObservableCollection<int> _slots = new();
+
+    [ObservableProperty]
+    private int _selectedSlot = 20;
+
+    // SF/BW/CR: auto-filled from the preset (ApplyPresetToLoraParams), editable
+    // to override — mirrors MeshRF.App's OverrideSf/OverrideBwKhz/OverrideCr.
+    [ObservableProperty]
+    private byte _overrideSf = 11;
+
+    [ObservableProperty]
+    private double _overrideBwKhz = 250;
+
+    [ObservableProperty]
+    private byte _overrideCr = 5;
+
+    /// <summary>True when SF/BW/CR differ from the selected preset's defaults.</summary>
+    public bool IsCustomLoraParams
+    {
+        get
+        {
+            var p = LoraParamsHelper.FromPreset(SelectedPreset);
+            return OverrideSf != p.Sf || Math.Abs(OverrideBwKhz - p.BwKhz) > 0.01 || OverrideCr != p.Cr;
+        }
+    }
+
+    [ObservableProperty]
+    private byte _lnaGainDb = 24;
+
+    [ObservableProperty]
+    private byte _vgaGainDb = 20;
+
+    [ObservableProperty]
+    private bool _ampEnable;
+
+    [ObservableProperty]
+    private byte _rtlGainDb = 30;
+
+    [ObservableProperty]
+    private bool _rtlAgcEnable;
+
+    private bool _suppressLoraParamSync;
+    private bool _suppressSlotSync;
+    private bool _suppressRetune;
+
+    [ObservableProperty]
     private bool _isRunning;
 
     [ObservableProperty]
@@ -91,10 +142,32 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings = AvaloniaAppSettings.Load();
         if (Enum.TryParse<RadioDeviceKind>(_settings.RxDeviceKind, out var savedDevice))
             SelectedDevice = savedDevice;
+        if (Enum.TryParse<Region>(_settings.Region, out var savedRegion))
+            SelectedRegion = savedRegion;
         if (Enum.TryParse<LoraPreset>(_settings.Preset, out var savedPreset))
             SelectedPreset = savedPreset;
+
+        if (_settings.OverrideSf != 0 || _settings.OverrideBwHz != 0 || _settings.OverrideCr != 0)
+        {
+            OverrideSf = _settings.OverrideSf;
+            OverrideBwKhz = _settings.OverrideBwHz / 1000.0;
+            OverrideCr = _settings.OverrideCr;
+        }
+        else
+        {
+            ApplyPresetToLoraParams(SelectedPreset);
+        }
+        RebuildSlots(snapToDefault: _settings.Slot <= 0);
+        if (_settings.Slot > 0) SelectedSlot = _settings.Slot;
         if (_settings.CenterFreqMHz > 0)
             CenterFreqMHz = _settings.CenterFreqMHz;
+
+        LnaGainDb = _settings.LnaGainDb;
+        VgaGainDb = _settings.VgaGainDb;
+        AmpEnable = _settings.AmpEnable;
+        RtlGainDb = _settings.RtlGainDb;
+        RtlAgcEnable = _settings.RtlAgcEnable;
+
         // The property setters above are no-ops when the loaded value equals
         // the field's compile-time default, so a fresh run with no settings
         // file yet wouldn't otherwise write one. Save unconditionally so the
@@ -179,10 +252,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         else
         {
             _core.SetRxDevice(SelectedDevice);
-            var hz = (ulong)(CenterFreqMHz * 1_000_000);
+            ApplyGains();
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             try
             {
-                _core.StartRx(SelectedPreset, hz);
+                if (IsCustomLoraParams)
+                {
+                    var bwHz = (uint)Math.Round(OverrideBwKhz * 1000.0);
+                    _core.StartRxParams(OverrideSf, bwHz, OverrideCr, hz);
+                }
+                else
+                {
+                    _core.StartRx(SelectedPreset, hz);
+                }
             }
             catch (InvalidOperationException ex)
             {
@@ -194,15 +276,105 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private bool CanToggleRx() => _core is not null;
 
-    partial void OnSelectedDeviceChanged(RadioDeviceKind value) => SaveSettings();
-    partial void OnSelectedPresetChanged(LoraPreset value) => SaveSettings();
-    partial void OnCenterFreqMHzChanged(double value) => SaveSettings();
+    private void ApplyGains()
+    {
+        if (_core is null) return;
+        if (SelectedDevice == RadioDeviceKind.RtlSdr)
+            _core.SetGains(RtlGainDb, 0, RtlAgcEnable);
+        else
+            _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
+    }
+
+    /// <summary>Syncs OverrideSf/BwKhz/Cr to the firmware defaults for
+    /// <paramref name="preset"/> without triggering a save loop.</summary>
+    private void ApplyPresetToLoraParams(LoraPreset preset)
+    {
+        var p = LoraParamsHelper.FromPreset(preset);
+        _suppressLoraParamSync = true;
+        try
+        {
+            OverrideSf = p.Sf;
+            OverrideBwKhz = p.BwKhz;
+            OverrideCr = p.Cr;
+        }
+        finally
+        {
+            _suppressLoraParamSync = false;
+        }
+        OnPropertyChanged(nameof(IsCustomLoraParams));
+    }
+
+    private void RebuildSlots(bool snapToDefault = false)
+    {
+        var count = ChannelPlan.SlotCount(SelectedRegion, SelectedPreset);
+        var preferred = ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset);
+        int desired = snapToDefault || SelectedSlot < 1 || SelectedSlot > count ? preferred : SelectedSlot;
+
+        _suppressSlotSync = true;
+        try
+        {
+            var fresh = new ObservableCollection<int>();
+            for (var i = 1; i <= count; i++) fresh.Add(i);
+            Slots = fresh;
+            SelectedSlot = desired;
+        }
+        finally
+        {
+            _suppressSlotSync = false;
+        }
+
+        _suppressRetune = true;
+        try { CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, desired); }
+        finally { _suppressRetune = false; }
+    }
+
+    partial void OnSelectedDeviceChanged(RadioDeviceKind value) { ApplyGains(); SaveSettings(); }
+
+    partial void OnSelectedPresetChanged(LoraPreset value)
+    {
+        // Autofill SF/BW/CR from the new preset — preset is the anchor, so
+        // overwriting any prior manual override here is the right UX.
+        ApplyPresetToLoraParams(value);
+        RebuildSlots(snapToDefault: true);
+        SaveSettings();
+    }
+
+    partial void OnSelectedRegionChanged(Region value) { RebuildSlots(snapToDefault: true); SaveSettings(); }
+
+    partial void OnSelectedSlotChanged(int value)
+    {
+        if (_suppressSlotSync || value <= 0) return;
+        CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, value);
+        SaveSettings();
+    }
+
+    partial void OnOverrideSfChanged(byte value)      { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
+    partial void OnOverrideBwKhzChanged(double value) { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
+    partial void OnOverrideCrChanged(byte value)      { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
+
+    partial void OnCenterFreqMHzChanged(double value) { if (!_suppressRetune) SaveSettings(); }
+
+    partial void OnLnaGainDbChanged(byte value) { ApplyGains(); SaveSettings(); }
+    partial void OnVgaGainDbChanged(byte value) { ApplyGains(); SaveSettings(); }
+    partial void OnAmpEnableChanged(bool value) { ApplyGains(); SaveSettings(); }
+    partial void OnRtlGainDbChanged(byte value) { ApplyGains(); SaveSettings(); }
+    partial void OnRtlAgcEnableChanged(bool value) { ApplyGains(); SaveSettings(); }
 
     private void SaveSettings()
     {
         _settings.RxDeviceKind = SelectedDevice.ToString();
         _settings.Preset = SelectedPreset.ToString();
         _settings.CenterFreqMHz = CenterFreqMHz;
+        _settings.Region = SelectedRegion.ToString();
+        _settings.Slot = SelectedSlot;
+        _settings.OverrideSf = OverrideSf;
+        _settings.OverrideBwHz = (uint)Math.Round(OverrideBwKhz * 1000.0);
+        _settings.OverrideCr = OverrideCr;
+        _settings.LnaGainDb = LnaGainDb;
+        _settings.VgaGainDb = VgaGainDb;
+        _settings.AmpEnable = AmpEnable;
+        _settings.RtlGainDb = RtlGainDb;
+        _settings.RtlAgcEnable = RtlAgcEnable;
         _settings.Save();
     }
 
