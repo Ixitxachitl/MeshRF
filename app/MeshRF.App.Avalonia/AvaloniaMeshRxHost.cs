@@ -25,6 +25,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     private readonly NodeStore _nodeStore;
     private readonly ChannelStore _channelStore;
     private readonly WaypointStore _waypointStore;
+    private readonly MessageStore _messageStore;
     private readonly Dictionary<uint, ConversationTabViewModel> _conversationsByNode = new();
     private readonly HashSet<ulong> _recentUndecodedKeys = new();
     private readonly Queue<ulong> _recentUndecodedOrder = new();
@@ -40,12 +41,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public ObservableCollection<string> LogLines { get; } = new();
 
     /// <summary>
-    /// Ephemeral session node number (random, not persisted) — needed so a
-    /// transmitted frame carries a valid "from" and gets recognized as our
-    /// own echo (isFromUs) instead of a new incoming packet. Real node
-    /// identity/PKI management doesn't exist in this scaffold yet.
+    /// Session node number: MeshRF.App's UserNodeNum when set (shared
+    /// settings.json), otherwise an ephemeral random identity so a
+    /// transmitted frame still carries a valid "from" and gets recognized
+    /// as our own echo (isFromUs) instead of a new incoming packet.
     /// </summary>
-    public uint MyNodeNum { get; set; }
+    public uint MyNodeNum { get; }
 
     uint IMeshRxHost.MyNodeNum => MyNodeNum;
     byte[] IMeshRxHost.MyPrivateKeyBytes => Array.Empty<byte>();
@@ -53,14 +54,54 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
 
-    public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore, WaypointStore waypointStore)
+    public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore, WaypointStore waypointStore,
+        MessageStore messageStore, uint myNodeNum)
     {
         _nodeStore = nodeStore;
         _channelStore = channelStore;
         _waypointStore = waypointStore;
+        _messageStore = messageStore;
+        MyNodeNum = myNodeNum;
+
         LoadChannels();
         foreach (var wp in _waypointStore.All()) Waypoints.Add(wp);
+        foreach (var n in _nodeStore.All()) Nodes.Add(n);
+        LoadMessageHistory();
     }
+
+    /// <summary>Rebuilds channel chat rooms and DM conversation tabs from
+    /// persisted history, same as MainViewModel does on startup — otherwise
+    /// this app would only ever show messages received during the current
+    /// session, even though the shared database already has history.</summary>
+    private void LoadMessageHistory()
+    {
+        foreach (var m in _messageStore.TextHistory())
+        {
+            if (m.ToNode != 0xFFFFFFFFu) continue; // DMs are rebuilt separately below.
+            var tab = ResolveChannelTab(m.Channel);
+            tab?.Messages.Insert(0, ToChannelMessage(m));
+        }
+
+        if (MyNodeNum == 0) return;
+        foreach (var peer in _messageStore.ConversationPeers(MyNodeNum))
+        {
+            var convo = OpenConversation(peer);
+            foreach (var m in _messageStore.Conversation(peer, MyNodeNum))
+                convo.Messages.Insert(0, ToChannelMessage(m));
+        }
+    }
+
+    private ChannelMessage ToChannelMessage(MessageRecord m) => new()
+    {
+        Timestamp = DateTimeOffset.FromUnixTimeSeconds(m.RxEpoch).LocalDateTime,
+        FromId = $"!{m.FromNode:x8}",
+        SenderNodeNum = m.FromNode,
+        Text = m.Text,
+        RssiDbm = m.RssiDbfs,
+        SnrDb = m.SnrDb,
+        PacketId = m.PacketId,
+        IsOutgoing = MyNodeNum != 0 && m.FromNode == MyNodeNum,
+    };
 
     private void LoadChannels()
     {

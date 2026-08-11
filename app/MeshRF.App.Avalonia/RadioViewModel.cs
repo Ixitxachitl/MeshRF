@@ -156,16 +156,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedRtlGainDb = _settings.RtlGainDb;
         var savedRtlAgcEnable = _settings.RtlAgcEnable;
 
-        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore)
-        {
-            // Shared with MeshRF.App's UserNodeNum when set (same
-            // settings.json); otherwise an ephemeral random identity for
-            // this session — see AvaloniaMeshRxHost.MyNodeNum. Avoid 0
-            // (unset) and the broadcast address for the random fallback.
-            MyNodeNum = _settings.UserNodeNum != 0
-                ? _settings.UserNodeNum
-                : (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE),
-        };
+        // Shared with MeshRF.App's UserNodeNum when set (same settings.json);
+        // otherwise an ephemeral random identity for this session — see
+        // AvaloniaMeshRxHost.MyNodeNum. Avoid 0 (unset) and the broadcast
+        // address for the random fallback.
+        var myNodeNum = _settings.UserNodeNum != 0
+            ? _settings.UserNodeNum
+            : (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE);
+        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum);
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
         SelectedTab = Tabs.FirstOrDefault();
         if (Enum.TryParse<RadioDeviceKind>(savedRxDeviceKind, out var device))
