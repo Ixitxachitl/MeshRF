@@ -1,10 +1,89 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="MeshRF.AvaloniaApp.App"
-             RequestedThemeVariant="Default">
+             RequestedThemeVariant="Dark">
+
+    <Application.Resources>
+        <!-- Mirrors MeshRF.App's Themes/Dark.xaml palette, so the two apps
+             read as the same product. Light theme isn't ported yet. -->
+        <SolidColorBrush x:Key="BrushAppBackground"      Color="#FF1E1E1E" />
+        <SolidColorBrush x:Key="BrushAppForeground"      Color="#FFE6E6E6" />
+        <SolidColorBrush x:Key="BrushSubtle"             Color="#FFB0B0B0" />
+        <SolidColorBrush x:Key="BrushPanelBackground"    Color="#FF2A2A2A" />
+        <SolidColorBrush x:Key="BrushPanelBorder"        Color="#FF3F3F3F" />
+        <SolidColorBrush x:Key="BrushSplitter"           Color="#FF3F3F3F" />
+        <SolidColorBrush x:Key="BrushSpectrumBackground" Color="#FF101418" />
+        <SolidColorBrush x:Key="BrushHover"              Color="#FF3A3A3A" />
+        <SolidColorBrush x:Key="BrushPressed"             Color="#FF222222" />
+    </Application.Resources>
 
     <Application.Styles>
         <FluentTheme />
+
+        <!-- MeshRF.App runs at WPF's default ~12px control text; Avalonia's
+             FluentTheme defaults noticeably larger (14px+, with generous
+             touch-sized padding) which reads as oversized next to it. Pull
+             the baseline down app-wide rather than per-control. -->
+        <Style Selector="Window">
+            <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+        </Style>
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="Button">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+        </Style>
+        <Style Selector="Button:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushPressed}" />
+        </Style>
+        <Style Selector="ComboBox">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="ComboBoxItem">
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="ListBox">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="TabControl">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+        </Style>
+        <Style Selector="TabItem">
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
     </Application.Styles>
 
 </Application>

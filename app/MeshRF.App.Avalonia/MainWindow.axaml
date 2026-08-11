@@ -3,126 +3,238 @@
         xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
         xmlns:mesh="clr-namespace:MeshRF;assembly=MeshRF.Core"
         xmlns:nodes="clr-namespace:MeshRF.Nodes;assembly=MeshRF.Core"
+        xmlns:waypoints="clr-namespace:MeshRF.Waypoints;assembly=MeshRF.Core"
         x:Class="MeshRF.AvaloniaApp.MainWindow"
         x:Name="RootWindow"
         x:DataType="local:RadioViewModel"
-        Title="MeshRF (cross-platform scaffold)"
-        Width="900" Height="680">
+        Title="MeshRF"
+        Width="1280" Height="900">
 
-    <Grid Margin="24" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto" ColumnDefinitions="2*,1*">
-        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="MeshRF — Avalonia scaffold" FontSize="20" FontWeight="Bold" />
-        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,8,0,0" />
-        <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding DeviceStatus}" TextWrapping="Wrap" />
+    <DockPanel LastChildFill="True">
 
-        <WrapPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,12,0,0">
-            <TextBlock Text="RX:" VerticalAlignment="Center" Margin="0,0,4,4" />
-            <ComboBox ItemsSource="{Binding AvailableDevices}"
-                      SelectedItem="{Binding SelectedDevice}"
-                      IsEnabled="{Binding !IsRunning}"
-                      Width="100" Margin="0,0,10,4" />
-            <TextBlock Text="Region:" VerticalAlignment="Center" Margin="0,0,4,4" />
-            <ComboBox ItemsSource="{Binding AvailableRegions}"
-                      SelectedItem="{Binding SelectedRegion}"
-                      IsEnabled="{Binding !IsRunning}"
-                      Width="80" Margin="0,0,10,4" />
-            <TextBlock Text="Preset:" VerticalAlignment="Center" Margin="0,0,4,4" />
-            <ComboBox ItemsSource="{Binding AvailablePresets}"
-                      SelectedItem="{Binding SelectedPreset}"
-                      IsEnabled="{Binding !IsRunning}"
-                      Width="120" Margin="0,0,10,4" />
-            <TextBlock Text="Slot:" VerticalAlignment="Center" Margin="0,0,4,4" />
-            <ComboBox ItemsSource="{Binding Slots}"
-                      SelectedItem="{Binding SelectedSlot}"
-                      IsEnabled="{Binding !IsRunning}"
-                      Width="60" Margin="0,0,10,4" />
-            <TextBlock Text="MHz:" VerticalAlignment="Center" Margin="0,0,4,4" />
-            <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}" Width="80" Margin="0,0,10,4" />
-            <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" Margin="0,0,10,4" />
-            <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}"
-                       IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,4" />
-        </WrapPanel>
+        <!-- Toolbar row 1: device / region / preset / slot / frequency / start-stop. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                BorderThickness="0,0,0,1"
+                Padding="6,4">
+            <WrapPanel>
+                <TextBlock Text="RX" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <ComboBox ItemsSource="{Binding AvailableDevices}"
+                          SelectedItem="{Binding SelectedDevice}"
+                          IsEnabled="{Binding !IsRunning}"
+                          FontSize="11" Width="100" Margin="0,0,10,4" />
+                <TextBlock Text="Region" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <ComboBox ItemsSource="{Binding AvailableRegions}"
+                          SelectedItem="{Binding SelectedRegion}"
+                          IsEnabled="{Binding !IsRunning}"
+                          FontSize="11" Width="80" Margin="0,0,10,4" />
+                <TextBlock Text="Preset" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <ComboBox ItemsSource="{Binding AvailablePresets}"
+                          SelectedItem="{Binding SelectedPreset}"
+                          IsEnabled="{Binding !IsRunning}"
+                          FontSize="11" Width="120" Margin="0,0,10,4" />
+                <TextBlock Text="Slot" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <ComboBox ItemsSource="{Binding Slots}"
+                          SelectedItem="{Binding SelectedSlot}"
+                          IsEnabled="{Binding !IsRunning}"
+                          FontSize="11" Width="60" Margin="0,0,10,4" />
+                <TextBlock Text="Freq (MHz)" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
+                         FontSize="11" Width="80" Margin="0,0,10,4" />
+                <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" Margin="0,0,10,4" />
+                <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}" FontSize="11"
+                           IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,4" />
+            </WrapPanel>
+        </Border>
 
-        <WrapPanel Grid.Row="4" Grid.ColumnSpan="2" Margin="0,4,0,0">
-            <TextBlock Text="SF:" VerticalAlignment="Center" Margin="0,0,4,4"
-                       ToolTip.Tip="Spreading factor — auto-filled from preset; edit to override" />
-            <TextBox Text="{Binding OverrideSf}" IsEnabled="{Binding !IsRunning}" Width="40" Margin="0,0,10,4" />
-            <TextBlock Text="BW (kHz):" VerticalAlignment="Center" Margin="0,0,4,4"
-                       ToolTip.Tip="Bandwidth — auto-filled from preset; edit to override" />
-            <TextBox Text="{Binding OverrideBwKhz}" IsEnabled="{Binding !IsRunning}" Width="60" Margin="0,0,10,4" />
-            <TextBlock Text="CR:" VerticalAlignment="Center" Margin="0,0,4,4"
-                       ToolTip.Tip="Coding rate denominator (4/N) — auto-filled from preset; edit to override" />
-            <TextBox Text="{Binding OverrideCr}" IsEnabled="{Binding !IsRunning}" Width="40" Margin="0,0,10,4" />
-            <TextBlock Text="LNA:" VerticalAlignment="Center" Margin="0,0,4,4"
-                       ToolTip.Tip="HackRF LNA gain (dB)" />
-            <TextBox Text="{Binding LnaGainDb}" Width="40" Margin="0,0,10,4" />
-            <TextBlock Text="VGA:" VerticalAlignment="Center" Margin="0,0,4,4"
-                       ToolTip.Tip="HackRF VGA gain (dB)" />
-            <TextBox Text="{Binding VgaGainDb}" Width="40" Margin="0,0,10,4" />
-            <CheckBox Content="Amp" IsChecked="{Binding AmpEnable}" Margin="0,0,10,4"
-                      ToolTip.Tip="HackRF RF amplifier" />
-            <TextBlock Text="RTL gain:" VerticalAlignment="Center" Margin="0,0,4,4" />
-            <TextBox Text="{Binding RtlGainDb}" IsEnabled="{Binding !RtlAgcEnable}" Width="40" Margin="0,0,10,4" />
-            <CheckBox Content="RTL AGC" IsChecked="{Binding RtlAgcEnable}" Margin="0,0,10,4" />
-        </WrapPanel>
+        <!-- Toolbar row 2: SF/BW/CR overrides + RX gains. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                BorderThickness="0,0,0,1"
+                Padding="6,4">
+            <WrapPanel>
+                <TextBlock Text="SF" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4"
+                           ToolTip.Tip="Spreading factor — auto-filled from preset; edit to override" />
+                <TextBox Text="{Binding OverrideSf}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="36" Margin="0,0,10,4" />
+                <TextBlock Text="BW" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4"
+                           ToolTip.Tip="Bandwidth in kHz — auto-filled from preset; edit to override" />
+                <TextBox Text="{Binding OverrideBwKhz}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="56" Margin="0,0,10,4" />
+                <TextBlock Text="CR" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4"
+                           ToolTip.Tip="Coding rate denominator (4/N) — auto-filled from preset; edit to override" />
+                <TextBox Text="{Binding OverrideCr}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="36" Margin="0,0,10,4" />
+                <Border Width="1" Margin="4,0,10,4" Background="{DynamicResource BrushPanelBorder}" />
+                <TextBlock Text="LNA" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" ToolTip.Tip="HackRF LNA gain (dB)" />
+                <TextBox Text="{Binding LnaGainDb}" FontSize="11" Width="36" Margin="0,0,10,4" />
+                <TextBlock Text="VGA" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" ToolTip.Tip="HackRF VGA gain (dB)" />
+                <TextBox Text="{Binding VgaGainDb}" FontSize="11" Width="36" Margin="0,0,10,4" />
+                <CheckBox Content="Amp" IsChecked="{Binding AmpEnable}" FontSize="11" Margin="0,0,10,4" ToolTip.Tip="HackRF RF amplifier" />
+                <Border Width="1" Margin="4,0,10,4" Background="{DynamicResource BrushPanelBorder}" />
+                <TextBlock Text="RTL gain" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <TextBox Text="{Binding RtlGainDb}" IsEnabled="{Binding !RtlAgcEnable}" FontSize="11" Width="36" Margin="0,0,10,4" />
+                <CheckBox Content="RTL AGC" IsChecked="{Binding RtlAgcEnable}" FontSize="11" Margin="0,0,10,4" />
+            </WrapPanel>
+        </Border>
 
-        <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,16,0,4" FontWeight="Bold" Text="Channels &amp; conversations" />
-        <TextBlock Grid.Row="5" Grid.Column="1" Margin="6,16,0,4" FontWeight="Bold"
-                   Text="{Binding Nodes.Count, StringFormat='Nodes ({0})'}" />
+        <!-- Status bar. -->
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                BorderThickness="0,1,0,0"
+                Padding="8,4">
+            <StackPanel>
+                <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+                <TextBlock Text="{Binding DeviceStatus}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+            </StackPanel>
+        </Border>
 
-        <TabControl Grid.Row="6" Grid.Column="0" Margin="0,0,6,0"
-                    ItemsSource="{Binding Tabs}"
-                    SelectedItem="{Binding SelectedTab}">
-            <TabControl.ItemTemplate>
-                <DataTemplate x:DataType="mesh:ITabItem">
-                    <TextBlock Text="{Binding TabHeader}" />
-                </DataTemplate>
-            </TabControl.ItemTemplate>
-            <TabControl.ContentTemplate>
-                <DataTemplate x:DataType="mesh:ITabItem">
-                    <ListBox ItemsSource="{Binding Messages}">
+        <!-- Main content: same 2x2 quadrant layout as MeshRF.App (map / nodes
+             on the left, spectrum+waterfall / chat+log on the right), so the
+             two apps read as the same product even though the top quarters
+             here are still placeholders — map and waterfall haven't been
+             ported yet. -->
+        <Grid x:Name="MainLayoutGrid" Margin="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1*" MinWidth="200" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="2*" MinWidth="260" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: map (top, placeholder) over nodes/waypoints (bottom). -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="1*" MinHeight="120" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="1*" MinHeight="120" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Margin="0,0,0,3"
+                        Background="{DynamicResource BrushSpectrumBackground}"
+                        BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                    <TextBlock Text="Map (not ported yet)" Foreground="{DynamicResource BrushSubtle}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                              Background="{DynamicResource BrushSplitter}" />
+
+                <Grid Grid.Row="2" Margin="0,3,0,0" RowDefinitions="Auto,2*,5,Auto,1*">
+                    <TextBlock Grid.Row="0" Margin="4,0,0,4" FontWeight="Bold"
+                               Text="{Binding Nodes.Count, StringFormat='Nodes ({0})'}" />
+                    <ListBox Grid.Row="1" ItemsSource="{Binding Nodes}">
                         <ListBox.ItemTemplate>
-                            <DataTemplate x:DataType="mesh:ChannelMessage">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding FromId}" FontWeight="Bold" />
-                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                            <DataTemplate x:DataType="nodes:NodeRecord">
+                                <Grid ColumnDefinitions="*,Auto" Margin="0,4">
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{Binding LongName}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding DisplayId}" FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+                                        <TextBlock FontSize="11" Foreground="{DynamicResource BrushSubtle}">
+                                            <Run Text="{Binding RssiDbm, StringFormat='{}{0:F0} dBm'}" />
+                                            <Run Text="{Binding SnrDb, StringFormat='  {0:F1} dB'}" />
+                                            <Run Text="{Binding BatteryPct, StringFormat='  {0}%'}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Msg" VerticalAlignment="Center"
+                                            Command="{Binding #RootWindow.DataContext.MessageNodeCommand}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
+                                  Background="{DynamicResource BrushSplitter}" />
+
+                    <TextBlock Grid.Row="3" Margin="4,3,0,4" FontWeight="Bold"
+                               Text="{Binding Waypoints.Count, StringFormat='Waypoints ({0})'}" />
+                    <ListBox Grid.Row="4" ItemsSource="{Binding Waypoints}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="waypoints:WaypointRecord">
+                                <StackPanel Margin="0,4">
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock FontSize="11" Foreground="{DynamicResource BrushSubtle}">
+                                        <Run Text="{Binding Latitude, StringFormat='{}{0:F5},'}" />
+                                        <Run Text="{Binding Longitude, StringFormat='{}{0:F5}'}" />
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Description}" FontSize="11"
+                                               Foreground="{DynamicResource BrushSubtle}" TextWrapping="Wrap"
+                                               IsVisible="{Binding Description, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                </DataTemplate>
-            </TabControl.ContentTemplate>
-        </TabControl>
+                </Grid>
+            </Grid>
 
-        <ListBox Grid.Row="6" Grid.Column="1" Margin="6,0,0,0" ItemsSource="{Binding Nodes}">
-            <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="nodes:NodeRecord">
-                    <Grid ColumnDefinitions="*,Auto" Margin="0,4">
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="{Binding LongName}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Text="{Binding DisplayId}" FontSize="11" Opacity="0.7" />
-                            <TextBlock FontSize="11" Opacity="0.7">
-                                <Run Text="{Binding RssiDbm, StringFormat='{}{0:F0} dBm'}" />
-                                <Run Text="{Binding SnrDb, StringFormat='  {0:F1} dB'}" />
-                                <Run Text="{Binding BatteryPct, StringFormat='  {0}%'}" />
-                            </TextBlock>
-                        </StackPanel>
-                        <Button Grid.Column="1" Content="Msg" VerticalAlignment="Center"
-                                Command="{Binding #RootWindow.DataContext.MessageNodeCommand}"
-                                CommandParameter="{Binding}" />
-                    </Grid>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                          Background="{DynamicResource BrushSplitter}" />
 
-        <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-            <TextBox Text="{Binding NewChannelName}" PlaceholderText="New channel name..." Width="180" />
-            <Button Content="Add channel" Command="{Binding AddChannelCommand}" />
-        </StackPanel>
+            <!-- Right: spectrum/waterfall (top, placeholder) over chat tabs + log (bottom). -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="1*" MinHeight="120" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="1*" MinHeight="120" />
+                </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-            <TextBox Text="{Binding MessageText}" PlaceholderText="Message..." Width="440" />
-            <Button Content="Send" Command="{Binding SendMessageCommand}" />
-        </StackPanel>
-    </Grid>
+                <Border Grid.Row="0" Margin="3,0,0,3"
+                        Background="{DynamicResource BrushSpectrumBackground}"
+                        BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                    <TextBlock Text="Spectrum / waterfall (not ported yet)" Foreground="{DynamicResource BrushSubtle}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                              Background="{DynamicResource BrushSplitter}" />
+
+                <Grid Grid.Row="2" Margin="3,3,0,0" RowDefinitions="Auto,2*,Auto,Auto,5,1*">
+                    <TextBlock Grid.Row="0" Margin="4,0,0,4" FontWeight="Bold" Text="Channels &amp; conversations" />
+
+                    <TabControl Grid.Row="1"
+                                ItemsSource="{Binding Tabs}"
+                                SelectedItem="{Binding SelectedTab}">
+                        <TabControl.ItemTemplate>
+                            <DataTemplate x:DataType="mesh:ITabItem">
+                                <TextBlock Text="{Binding TabHeader}" />
+                            </DataTemplate>
+                        </TabControl.ItemTemplate>
+                        <TabControl.ContentTemplate>
+                            <DataTemplate x:DataType="mesh:ITabItem">
+                                <ListBox ItemsSource="{Binding Messages}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="mesh:ChannelMessage">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding FromId}" FontWeight="Bold" />
+                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DataTemplate>
+                        </TabControl.ContentTemplate>
+                    </TabControl>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                        <TextBox Text="{Binding NewChannelName}" PlaceholderText="New channel name..." Width="180" />
+                        <Button Content="Add channel" Command="{Binding AddChannelCommand}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                        <TextBox Text="{Binding MessageText}" PlaceholderText="Message..." Width="360" />
+                        <Button Content="Send" Command="{Binding SendMessageCommand}" />
+                    </StackPanel>
+
+                    <GridSplitter Grid.Row="4" Height="5" HorizontalAlignment="Stretch" Margin="0,6,0,0"
+                                  Background="{DynamicResource BrushSplitter}" />
+
+                    <DockPanel Grid.Row="5" Margin="0,3,0,0">
+                        <TextBlock DockPanel.Dock="Top" Text="Log" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,2" />
+                        <ListBox DockPanel.Dock="Bottom" ItemsSource="{Binding LogLines}" FontFamily="Consolas" FontSize="11" />
+                    </DockPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </DockPanel>
 
 </Window>

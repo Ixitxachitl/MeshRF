@@ -4,6 +4,7 @@ using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
+using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -23,6 +24,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 {
     private readonly NodeStore _nodeStore;
     private readonly ChannelStore _channelStore;
+    private readonly WaypointStore _waypointStore;
     private readonly Dictionary<uint, ConversationTabViewModel> _conversationsByNode = new();
     private readonly HashSet<ulong> _recentUndecodedKeys = new();
     private readonly Queue<ulong> _recentUndecodedOrder = new();
@@ -34,6 +36,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public ObservableCollection<ITabItem> Tabs { get; } = new();
 
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
+    public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
 
     /// <summary>
@@ -50,11 +53,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
 
-    public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore)
+    public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore, WaypointStore waypointStore)
     {
         _nodeStore = nodeStore;
         _channelStore = channelStore;
+        _waypointStore = waypointStore;
         LoadChannels();
+        foreach (var wp in _waypointStore.All()) Waypoints.Add(wp);
     }
 
     private void LoadChannels()
@@ -229,6 +234,45 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 MarkNodeDirty(header.From);
                 break;
 
+            case PortNum.Waypoint when result.Waypoint is not null:
+                var wp = result.Waypoint;
+                // Some senders omit waypoint id (0); fall back to packet id
+                // as a stable per-sender key, same as MainViewModel.
+                uint waypointId = wp.Id != 0 ? wp.Id : header.PacketId;
+                var waypointRecord = new WaypointRecord
+                {
+                    FromNode = header.From,
+                    WaypointId = waypointId,
+                    PacketId = header.PacketId,
+                    Channel = result.ChannelName,
+                    Name = wp.Name,
+                    Description = wp.Description,
+                    Icon = wp.Icon,
+                    Latitude = wp.Latitude,
+                    Longitude = wp.Longitude,
+                    ExpireEpoch = wp.ExpireEpoch,
+                    LockedTo = wp.LockedTo,
+                    RxEpoch = rxEpoch,
+                    GeofenceRadius = wp.GeofenceRadius,
+                    BboxWest = wp.BoundingBox?.West,
+                    BboxSouth = wp.BoundingBox?.South,
+                    BboxEast = wp.BoundingBox?.East,
+                    BboxNorth = wp.BoundingBox?.North,
+                };
+                _waypointStore.Upsert(waypointRecord);
+                var existingWpIndex = -1;
+                for (int i = 0; i < Waypoints.Count; i++)
+                {
+                    if (Waypoints[i].FromNode == header.From && Waypoints[i].WaypointId == waypointId)
+                    {
+                        existingWpIndex = i;
+                        break;
+                    }
+                }
+                if (existingWpIndex >= 0) Waypoints[existingWpIndex] = waypointRecord;
+                else Waypoints.Add(waypointRecord);
+                break;
+
             case PortNum.Telemetry when result.Telemetry is not null:
                 var t = result.Telemetry;
                 _nodeStore.Upsert(new NodeRecord
@@ -248,5 +292,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         }
     }
 
-    public void Dispose() => _channelStore.Dispose();
+    public void Dispose()
+    {
+        _channelStore.Dispose();
+        _waypointStore.Dispose();
+    }
 }

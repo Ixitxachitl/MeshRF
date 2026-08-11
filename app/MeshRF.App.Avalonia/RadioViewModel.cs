@@ -9,6 +9,7 @@ using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
+using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -26,17 +27,20 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         @"payload(?:\[(?<status>OK|BAD)\])?\s+len=(?<len>\d+)(?:\s+crc=(?<rx>[0-9A-Fa-f]+)/(?<calc>[0-9A-Fa-f]+))?\s+(?<hex>[0-9A-Fa-f]+)",
         RegexOptions.Compiled);
 
-    private readonly AvaloniaAppSettings _settings;
+    private readonly AppSettings _settings;
     private readonly MeshtasticCore? _core;
     private readonly DispatcherTimer _pollTimer;
     private readonly NodeStore _nodeStore = new();
     private readonly MessageStore _messageStore = new();
     private readonly ChannelStore _channelStore = new();
+    private readonly WaypointStore _waypointStore = new();
     private readonly AvaloniaMeshRxHost _rxHost;
     private readonly MeshRxRouter _rxRouter;
 
     public ObservableCollection<ITabItem> Tabs => _rxHost.Tabs;
     public ObservableCollection<NodeRecord> Nodes => _rxHost.Nodes;
+    public ObservableCollection<WaypointRecord> Waypoints => _rxHost.Waypoints;
+    public ObservableCollection<string> LogLines => _rxHost.LogLines;
 
     [ObservableProperty]
     private ITabItem? _selectedTab;
@@ -129,49 +133,71 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     public RadioViewModel()
     {
-        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore)
+        _settings = AppSettings.Load();
+
+        // Snapshot everything we need from _settings into locals up front.
+        // OnSelectedPresetChanged/OnSelectedRegionChanged etc. below call
+        // SaveSettings(), which mutates these same _settings fields to match
+        // the view model's current (partially-applied) state — reading
+        // _settings again later in this constructor would see those
+        // in-progress values instead of what was actually on disk, silently
+        // clobbering the saved slot/frequency with a preset's default.
+        var savedRxDeviceKind = _settings.RxDeviceKind;
+        var savedRegion = _settings.Region;
+        var savedPreset = _settings.Preset;
+        var savedOverrideSf = _settings.OverrideSf;
+        var savedOverrideBwHz = _settings.OverrideBwHz;
+        var savedOverrideCr = _settings.OverrideCr;
+        var savedSlot = _settings.Slot;
+        var savedCenterFreqMHz = _settings.CenterFreqMHz;
+        var savedLnaGainDb = _settings.LnaGainDb;
+        var savedVgaGainDb = _settings.VgaGainDb;
+        var savedAmpEnable = _settings.AmpEnable;
+        var savedRtlGainDb = _settings.RtlGainDb;
+        var savedRtlAgcEnable = _settings.RtlAgcEnable;
+
+        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore)
         {
-            // Ephemeral session identity (random, not persisted) — see
-            // AvaloniaMeshRxHost.MyNodeNum. Avoid 0 (unset) and the
-            // broadcast address.
-            MyNodeNum = (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE),
+            // Shared with MeshRF.App's UserNodeNum when set (same
+            // settings.json); otherwise an ephemeral random identity for
+            // this session — see AvaloniaMeshRxHost.MyNodeNum. Avoid 0
+            // (unset) and the broadcast address for the random fallback.
+            MyNodeNum = _settings.UserNodeNum != 0
+                ? _settings.UserNodeNum
+                : (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE),
         };
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
         SelectedTab = Tabs.FirstOrDefault();
+        if (Enum.TryParse<RadioDeviceKind>(savedRxDeviceKind, out var device))
+            SelectedDevice = device;
+        if (Enum.TryParse<Region>(savedRegion, out var region))
+            SelectedRegion = region;
+        if (Enum.TryParse<LoraPreset>(savedPreset, out var preset))
+            SelectedPreset = preset;
 
-        _settings = AvaloniaAppSettings.Load();
-        if (Enum.TryParse<RadioDeviceKind>(_settings.RxDeviceKind, out var savedDevice))
-            SelectedDevice = savedDevice;
-        if (Enum.TryParse<Region>(_settings.Region, out var savedRegion))
-            SelectedRegion = savedRegion;
-        if (Enum.TryParse<LoraPreset>(_settings.Preset, out var savedPreset))
-            SelectedPreset = savedPreset;
-
-        if (_settings.OverrideSf != 0 || _settings.OverrideBwHz != 0 || _settings.OverrideCr != 0)
+        if (savedOverrideSf != 0 || savedOverrideBwHz != 0 || savedOverrideCr != 0)
         {
-            OverrideSf = _settings.OverrideSf;
-            OverrideBwKhz = _settings.OverrideBwHz / 1000.0;
-            OverrideCr = _settings.OverrideCr;
+            OverrideSf = savedOverrideSf;
+            OverrideBwKhz = savedOverrideBwHz / 1000.0;
+            OverrideCr = savedOverrideCr;
         }
         else
         {
             ApplyPresetToLoraParams(SelectedPreset);
         }
-        RebuildSlots(snapToDefault: _settings.Slot <= 0);
-        if (_settings.Slot > 0) SelectedSlot = _settings.Slot;
-        if (_settings.CenterFreqMHz > 0)
-            CenterFreqMHz = _settings.CenterFreqMHz;
+        RebuildSlots(snapToDefault: savedSlot <= 0);
+        if (savedSlot > 0) SelectedSlot = savedSlot;
+        if (savedCenterFreqMHz > 0)
+            CenterFreqMHz = savedCenterFreqMHz;
 
-        LnaGainDb = _settings.LnaGainDb;
-        VgaGainDb = _settings.VgaGainDb;
-        AmpEnable = _settings.AmpEnable;
-        RtlGainDb = _settings.RtlGainDb;
-        RtlAgcEnable = _settings.RtlAgcEnable;
+        LnaGainDb = savedLnaGainDb;
+        VgaGainDb = savedVgaGainDb;
+        AmpEnable = savedAmpEnable;
+        RtlGainDb = savedRtlGainDb;
+        RtlAgcEnable = savedRtlAgcEnable;
 
-        // The property setters above are no-ops when the loaded value equals
-        // the field's compile-time default, so a fresh run with no settings
-        // file yet wouldn't otherwise write one. Save unconditionally so the
-        // file always exists (and self-heals if deleted).
+        // Final sync: re-save so _settings/disk reflect the fully-resolved
+        // state above rather than whatever an intermediate cascade wrote.
         SaveSettings();
 
         try
