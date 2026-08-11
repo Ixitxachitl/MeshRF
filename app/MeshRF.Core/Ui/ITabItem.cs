@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-namespace MeshRF.App.ViewModels;
+namespace MeshRF;
 
 /// <summary>
 /// Common surface for anything shown as a tab in the channel/conversation
-/// TabControl. Lets channels and direct-message conversations coexist in one
-/// <c>ItemsSource</c> while sharing a header template.
+/// tab strip. Lets channels and direct-message conversations coexist in one
+/// list while sharing a header presentation.
 /// </summary>
 public interface ITabItem
 {

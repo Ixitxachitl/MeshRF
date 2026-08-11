@@ -4,32 +4,16 @@ using System.Media;
 
 namespace MeshRF.App.Audio;
 
-/// <summary>How long an incoming-message ringtone plays.</summary>
-public enum RingtoneMode
-{
-    /// <summary>Ringtone disabled; nothing plays.</summary>
-    Off,
-    /// <summary>Play the tune through exactly once.</summary>
-    PlayOnce,
-    /// <summary>Loop the tune for up to 5 seconds.</summary>
-    Seconds5,
-    /// <summary>Loop the tune for up to 10 seconds.</summary>
-    Seconds10,
-    /// <summary>Loop the tune for up to 30 seconds.</summary>
-    Seconds30,
-}
-
 /// <summary>
 /// Parses an RTTTL (Ring Tone Text Transfer Language) string and plays it as a
-/// synthesized tone via <see cref="SoundPlayer"/>. RTTTL is the same ringtone
-/// format Meshtastic uses for its external-notification buzzer, so a tune
-/// copied from a Meshtastic device plays here too.
+/// synthesized tone via <see cref="SoundPlayer"/>. Windows-only (SoundPlayer);
+/// see <see cref="MeshRF.IRingtonePlayer"/> for the portable surface other
+/// frontends implement against.
 /// </summary>
-public sealed class RtttlPlayer : IDisposable
+public sealed class RtttlPlayer : IRingtonePlayer
 {
     /// <summary>The stock Meshtastic external-notification ringtone.</summary>
-    public const string MeshtasticDefault =
-        "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p";
+    public const string MeshtasticDefault = IRingtonePlayer.MeshtasticDefault;
 
     private const int SampleRate = 44100;
     private const int LoopGapMs = 400;

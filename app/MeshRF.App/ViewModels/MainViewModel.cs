@@ -266,13 +266,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
 
     /// <summary>Map the user-facing mode label to the player enum.</summary>
-    private static MeshRF.App.Audio.RingtoneMode ParseRingtoneMode(string mode) => mode switch
+    private static MeshRF.RingtoneMode ParseRingtoneMode(string mode) => mode switch
     {
-        "Off" => MeshRF.App.Audio.RingtoneMode.Off,
-        "5 seconds" => MeshRF.App.Audio.RingtoneMode.Seconds5,
-        "10 seconds" => MeshRF.App.Audio.RingtoneMode.Seconds10,
-        "30 seconds" => MeshRF.App.Audio.RingtoneMode.Seconds30,
-        _ => MeshRF.App.Audio.RingtoneMode.PlayOnce,
+        "Off" => MeshRF.RingtoneMode.Off,
+        "5 seconds" => MeshRF.RingtoneMode.Seconds5,
+        "10 seconds" => MeshRF.RingtoneMode.Seconds10,
+        "30 seconds" => MeshRF.RingtoneMode.Seconds30,
+        _ => MeshRF.RingtoneMode.PlayOnce,
     };
 
     /// <summary>Play the configured ringtone for an incoming text message.</summary>
@@ -916,7 +916,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// mirrors firmware FloodingRouter::perhapsHandleUpgradedPacket.</summary>
     private readonly record struct PendingRelay(CancellationTokenSource Cts, byte NextHopLimit);
     private readonly Dictionary<ulong, PendingRelay> _pendingRelayCancels = new();
-    private readonly Dispatcher _uiDispatcher;
+    private readonly IUiDispatcher _uiDispatcher;
     private readonly Channel<PkcDecodeWorkItem> _pkcDecodeQueue;
     private readonly CancellationTokenSource _pkcDecodeCts = new();
     private const int MaxQueuedPkcDecodes = 256;
@@ -2058,7 +2058,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public MainViewModel()
     {
-        _uiDispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+        _uiDispatcher = new WpfUiDispatcher(Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher);
         _pkcDecodeQueue = Channel.CreateBounded<PkcDecodeWorkItem>(new BoundedChannelOptions(MaxQueuedPkcDecodes)
         {
             SingleReader = true,
@@ -8263,8 +8263,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             item.RxEpoch,
                             item.SnrDb,
                             item.PacketRssiDbm,
-                            item.HopsAway),
-                        DispatcherPriority.Background);
+                            item.HopsAway));
                 }
             }
         }
@@ -9044,7 +9043,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // Self convo is not in Tabs — update it separately.
                 if (_selfConversation?.NodeNum == nodeNum)
                     _selfConversation.AppendTelemetryHistoryRecord(withId);
-            }, DispatcherPriority.Background);
+            });
         });
     }
 
