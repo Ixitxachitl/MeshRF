@@ -1,0 +1,15 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.MainWindow"
+        x:DataType="local:MainWindow"
+        Title="MeshRF (cross-platform scaffold)"
+        Width="480" Height="260">
+
+    <StackPanel Margin="24" Spacing="12">
+        <TextBlock Text="MeshRF — Avalonia scaffold" FontSize="20" FontWeight="Bold" />
+        <TextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding NativeStatusLine}" TextWrapping="Wrap" />
+    </StackPanel>
+
+</Window>

@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>MeshRF.AvaloniaApp</RootNamespace>
+    <AssemblyName>MeshRF</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MeshRF.Core\MeshRF.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Copy the native bridge library produced by CMake into the output dir so
+       P/Invoke can find it at runtime. Mirrors MeshRF.App.csproj's
+       CopyNativeBridge target; see that file for the RelWithDebInfo rationale.
+       On Linux, point NativeBinDir at build/linux-x64/bin/<config> instead
+       (or override NativeConfig/NativeBinDir directly) since the CMake
+       preset name differs from the Windows one. -->
+  <PropertyGroup>
+    <NativeConfig Condition="'$(NativeConfig)' == ''">RelWithDebInfo</NativeConfig>
+    <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$(OS)' == 'Windows_NT'">$(MSBuildThisFileDirectory)..\..\build\windows-x64\bin\$(NativeConfig)</NativeBinDir>
+    <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$(OS)' != 'Windows_NT'">$(MSBuildThisFileDirectory)../../build/linux-x64/bin</NativeBinDir>
+  </PropertyGroup>
+  <Target Name="CopyNativeBridge" AfterTargets="Build">
+    <ItemGroup>
+      <_NativeBridgeLib Include="$(NativeBinDir)\MeshRF.Native.dll" Condition="'$(OS)' == 'Windows_NT'" />
+      <_NativeBridgeLib Include="$(NativeBinDir)/libMeshRF.Native.so" Condition="'$(OS)' != 'Windows_NT'" />
+      <_NativeRuntimeDll Include="$(NativeBinDir)\hackrf.dll" Condition="'$(OS)' == 'Windows_NT'" />
+      <_NativeRuntimeDll Include="$(NativeBinDir)\libusb-1.0.dll" Condition="'$(OS)' == 'Windows_NT'" />
+      <_NativeRuntimeDll Include="$(NativeBinDir)\pthreadVC2.dll" Condition="'$(OS)' == 'Windows_NT'" />
+      <_NativeRuntimeDll Include="$(NativeBinDir)\rtlsdr.dll" Condition="'$(OS)' == 'Windows_NT'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_NativeBridgeLib)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(_NativeBridgeLib.FullPath)')" />
+    <Copy SourceFiles="@(_NativeRuntimeDll)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(_NativeRuntimeDll.FullPath)')" />
+    <Warning Text="Native bridge library not found under $(NativeBinDir). Build the native CMake project first."
+             Condition="'@(_NativeBridgeLib)' == '' Or !Exists('%(_NativeBridgeLib.FullPath)')" />
+  </Target>
+
+</Project>

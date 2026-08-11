@@ -150,7 +150,137 @@ const char* last_status() { return g_status.c_str(); }
 
 } // namespace mrf::hal::hackrf_dyn
 
-#else  // !_WIN32
+#elif defined(__linux__) || defined(__APPLE__)
+
+#include <dlfcn.h>
+
+#include <array>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
+
+namespace mrf::hal::hackrf_dyn {
+namespace fs = std::filesystem;
+
+namespace {
+
+thread_local std::string g_status = "not attempted";
+
+template <typename Fn>
+bool resolve(void* m, const char* name, Fn& slot) {
+    auto p = ::dlsym(m, name);
+    if (!p) return false;
+    slot = reinterpret_cast<Fn>(p);
+    return true;
+}
+
+void* try_load_explicit(const fs::path& dir, std::string& diag) {
+    if (dir.empty()) return nullptr;
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return nullptr;
+#if defined(__APPLE__)
+    static const std::array<const char*, 2> kNames{"libhackrf.dylib", "libhackrf.0.dylib"};
+#else
+    static const std::array<const char*, 2> kNames{"libhackrf.so.0", "libhackrf.so"};
+#endif
+    for (const char* name : kNames) {
+        auto lib = dir / name;
+        if (!fs::exists(lib, ec)) continue;
+        void* m = ::dlopen(lib.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (m) return m;
+        diag = "dlopen failed for " + lib.string() + " (" + ::dlerror() + ")";
+    }
+    return nullptr;
+}
+
+fs::path env_path(const char* name) {
+    const char* v = std::getenv(name);
+    if (!v || !*v) return {};
+    return fs::path(v);
+}
+
+} // namespace
+
+bool load(Api& out) {
+    void* m = nullptr;
+    fs::path loaded_from;
+    std::string last_load_error;
+
+    auto try_dir = [&](const fs::path& dir) {
+        if (m) return;
+        std::string diag;
+        if (auto h = try_load_explicit(dir, diag)) {
+            m = h;
+            loaded_from = dir;
+        } else if (!diag.empty()) {
+            last_load_error = diag;
+        }
+    };
+
+    // 1. HACKRF_DIR / HACKRF_ROOT environment variables (explicit opt-in).
+    try_dir(env_path("HACKRF_DIR"));
+    try_dir(env_path("HACKRF_ROOT"));
+
+    // 2. System library search path — the normal case on Linux, where
+    //    libhackrf is installed via the distro package manager (libhackrf0)
+    //    or a system-wide `make install` and lives in the ld.so cache.
+    if (!m) {
+#if defined(__APPLE__)
+        static const std::array<const char*, 2> kNames{"libhackrf.dylib", "libhackrf.0.dylib"};
+#else
+        static const std::array<const char*, 2> kNames{"libhackrf.so.0", "libhackrf.so"};
+#endif
+        for (const char* name : kNames) {
+            m = ::dlopen(name, RTLD_NOW | RTLD_LOCAL);
+            if (m) {
+                loaded_from = name;
+                break;
+            }
+        }
+    }
+    if (!m) {
+        g_status = last_load_error.empty()
+                       ? "libhackrf not found (install libhackrf0, or set HACKRF_DIR)"
+                       : last_load_error;
+        return false;
+    }
+
+    Api a{};
+    bool ok = true;
+    ok &= resolve(m, "hackrf_init",            a.hackrf_init);
+    ok &= resolve(m, "hackrf_exit",            a.hackrf_exit);
+    ok &= resolve(m, "hackrf_open",            a.hackrf_open);
+    ok &= resolve(m, "hackrf_close",           a.hackrf_close);
+    ok &= resolve(m, "hackrf_set_freq",        a.hackrf_set_freq);
+    ok &= resolve(m, "hackrf_set_sample_rate", a.hackrf_set_sample_rate);
+    ok &= resolve(m, "hackrf_set_baseband_filter_bandwidth",
+                  a.hackrf_set_baseband_filter_bandwidth);
+    ok &= resolve(m, "hackrf_compute_baseband_filter_bw_round_down_lt",
+                  a.hackrf_compute_baseband_filter_bw_round_down_lt);
+    ok &= resolve(m, "hackrf_set_lna_gain",    a.hackrf_set_lna_gain);
+    ok &= resolve(m, "hackrf_set_vga_gain",    a.hackrf_set_vga_gain);
+    ok &= resolve(m, "hackrf_set_txvga_gain",  a.hackrf_set_txvga_gain);
+    ok &= resolve(m, "hackrf_set_amp_enable",  a.hackrf_set_amp_enable);
+    ok &= resolve(m, "hackrf_start_rx",        a.hackrf_start_rx);
+    ok &= resolve(m, "hackrf_stop_rx",         a.hackrf_stop_rx);
+    ok &= resolve(m, "hackrf_start_tx",        a.hackrf_start_tx);
+    ok &= resolve(m, "hackrf_stop_tx",         a.hackrf_stop_tx);
+    if (!ok) {
+        ::dlclose(m);
+        g_status = "libhackrf loaded but missing required exports";
+        return false;
+    }
+    out = a;
+    g_status = "loaded " + loaded_from.string();
+    // Intentionally leak `m`: we want libhackrf to live for the process.
+    return true;
+}
+
+const char* last_status() { return g_status.c_str(); }
+
+} // namespace mrf::hal::hackrf_dyn
+
+#else  // unsupported platform
 
 namespace mrf::hal::hackrf_dyn {
 bool load(Api&) { return false; }

@@ -117,7 +117,12 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 option(MRF_BUILD_TESTS "Build native unit tests" ON)
 
-if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES)
+if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
+    # Building hackrf/rtl-sdr DLLs from the vendored submodules is a
+    # Windows-only convenience (no system package manager to rely on). On
+    # Linux/macOS, install the distro/Homebrew libhackrf and librtlsdr
+    # packages instead — HackRfDynLoad.cpp / RtlSdrDynLoad.cpp find them via
+    # dlopen() on the system library search path.
     set(MRF_HACKRF_SUBMODULE_DIR "${CMAKE_SOURCE_DIR}/third_party/hackrf")
     set(MRF_HACKRF_SOURCE_DIR "${MRF_HACKRF_SUBMODULE_DIR}/host")
     set(MRF_RTLSDR_SUBMODULE_DIR "${CMAKE_SOURCE_DIR}/third_party/rtlsdr")

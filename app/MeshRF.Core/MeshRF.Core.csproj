@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Multi-targeted: net8.0-windows for the WPF app (MeshRF.App), plain
+         net8.0 for the cross-platform Avalonia app (MeshRF.App.Avalonia).
+         Nothing in this project actually uses Windows-only APIs today. -->
+    <TargetFrameworks>net8.0-windows;net8.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

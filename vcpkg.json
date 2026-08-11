@@ -14,7 +14,11 @@
     "liquid-dsp",
     "gtest",
     "spdlog",
-    "fmt"
+    "fmt",
+    {
+      "name": "mbedtls",
+      "platform": "!windows"
+    }
   ],
   "builtin-baseline": "d92484ed3c5020c6679d095ad3e5add907887b62"
 }

@@ -50,6 +50,12 @@ if(WIN32)
     # AES-CTR for channel crypto is implemented via Windows CNG (bcrypt.lib),
     # since libsodium does not expose a generic AES-128/256-CTR primitive.
     target_link_libraries(mrf_core PUBLIC bcrypt)
+else()
+    # Non-Windows: use mbedtls's AES-ECB primitive to build the same CTR
+    # construction (mbedtls is also what the Meshtastic firmware itself uses
+    # for CryptoEngine, so this keeps behavior consistent across platforms).
+    find_package(MbedTLS CONFIG REQUIRED)
+    target_link_libraries(mrf_core PUBLIC MbedTLS::mbedcrypto)
 endif()
 
 # Radio backends are loaded at runtime via LoadLibrary (see hal/*DynLoad.cpp).

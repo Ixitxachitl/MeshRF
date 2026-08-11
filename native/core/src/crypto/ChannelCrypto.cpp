@@ -3,12 +3,21 @@
 
 #include <stdexcept>
 
-// Windows CNG (bcrypt.lib) provides the AES-ECB primitive used below to build
-// AES-CTR. libsodium (linked elsewhere in this target) does not expose a
-// generic AES-128/256-CTR primitive, so we use the platform crypto library
-// instead (this project targets Windows only).
-#include <windows.h>
-#include <bcrypt.h>
+// AES-CTR is built out of a raw AES-ECB single-block primitive (the standard
+// construction: keystream_block = AES_ECB_Encrypt(key, counter_block)).
+// libsodium (linked elsewhere in this target) does not expose a generic
+// AES-128/256-CTR or ECB primitive, so each platform uses its native/system
+// crypto library instead:
+//   - Windows: CNG (bcrypt.lib)
+//   - Everywhere else: mbedtls, which is also what the Meshtastic firmware
+//     itself uses for CryptoEngine, keeping behavior consistent.
+#if defined(_WIN32)
+#  include <windows.h>
+#  include <bcrypt.h>
+#else
+#  include <mbedtls/aes.h>
+#  include <cstring>
+#endif
 
 namespace mrf::crypto {
 
@@ -23,9 +32,10 @@ std::uint8_t channel_hash(std::string_view name, std::span<const std::uint8_t> p
 
 namespace {
 
+#if defined(_WIN32)
+
 // RAII wrapper around a BCrypt AES-ECB key, used only to encrypt individual
-// 16-byte counter blocks (i.e. to build CTR mode out of ECB, the standard
-// construction: keystream_block = AES_ECB_Encrypt(key, counter_block)).
+// 16-byte counter blocks.
 class AesEcbKey {
 public:
     explicit AesEcbKey(std::span<const std::uint8_t> key) {
@@ -71,6 +81,52 @@ private:
     BCRYPT_KEY_HANDLE hkey_ = nullptr;
 };
 
+void secure_zero(std::array<std::uint8_t, 16>& block) {
+    SecureZeroMemory(block.data(), block.size());
+}
+
+#else  // !_WIN32
+
+// RAII wrapper around an mbedtls AES-ECB encryption key, used the same way
+// as the BCrypt version above: encrypt individual 16-byte counter blocks.
+class AesEcbKey {
+public:
+    explicit AesEcbKey(std::span<const std::uint8_t> key) {
+        mbedtls_aes_init(&ctx_);
+        int rc = mbedtls_aes_setkey_enc(&ctx_, key.data(), static_cast<unsigned>(key.size() * 8));
+        if (rc != 0) {
+            mbedtls_aes_free(&ctx_);
+            throw std::runtime_error("aes_ctr_xcrypt: mbedtls_aes_setkey_enc failed");
+        }
+    }
+
+    ~AesEcbKey() { mbedtls_aes_free(&ctx_); }
+
+    AesEcbKey(const AesEcbKey&) = delete;
+    AesEcbKey& operator=(const AesEcbKey&) = delete;
+
+    // Encrypts exactly one 16-byte block in place.
+    void encrypt_block(std::array<std::uint8_t, 16>& block) const {
+        std::array<std::uint8_t, 16> out{};
+        int rc = mbedtls_aes_crypt_ecb(const_cast<mbedtls_aes_context*>(&ctx_), MBEDTLS_AES_ENCRYPT,
+                                        block.data(), out.data());
+        if (rc != 0) throw std::runtime_error("aes_ctr_xcrypt: mbedtls_aes_crypt_ecb failed");
+        block = out;
+    }
+
+private:
+    mbedtls_aes_context ctx_{};
+};
+
+void secure_zero(std::array<std::uint8_t, 16>& block) {
+    // Defeats dead-store elimination without relying on the non-portable
+    // memset_s (not guaranteed available across libcs).
+    volatile std::uint8_t* p = block.data();
+    for (std::size_t i = 0; i < block.size(); ++i) p[i] = 0;
+}
+
+#endif // !_WIN32
+
 // Increments a 16-byte big-endian counter (matches mbedtls_aes_crypt_ctr's
 // default nonce_counter increment, used by firmware's CryptoEngine).
 void increment_counter(std::array<std::uint8_t, 16>& ctr) noexcept {
@@ -108,7 +164,7 @@ void aes_ctr_xcrypt(std::span<const std::uint8_t> key,
         increment_counter(counter);
     }
 
-    SecureZeroMemory(counter.data(), counter.size());
+    secure_zero(counter);
 }
 
 } // namespace mrf::crypto

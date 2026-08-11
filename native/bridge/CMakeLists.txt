@@ -16,7 +16,7 @@ set_target_properties(mrf_bridge PROPERTIES
     FOLDER "native"
 )
 
-if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES)
+if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
     add_dependencies(mrf_bridge mrf_hackrf_vendor mrf_rtlsdr_vendor)
 
     # Copy all installed runtime DLLs built from upstream submodule sources.
