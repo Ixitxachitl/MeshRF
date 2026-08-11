@@ -31,7 +31,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost
         new ChannelConfig { Index = 0, Name = "LongFast", Role = ChannelRole.Primary },
     ];
 
-    uint IMeshRxHost.MyNodeNum => 0;
+    /// <summary>
+    /// Ephemeral session node number (random, not persisted) — needed so a
+    /// transmitted frame carries a valid "from" and gets recognized as our
+    /// own echo (isFromUs) instead of a new incoming packet. Real node
+    /// identity/PKI management doesn't exist in this scaffold yet.
+    /// </summary>
+    public uint MyNodeNum { get; set; }
+
+    uint IMeshRxHost.MyNodeNum => MyNodeNum;
     byte[] IMeshRxHost.MyPrivateKeyBytes => Array.Empty<byte>();
     IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Channels;
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;

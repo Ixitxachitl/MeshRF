@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
@@ -54,13 +55,22 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private float _rssiDbfs;
 
+    [ObservableProperty]
+    private string _messageText = string.Empty;
+
     public RadioDeviceKind[] AvailableDevices { get; } = Enum.GetValues<RadioDeviceKind>();
 
     public string ToggleButtonText => IsRunning ? "Stop RX" : "Start RX";
 
     public RadioViewModel()
     {
-        _rxHost = new AvaloniaMeshRxHost(_nodeStore);
+        _rxHost = new AvaloniaMeshRxHost(_nodeStore)
+        {
+            // Ephemeral session identity (random, not persisted) — see
+            // AvaloniaMeshRxHost.MyNodeNum. Avoid 0 (unset) and the
+            // broadcast address.
+            MyNodeNum = (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE),
+        };
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
 
         try
@@ -156,7 +166,47 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private bool CanToggleRx() => _core is not null;
 
-    partial void OnIsRunningChanged(bool value) => OnPropertyChanged(nameof(ToggleButtonText));
+    [RelayCommand(CanExecute = nameof(CanSendMessage))]
+    private async Task SendMessageAsync()
+    {
+        if (_core is null || string.IsNullOrWhiteSpace(MessageText)) return;
+
+        var text = MessageText.Trim();
+        var channel = _rxHost.Channels[0];
+        var packetId = (uint)Random.Shared.NextInt64(1, uint.MaxValue);
+        var hz = (ulong)(DefaultCenterFreqMHz * 1_000_000);
+
+        var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text);
+
+        bool ok = await Task.Run(() => _core.Transmit(LoraPreset.LongFast, hz, frame)).ConfigureAwait(true);
+        if (!ok)
+        {
+            StatusText = "Failed to transmit (no TX-capable device selected?).";
+            return;
+        }
+
+        // Echo locally — we won't decode our own transmission back off the
+        // air (MeshRxRouter treats hearing it as isFromUs and drops it).
+        Messages.Insert(0, new ChannelMessage
+        {
+            FromId = $"!{_rxHost.MyNodeNum:x8}",
+            SenderNodeNum = _rxHost.MyNodeNum,
+            Text = text,
+            PacketId = packetId,
+            IsOutgoing = true,
+        });
+        MessageText = string.Empty;
+    }
+
+    private bool CanSendMessage() => _core?.CanTransmit == true && !string.IsNullOrWhiteSpace(MessageText);
+
+    partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
+
+    partial void OnIsRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ToggleButtonText));
+        SendMessageCommand.NotifyCanExecuteChanged();
+    }
 
     public void Dispose()
     {
