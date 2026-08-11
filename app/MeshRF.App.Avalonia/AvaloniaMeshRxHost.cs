@@ -11,21 +11,28 @@ namespace MeshRF.AvaloniaApp;
 /// <see cref="IMeshRxHost"/> for the Avalonia app: decodes traffic on any
 /// configured channel (persisted via <see cref="ChannelStore"/>, same
 /// %APPDATA%/config path the WPF app uses) into per-channel message tabs,
+/// routes direct messages addressed to us into per-peer conversation tabs,
 /// and keeps <see cref="NodeStore"/> updated from NodeInfo/Position/
-/// Telemetry. No DM chat tabs, relay, MQTT, geofencing, or games yet —
-/// those stay WPF-only until ported. Node identity (PKC direct messages) is
-/// intentionally unset, so only channel-PSK traffic decodes for now.
+/// Telemetry. No relay, MQTT, geofencing, or games yet — those stay
+/// WPF-only until ported. PKC (public-key) direct messages aren't
+/// supported (no node identity/PKI management in this scaffold yet); DMs
+/// are sent/received as legacy channel-PSK-encrypted unicast instead,
+/// exactly like a broadcast but addressed to one node.
 /// </summary>
 public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 {
     private readonly NodeStore _nodeStore;
     private readonly ChannelStore _channelStore;
+    private readonly Dictionary<uint, ConversationTabViewModel> _conversationsByNode = new();
     private readonly HashSet<ulong> _recentUndecodedKeys = new();
     private readonly Queue<ulong> _recentUndecodedOrder = new();
     private const int RecentUndecodedLimit = 512;
-    private const int MaxMessagesPerChannel = 500;
+    private const int MaxMessagesPerTab = 500;
 
-    public ObservableCollection<ChannelTabViewModel> ChannelTabs { get; } = new();
+    /// <summary>Channel tabs and DM conversation tabs, in one list (channels
+    /// first, in persisted order; conversations appended as they open).</summary>
+    public ObservableCollection<ITabItem> Tabs { get; } = new();
+
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
 
@@ -39,7 +46,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     uint IMeshRxHost.MyNodeNum => MyNodeNum;
     byte[] IMeshRxHost.MyPrivateKeyBytes => Array.Empty<byte>();
-    IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => ChannelTabs.Select(t => t.Config).ToList();
+    IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
 
@@ -61,13 +68,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         }
 
         foreach (var c in configs.OrderBy(c => c.Index))
-            ChannelTabs.Add(new ChannelTabViewModel(c));
+            Tabs.Add(new ChannelTabViewModel(c));
     }
 
     /// <summary>Adds and persists a new secondary channel with a fresh random PSK.</summary>
     public ChannelTabViewModel AddChannel(string name)
     {
-        int nextIndex = ChannelTabs.Count == 0 ? 0 : ChannelTabs.Max(t => t.Config.Index) + 1;
+        var existingChannels = Tabs.OfType<ChannelTabViewModel>().ToList();
+        int nextIndex = existingChannels.Count == 0 ? 0 : existingChannels.Max(t => t.Config.Index) + 1;
         var config = new ChannelConfig
         {
             Index = nextIndex,
@@ -77,19 +85,44 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         };
         _channelStore.Upsert(config);
         var tab = new ChannelTabViewModel(config);
-        ChannelTabs.Add(tab);
+        // Keep channel tabs contiguous ahead of conversation tabs.
+        int insertAt = Tabs.OfType<ChannelTabViewModel>().Count();
+        Tabs.Insert(insertAt, tab);
         return tab;
     }
 
     private ChannelTabViewModel? ResolveChannelTab(string? channelName)
     {
+        var channelTabs = Tabs.OfType<ChannelTabViewModel>();
         if (!string.IsNullOrEmpty(channelName))
         {
-            var match = ChannelTabs.FirstOrDefault(t =>
+            var match = channelTabs.FirstOrDefault(t =>
                 string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
             if (match is not null) return match;
         }
-        return ChannelTabs.FirstOrDefault();
+        return channelTabs.FirstOrDefault();
+    }
+
+    /// <summary>Finds or opens the DM conversation tab for a peer node.</summary>
+    public ConversationTabViewModel OpenConversation(uint nodeNum)
+    {
+        if (_conversationsByNode.TryGetValue(nodeNum, out var existing)) return existing;
+
+        var convo = new ConversationTabViewModel(nodeNum, NodeDisplayName(nodeNum));
+        _conversationsByNode[nodeNum] = convo;
+        Tabs.Add(convo);
+        return convo;
+    }
+
+    private string NodeDisplayName(uint nodeNum)
+    {
+        var rec = _nodeStore.Get(nodeNum);
+        if (rec is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(rec.LongName)) return rec.LongName;
+            if (!string.IsNullOrWhiteSpace(rec.ShortName)) return rec.ShortName;
+        }
+        return $"!{nodeNum:x8}";
     }
 
     string? IMeshRxHost.GetStoredPublicKeyHex(uint nodeNum) => _nodeStore.Get(nodeNum)?.PublicKey;
@@ -111,6 +144,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         }
         if (existingIndex >= 0) Nodes[existingIndex] = rec;
         else Nodes.Add(rec);
+
+        if (_conversationsByNode.TryGetValue(nodeNum, out var convo))
+            convo.PeerName = NodeDisplayName(nodeNum);
     }
 
     public bool RememberUndecodedPacket(MeshHeader header)
@@ -142,10 +178,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         switch (result.Port)
         {
             case PortNum.TextMessage:
-                var tab = ResolveChannelTab(result.ChannelName);
-                if (tab is not null)
+                bool isDirectToUs = MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum;
+                var messages = isDirectToUs ? OpenConversation(header.From).Messages : ResolveChannelTab(result.ChannelName)?.Messages;
+                if (messages is not null)
                 {
-                    tab.Messages.Insert(0, new ChannelMessage
+                    messages.Insert(0, new ChannelMessage
                     {
                         Timestamp = DateTimeOffset.FromUnixTimeSeconds(rxEpoch).LocalDateTime,
                         FromId = header.FromId,
@@ -155,10 +192,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                         SnrDb = record.SnrDb,
                         PacketId = header.PacketId,
                     });
-                    while (tab.Messages.Count > MaxMessagesPerChannel)
-                        tab.Messages.RemoveAt(tab.Messages.Count - 1);
-                    tab.TabNeedsAttention = true;
+                    while (messages.Count > MaxMessagesPerTab)
+                        messages.RemoveAt(messages.Count - 1);
                 }
+
+                if (isDirectToUs) _conversationsByNode[header.From].TabNeedsAttention = true;
+                else if (ResolveChannelTab(result.ChannelName) is { } chanTab) chanTab.TabNeedsAttention = true;
                 break;
 
             case PortNum.NodeInfo when result.User is not null:

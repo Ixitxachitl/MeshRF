@@ -4,9 +4,10 @@
         xmlns:mesh="clr-namespace:MeshRF;assembly=MeshRF.Core"
         xmlns:nodes="clr-namespace:MeshRF.Nodes;assembly=MeshRF.Core"
         x:Class="MeshRF.AvaloniaApp.MainWindow"
+        x:Name="RootWindow"
         x:DataType="local:RadioViewModel"
         Title="MeshRF (cross-platform scaffold)"
-        Width="720" Height="560">
+        Width="820" Height="600">
 
     <Grid Margin="24" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto,Auto" ColumnDefinitions="2*,1*">
         <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="MeshRF — Avalonia scaffold" FontSize="20" FontWeight="Bold" />
@@ -31,20 +32,20 @@
                        IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="12,0,0,0" />
         </StackPanel>
 
-        <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,16,0,4" FontWeight="Bold" Text="Channels" />
+        <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,16,0,4" FontWeight="Bold" Text="Channels &amp; conversations" />
         <TextBlock Grid.Row="4" Grid.Column="1" Margin="6,16,0,4" FontWeight="Bold"
                    Text="{Binding Nodes.Count, StringFormat='Nodes ({0})'}" />
 
         <TabControl Grid.Row="5" Grid.Column="0" Margin="0,0,6,0"
-                    ItemsSource="{Binding ChannelTabs}"
-                    SelectedItem="{Binding SelectedChannelTab}">
+                    ItemsSource="{Binding Tabs}"
+                    SelectedItem="{Binding SelectedTab}">
             <TabControl.ItemTemplate>
-                <DataTemplate x:DataType="local:ChannelTabViewModel">
+                <DataTemplate x:DataType="mesh:ITabItem">
                     <TextBlock Text="{Binding TabHeader}" />
                 </DataTemplate>
             </TabControl.ItemTemplate>
             <TabControl.ContentTemplate>
-                <DataTemplate x:DataType="local:ChannelTabViewModel">
+                <DataTemplate x:DataType="mesh:ITabItem">
                     <ListBox ItemsSource="{Binding Messages}">
                         <ListBox.ItemTemplate>
                             <DataTemplate x:DataType="mesh:ChannelMessage">
@@ -62,7 +63,20 @@
         <ListBox Grid.Row="5" Grid.Column="1" Margin="6,0,0,0" ItemsSource="{Binding Nodes}">
             <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="nodes:NodeRecord">
-                    <TextBlock Text="{Binding LongName}" />
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,4">
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="{Binding LongName}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding DisplayId}" FontSize="11" Opacity="0.7" />
+                            <TextBlock FontSize="11" Opacity="0.7">
+                                <Run Text="{Binding RssiDbm, StringFormat='{}{0:F0} dBm'}" />
+                                <Run Text="{Binding SnrDb, StringFormat='  {0:F1} dB'}" />
+                                <Run Text="{Binding BatteryPct, StringFormat='  {0}%'}" />
+                            </TextBlock>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="Msg" VerticalAlignment="Center"
+                                Command="{Binding #RootWindow.DataContext.MessageNodeCommand}"
+                                CommandParameter="{Binding}" />
+                    </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>

@@ -34,11 +34,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private readonly AvaloniaMeshRxHost _rxHost;
     private readonly MeshRxRouter _rxRouter;
 
-    public ObservableCollection<ChannelTabViewModel> ChannelTabs => _rxHost.ChannelTabs;
+    public ObservableCollection<ITabItem> Tabs => _rxHost.Tabs;
     public ObservableCollection<NodeRecord> Nodes => _rxHost.Nodes;
 
     [ObservableProperty]
-    private ChannelTabViewModel? _selectedChannelTab;
+    private ITabItem? _selectedTab;
 
     [ObservableProperty]
     private string _newChannelName = string.Empty;
@@ -85,7 +85,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             MyNodeNum = (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE),
         };
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
-        SelectedChannelTab = ChannelTabs.FirstOrDefault();
+        SelectedTab = Tabs.FirstOrDefault();
 
         try
         {
@@ -183,14 +183,36 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
     private async Task SendMessageAsync()
     {
-        if (_core is null || SelectedChannelTab is null || string.IsNullOrWhiteSpace(MessageText)) return;
+        if (_core is null || string.IsNullOrWhiteSpace(MessageText)) return;
 
-        var tab = SelectedChannelTab;
+        // DMs aren't PKC-sealed here (no node identity/PKI yet) — sent as a
+        // legacy channel-PSK-encrypted unicast on the primary channel,
+        // exactly like a broadcast but addressed to one node.
+        ObservableCollection<ChannelMessage>? messages;
+        ChannelConfig channel;
+        uint to = 0xFFFFFFFFu;
+        switch (SelectedTab)
+        {
+            case ChannelTabViewModel chanTab:
+                messages = chanTab.Messages;
+                channel = chanTab.Config;
+                break;
+            case ConversationTabViewModel convoTab:
+                var primary = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+                if (primary is null) return;
+                messages = convoTab.Messages;
+                channel = primary.Config;
+                to = convoTab.NodeNum;
+                break;
+            default:
+                return;
+        }
+
         var text = MessageText.Trim();
         var packetId = (uint)Random.Shared.NextInt64(1, uint.MaxValue);
         var hz = (ulong)(CenterFreqMHz * 1_000_000);
 
-        var frame = MeshEncoder.EncodeTextMessage(tab.Config, _rxHost.MyNodeNum, packetId, text);
+        var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text, to: to);
 
         bool ok = await Task.Run(() => _core.Transmit(SelectedPreset, hz, frame)).ConfigureAwait(true);
         if (!ok)
@@ -201,7 +223,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         // Echo locally — we won't decode our own transmission back off the
         // air (MeshRxRouter treats hearing it as isFromUs and drops it).
-        tab.Messages.Insert(0, new ChannelMessage
+        messages.Insert(0, new ChannelMessage
         {
             FromId = $"!{_rxHost.MyNodeNum:x8}",
             SenderNodeNum = _rxHost.MyNodeNum,
@@ -213,10 +235,17 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     }
 
     private bool CanSendMessage() =>
-        _core?.CanTransmit == true && SelectedChannelTab is not null && !string.IsNullOrWhiteSpace(MessageText);
+        _core?.CanTransmit == true && SelectedTab is not null && !string.IsNullOrWhiteSpace(MessageText);
 
     partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedChannelTabChanged(ChannelTabViewModel? value) => SendMessageCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedTabChanged(ITabItem? value) => SendMessageCommand.NotifyCanExecuteChanged();
+
+    [RelayCommand]
+    private void MessageNode(NodeRecord? node)
+    {
+        if (node is null) return;
+        SelectedTab = _rxHost.OpenConversation(node.NodeNum);
+    }
 
     partial void OnIsRunningChanged(bool value)
     {
@@ -229,7 +258,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         var name = NewChannelName.Trim();
         if (name.Length == 0) return;
-        SelectedChannelTab = _rxHost.AddChannel(name);
+        SelectedTab = _rxHost.AddChannel(name);
         NewChannelName = string.Empty;
     }
 
