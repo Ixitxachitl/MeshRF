@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Globalization;
-using MeshRF.App.ViewModels;
-using MeshRF.Mqtt;
 
-namespace MeshRF.App.Units;
+namespace MeshRF;
 
 public enum UnitSystem
 {
     Metric,
     Imperial,
 }
+
+/// <summary>One selectable location-sharing precision (Meshtastic <c>position_precision</c>).</summary>
+public sealed record PositionPrecisionOption(byte Bits, string Label);
 
 public static class DisplayUnits
 {
@@ -48,12 +49,12 @@ public static class DisplayUnits
         IsImperial(unitSystem) ? "ft" : "m";
 
     public static string TemperatureUnitShort(UnitSystem unitSystem) =>
-        IsImperial(unitSystem) ? "\u00B0F" : "\u00B0C";
+        IsImperial(unitSystem) ? "°F" : "°C";
 
     public static string FormatTemperature(float temperatureC, UnitSystem unitSystem) =>
         IsImperial(unitSystem)
-            ? $"{CelsiusToFahrenheit(temperatureC):F1} \u00B0F"
-            : $"{temperatureC:F1} \u00B0C";
+            ? $"{CelsiusToFahrenheit(temperatureC):F1} °F"
+            : $"{temperatureC:F1} °C";
 
     public static string FormatPressure(float pressureHpa, UnitSystem unitSystem) =>
         IsImperial(unitSystem)
@@ -122,7 +123,7 @@ public static class DisplayUnits
     /// sharing.</summary>
     public static IReadOnlyList<PositionPrecisionOption> BuildMapReportPrecisionOptions(UnitSystem unitSystem) =>
         s_positionPrecisions
-            .Where(p => p.Bits >= MqttPolicy.MinMapPositionPrecision && p.Bits <= MqttPolicy.MaxMapPositionPrecision)
+            .Where(p => p.Bits >= MeshRF.Mqtt.MqttPolicy.MinMapPositionPrecision && p.Bits <= MeshRF.Mqtt.MqttPolicy.MaxMapPositionPrecision)
             .Select(p => new PositionPrecisionOption(p.Bits, $"Within {FormatRadius(p.RadiusMeters, unitSystem)}"))
             .ToList();
 

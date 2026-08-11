@@ -5,7 +5,6 @@ using System.Globalization;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using MeshRF.App.Units;
 using MeshRF.Mesh;
 using MeshRF.Nodes;
 
