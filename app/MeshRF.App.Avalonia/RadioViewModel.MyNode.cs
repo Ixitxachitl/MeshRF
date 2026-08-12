@@ -67,6 +67,9 @@ public partial class RadioViewModel
     /// <summary>Our own node number, for the self-history buttons.</summary>
     public uint MyNodeNumber => _rxHost.MyNodeNum;
 
+    /// <summary>How we're labelled in message and reaction attributions.</summary>
+    public string MyDisplayName => _rxHost.NodeDisplayName(_rxHost.MyNodeNum);
+
     /// <summary>A conversation view model to render history against. Reuses the
     /// open DM tab when there is one so the window and the tab share state;
     /// otherwise builds a detached one, which is how history is shown for a
@@ -177,17 +180,65 @@ public partial class RadioViewModel
                     TransmitBackground(position);
                     break;
 
-                case PortNum.Telemetry:
-                    var metrics = MeshEncoder.EncodeTelemetryDeviceMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
-                        batteryLevel: 101, // 101 = mains-powered, the sentinel this app reports.
-                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
-                    TransmitBackground(metrics);
-                    break;
             }
         }
         catch (Exception ex)
         {
             StatusText = $"Auto-reply failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Answers a directed telemetry request with the metric group that was
+    /// asked for. Firmware has a module per group, each replying only to its
+    /// own variant; here one handler covers them, and an unspecified request
+    /// gets device metrics — the variant every node can answer.
+    /// </summary>
+    private async void HandleTelemetryReplyRequest(uint to, string? channelName, TelemetryVariants wanted)
+    {
+        if (!CanTransmit || to == 0 || to == 0xFFFFFFFFu) return;
+        var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+        if (channel is null) return;
+
+        try
+        {
+            if (wanted.HasFlag(TelemetryVariants.Environment) ||
+                wanted.HasFlag(TelemetryVariants.AirQuality))
+            {
+                // Both are sourced from the home location's weather, so a
+                // request we can't locate can't be answered.
+                if (!TryGetHomeLocation(out double lat, out double lon)) return;
+
+                if (wanted.HasFlag(TelemetryVariants.Environment) &&
+                    await _openMeteo.GetWeatherAsync(lat, lon) is { } weather)
+                {
+                    TransmitBackground(MeshEncoder.EncodeTelemetryEnvironmentMetrics(
+                        channel, _rxHost.MyNodeNum, NextPacketId(),
+                        temperatureC: weather.TemperatureC,
+                        relativeHumidityPct: weather.RelativeHumidityPct,
+                        barometricPressureHpa: weather.BarometricPressureHpa,
+                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt));
+                }
+
+                if (wanted.HasFlag(TelemetryVariants.AirQuality) &&
+                    await _openMeteo.GetAirQualityAsync(lat, lon) is { } aq)
+                {
+                    TransmitBackground(MeshEncoder.EncodeTelemetryAirQualityMetrics(
+                        channel, _rxHost.MyNodeNum, NextPacketId(),
+                        pm25Standard: aq.Pm25Standard, pm100Standard: aq.Pm100Standard,
+                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt));
+                }
+                return;
+            }
+
+            TransmitBackground(MeshEncoder.EncodeTelemetryDeviceMetrics(
+                channel, _rxHost.MyNodeNum, NextPacketId(),
+                batteryLevel: 101, // 101 = mains-powered, the sentinel this app reports.
+                to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt));
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Telemetry reply failed: {ex.Message}";
         }
     }
 

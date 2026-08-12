@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using MeshRF.Channels;
 using MeshRF.Nodes;
 using MeshRF.Waypoints;
@@ -586,8 +587,23 @@ public partial class MainWindow : Window
     /// with a tapback doesn't require picking the emoji again.</summary>
     private async void OnReactionChipTapped(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Button { DataContext: MessageReaction reaction, Tag: ChannelMessage message }) return;
+        if (sender is not Button button || button.DataContext is not MessageReaction reaction) return;
         if (string.IsNullOrEmpty(reaction.Emoji)) return;
+
+        // Tag carries the message; fall back to the containing row in case the
+        // ancestor binding didn't resolve.
+        var message = button.Tag as ChannelMessage
+                      ?? button.FindAncestorOfType<ListBoxItem>()?.DataContext as ChannelMessage;
+        if (message is null) return;
+
+        // A tapback is per-person: reacting twice with the same emoji adds
+        // nothing, so say that instead of silently doing nothing.
+        if (message.HasReactionFrom(reaction.Emoji, _viewModel.MyDisplayName))
+        {
+            _viewModel.StatusText = $"You already reacted {reaction.Emoji} to that message.";
+            return;
+        }
+
         await _viewModel.SendReactionAsync(message, reaction.Emoji);
     }
 

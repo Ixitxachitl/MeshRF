@@ -466,9 +466,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
         _rxHost.IncomingChannelMessage += PlayIncomingRingtone;
         _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
+        _rxHost.TelemetryReplyRequested += HandleTelemetryReplyRequest;
         _rxHost.AckRequested += SendAck;
         _rxHost.DecodedPacketForFeed += AppendDecodedPacketJson;
         _rxHost.SelectedTabProvider = () => SelectedTab;
+        // Relaying is opt-in via the Routing checkbox; the scheduler is only
+        // consulted when RoutingRelayEnabled is on (see RelayContextProvider).
+        _rxHost.RelayContextProvider = BuildRelayContext;
+        _rxHost.RelayScheduler = new RelayScheduler
+        {
+            Transmit = frame => TransmitFrameAsync(frame),
+            Log = _rxHost.Log,
+        };
         // Enables PKC decode in the shared router; without it every direct
         // message stays undecodable.
         _rxHost.MyPrivateKeyProvider = () => TryParseKeyBase64(MyPrivateKey);

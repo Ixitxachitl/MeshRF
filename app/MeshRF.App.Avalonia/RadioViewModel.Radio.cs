@@ -104,6 +104,28 @@ public partial class RadioViewModel
         });
     }
 
+    // -- Relay --------------------------------------------------------------
+
+    /// <summary>
+    /// Current relay configuration, or null when relaying is off. Returning null
+    /// is what the Routing checkbox controls: the rebroadcast mode alone can't
+    /// express "off" for router roles, since firmware coerces NONE to ALL for
+    /// them, so the opt-in is kept separate.
+    /// </summary>
+    private RelayContext? BuildRelayContext()
+    {
+        if (!RoutingRelayEnabled) return null;
+        if (!CanTransmit) return null;
+
+        return new RelayContext(
+            MyRole ?? string.Empty,
+            RebroadcastMode ?? "ALL",
+            _rxHost.MyNodeNum,
+            SelectedPreset,
+            _nodeStore.Get,
+            _nodeStore.All);
+    }
+
     // -- Acknowledgements ---------------------------------------------------
 
     /// <summary>

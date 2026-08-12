@@ -47,6 +47,13 @@ public partial class ChannelMessage : ObservableObject
 
     public bool HasReactions => Reactions.Count > 0;
 
+    /// <summary>True when <paramref name="fromId"/> has already reacted with
+    /// this emoji. A tapback is per-person, so reacting again is a no-op —
+    /// callers use this to say so rather than appearing to do nothing.</summary>
+    public bool HasReactionFrom(string emoji, string fromId) =>
+        _reactorsByEmoji.TryGetValue((emoji ?? string.Empty).Trim(), out var reactors) &&
+        reactors.Contains(string.IsNullOrWhiteSpace(fromId) ? "unknown" : fromId.Trim());
+
     /// <summary>Delivery state for outgoing messages, updated when an ACK/NAK
     /// arrives. Always <see cref="MessageDelivery.None"/> for received messages.</summary>
     [ObservableProperty]

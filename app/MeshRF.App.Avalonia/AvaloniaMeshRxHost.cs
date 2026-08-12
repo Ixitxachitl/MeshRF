@@ -109,6 +109,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// holds our identity and the transmitter, so it builds the reply.</summary>
     public Action<PortNum, uint, string?>? AutoReplyRequested { get; set; }
 
+    /// <summary>Raised for a directed telemetry request, carrying which metric
+    /// group was asked for so the reply matches rather than always answering
+    /// with device metrics.</summary>
+    public Action<uint, string?, TelemetryVariants>? TelemetryReplyRequested { get; set; }
+
     /// <summary>Raised for a unicast addressed to us carrying want_ack, so the
     /// owner can transmit the routing ack (header, channel name, whether it was
     /// PKC). Raised even when the payload could not be decrypted: the
@@ -548,9 +553,39 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         return true;
     }
 
-    // No relay, MQTT uplink, or per-duplicate bookkeeping yet.
-    public void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb) { }
-    public void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb) { }
+    /// <summary>Supplies the current relay configuration. Owned by the view
+    /// model, which holds the role, rebroadcast mode and modem preset.</summary>
+    public Func<RelayContext?>? RelayContextProvider { get; set; }
+
+    /// <summary>Rebroadcasts eligible traffic after a contention delay. Null
+    /// until the owner wires it up, which leaves relaying off.</summary>
+    public RelayScheduler? RelayScheduler { get; set; }
+
+    public void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
+    {
+        if (RelayScheduler is null || RelayContextProvider?.Invoke() is not { } ctx) return;
+        // True means this copy arrived with more hops left than the one we had
+        // queued, so it's worth relaying instead.
+        if (RelayScheduler.HandleDuplicate(ctx, header))
+            RelayIfEligible(frame, header, result, snrDb);
+    }
+
+    public void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
+    {
+        if (RelayScheduler is null || RelayContextProvider?.Invoke() is not { } ctx) return;
+        if (!RelayPolicy.ShouldRelay(ctx, header, result, IsNodeIgnored(header.From))) return;
+
+        byte nextHopLimit = RelayPolicy.ShouldDecrementHopLimit(ctx, header)
+            ? (byte)Math.Max(0, header.HopLimit - 1)
+            : header.HopLimit;
+
+        var relayFrame = RelayPolicy.BuildRelayFrame(ctx, frame, nextHopLimit);
+        int delayMs = RelayPolicy.GetTxDelayMsecWeighted(
+            ctx.Preset, snrDb ?? 0f, RelayPolicy.IsRouterRole(ctx.Role));
+
+        RelayScheduler.Schedule(header, relayFrame, nextHopLimit, delayMs);
+    }
+
     public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm) { }
 
     public void OnOwnPacketHeard(MeshHeader header, MeshDecodeResult? ownDecode) { }
@@ -655,7 +690,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 // request form.
                 if (result.AppPayload.Length == 0 && IsDirectedRequest(header, result))
                 {
-                    AutoReplyRequested?.Invoke(PortNum.Telemetry, header.From, result.ChannelName);
+                    TelemetryReplyRequested?.Invoke(header.From, result.ChannelName,
+                                                    result.Telemetry.PresentVariants);
                     break;
                 }
                 var t = result.Telemetry;
@@ -674,7 +710,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 RecordTelemetryHistory(header.From, t, rxEpoch);
                 MarkNodeDirty(header.From);
                 if (IsDirectedRequest(header, result))
-                    AutoReplyRequested?.Invoke(PortNum.Telemetry, header.From, result.ChannelName);
+                    TelemetryReplyRequested?.Invoke(header.From, result.ChannelName, t.PresentVariants);
                 break;
 
             case PortNum.Traceroute:

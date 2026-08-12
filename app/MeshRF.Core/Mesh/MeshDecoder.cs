@@ -160,8 +160,25 @@ public sealed class MeshBoundingBox
 /// Subset of the Meshtastic <c>Telemetry</c> protobuf, covering both the
 /// <c>DeviceMetrics</c> and <c>EnvironmentMetrics</c> variants.
 /// </summary>
+/// <summary>Metric-group submessages carried by a TELEMETRY_APP payload.</summary>
+[Flags]
+public enum TelemetryVariants
+{
+    None = 0,
+    Device = 1,
+    Environment = 2,
+    AirQuality = 4,
+    Power = 8,
+}
+
 public sealed class MeshTelemetry
 {
+    /// <summary>Which metric-group submessages were present in the payload,
+    /// whether or not they carried values. A telemetry *request* is an empty
+    /// submessage of the wanted variant, so this is the only way to tell which
+    /// kind of reply the sender is asking for.</summary>
+    public TelemetryVariants PresentVariants { get; init; }
+
     // Device metrics.
     public byte? BatteryLevel { get; init; }
     public float? Voltage { get; init; }
@@ -884,6 +901,7 @@ public static class MeshDecoder
     //                     4=pm10_environmental 5=pm25_environmental 6=pm100_environmental
     private static MeshTelemetry ParseTelemetry(byte[] data)
     {
+        var present = TelemetryVariants.None;
         byte? batt = null; float? volt = null, chan = null, airx = null; uint? uptime = null;
         float? temp = null, hum = null, pres = null, gas = null; int? iaq = null;
         uint? pm10std = null, pm25std = null, pm100std = null;
@@ -897,6 +915,7 @@ public static class MeshDecoder
             {
                 case 2 when wt == ProtoReader.WireType.Len: // device_metrics
                 {
+                    present |= TelemetryVariants.Device;
                     var sub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
                     while (sub.TryReadTag(out int f, out var swt))
                     {
@@ -916,6 +935,7 @@ public static class MeshDecoder
                 }
                 case 3 when wt == ProtoReader.WireType.Len: // environment_metrics
                 {
+                    present |= TelemetryVariants.Environment;
                     var sub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
                     while (sub.TryReadTag(out int f, out var swt))
                     {
@@ -934,6 +954,7 @@ public static class MeshDecoder
                 }
                 case 4 when wt == ProtoReader.WireType.Len: // air_quality_metrics
                 {
+                    present |= TelemetryVariants.AirQuality;
                     var sub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
                     while (sub.TryReadTag(out int f, out var swt))
                     {
@@ -952,6 +973,7 @@ public static class MeshDecoder
                 }
                 case 5 when wt == ProtoReader.WireType.Len: // power_metrics
                 {
+                    present |= TelemetryVariants.Power;
                     var sub = new ProtoReader(rdr.ReadLengthDelimited().ToArray());
                     while (sub.TryReadTag(out int f, out var swt))
                     {
@@ -974,6 +996,7 @@ public static class MeshDecoder
 
         return new MeshTelemetry
         {
+            PresentVariants = present,
             BatteryLevel = batt,
             Voltage = volt,
             ChannelUtilization = chan,
