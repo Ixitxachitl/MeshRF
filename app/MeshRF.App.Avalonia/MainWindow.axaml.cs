@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -246,9 +247,201 @@ public partial class MainWindow : Window
         return _specHistoryRing![(oldest + index) % HistoryFrames];
     }
 
-    /// <summary>Freeze a spectrogram of the packet that just decoded, from the
-    /// row history above. Mirrors MeshRF.App's FreezeLastPacket.</summary>
+    // Ping-pong pool for the packet-snapshot spectrogram grid: LastPacket keeps
+    // the array it was handed for later re-renders, so the next pull must fill
+    // the other one rather than overwrite what's on screen.
+    private readonly float[]?[] _snapshotGridPool = new float[2][];
+    private int _snapshotGridPoolIndex;
+    // Reusable BGRA buffer for the off-thread snapshot rasterization; consumed
+    // by the single blit in PresentSnapshot before the next pull reuses it.
+    private uint[] _snapshotPixelBuffer = Array.Empty<uint>();
+    private int _snapshotInFlight;
+
+    // A CRC-valid packet just decoded. A bad frame or a false positive
+    // (preamble that never decodes) never reaches here, so the last-packet
+    // panel only ever shows genuine packets. The whole packet is already
+    // buffered in the native IQ ring by the time it decodes, so we snapshot
+    // immediately — any extra delay just ages the packet toward the far end of
+    // the ring and risks the preamble scrolling out.
     private void OnPacketDecoded()
+    {
+        if (!_lastPacketExpanded) return; // Collapsed: don't pay for a snapshot nobody sees.
+        if (Interlocked.Exchange(ref _snapshotInFlight, 1) != 0) return;
+        _ = FreezeLastPacketAsync();
+    }
+
+    // Collapsed state for the last-packet panel, persisted under the same
+    // settings.json key MeshRF.App uses. _lastPacketSavedHeight remembers the
+    // expanded row height (which the user can drag) across a collapse.
+    private bool _lastPacketExpanded = true;
+    private GridLength _lastPacketSavedHeight = new(84);
+
+    private void OnLastPacketToggle(object? sender, PointerReleasedEventArgs e) =>
+        ApplyLastPacketExpandedState(!_lastPacketExpanded, persist: true);
+
+    /// <summary>Show or hide the spectrogram, leaving the header strip visible
+    /// as the affordance to bring it back. Collapsed the row goes to Auto so it
+    /// shrinks to the header and gives its space to the live waterfall.</summary>
+    private void ApplyLastPacketExpandedState(bool expanded, bool persist)
+    {
+        _lastPacketExpanded = expanded;
+        var row = WaterfallStackGrid.RowDefinitions[2];
+
+        if (_lastPacketExpanded)
+        {
+            LastPacket.IsVisible = true;
+            row.Height = _lastPacketSavedHeight;
+            row.MinHeight = 64;
+            LastPacketToggleIcon.Text = "▼";
+        }
+        else
+        {
+            _lastPacketSavedHeight = row.Height;
+            row.Height = GridLength.Auto;
+            row.MinHeight = 0;
+            LastPacket.IsVisible = false;
+            LastPacketToggleIcon.Text = "▶";
+        }
+
+        if (!persist) return;
+        var settings = AppSettings.Load();
+        settings.LastPacketExpanded = _lastPacketExpanded;
+        settings.Save();
+    }
+
+    /// <summary>Snapshots the last decoded packet as a high-time-resolution
+    /// STFT computed natively from buffered modem-rate IQ, cropped (zoomed) to
+    /// the LoRa channel so the individual chirps are visible. Mirrors
+    /// MeshRF.App's FreezeLastPacketAsync.
+    ///
+    /// PullPacketSpectrogram is CPU-heavy (IQ ring copy + energy locator FFTs +
+    /// STFT) and so is the bicubic rasterize that follows it, so both run on a
+    /// thread-pool thread; only the final blit touches the UI thread.</summary>
+    private async Task FreezeLastPacketAsync()
+    {
+        try
+        {
+            var core = _viewModel.Core;
+            if (core is null) return;
+
+            // Size the grid from the LoRa parameters: slow modes (high SF, low
+            // BW) need many more STFT frames to hold the full packet.
+            // STFT is a 512-point FFT with a 128-sample hop; at modem rate
+            // (BW * 4 oversampling) a symbol is 2^SF * 4 samples.
+            const int kFft = 512;
+            const int kHop = 128;
+            const int nFreq = 256;
+
+            int sf = Math.Clamp((int)_viewModel.OverrideSf, 7, 12);
+            double bwHz = Math.Max(7_800.0, _viewModel.OverrideBwKhz * 1000.0);
+            double symbolSamples = (1 << sf) * 4.0;
+
+            // 16 preamble + 4.25 sync + 8 header + 280 payload symbols; for
+            // SF12/125k a 255-byte packet is ~280 symbols ≈ 9 seconds.
+            double maxSamples = (16.0 + 4.25 + 8.0 + 280.0) * symbolSamples;
+            int nTime = Math.Max(2048, (int)Math.Ceiling((maxSamples - kFft) / kHop) + 1);
+            nTime = Math.Min(nTime, 16384); // Cap to avoid huge allocations.
+
+            // Read presentation parameters on the UI thread up front so the
+            // whole pull + contrast + rasterize pipeline can run off-thread.
+            var (targetW, targetH) = LastPacket.GetSnapshotTargetSize();
+            bool timeHorizontal = LastPacket.TimeHorizontal;
+            var colormap = _viewModel.WaterfallColormap;
+            int poolIndex = _snapshotGridPoolIndex ^ 1;
+
+            (int rows, float[] grid, double floor, double ceil) PullAndRasterize()
+            {
+                var grid = _snapshotGridPool[poolIndex];
+                if (grid is null || grid.Length < nTime * nFreq)
+                    _snapshotGridPool[poolIndex] = grid = new float[nTime * nFreq];
+
+                int written = core.PullPacketSpectrogram(grid, nTime, nFreq);
+                if (written <= 0) return (0, Array.Empty<float>(), -100.0, 0.0);
+
+                var (floor, ceil) = ComputeContrastLevels(grid.AsSpan(0, written * nFreq));
+
+                if (_snapshotPixelBuffer.Length < targetW * targetH)
+                    _snapshotPixelBuffer = new uint[targetW * targetH];
+                WaterfallView.RenderScaledSnapshotPixels(
+                    grid, written, nFreq, targetW, targetH, timeHorizontal,
+                    floor, ceil, colormap, _snapshotPixelBuffer);
+                return (written, grid, floor, ceil);
+            }
+
+            var (rows, grid, floor, ceil) = await Task.Run(PullAndRasterize).ConfigureAwait(true);
+
+            // The very first packet after RX start can arrive before enough IQ
+            // history has accumulated for a robust native snapshot. Retry once
+            // shortly after decode before falling back.
+            if (rows <= 0)
+            {
+                await Task.Delay(ComputeRetryDelayMs()).ConfigureAwait(true);
+                (rows, grid, floor, ceil) = await Task.Run(PullAndRasterize).ConfigureAwait(true);
+            }
+
+            if (rows <= 0)
+            {
+                FreezeLastPacketFromHistory();
+                return;
+            }
+
+            LastPacket.PresentSnapshot(
+                floor, ceil, colormap,
+                _snapshotPixelBuffer, targetW, targetH,
+                grid, rows, nFreq);
+            _snapshotGridPoolIndex = poolIndex;
+            LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _snapshotInFlight, 0);
+        }
+    }
+
+    /// <summary>Base the retry wait on LoRa symbol time so slow modes (high SF
+    /// / low BW) wait longer to accumulate history for the first packet, with
+    /// hard bounds for UI responsiveness.</summary>
+    private int ComputeRetryDelayMs()
+    {
+        int sf = Math.Clamp((int)_viewModel.OverrideSf, 5, 12);
+        double bwHz = Math.Max(7_800.0, _viewModel.OverrideBwKhz * 1000.0);
+        double symbolMs = ((1 << sf) / bwHz) * 1000.0;
+        return Math.Clamp((int)Math.Round(symbolMs * 24.0), 80, 900);
+    }
+
+    /// <summary>Robust display levels for a snapshot (5th/99.5th percentile
+    /// with a small margin and a 24 dB minimum span) so frozen packets stay
+    /// high-contrast regardless of the live waterfall's levels. O(n log n) —
+    /// call it off the UI thread.</summary>
+    private static (double floor, double ceil) ComputeContrastLevels(ReadOnlySpan<float> values)
+    {
+        if (values.Length < 16) return (-100.0, 0.0);
+
+        var vals = new float[values.Length];
+        int valid = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            float v = values[i];
+            if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+            vals[valid++] = v;
+        }
+        if (valid < 16) return (-100.0, 0.0);
+
+        Array.Sort(vals, 0, valid);
+        float p05 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.05), 0, valid - 1)];
+        float p995 = vals[(int)Math.Clamp(Math.Round((valid - 1) * 0.995), 0, valid - 1)];
+
+        double floor = p05 - 2.0;
+        double ceil = p995 + 2.0;
+        if (ceil - floor < 24.0) ceil = floor + 24.0;
+        return (floor, ceil);
+    }
+
+    /// <summary>Fallback when the native IQ ring can't produce a spectrogram:
+    /// replay the app-side spectrum history, cropped (zoomed) to the LoRa
+    /// channel around DC. Much lower time resolution than the native STFT, so
+    /// the burst also needs cropping and thinning to stay legible.</summary>
+    private void FreezeLastPacketFromHistory()
     {
         var core = _viewModel.Core;
         if (core is null || _specHistoryRing is null || _specHistoryCount == 0) return;
@@ -280,8 +473,9 @@ public partial class MainWindow : Window
         // window's noise floor), padded slightly so the edges stay visible.
         var frames = CropToBurst(all);
 
-        // Hand the view roughly one frame per pixel column. More than that and
-        // the renderer max-holds them together, blurring the sweep again.
+        // Hand the view roughly one frame per pixel column. The bicubic
+        // resample takes 4 taps around each output pixel, so surplus frames
+        // aren't averaged in — they're skipped, and the sweep aliases.
         int columns = (int)Math.Round(LastPacket.Bounds.Width);
         if (columns > 0) frames = ThinToWidth(frames, columns);
 

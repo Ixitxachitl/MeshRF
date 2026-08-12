@@ -68,6 +68,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// that isn't ignored, so the owner can play the alert tone.</summary>
     public Action? IncomingDirectMessage { get; set; }
 
+    /// <summary>Raised when broadcast text lands on a channel tab that isn't
+    /// muted, from a node that's neither ignored nor individually muted.</summary>
+    public Action? IncomingChannelMessage { get; set; }
+
     /// <summary>Raised when a directed request we're the target of wants an
     /// auto-reply (NodeInfo/Position/Telemetry/Traceroute). The owner (which
     /// holds the transmit-capable MeshtasticCore) wires this up; left null
@@ -605,8 +609,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // a tapback shouldn't ring.
             if (!isReaction && !IsNodeIgnored(header.From)) IncomingDirectMessage?.Invoke();
         }
-        else if (ResolveChannelTab(result.ChannelName) is { } chanTab2) chanTab2.TabNeedsAttention = true;
+        else if (ResolveChannelTab(result.ChannelName) is { } chanTab2)
+        {
+            chanTab2.TabNeedsAttention = true;
+            // Ring on channel traffic unless the channel is muted, the sender is
+            // ignored, or that node is individually muted. Matches MeshRF.App,
+            // which also rings for channel reactions (unlike the DM path above).
+            if (!chanTab2.MuteRtttl && !IsNodeIgnored(header.From) && !IsNodeRtttlMuted(header.From))
+                IncomingChannelMessage?.Invoke();
+        }
     }
+
+    private bool IsNodeRtttlMuted(uint nodeNum) => _nodeStore.Get(nodeNum)?.MuteRtttl == true;
 
     private void HandleWaypoint(MeshHeader header, MeshDecodeResult result)
     {

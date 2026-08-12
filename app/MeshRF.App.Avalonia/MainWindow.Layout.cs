@@ -34,6 +34,8 @@ public partial class MainWindow
         ApplyStarPair(MessagesLayoutGrid.RowDefinitions[1], MessagesLayoutGrid.RowDefinitions[3],
                       settings.MessagesTopPaneStar, settings.MessagesBottomPaneStar);
 
+        ApplyLastPacketExpandedState(settings.LastPacketExpanded, persist: false);
+
         ApplyColumnWidths(NodesGridProxy, settings.NodeColumnWidths);
         ApplyColumnWidths(WaypointsGridProxy, settings.WaypointColumnWidths);
         _viewModel.ApplyNodeSort(settings.NodeSortMemberPath, settings.NodeSortDescending);
@@ -143,6 +145,8 @@ public partial class MainWindow
                      out var msgTop, out var msgBottom);
         settings.MessagesTopPaneStar = msgTop;
         settings.MessagesBottomPaneStar = msgBottom;
+
+        settings.LastPacketExpanded = _lastPacketExpanded;
 
         settings.NodeColumnWidths = SaveColumnWidths(NodesGridProxy);
         settings.WaypointColumnWidths = SaveColumnWidths(WaypointsGridProxy);

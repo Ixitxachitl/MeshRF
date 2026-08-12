@@ -651,7 +651,14 @@
                              84px keeps the live waterfall the same on-screen height as Windows,
                              so a fixed real-world time span always renders the same number of
                              rows tall on both apps. -->
-                        <Grid Grid.Row="2" RowDefinitions="22,*,84" Background="{DynamicResource BrushSpectrumBackground}">
+                        <Grid Grid.Row="2" x:Name="WaterfallStackGrid" Background="{DynamicResource BrushSpectrumBackground}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="22" />
+                                <RowDefinition Height="*" />
+                                <!-- Collapsing the last-packet panel sets this row to Auto
+                                     (header only) and back; see ApplyLastPacketExpandedState. -->
+                                <RowDefinition Height="84" MinHeight="64" />
+                            </Grid.RowDefinitions>
                             <local:FrequencyAxis Grid.Row="0"
                                                  CenterFreqHz="{Binding SpectrumCenterHz}"
                                                  SpanHz="{Binding SpectrumSpanHz}"
@@ -666,10 +673,19 @@
                                     Background="#DD101418"
                                     BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
                                 <DockPanel>
-                                    <TextBlock DockPanel.Dock="Top" Name="LastPacketTitle" Text="Last packet"
-                                               Margin="4,2,4,2" FontWeight="SemiBold" FontSize="11" />
+                                    <!-- Click the header strip to collapse/expand the panel. -->
+                                    <DockPanel DockPanel.Dock="Top" Background="Transparent" Cursor="Hand"
+                                               PointerReleased="OnLastPacketToggle">
+                                        <TextBlock DockPanel.Dock="Right" x:Name="LastPacketToggleIcon"
+                                                   Text="&#x25BC;" Margin="4,0,4,0" FontSize="8"
+                                                   Foreground="#888888" VerticalAlignment="Center" />
+                                        <TextBlock Name="LastPacketTitle" Text="Last packet"
+                                                   Margin="4,2,2,2" FontWeight="SemiBold" FontSize="11"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
                                     <local:WaterfallView x:Name="LastPacket" Margin="2"
                                                          AutoLevels="True" ScaleToFit="True" TimeHorizontal="True"
+                                                         SmoothPixels="True"
                                                          Colormap="{Binding WaterfallColormap}" />
                                 </DockPanel>
                             </Border>

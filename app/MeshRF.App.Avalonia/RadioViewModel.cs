@@ -463,6 +463,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum, savedOpenConversations);
         _rxHost.OpenConversationsChanged += SaveOpenConversations;
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
+        _rxHost.IncomingChannelMessage += PlayIncomingRingtone;
+        // Restore per-channel ringtone mutes. The channel tabs exist by now
+        // (the host loads them in its constructor), and MutedRingtoneChannels
+        // is the same settings.json key MeshRF.App writes.
+        foreach (var channelTab in Tabs.OfType<ChannelTabViewModel>())
+            channelTab.MuteRtttl = _settings.MutedRingtoneChannels.Contains(channelTab.Config.Index);
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
         SelectedTab = Tabs.FirstOrDefault();
         if (Enum.TryParse<RadioDeviceKind>(savedRxDeviceKind, out var device))
@@ -1033,6 +1039,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.RingtoneMode = RingtoneMode;
         _settings.RingtoneVolume = (int)Math.Round(RingtoneVolume);
         _settings.RingtoneRtttl = RingtoneRtttl;
+        _settings.MutedRingtoneChannels = Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
         _settings.UnitSystem = UnitSystemName;
         _settings.UseFahrenheit = UseFahrenheit;
         _settings.UseMiles = UseMiles;
@@ -1230,7 +1238,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Persists edits made in the channel Settings dialog.</summary>
-    public void SaveChannelSettings(ChannelTabViewModel channel) => _rxHost.SaveChannelConfig(channel);
+    public void SaveChannelSettings(ChannelTabViewModel channel)
+    {
+        _rxHost.SaveChannelConfig(channel);
+        // MuteRtttl lives in settings.json, not the channel store, so the
+        // dialog's Save has to flush settings too.
+        SaveSettings();
+    }
 
     [RelayCommand]
     private void CloseTab(ITabItem? tab)

@@ -16,10 +16,10 @@ public enum WaterfallColormap
 
 /// <summary>
 /// Scrolling dBFS waterfall, ported from MeshRF.App's WPF WaterfallView but
-/// scoped down to what this app currently drives: a live scrolling ring
-/// buffer with auto-levels. The WPF version's ScaleToFit/TimeHorizontal/
-/// SmoothPixels toggles exist to support a frozen "last packet" snapshot
-/// panel, which isn't built in this app yet. This port also always does a
+/// driving both surfaces it does in WPF: the live scrolling ring buffer with
+/// auto-levels, and — via ScaleToFit/TimeHorizontal/SmoothPixels plus the
+/// bicubic snapshot rasterizer below — the frozen "last packet" panel.
+/// This port always does a
 /// full-frame re-render on Push rather than WPF's incremental single-row
 /// bitmap shift — the shift is an optimization for a native ~60fps push
 /// rate; at this app's spectrum poll rate a full re-render is cheap enough
@@ -47,8 +47,16 @@ public sealed class WaterfallView : Image
     public static readonly StyledProperty<bool> TimeHorizontalProperty =
         AvaloniaProperty.Register<WaterfallView, bool>(nameof(TimeHorizontal));
 
+    /// <summary>Let the compositor interpolate when the bitmap is stretched to
+    /// the control, instead of point-sampling it. MeshRF.App's SmoothPixels:
+    /// the frozen snapshot is bicubic-resampled into the bitmap already, and
+    /// nearest-neighbour on top of that re-introduces the blockiness.</summary>
+    public static readonly StyledProperty<bool> SmoothPixelsProperty =
+        AvaloniaProperty.Register<WaterfallView, bool>(nameof(SmoothPixels));
+
     public bool ScaleToFit { get => GetValue(ScaleToFitProperty); set => SetValue(ScaleToFitProperty, value); }
     public bool TimeHorizontal { get => GetValue(TimeHorizontalProperty); set => SetValue(TimeHorizontalProperty, value); }
+    public bool SmoothPixels { get => GetValue(SmoothPixelsProperty); set => SetValue(SmoothPixelsProperty, value); }
 
     // ScaleToFit storage: every frame from ReplaceFrames, row-major.
     private float[]? _scaleFrames;
@@ -159,14 +167,19 @@ public sealed class WaterfallView : Image
         FloorDbProperty.Changed.AddClassHandler<WaterfallView>((v, _) => v.OnLevelsChanged());
         CeilDbProperty.Changed.AddClassHandler<WaterfallView>((v, _) => v.OnLevelsChanged());
         ColormapProperty.Changed.AddClassHandler<WaterfallView>((v, _) => { v._lutValid = false; v.OnLevelsChanged(); });
+        SmoothPixelsProperty.Changed.AddClassHandler<WaterfallView>((v, _) => v.ApplyInterpolationMode());
     }
 
     public WaterfallView()
     {
         Stretch = Stretch.Fill;
-        RenderOptions.SetBitmapInterpolationMode(this, BitmapInterpolationMode.None);
+        ApplyInterpolationMode();
         SizeChanged += (_, _) => { EnsureBitmap(); Render(); };
     }
+
+    private void ApplyInterpolationMode() =>
+        RenderOptions.SetBitmapInterpolationMode(
+            this, SmoothPixels ? BitmapInterpolationMode.HighQuality : BitmapInterpolationMode.None);
 
     private void OnLevelsChanged()
     {
@@ -311,7 +324,11 @@ public sealed class WaterfallView : Image
     {
         if (_lutValid) return;
         _lutValid = true;
-        var cmap = Colormap;
+        FillLut(_lut, Colormap);
+    }
+
+    private static void FillLut(uint[] lut, WaterfallColormap cmap)
+    {
         for (int i = 0; i < 256; i++)
         {
             float t = i / 255f;
@@ -319,7 +336,7 @@ public sealed class WaterfallView : Image
             if (cmap == WaterfallColormap.Turbo) TurboMap(t, out r, out g, out b);
             else if (cmap == WaterfallColormap.Meshtastic) MeshtasticMap(t, out r, out g, out b);
             else InfernoMap(t, out r, out g, out b);
-            _lut[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
+            lut[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
         }
     }
 
@@ -365,7 +382,17 @@ public sealed class WaterfallView : Image
 
             if (ScaleToFit && _scaleFrames is not null && _scaleFrameCount > 0 && _scaleBinCount > 0)
             {
-                RenderScaled(back, stride, w, h, floorF, invRange);
+                EnsureLut();
+                fixed (uint* lut = _lut)
+                fixed (float* src = _scaleFrames)
+                {
+                    if (TimeHorizontal)
+                        RenderScaledTimeHorizontalCore((uint*)back, stride / 4, w, h,
+                            src, _scaleFrameCount, _scaleBinCount, floorF, invRange, lut);
+                    else
+                        RenderScaledTimeVerticalCore((uint*)back, stride / 4, w, h,
+                            src, _scaleFrameCount, _scaleBinCount, floorF, invRange, lut);
+                }
                 InvalidateVisual();
                 return;
             }
@@ -425,59 +452,196 @@ public sealed class WaterfallView : Image
     /// <see cref="TimeHorizontal"/>, x = time (left oldest) and y = frequency
     /// (top = high bin); otherwise x = frequency and y = time (top newest),
     /// matching the live waterfall's orientation.</summary>
-    private unsafe void RenderScaled(byte* back, int stride, int w, int h, float floorF, float invRange)
+    private static unsafe void RenderScaledTimeHorizontalCore(
+        uint* dst, int stridePx, int w, int h,
+        float* frames, int numFrames, int n, float floorF, float invRange, uint* lut)
     {
-        int frames = _scaleFrameCount, bins = _scaleBinCount;
-        fixed (uint* lut = _lut)
-        fixed (float* src = _scaleFrames)
+        for (int x = 0; x < w; x++)
         {
+            double tx = ((x + 0.5) * numFrames / w) - 0.5;
             for (int y = 0; y < h; y++)
             {
-                uint* dstRow = (uint*)(back + y * stride);
-                for (int x = 0; x < w; x++)
-                {
-                    // Map this pixel to a (frame, bin) span and max-hold it, so
-                    // downscaling can't drop a one-pixel-wide chirp.
-                    int t0, t1, b0, b1;
-                    if (TimeHorizontal)
-                    {
-                        SpanFor(x, w, frames, out t0, out t1);
-                        SpanFor(h - 1 - y, h, bins, out b0, out b1);
-                    }
-                    else
-                    {
-                        SpanFor(y, h, frames, out t0, out t1);
-                        SpanFor(x, w, bins, out b0, out b1);
-                    }
-
-                    float v = float.NegativeInfinity;
-                    for (int t = t0; t < t1; t++)
-                    {
-                        float* frame = src + (long)t * bins;
-                        for (int b = b0; b < b1; b++)
-                        {
-                            float c = frame[b];
-                            if (!float.IsNaN(c) && !float.IsInfinity(c) && c > v) v = c;
-                        }
-                    }
-                    if (float.IsNegativeInfinity(v)) v = floorF;
-                    int idx = (int)((v - floorF) * invRange);
-                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
-                    dstRow[x] = lut[idx];
-                }
+                double fy = ((h - 0.5 - y) * n / h) - 0.5;
+                float v = SampleScaleFrameBicubic(frames, numFrames, n, tx, fy, floorF);
+                int idx = (int)((v - floorF) * invRange);
+                if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                dst[y * stridePx + x] = lut[idx];
             }
         }
     }
 
-    /// <summary>Map output pixel <paramref name="i"/> of <paramref name="outCount"/>
-    /// onto a half-open source span, always at least one wide.</summary>
-    private static void SpanFor(int i, int outCount, int srcCount, out int start, out int end)
+    private static unsafe void RenderScaledTimeVerticalCore(
+        uint* dst, int stridePx, int w, int h,
+        float* frames, int numFrames, int n, float floorF, float invRange, uint* lut)
     {
-        start = (int)((long)i * srcCount / outCount);
-        end = (int)(((long)(i + 1) * srcCount + outCount - 1) / outCount);
-        if (start < 0) start = 0; else if (start >= srcCount) start = srcCount - 1;
-        if (end <= start) end = start + 1;
-        if (end > srcCount) end = srcCount;
+        for (int y = 0; y < h; y++)
+        {
+            uint* dstRow = dst + (long)y * stridePx;
+            double ty = ((h - 0.5 - y) * numFrames / h) - 0.5;
+            for (int x = 0; x < w; x++)
+            {
+                double fx = ((x + 0.5) * n / w) - 0.5;
+                float v = SampleScaleFrameBicubic(frames, numFrames, n, ty, fx, floorF);
+                int idx = (int)((v - floorF) * invRange);
+                if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                dstRow[x] = lut[idx];
+            }
+        }
+    }
+
+    /// <summary>Rasterizes a scale-to-fit snapshot into <paramref name="pixels"/>
+    /// (BGRA, row-major, stride = <paramref name="w"/>). Pure function safe to
+    /// call from a background thread — this keeps the expensive per-pixel
+    /// bicubic resample off the UI thread, where it stalls the live waterfall
+    /// for tens of milliseconds after every decoded packet.</summary>
+    public static void RenderScaledSnapshotPixels(
+        float[] frames, int frameCount, int bins,
+        int w, int h, bool timeHorizontal,
+        double floorDb, double ceilDb, WaterfallColormap colormap,
+        uint[] pixels)
+    {
+        if (frames is null || frameCount <= 0 || bins <= 0 || w <= 0 || h <= 0) return;
+        if ((long)frameCount * bins > frames.Length) return;
+        if ((long)w * h > pixels.Length) return;
+
+        if (ceilDb <= floorDb) ceilDb = floorDb + 1.0;
+        float invRange = 255f / (float)(ceilDb - floorDb);
+        float floorF = (float)floorDb;
+        var lut = new uint[256];
+        FillLut(lut, colormap);
+
+        unsafe
+        {
+            fixed (uint* dst = pixels)
+            fixed (float* src = frames)
+            fixed (uint* lutPtr = lut)
+            {
+                if (timeHorizontal)
+                    RenderScaledTimeHorizontalCore(dst, w, w, h, src, frameCount, bins, floorF, invRange, lutPtr);
+                else
+                    RenderScaledTimeVerticalCore(dst, w, w, h, src, frameCount, bins, floorF, invRange, lutPtr);
+            }
+        }
+    }
+
+    /// <summary>Ensures the backing bitmap exists at the current layout size and
+    /// returns its pixel dimensions, so a caller can rasterize a matching
+    /// snapshot off the UI thread before presenting it.</summary>
+    public (int Width, int Height) GetSnapshotTargetSize()
+    {
+        if (_bmp is null) EnsureBitmap();
+        return (_w, _h);
+    }
+
+    /// <summary>Presents a snapshot rasterized off-thread by
+    /// <see cref="RenderScaledSnapshotPixels"/>: applies levels/colormap without
+    /// triggering intermediate renders (each property setter would otherwise
+    /// re-render the *previous* snapshot), adopts <paramref name="frames"/> so
+    /// later resizes and level changes can re-render, then blits the pixels.
+    /// Falls back to one normal render if the bitmap was resized since
+    /// rasterization.</summary>
+    public unsafe void PresentSnapshot(
+        double floorDb, double ceilDb, WaterfallColormap colormap,
+        uint[] pixels, int pixelWidth, int pixelHeight,
+        float[] frames, int frameCount, int bins)
+    {
+        _suppressRender = true;
+        try
+        {
+            FloorDb = floorDb;
+            CeilDb = ceilDb;
+            Colormap = colormap;
+        }
+        finally
+        {
+            _suppressRender = false;
+        }
+
+        if (frames is null || frameCount <= 0 || bins <= 0)
+        {
+            _scaleFrames = null;
+            _scaleFrameCount = 0;
+            _scaleBinCount = 0;
+            Render();
+            return;
+        }
+
+        if (_bmp is null) EnsureBitmap();
+
+        _scaleBinCount = bins;
+        _scaleFrameCount = frameCount;
+        _scaleFrames = frames;
+
+        if (_bmp is not null && pixelWidth == _w && pixelHeight == _h &&
+            (long)_w * _h <= pixels.LongLength)
+        {
+            using (var fb = _bmp.Lock())
+            {
+                int stride = fb.RowBytes;
+                byte* dst = (byte*)fb.Address.ToPointer();
+                fixed (uint* src = pixels)
+                {
+                    for (int y = 0; y < _h; y++)
+                        Buffer.MemoryCopy(src + (long)y * _w, dst + (long)y * stride,
+                                          stride, (long)_w * 4);
+                }
+            }
+            InvalidateVisual();
+            return;
+        }
+
+        Render();
+    }
+
+    /// <summary>Catmull-Rom bicubic sample of the frame grid, matching
+    /// MeshRF.App. Coordinates are in source units with pixel centres at
+    /// half-integers; out-of-range taps clamp to the edge.</summary>
+    private static unsafe float SampleScaleFrameBicubic(
+        float* frames, int frameCount, int bins, double frameCoord, double binCoord, float fallback)
+    {
+        int frameBase = (int)Math.Floor(frameCoord);
+        int binBase = (int)Math.Floor(binCoord);
+        double ft = frameCoord - frameBase;
+        double fb = binCoord - binBase;
+
+        Span<float> rows = stackalloc float[4];
+        for (int row = 0; row < 4; row++)
+        {
+            int frame = ClampIndex(frameBase + row - 1, frameCount);
+            float p0 = GetScaleFrameValue(frames, frame, binBase - 1, bins, fallback);
+            float p1 = GetScaleFrameValue(frames, frame, binBase, bins, fallback);
+            float p2 = GetScaleFrameValue(frames, frame, binBase + 1, bins, fallback);
+            float p3 = GetScaleFrameValue(frames, frame, binBase + 2, bins, fallback);
+            rows[row] = CubicInterpolate(p0, p1, p2, p3, fb);
+        }
+
+        return CubicInterpolate(rows[0], rows[1], rows[2], rows[3], ft);
+    }
+
+    private static unsafe float GetScaleFrameValue(
+        float* frames, int frame, int bin, int bins, float fallback)
+    {
+        int clampedBin = ClampIndex(bin, bins);
+        float value = frames[(long)frame * bins + clampedBin];
+        return float.IsNaN(value) || float.IsInfinity(value) ? fallback : value;
+    }
+
+    private static int ClampIndex(int index, int count)
+    {
+        if (index < 0) return 0;
+        if (index >= count) return count - 1;
+        return index;
+    }
+
+    private static float CubicInterpolate(float p0, float p1, float p2, float p3, double t)
+    {
+        double t2 = t * t;
+        double t3 = t2 * t;
+        return (float)(0.5 * (
+            (2.0 * p1) +
+            (-p0 + p2) * t +
+            (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+            (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3));
     }
 
     private static byte ToByte(float f)
