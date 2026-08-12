@@ -2,16 +2,14 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "meshrf",
   "version-string": "0.0.1",
-  "description": "Windows-native Meshtastic client using HackRF",
+  "description": "Cross-platform Meshtastic client using HackRF / RTL-SDR",
   "license": "GPL-3.0-or-later",
   "dependencies": [
     "libusb",
-    "libsodium",
     {
       "name": "protobuf",
       "features": ["zlib"]
     },
-    "liquid-dsp",
     "gtest",
     "spdlog",
     "fmt",

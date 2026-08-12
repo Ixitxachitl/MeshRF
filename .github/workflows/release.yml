@@ -25,7 +25,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          # Pinned, not windows-latest: that image is now windows-2025-vs2026,
+          # which ships Visual Studio 2026, and the windows-x64 preset asks for
+          # the "Visual Studio 17 2022" generator. A preset that names a
+          # generator cannot be overridden with -G, so the runner has to match
+          # the preset until the preset learns to pick whatever VS is present.
+          - os: windows-2022
             platform: windows
             # The last WPF release ships alongside the first Avalonia one; after
             # that this becomes 'Avalonia'.

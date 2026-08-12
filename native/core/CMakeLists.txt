@@ -34,11 +34,11 @@ target_compile_features(mrf_core PUBLIC cxx_std_20)
 # These are wired in best-effort; modules guarded by HAVE_* macros so the
 # scaffold compiles even before vcpkg integration is fully bootstrapped.
 # ---------------------------------------------------------------------------
-find_package(unofficial-sodium CONFIG QUIET)
-if(unofficial-sodium_FOUND)
-    target_link_libraries(mrf_core PUBLIC unofficial-sodium::sodium)
-    target_compile_definitions(mrf_core PUBLIC MRF_HAVE_SODIUM=1)
-endif()
+# No libsodium: it was linked here best-effort, but nothing ever included it
+# and MRF_HAVE_SODIUM was never read. Channel crypto needs a generic
+# AES-128/256-CTR primitive, which libsodium does not expose (see the WIN32
+# branch below), so it was only ever dead weight -- and it is the port that
+# failed to build on Linux and macOS, blocking those releases entirely.
 
 find_package(spdlog CONFIG QUIET)
 if(spdlog_FOUND)
