@@ -1125,12 +1125,16 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (_core is null || string.IsNullOrWhiteSpace(MessageText)) return;
 
-        // DMs aren't PKC-sealed here (no node identity/PKI yet) — sent as a
-        // legacy channel-PSK-encrypted unicast on the primary channel,
-        // exactly like a broadcast but addressed to one node.
         ObservableCollection<ChannelMessage>? messages;
-        ChannelConfig channel;
+        ChannelConfig? channel;
         uint to = 0xFFFFFFFFu;
+        // A direct message must be PKC-sealed. Firmware rejects a text message
+        // addressed to it that decrypted with the channel PSK outright
+        // ("Rejecting legacy DM", Router.cpp) unless the node is licensed, so a
+        // legacy unicast DM is silently dropped by the peer.
+        byte[] myPriv = Array.Empty<byte>(), peerPub = Array.Empty<byte>();
+        bool usePkc = false;
+
         switch (SelectedTab)
         {
             case ChannelTabViewModel chanTab:
@@ -1138,11 +1142,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 channel = chanTab.Config;
                 break;
             case ConversationTabViewModel convoTab:
-                var primary = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
-                if (primary is null) return;
                 messages = convoTab.Messages;
-                channel = primary.Config;
                 to = convoTab.NodeNum;
+                myPriv = TryParseKeyBase64(MyPrivateKey);
+                peerPub = TryParseHex(_rxHost.PublicKeyHexFor(convoTab.NodeNum));
+                usePkc = myPriv.Length == 32 && peerPub.Length == 32;
+                // The channel is only needed for the legacy fallback.
+                channel = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault()?.Config;
+                if (!usePkc && channel is null) return;
                 break;
             default:
                 return;
@@ -1153,7 +1160,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         uint replyId = PendingReplyPacketId;
         var replyContext = PendingReplyContext;
 
-        var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text, to: to, replyId: replyId);
+        var frame = usePkc
+            ? MeshEncoder.EncodePkcTextMessage(
+                _rxHost.MyNodeNum, to, packetId, text, myPriv, peerPub,
+                hopLimit: (byte)HopLimit, wantAck: true, replyId: replyId, okToMqtt: OkToMqtt)
+            : MeshEncoder.EncodeTextMessage(
+                channel!, _rxHost.MyNodeNum, packetId, text, to: to,
+                hopLimit: (byte)HopLimit, wantAck: to != 0xFFFFFFFFu,
+                replyId: replyId, okToMqtt: OkToMqtt);
 
         bool ok = await TransmitFrameAsync(frame);
         if (!ok)
@@ -1181,7 +1195,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         });
         // Persist the raw body (not the quoted display text) so a reload
         // rebuilds the quote from reply_id, exactly like MeshRF.App.
-        _rxHost.PersistOutgoingText(to, packetId, text, channel.Name, replyId);
+        // "PKC" is the channel name the router reports for PKC traffic, so
+        // history reloads classify these the same way received ones are.
+        _rxHost.PersistOutgoingText(to, packetId, text,
+                                    usePkc ? "PKC" : channel!.Name, replyId);
         MessageText = string.Empty;
         CancelReply();
     }
