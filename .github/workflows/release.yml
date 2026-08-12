@@ -61,15 +61,21 @@ jobs:
 
       # Radio backends are dlopen'd at runtime rather than linked, so the dev
       # packages only need to exist at build time for the headers.
+      #
+      # The autotools and libudev entries are for vcpkg's own libusb port,
+      # which autoreconfs from source and names these itself when they are
+      # missing ("libusb currently requires the following tools and libraries
+      # from the system package manager: libudev").
       - name: Install native dependencies (Linux)
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libhackrf-dev librtlsdr-dev libusb-1.0-0-dev
+          sudo apt-get install -y ninja-build libhackrf-dev librtlsdr-dev libusb-1.0-0-dev \
+                                  libudev-dev autoconf autoconf-archive automake libtool
 
       - name: Install native dependencies (macOS)
         if: matrix.platform == 'macos'
-        run: brew install ninja hackrf librtlsdr libusb
+        run: brew install ninja hackrf librtlsdr libusb autoconf autoconf-archive automake libtool
 
       # A full clone, deliberately: vcpkg.json pins a "builtin-baseline" commit
       # that a shallow clone cannot resolve, and a blob-filtered clone makes
