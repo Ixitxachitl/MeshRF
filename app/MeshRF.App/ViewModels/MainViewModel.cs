@@ -2549,7 +2549,9 @@ public partial class MainViewModel : ObservableObject, IDisposable, IMeshRxHost
                     latest.SnrDb    = pending.Snr  ?? latest.SnrDb;
                     latest.RssiDbm  = pending.Rssi ?? latest.RssiDbm;
                     latest.HopsAway = pending.Hops ?? latest.HopsAway;
-                    if (pending.ViaMqtt) latest.SeenViaMqtt = true;
+                    // Overwrite, don't OR: the flag tracks the latest sighting's
+                    // transport, so an RF packet clears an earlier MQTT one.
+                    latest.SeenViaMqtt = pending.ViaMqtt;
                 }
                 _pendingNodeSightings.Remove(nodeNum);
             }
@@ -9275,9 +9277,16 @@ public partial class MainViewModel : ObservableObject, IDisposable, IMeshRxHost
         bool hasDefaultChannel = primary is not null && primary.UsesDefaultKey &&
             (string.IsNullOrEmpty(primary.Name) || Enum.GetNames<LoraPreset>().Contains(primary.Name));
 
+        // Firmware's NodeDB::getNumOnlineMeshNodes(localOnly: true): heard in the
+        // last 2 hours, most recent sighting not via MQTT. Our own node is skipped
+        // because firmware never counts it either — updateFrom() bails on packets
+        // from self, so the self entry's last_heard stays 0. We have to say so
+        // explicitly, since MeshRF does stamp last_heard on self when we transmit.
         var twoHoursAgoEpoch = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds();
         int numOnlineLocalNodes = _nodeStore.All()
-            .Count(n => !n.SeenViaMqtt && n.LastHeardEpoch >= twoHoursAgoEpoch);
+            .Count(n => n.NodeNum != _myNodeNum
+                        && n.SeenViaMqtt != true
+                        && n.LastHeardEpoch >= twoHoursAgoEpoch);
 
         var region = ToProtoRegionCode(SelectedRegion);
         if (!Enum.TryParse<ProtoModemPreset>(SelectedPreset.ToString(), out var modemPreset))
@@ -10158,8 +10167,8 @@ public partial class MainViewModel : ObservableObject, IDisposable, IMeshRxHost
         // MQTT filter.
         switch (criteria.MqttStatus)
         {
-            case "Hide via MQTT": if (n.SeenViaMqtt) return false; break;
-            case "Only via MQTT": if (!n.SeenViaMqtt) return false; break;
+            case "Hide via MQTT": if (n.SeenViaMqtt == true) return false; break;
+            case "Only via MQTT": if (n.SeenViaMqtt != true) return false; break;
         }
 
         // Telemetry presence filters.

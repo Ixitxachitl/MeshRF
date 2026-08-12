@@ -110,7 +110,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
             Add("Hardware", n.HwModel);
             Add("Role", n.Role);
             if (n.IsUnmessagable.HasValue) Add("Unmessagable", n.IsUnmessagable.Value ? "Yes" : "No");
-            if (n.SeenViaMqtt) Add("Via MQTT", "Yes");
+            if (n.SeenViaMqtt == true) Add("Via MQTT", "Yes");
             if (n.BatteryPct is byte bat) Add("Battery", $"{bat}%");
             if (n.VoltageV is float volt) Add("Voltage", $"{volt:0.00} V");
             if (n.ChannelUtilPct is float chUtil) Add("Channel util", $"{chUtil:0.0}%");

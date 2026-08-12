@@ -90,8 +90,13 @@ public sealed class NodeRecord : INotifyPropertyChanged
     /// <summary>Unix epoch seconds, 0 if never heard.</summary>
     public long LastHeardEpoch { get; set; }
 
-    /// <summary>True when any stored sighting for this node reported <c>via_mqtt</c>.</summary>
-    public bool SeenViaMqtt { get; set; }
+    /// <summary>Transport of the most recent sighting: true when it arrived
+    /// <c>via_mqtt</c>. Mirrors firmware's per-node <c>VIA_MQTT</c> bitfield,
+    /// which <c>NodeDB::updateFrom</c> overwrites from every packet — so a node
+    /// first heard over MQTT reverts to local once we hear it over the air.
+    /// Null on an upsert that carries no packet (identity/position-only writes)
+    /// and leaves the stored value alone.</summary>
+    public bool? SeenViaMqtt { get; set; }
 
     public float? SnrDb       { get; set; }
     public float? RssiDbm     { get; set; }

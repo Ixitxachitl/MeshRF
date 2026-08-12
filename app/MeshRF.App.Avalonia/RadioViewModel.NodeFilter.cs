@@ -223,8 +223,8 @@ public partial class RadioViewModel
 
         switch (NodeMqttFilter)
         {
-            case "Hide via MQTT" when n.SeenViaMqtt: return false;
-            case "Only via MQTT" when !n.SeenViaMqtt: return false;
+            case "Hide via MQTT" when n.SeenViaMqtt == true: return false;
+            case "Only via MQTT" when n.SeenViaMqtt != true: return false;
         }
 
         if (int.TryParse(NodeMaxAgeMinutesText, NumberStyles.Integer, CultureInfo.CurrentCulture, out var maxAge) && maxAge > 0)

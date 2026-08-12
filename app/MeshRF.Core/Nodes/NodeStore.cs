@@ -244,7 +244,7 @@ public sealed class NodeStore : IDisposable
                                        ch2_voltage_v, ch2_current_ma,
                                        ch3_voltage_v, ch3_current_ma)
                 VALUES ($node_num, $user_id, $long_name, $short_name,
-                        $hw_model, $role, $last_heard, $seen_via_mqtt,
+                        $hw_model, $role, $last_heard, MAX($seen_via_mqtt, 0),
                         $snr, $rssi, $hops,
                         $lat, $lon, $alt,
                         $batt, $volt,
@@ -264,7 +264,7 @@ public sealed class NodeStore : IDisposable
                     hw_model         = COALESCE(NULLIF(excluded.hw_model, ''),   hw_model),
                     role             = COALESCE(NULLIF(excluded.role, ''),       role),
                     last_heard_epoch = MAX(excluded.last_heard_epoch, last_heard_epoch),
-                    seen_via_mqtt    = MAX(excluded.seen_via_mqtt, seen_via_mqtt),
+                    seen_via_mqtt    = COALESCE(NULLIF($seen_via_mqtt, -1), seen_via_mqtt),
                     snr_db           = COALESCE(excluded.snr_db, snr_db),
                     rssi_dbm         = COALESCE(excluded.rssi_dbm, rssi_dbm),
                     hops_away        = COALESCE(excluded.hops_away, hops_away),
@@ -306,7 +306,12 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$hw_model", rec.HwModel ?? string.Empty);
             cmd.Parameters.AddWithValue("$role", rec.Role ?? string.Empty);
             cmd.Parameters.AddWithValue("$last_heard", rec.LastHeardEpoch);
-            cmd.Parameters.AddWithValue("$seen_via_mqtt", rec.SeenViaMqtt ? 1 : 0);
+            // -1 is the "this write carries no packet, leave the flag alone" sentinel.
+            // The column is NOT NULL, so the null case can't ride in as SQL NULL:
+            // the VALUES clause clamps it to 0 for a fresh row and the DO UPDATE
+            // maps it back to "keep existing" (see the NULLIF above).
+            cmd.Parameters.AddWithValue("$seen_via_mqtt",
+                rec.SeenViaMqtt is bool via ? (via ? 1 : 0) : -1);
             cmd.Parameters.AddWithValue("$snr",  (object?)rec.SnrDb       ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$rssi", (object?)rec.RssiDbm     ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$hops", (object?)rec.HopsAway    ?? DBNull.Value);
@@ -409,7 +414,9 @@ public sealed class NodeStore : IDisposable
         }
     }
 
-    /// <summary>Touch last-heard / RSSI / SNR for an existing or new node.</summary>
+    /// <summary>Touch last-heard / RSSI / SNR for an existing or new node.
+    /// <paramref name="seenViaMqtt"/> is the transport of this sighting and
+    /// overwrites the stored flag either way — callers always know it.</summary>
     public void RecordSighting(uint nodeNum, float? rssiDbm = null,
                                float? snrDb = null, byte? hopsAway = null,
                                DateTimeOffset? when = null,
@@ -873,7 +880,7 @@ public sealed class NodeStore : IDisposable
             HwModel        = r.GetString(r.GetOrdinal("hw_model")),
             Role           = r.GetString(r.GetOrdinal("role")),
             LastHeardEpoch = r.GetInt64(r.GetOrdinal("last_heard_epoch")),
-            SeenViaMqtt    = Nullable<bool>("seen_via_mqtt") == true,
+            SeenViaMqtt    = Nullable<bool>("seen_via_mqtt"),
             SnrDb          = Nullable<float>("snr_db"),
             RssiDbm        = Nullable<float>("rssi_dbm"),
             HopsAway       = Nullable<byte>("hops_away"),

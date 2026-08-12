@@ -552,9 +552,16 @@ public partial class RadioViewModel
         bool hasDefaultChannel = primary is not null && primary.UsesDefaultKey &&
             (string.IsNullOrEmpty(primary.Name) || Enum.GetNames<LoraPreset>().Contains(primary.Name));
 
+        // Firmware's NodeDB::getNumOnlineMeshNodes(localOnly: true): heard in the
+        // last 2 hours, most recent sighting not via MQTT. Our own node is skipped
+        // because firmware never counts it either — updateFrom() bails on packets
+        // from self, so the self entry's last_heard stays 0. We have to say so
+        // explicitly, since MeshRF does stamp last_heard on self when we transmit.
         var twoHoursAgoEpoch = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds();
         int numOnlineLocalNodes = _nodeStore.All()
-            .Count(n => !n.SeenViaMqtt && n.LastHeardEpoch >= twoHoursAgoEpoch);
+            .Count(n => n.NodeNum != _rxHost.MyNodeNum
+                        && n.SeenViaMqtt != true
+                        && n.LastHeardEpoch >= twoHoursAgoEpoch);
 
         if (!Enum.TryParse<ProtoModemPreset>(SelectedPreset.ToString(), out var modemPreset))
             modemPreset = ProtoModemPreset.LongFast;
