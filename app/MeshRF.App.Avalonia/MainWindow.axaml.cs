@@ -483,6 +483,18 @@ public partial class MainWindow : Window
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
     }
 
+    /// <summary>Centers the map on the selected node's last known position.</summary>
+    private void OnShowOnMap(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        if (node.Latitude is not double lat || node.Longitude is not double lon)
+        {
+            _viewModel.StatusText = "That node has no known position.";
+            return;
+        }
+        Map.CenterOn(lat, lon);
+    }
+
     private async void OnCopyNode(object? sender, RoutedEventArgs e)
     {
         if (NodesGridProxy.SelectedItem is not NodeRecord node) return;

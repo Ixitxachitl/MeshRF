@@ -1,0 +1,134 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+             x:Class="MeshRF.AvaloniaApp.MapPanel"
+             x:DataType="local:RadioViewModel"
+             ClipToBounds="True">
+    <Grid>
+        <!-- Base layer: the custom-drawn slippy map. Everything below is
+             chrome floating over it. -->
+        <local:MapCanvas x:Name="Canvas" />
+
+        <TextBlock x:Name="AttributionText"
+                   IsHitTestVisible="False"
+                   HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                   Margin="0,0,4,2" FontSize="10" Foreground="#AAFFFFFF" />
+
+        <!-- Zoom / view controls -->
+        <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                Margin="8" Padding="2" Background="#CC202020" CornerRadius="3">
+            <StackPanel Orientation="Vertical" Spacing="2">
+                <Button Content="+" Width="28" Height="28" FontSize="16" Padding="0"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        Click="OnZoomIn" ToolTip.Tip="Zoom in" />
+                <Button Content="–" Width="28" Height="28" FontSize="16" Padding="0"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        Click="OnZoomOut" ToolTip.Tip="Zoom out" />
+                <Button Content="⌂" Width="28" Height="28" FontSize="14" Padding="0"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        Click="OnGoHome" ToolTip.Tip="Go to location" />
+                <Button Content="⛶" Width="28" Height="28" FontSize="12" Padding="0"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        Click="OnFitAll" ToolTip.Tip="Fit all visible nodes" />
+                <ToggleButton x:Name="FollowHomeButton" Width="28" Height="28" FontSize="12" Padding="0"
+                              Content="◎"
+                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              IsCheckedChanged="OnFollowHomeToggle" ToolTip.Tip="Follow GPS / location" />
+                <ToggleButton x:Name="ClusterNodesButton" Width="28" Height="28" FontSize="12" Padding="0"
+                              Content="⁙" IsChecked="True"
+                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              IsCheckedChanged="OnClusterToggle" ToolTip.Tip="Cluster overlapping nodes" />
+            </StackPanel>
+        </Border>
+
+        <!-- Label / tile selectors -->
+        <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                Margin="44,8,0,0" Padding="6,5"
+                Background="#CC202020" CornerRadius="3"
+                BorderBrush="#553A3A3A" BorderThickness="1">
+            <StackPanel Orientation="Vertical" Width="160">
+                <TextBlock Text="Map label" FontSize="11" Margin="0,0,0,3" Foreground="#DDDDDD" />
+                <ComboBox x:Name="LabelModeCombo" Height="24" FontSize="11"
+                          HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding MapNodeLabelModeOptions}"
+                          SelectedItem="{Binding MapNodeLabelMode, Mode=TwoWay}"
+                          ToolTip.Tip="Label shown on map markers; falls back to node number when data is unavailable" />
+                <TextBlock Text="Map tiles" FontSize="11" Margin="0,6,0,3" Foreground="#DDDDDD" />
+                <ComboBox x:Name="MapTileThemeCombo" Height="24" FontSize="11"
+                          HorizontalAlignment="Stretch"
+                          SelectionChanged="OnMapTileThemeChanged"
+                          ToolTip.Tip="Tile provider for the basemap" />
+            </StackPanel>
+        </Border>
+
+        <!-- New-waypoint composer: what Ctrl+left-click sends. -->
+        <Expander HorizontalAlignment="Right" VerticalAlignment="Top"
+                  Margin="8" Header="Waypoint" IsExpanded="False"
+                  Background="{DynamicResource BrushPanelBackground}"
+                  BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+            <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
+                <StackPanel Orientation="Vertical" Width="220" Margin="6,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="WP" VerticalAlignment="Center" />
+                        <Button x:Name="EmojiButton" Width="28" Height="28" Padding="0"
+                                HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                Content="{Binding SelectedWaypointEmoji}"
+                                Click="OnPickEmoji"
+                                ToolTip.Tip="Click to pick waypoint emoji" />
+                    </StackPanel>
+
+                    <TextBlock Text="Name" Margin="0,6,0,0" />
+                    <TextBox Margin="0,2,0,0" Text="{Binding WaypointNameInput, Mode=TwoWay}"
+                             ToolTip.Tip="Waypoint name for new Ctrl+left-click waypoints" />
+
+                    <TextBlock Text="Description" Margin="0,6,0,0" />
+                    <TextBox Margin="0,2,0,0" Text="{Binding WaypointDescriptionInput, Mode=TwoWay}"
+                             ToolTip.Tip="Waypoint description for new Ctrl+left-click waypoints" />
+
+                    <CheckBox Content="Lock to me" Margin="0,6,0,0"
+                              IsChecked="{Binding WaypointLockToMe, Mode=TwoWay}"
+                              ToolTip.Tip="Sets Waypoint.locked_to to your node number, so compliant clients refuse edits/deletes from other nodes" />
+
+                    <CheckBox Content="Set expiration" Margin="0,6,0,0"
+                              IsChecked="{Binding UseWaypointExpiry, Mode=TwoWay}" />
+                    <StackPanel Orientation="Vertical" Margin="0,2,0,0" Spacing="4"
+                                IsEnabled="{Binding UseWaypointExpiry}">
+                        <DatePicker SelectedDate="{Binding WaypointExpiryDate, Mode=TwoWay}" />
+                        <TimePicker ClockIdentifier="12HourClock" UseSeconds="True"
+                                    SelectedTime="{Binding WaypointExpiryTime, Mode=TwoWay}" />
+                    </StackPanel>
+
+                    <CheckBox Content="Add geofence" Margin="0,6,0,0"
+                              IsChecked="{Binding UseWaypointGeofence, Mode=TwoWay}"
+                              ToolTip.Tip="Attach a circular geofence to this waypoint (Waypoint.geofence_radius)" />
+                    <StackPanel Orientation="Vertical" Margin="0,2,0,0" Spacing="2"
+                                IsEnabled="{Binding UseWaypointGeofence}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="Radius (m)" VerticalAlignment="Center" />
+                            <TextBox Width="80" Text="{Binding WaypointGeofenceRadiusInput, Mode=TwoWay}"
+                                     ToolTip.Tip="Circular geofence radius in meters" />
+                        </StackPanel>
+                        <CheckBox Content="Notify on enter" IsChecked="{Binding WaypointNotifyOnEnter, Mode=TwoWay}" />
+                        <CheckBox Content="Notify on exit" IsChecked="{Binding WaypointNotifyOnExit, Mode=TwoWay}" />
+                        <CheckBox Content="Favorites only" IsChecked="{Binding WaypointNotifyFavoritesOnly, Mode=TwoWay}"
+                                  ToolTip.Tip="Only raise enter/exit notifications for nodes marked as favorites (per receiver)" />
+                    </StackPanel>
+
+                    <CheckBox Content="Add bounding box geofence" Margin="0,6,0,0"
+                              IsChecked="{Binding UseWaypointBoundingBox, Mode=TwoWay}"
+                              ToolTip.Tip="Attach a rectangular geofence to this waypoint (Waypoint.bounding_box). May be combined with the circular radius above." />
+                    <StackPanel Orientation="Vertical" Margin="0,2,0,0" Spacing="4"
+                                IsEnabled="{Binding UseWaypointBoundingBox}">
+                        <ToggleButton Content="Pick corners on map" HorizontalAlignment="Left"
+                                      IsChecked="{Binding IsPickingWaypointBoundingBox, Mode=TwoWay}"
+                                      IsCheckedChanged="OnPickBoundingBoxCornersToggled"
+                                      ToolTip.Tip="Click, then click two opposite corners on the map (no Ctrl needed while this is on)" />
+                        <TextBlock Text="{Binding WaypointBoundingBoxSummary}" TextWrapping="Wrap" />
+                        <Button Content="Clear box" HorizontalAlignment="Left"
+                                Command="{Binding ClearWaypointBoundingBoxCommand}" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Expander>
+    </Grid>
+</UserControl>

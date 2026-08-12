@@ -72,6 +72,7 @@ public partial class RadioViewModel
     private void HookNodeFilter()
     {
         Nodes.CollectionChanged += (_, _) => ApplyNodeFilter();
+        Waypoints.CollectionChanged += (_, _) => RaiseMapDataChanged();
         ApplyNodeFilter();
     }
 
@@ -170,6 +171,10 @@ public partial class RadioViewModel
         foreach (var n in Nodes)
             if (PassesFilter(n)) FilteredNodes.Add(n);
         OnPropertyChanged(nameof(NodesHeader));
+        // The map draws FilteredNodes, so hiding a node here hides its marker.
+        // Raised once per rebuild rather than per item — the collection is
+        // cleared and refilled, and the map coalesces to one redraw anyway.
+        RaiseMapDataChanged();
     }
 
     private bool PassesFilter(NodeRecord n)
@@ -262,7 +267,9 @@ public partial class RadioViewModel
         _ => true,
     };
 
-    private bool TryGetHomeLocation(out double lat, out double lon)
+    /// <summary>Parses the home lat/lon text boxes — the persisted source of
+    /// truth for our own position. Public for the map panel's home marker.</summary>
+    public bool TryGetHomeLocation(out double lat, out double lon)
     {
         lat = lon = 0;
         return double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out lat)

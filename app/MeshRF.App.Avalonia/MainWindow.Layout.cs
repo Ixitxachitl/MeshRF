@@ -35,6 +35,7 @@ public partial class MainWindow
                       settings.MessagesTopPaneStar, settings.MessagesBottomPaneStar);
 
         ApplyLastPacketExpandedState(settings.LastPacketExpanded, persist: false);
+        Map.Attach(_viewModel, settings);
 
         ApplyColumnWidths(NodesGridProxy, settings.NodeColumnWidths);
         ApplyColumnWidths(WaypointsGridProxy, settings.WaypointColumnWidths);
@@ -147,6 +148,7 @@ public partial class MainWindow
         settings.MessagesBottomPaneStar = msgBottom;
 
         settings.LastPacketExpanded = _lastPacketExpanded;
+        Map.SaveToSettings(settings);
 
         settings.NodeColumnWidths = SaveColumnWidths(NodesGridProxy);
         settings.WaypointColumnWidths = SaveColumnWidths(WaypointsGridProxy);

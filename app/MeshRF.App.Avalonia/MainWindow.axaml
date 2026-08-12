@@ -265,7 +265,7 @@
                 <ColumnDefinition Width="*" MinWidth="260" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left: map (top, placeholder) over nodes/waypoints (bottom). -->
+            <!-- Left: map (top) over nodes/waypoints (bottom). -->
             <Grid x:Name="LeftPaneGrid" Grid.Column="0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="1*" MinHeight="120" />
@@ -276,8 +276,7 @@
                 <Border Grid.Row="0" Margin="0,0,0,3"
                         Background="{DynamicResource BrushSpectrumBackground}"
                         BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-                    <TextBlock Text="Map (not ported yet)" Foreground="{DynamicResource BrushSubtle}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <local:MapPanel x:Name="Map" />
                 </Border>
 
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
@@ -456,6 +455,7 @@
                                 <MenuItem Header="Message"
                                           Command="{Binding #RootWindow.DataContext.MessageNodeCommand}"
                                           CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Show on map" Click="OnShowOnMap" />
                                 <Separator />
                                 <MenuItem Header="Request node info"
                                           Command="{Binding #RootWindow.DataContext.RequestNodeInfoCommand}"

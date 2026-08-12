@@ -928,8 +928,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnHopLimitChanged(int value) => SaveSettings();
     partial void OnOkToMqttChanged(bool value) => SaveSettings();
 
-    partial void OnHomeLatitudeTextChanged(string value) => SaveSettings();
-    partial void OnHomeLongitudeTextChanged(string value) => SaveSettings();
+    // The map's home marker reads these, so a manual edit has to redraw it.
+    partial void OnHomeLatitudeTextChanged(string value) { SaveSettings(); RaiseMapDataChanged(); }
+    partial void OnHomeLongitudeTextChanged(string value) { SaveSettings(); RaiseMapDataChanged(); }
     partial void OnHomeAltitudeTextChanged(string value) => SaveSettings();
     partial void OnMyFirmwareVersionChanged(string value) => SaveSettings();
     partial void OnMyFirmwareEditionChanged(string value) => SaveSettings();
