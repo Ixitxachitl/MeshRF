@@ -55,7 +55,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void UpdateMyNodeNum(uint nodeNum) => MyNodeNum = nodeNum;
 
     uint IMeshRxHost.MyNodeNum => MyNodeNum;
-    byte[] IMeshRxHost.MyPrivateKeyBytes => Array.Empty<byte>();
+    /// <summary>Supplies our X25519 private key so the shared router can
+    /// decrypt PKC direct messages. Returning empty here (as this host did
+    /// while PKI was unimplemented) silently disables PKC decode for the whole
+    /// app: DMs arrive as "rx undecoded", can't be delivered, and — because an
+    /// undecodable packet can't be acked — the sender retries until the mesh
+    /// is saturated with refloods.</summary>
+    public Func<byte[]>? MyPrivateKeyProvider { get; set; }
+
+    byte[] IMeshRxHost.MyPrivateKeyBytes => MyPrivateKeyProvider?.Invoke() ?? Array.Empty<byte>();
     IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
@@ -473,18 +481,16 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     public bool RememberUndecodedPacket(MeshHeader header)
     {
-        // Ack first, and on every copy. We can't read the payload, but the
-        // addressing is plaintext, so we know it's for us and that the sender
-        // is waiting. Acking only the first copy would leave a retry that
-        // arrived before our ack got out unanswered — and a retry is exactly
-        // what a lost ack produces.
-        AckRequested?.Invoke(header, null, header.ChannelHash == 0x00);
-
         ulong key = ((ulong)header.From << 32) ^ header.PacketId;
         if (!_recentUndecodedKeys.Add(key)) return false;
         _recentUndecodedOrder.Enqueue(key);
         while (_recentUndecodedOrder.Count > RecentUndecodedLimit)
             _recentUndecodedKeys.Remove(_recentUndecodedOrder.Dequeue());
+        // Deliberately no ack here, matching MeshRF.App: a packet we could not
+        // decode is one we cannot claim to have received. The fix for an
+        // unacked PKC direct message is to decrypt it (see
+        // MyPrivateKeyProvider) so it takes the decoded path, not to
+        // acknowledge blind.
         return true;
     }
 
@@ -510,9 +516,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // every packet was being rejected as a duplicate.
         Log(BuildDecodedPortSummary(header, result, NodeDisplayName(header.From)));
 
-        // Ack before handling: the sender is already counting down to a retry.
-        AckRequested?.Invoke(header, result.ChannelName,
-                             string.Equals(result.ChannelName, "PKC", StringComparison.Ordinal));
+        // Only reached for a packet that decoded and passed dedupe, so this is
+        // exactly one ack per unique message — matching MeshRF.App.
+        if (header.WantAck)
+            AckRequested?.Invoke(header, result.ChannelName,
+                                 string.Equals(result.ChannelName, "PKC", StringComparison.Ordinal));
 
         switch (result.Port)
         {

@@ -139,7 +139,7 @@ public partial class RadioViewModel
                 if (myPriv.Length == 32 && peerPub.Length == 32)
                     frame = MeshEncoder.EncodePkcRouting(
                         _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
-                        myPriv, peerPub, errorReason: 0, hopLimit: (byte)HopLimit);
+                        myPriv, peerPub, errorReason: 0, hopLimit: ResponseHopLimit(header));
             }
             else
             {
@@ -147,7 +147,7 @@ public partial class RadioViewModel
                 if (channel is not null)
                     frame = MeshEncoder.EncodeRouting(
                         channel, _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
-                        errorReason: 0, hopLimit: (byte)HopLimit);
+                        errorReason: 0, hopLimit: ResponseHopLimit(header));
             }
 
             if (frame is not null) TransmitBackground(frame);
@@ -156,6 +156,26 @@ public partial class RadioViewModel
         {
             StatusText = $"Ack failed: {ex.Message}";
         }
+    }
+
+    /// <summary>Hop limit for a reply, ported from firmware's
+    /// RoutingModule::getHopLimitForResponse. A reply sent at the full
+    /// configured limit is rebroadcast by every repeater in range regardless of
+    /// how close the requester actually was; this gives the return path only
+    /// the hops the request needed, plus a small margin.</summary>
+    private byte ResponseHopLimit(MeshHeader header)
+    {
+        byte configured = (byte)Math.Clamp(HopLimit, 0, 7);
+        int hopStart = header.HopStart;
+        // hop_start of 0 means the field isn't in use; hops used is unknown.
+        int hopsUsed = hopStart > 0 ? hopStart - header.HopLimit : -1;
+
+        if (hopsUsed >= 0)
+        {
+            if (hopsUsed > configured) return (byte)hopsUsed;
+            if (hopsUsed + 2 < configured) return (byte)(hopsUsed + 2);
+        }
+        return configured;
     }
 
     private static byte[] TryParseHex(string? hex)
