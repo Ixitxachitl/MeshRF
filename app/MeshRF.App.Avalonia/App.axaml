@@ -41,6 +41,9 @@
         <Style Selector="Window">
             <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
             <Setter Property="FontSize" Value="12" />
+            <!-- Applied app-wide rather than per-window so every dialog gets the
+                 title-bar icon too, not just the taskbar entry for MainWindow. -->
+            <Setter Property="Icon" Value="/Assets/icon.ico" />
             <!-- Program.cs calls WithInterFont(), and Inter carries no colour
                  emoji glyphs — without an explicit fallback chain every emoji in
                  the app (node indicators, reactions, compose button) renders

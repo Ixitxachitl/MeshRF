@@ -12,6 +12,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Windows PE icon for the published executable. The same .ico is also an
+         AvaloniaResource below so the window/taskbar icon works on every OS. -->
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,21 +32,35 @@
     <ProjectReference Include="..\MeshRF.Core\MeshRF.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Unicode's emoji set, generated from UTS #51 emoji-test.txt; see
+         EmojiCatalog.cs, which filters it down to what the platform colour
+         emoji font can actually draw. -->
+    <EmbeddedResource Include="Assets\emoji-catalog.txt" LogicalName="emoji-catalog.txt" />
+    <!-- Window/taskbar icon, loaded at runtime via avares://. The .png is the
+         source art, shipped for the Linux .desktop entry and macOS bundling. -->
+    <AvaloniaResource Include="Assets\icon.ico" />
+    <AvaloniaResource Include="Assets\icon.png" />
+  </ItemGroup>
+
   <!-- Copy the native bridge library produced by CMake into the output dir so
        P/Invoke can find it at runtime. Mirrors MeshRF.App.csproj's
        CopyNativeBridge target; see that file for the RelWithDebInfo rationale.
-       On Linux, point NativeBinDir at build/linux-x64/bin/<config> instead
-       (or override NativeConfig/NativeBinDir directly) since the CMake
-       preset name differs from the Windows one. -->
+       Each OS has its own CMake preset (and so its own build dir) and its own
+       shared-library extension; override NativeConfig/NativeBinDir directly to
+       point somewhere else. The macOS branch is untested — see the
+       macos-arm64 preset in CMakePresets.json. -->
   <PropertyGroup>
     <NativeConfig Condition="'$(NativeConfig)' == ''">RelWithDebInfo</NativeConfig>
     <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$(OS)' == 'Windows_NT'">$(MSBuildThisFileDirectory)..\..\build\windows-x64\bin\$(NativeConfig)</NativeBinDir>
-    <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$(OS)' != 'Windows_NT'">$(MSBuildThisFileDirectory)../../build/linux-x64/bin</NativeBinDir>
+    <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$([MSBuild]::IsOSPlatform(`Linux`))'">$(MSBuildThisFileDirectory)../../build/linux-x64/bin</NativeBinDir>
+    <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$([MSBuild]::IsOSPlatform(`OSX`))'">$(MSBuildThisFileDirectory)../../build/macos-arm64/bin</NativeBinDir>
   </PropertyGroup>
   <Target Name="CopyNativeBridge" AfterTargets="Build">
     <ItemGroup>
       <_NativeBridgeLib Include="$(NativeBinDir)\MeshRF.Native.dll" Condition="'$(OS)' == 'Windows_NT'" />
-      <_NativeBridgeLib Include="$(NativeBinDir)/libMeshRF.Native.so" Condition="'$(OS)' != 'Windows_NT'" />
+      <_NativeBridgeLib Include="$(NativeBinDir)/libMeshRF.Native.so" Condition="'$([MSBuild]::IsOSPlatform(`Linux`))'" />
+      <_NativeBridgeLib Include="$(NativeBinDir)/libMeshRF.Native.dylib" Condition="'$([MSBuild]::IsOSPlatform(`OSX`))'" />
       <_NativeRuntimeDll Include="$(NativeBinDir)\hackrf.dll" Condition="'$(OS)' == 'Windows_NT'" />
       <_NativeRuntimeDll Include="$(NativeBinDir)\libusb-1.0.dll" Condition="'$(OS)' == 'Windows_NT'" />
       <_NativeRuntimeDll Include="$(NativeBinDir)\pthreadVC2.dll" Condition="'$(OS)' == 'Windows_NT'" />

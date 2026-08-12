@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-using System.Globalization;
 using Avalonia;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls;
@@ -10,115 +9,143 @@ using Avalonia.Media;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// Emoji picker, ported from MeshRF.App's EmojiPickerWindow. Same category
-/// ranges, so both apps offer the same glyphs. Used for message reactions and
-/// for inserting into the compose box.
+/// Emoji picker for message reactions, waypoint icons and the compose box.
+/// The glyphs come from <see cref="EmojiCatalog"/>, so the grid holds every
+/// emoji the colour emoji font on this machine can draw and nothing it can't;
+/// the tabs are Unicode's own emoji groups and the search box matches Unicode
+/// names.
 /// </summary>
 public partial class EmojiPickerWindow : Window
 {
-    private readonly record struct Range(int Start, int End);
-    private sealed record CategorySpec(string Name, Range[] Ranges);
+    private readonly bool _singleCodePointOnly;
+    private readonly List<(string Group, List<EmojiCatalog.Entry> Entries)> _groups = [];
 
-    // Mirrors MeshRF.App's s_categorySpecs.
-    private static readonly CategorySpec[] CategorySpecs =
-    [
-        new("Smileys", [new(0x1F600, 0x1F64F), new(0x1F910, 0x1F92F), new(0x1FAE0, 0x1FAE8)]),
-        new("Hands", [new(0x1F440, 0x1F450), new(0x1F90C, 0x1F93A), new(0x1FAF0, 0x1FAF8), new(0x270A, 0x270D)]),
-        new("People", [new(0x1F460, 0x1F487), new(0x1F574, 0x1F57A), new(0x1F645, 0x1F64F)]),
-        new("Animals", [new(0x1F400, 0x1F43E), new(0x1F980, 0x1F9AE), new(0x1F330, 0x1F33F)]),
-        new("Food", [new(0x1F32D, 0x1F37F), new(0x1F950, 0x1F96F)]),
-        new("Travel", [new(0x1F680, 0x1F6FF), new(0x1F300, 0x1F32C), new(0x1F5FA, 0x1F5FF), new(0x26F0, 0x26FF)]),
-        new("Activities", [new(0x1F380, 0x1F3C8), new(0x1F3D0, 0x1F3FA), new(0x1F93F, 0x1F94F)]),
-        new("Objects", [new(0x1F4A1, 0x1F4FF), new(0x1F6E0, 0x1F6EC), new(0x1F9F0, 0x1F9FF), new(0x1FA70, 0x1FAFF)]),
-        new("Symbols", [new(0x2600, 0x26FF), new(0x2700, 0x27BF), new(0x2B00, 0x2BFF), new(0x2194, 0x21AA), new(0x2300, 0x23FF)]),
-    ];
-
-    private static readonly Lazy<List<(string Category, string Glyph)>> Catalog = new(BuildCatalog);
-
+    private EmojiCatalog.Snapshot? _catalog;
     private string? _picked;
 
-    public EmojiPickerWindow()
+    public EmojiPickerWindow() : this(singleCodePointOnly: false) { }
+
+    public EmojiPickerWindow(bool singleCodePointOnly)
     {
+        _singleCodePointOnly = singleCodePointOnly;
         InitializeComponent();
-        BuildTabs(null);
-        SearchBox.TextChanged += (_, _) => BuildTabs(SearchBox.Text);
+        SearchBox.TextChanged += (_, _) => Rebuild();
+        CategoryTabs.SelectionChanged += (_, _) => FillSelectedTab();
     }
 
     /// <summary>Show the picker and return the chosen glyph, or null if cancelled.</summary>
-    public static async Task<string?> PickAsync(Window owner)
+    /// <param name="singleCodePointOnly">
+    /// Restrict the grid to emoji that are a single code point. Meshtastic
+    /// waypoint icons are one uint32, so flags, keycaps and ZWJ sequences would
+    /// be silently truncated to their first scalar there.
+    /// </param>
+    public static async Task<string?> PickAsync(Window owner, bool singleCodePointOnly = false)
     {
-        var w = new EmojiPickerWindow();
+        var w = new EmojiPickerWindow(singleCodePointOnly);
         await w.ShowDialog(owner);
         return w._picked;
     }
 
-    private static List<(string Category, string Glyph)> BuildCatalog()
+    /// <summary>
+    /// Built here rather than in the constructor: the font chain to filter
+    /// against comes from the Window style in App.axaml, which is only applied
+    /// once the window is attached.
+    /// </summary>
+    protected override void OnOpened(EventArgs e)
     {
-        var list = new List<(string, string)>();
-        foreach (var spec in CategorySpecs)
-        {
-            foreach (var range in spec.Ranges)
-            {
-                for (int cp = range.Start; cp <= range.End; cp++)
-                {
-                    // Skip unassigned/non-printable code points so the grid
-                    // doesn't fill with tofu boxes.
-                    var cat = CharUnicodeInfo.GetUnicodeCategory(cp switch
-                    {
-                        <= 0xFFFF => (char)cp,
-                        _ => '�',
-                    });
-                    if (cp <= 0xFFFF && cat is System.Globalization.UnicodeCategory.OtherNotAssigned
-                                            or System.Globalization.UnicodeCategory.Control)
-                        continue;
-                    string glyph;
-                    try { glyph = char.ConvertFromUtf32(cp); }
-                    catch { continue; }
-                    list.Add((spec.Name, glyph));
-                }
-            }
-        }
-        return list;
+        base.OnOpened(e);
+        _catalog ??= EmojiCatalog.For(FontFamily);
+        Rebuild();
     }
 
-    private void BuildTabs(string? filter)
+    /// <summary>Regroup for the current search text and reset the tab strip.</summary>
+    private void Rebuild()
     {
+        if (_catalog is null) return;
+        string filter = (SearchBox.Text ?? string.Empty).Trim();
+
+        string? wasSelected = (CategoryTabs.SelectedItem as TabItem)?.Tag as string;
+        _groups.Clear();
+        int shown = 0;
+        foreach (var entry in _catalog.Entries)
+        {
+            if (_singleCodePointOnly && !entry.IsSingleCodePoint) continue;
+            if (!Matches(entry, filter)) continue;
+
+            // The catalog is in Unicode's display order and groups its entries,
+            // so starting a bucket whenever the group changes keeps both the
+            // tabs and the glyphs within them in that order.
+            if (_groups.Count == 0 || _groups[^1].Group != entry.Group)
+                _groups.Add((entry.Group, []));
+            _groups[^1].Entries.Add(entry);
+            shown++;
+        }
+
         CategoryTabs.Items.Clear();
-        var f = (filter ?? string.Empty).Trim();
+        foreach (var (group, _) in _groups)
+            CategoryTabs.Items.Add(new TabItem { Header = group, Tag = group });
 
-        foreach (var spec in CategorySpecs)
+        if (CategoryTabs.ItemCount > 0)
         {
-            var glyphs = Catalog.Value
-                .Where(e => e.Category == spec.Name)
-                .Select(e => e.Glyph)
-                .Where(g => f.Length == 0 || g.Contains(f, StringComparison.Ordinal))
-                .ToList();
-            if (glyphs.Count == 0) continue;
-
-            var panel = new WrapPanel { Orientation = Orientation.Horizontal };
-            foreach (var glyph in glyphs)
-            {
-                var b = new Button
-                {
-                    Content = new TextBlock { Text = glyph, FontSize = 18 },
-                    Padding = new Thickness(4, 2),
-                    Margin = new Thickness(1),
-                    Background = Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
-                    Tag = glyph,
-                };
-                b.Click += OnGlyphClick;
-                panel.Children.Add(b);
-            }
-
-            CategoryTabs.Items.Add(new TabItem
-            {
-                Header = spec.Name,
-                Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
-            });
+            int index = wasSelected is null ? 0 : _groups.FindIndex(g => g.Group == wasSelected);
+            CategoryTabs.SelectedIndex = index < 0 ? 0 : index;
+            FillSelectedTab();
         }
-        if (CategoryTabs.ItemCount > 0) CategoryTabs.SelectedIndex = 0;
+
+        StatusText.Text = filter.Length > 0
+            ? $"{shown} match{(shown == 1 ? "" : "es")}"
+            : $"{shown} emoji available in {_catalog.FontFamily}";
     }
+
+    /// <summary>
+    /// Populate the visible tab only. The full set is ~1900 glyphs; building
+    /// every tab up front — and again on each keystroke — is the difference
+    /// between the picker opening instantly and visibly stalling.
+    /// </summary>
+    private void FillSelectedTab()
+    {
+        if (CategoryTabs.SelectedItem is not TabItem { Tag: string group } tab) return;
+        if (tab.Content is not null) return;
+
+        int index = _groups.FindIndex(g => g.Group == group);
+        if (index < 0) return;
+
+        var panel = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var entry in _groups[index].Entries)
+        {
+            var b = new Button
+            {
+                // Pin the emoji font so the grid draws with the same font the
+                // catalog was filtered against.
+                Content = new TextBlock
+                {
+                    Text = entry.Glyph,
+                    FontSize = 18,
+                    FontFamily = new FontFamily(_catalog!.FontFamily),
+                },
+                Padding = new Thickness(4, 2),
+                Margin = new Thickness(1),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Tag = entry.Glyph,
+            };
+            ToolTip.SetTip(b, entry.Name);
+            b.Click += OnGlyphClick;
+            panel.Children.Add(b);
+        }
+
+        tab.Content = new ScrollViewer
+        {
+            Content = panel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+    }
+
+    private static bool Matches(EmojiCatalog.Entry entry, string filter) =>
+        filter.Length == 0
+        || entry.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
+        // Lets a pasted glyph find itself, which is how the old picker searched.
+        || entry.Glyph.Contains(filter, StringComparison.Ordinal);
 
     private void OnGlyphClick(object? sender, RoutedEventArgs e)
     {

@@ -8,6 +8,7 @@
         Background="{DynamicResource BrushAppBackground}">
     <DockPanel Margin="8">
         <TextBox DockPanel.Dock="Top" Name="SearchBox" PlaceholderText="Search…" Margin="0,0,0,6" />
+        <TextBlock DockPanel.Dock="Bottom" Name="StatusText" Margin="2,4,0,0" FontSize="10" Opacity="0.6" />
         <TabControl Name="CategoryTabs" />
     </DockPanel>
 </Window>

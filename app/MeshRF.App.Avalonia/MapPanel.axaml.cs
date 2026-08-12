@@ -77,7 +77,9 @@ public partial class MapPanel : UserControl
         if (_viewModel is null) return;
         var owner = TopLevel.GetTopLevel(this) as Window;
         if (owner is null) return;
-        var picked = await EmojiPickerWindow.PickAsync(owner);
+        // A waypoint icon travels as a single uint32 code point, so multi-scalar
+        // emoji (flags, keycaps, ZWJ sequences) can't be offered here.
+        var picked = await EmojiPickerWindow.PickAsync(owner, singleCodePointOnly: true);
         if (!string.IsNullOrEmpty(picked)) _viewModel.SelectedWaypointEmoji = picked;
     }
 
