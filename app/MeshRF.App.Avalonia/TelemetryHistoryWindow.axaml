@@ -1,0 +1,97 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.TelemetryHistoryWindow"
+        x:DataType="local:ConversationTabViewModel"
+        Title="Telemetry History"
+        Width="960" Height="800" MinWidth="760" MinHeight="620"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Grid Margin="6" RowDefinitions="Auto,Auto,*">
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,4">
+            <Button DockPanel.Dock="Right" Content="Clear" Padding="8,2"
+                    Command="{Binding ClearTelemetryHistoryCommand}" />
+            <TextBlock Text="{Binding TabHeader}" FontWeight="SemiBold" VerticalAlignment="Center" />
+        </DockPanel>
+
+        <TextBlock Grid.Row="1" Margin="0,0,0,4" FontSize="11"
+                   Foreground="{DynamicResource BrushSubtle}"
+                   Text="No telemetry samples yet."
+                   IsVisible="{Binding !HasTelemetryHistory}" />
+
+        <!-- Four metric groups, each a graph beside its table. Splitters let a
+             pane be grown when one group is the one being studied. -->
+        <Grid Grid.Row="2" IsVisible="{Binding HasTelemetryHistory}"
+              ColumnDefinitions="380,6,*"
+              RowDefinitions="*,6,*,6,*,6,*">
+
+            <local:TelemetryGraph Grid.Row="0" Grid.Column="0" x:Name="DeviceGraph" Title="Device" />
+            <DataGrid Grid.Row="0" Grid.Column="2" x:Name="DeviceGrid"
+                      ItemsSource="{Binding DeviceTelemetryHistory}"
+                      AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="Battery" Width="Auto" Binding="{Binding Battery}" />
+                    <DataGridTextColumn Header="Voltage" Width="Auto" Binding="{Binding Voltage}" />
+                    <DataGridTextColumn Header="Ch util" Width="Auto" Binding="{Binding ChannelUtil}" />
+                    <DataGridTextColumn Header="Air TX" Width="Auto" Binding="{Binding AirUtilTx}" />
+                    <DataGridTextColumn Header="Uptime" Width="Auto" Binding="{Binding Uptime}" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <GridSplitter Grid.Row="0" Grid.RowSpan="7" Grid.Column="1" Width="6"
+                          Background="{DynamicResource BrushSplitter}" />
+            <GridSplitter Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Height="6"
+                          HorizontalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" />
+            <GridSplitter Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Height="6"
+                          HorizontalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" />
+            <GridSplitter Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3" Height="6"
+                          HorizontalAlignment="Stretch" Background="{DynamicResource BrushSplitter}" />
+
+            <local:TelemetryGraph Grid.Row="2" Grid.Column="0" x:Name="EnvironmentGraph" Title="Environmental" />
+            <DataGrid Grid.Row="2" Grid.Column="2" x:Name="EnvironmentGrid"
+                      ItemsSource="{Binding EnvironmentalTelemetryHistory}"
+                      AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="Temp" Width="Auto" Binding="{Binding Temperature}" />
+                    <DataGridTextColumn Header="Humidity" Width="Auto" Binding="{Binding Humidity}" />
+                    <DataGridTextColumn Header="Pressure" Width="Auto" Binding="{Binding Pressure}" />
+                    <DataGridTextColumn Header="Gas" Width="Auto" Binding="{Binding GasResistance}" />
+                    <DataGridTextColumn Header="IAQ" Width="Auto" Binding="{Binding AirQuality}" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <local:TelemetryGraph Grid.Row="4" Grid.Column="0" x:Name="AirQualityGraph" Title="Air Quality" />
+            <DataGrid Grid.Row="4" Grid.Column="2" x:Name="AirQualityGrid"
+                      ItemsSource="{Binding AirQualityTelemetryHistory}"
+                      AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="PM2.5" Width="Auto" Binding="{Binding Pm25Std}" />
+                    <DataGridTextColumn Header="PM10" Width="Auto" Binding="{Binding Pm100Std}" />
+                    <DataGridTextColumn Header="PM1.0" Width="Auto" Binding="{Binding Pm10Std}" />
+                    <DataGridTextColumn Header="PM2.5e" Width="Auto" Binding="{Binding Pm25Env}" />
+                    <DataGridTextColumn Header="PM10e" Width="Auto" Binding="{Binding Pm100Env}" />
+                    <DataGridTextColumn Header="PM1.0e" Width="Auto" Binding="{Binding Pm10Env}" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <local:TelemetryGraph Grid.Row="6" Grid.Column="0" x:Name="PowerGraph" Title="Power" />
+            <DataGrid Grid.Row="6" Grid.Column="2" x:Name="PowerGrid"
+                      ItemsSource="{Binding PowerTelemetryHistory}"
+                      AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="CH1 V" Width="Auto" Binding="{Binding Ch1Voltage}" />
+                    <DataGridTextColumn Header="CH1 A" Width="Auto" Binding="{Binding Ch1Current}" />
+                    <DataGridTextColumn Header="CH2 V" Width="Auto" Binding="{Binding Ch2Voltage}" />
+                    <DataGridTextColumn Header="CH2 A" Width="Auto" Binding="{Binding Ch2Current}" />
+                    <DataGridTextColumn Header="CH3 V" Width="Auto" Binding="{Binding Ch3Voltage}" />
+                    <DataGridTextColumn Header="CH3 A" Width="Auto" Binding="{Binding Ch3Current}" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </Grid>
+</Window>

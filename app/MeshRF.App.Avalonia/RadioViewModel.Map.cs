@@ -127,7 +127,7 @@ public partial class RadioViewModel
         _ => n.DisplayId,
     };
 
-    private string FormatTemperature(float celsius) =>
+    internal string FormatTemperature(float celsius) =>
         CurrentUnitSystem == UnitSystem.Imperial
             ? $"{celsius * 9f / 5f + 32f:0.0}°F"
             : $"{celsius:0.0}°C";

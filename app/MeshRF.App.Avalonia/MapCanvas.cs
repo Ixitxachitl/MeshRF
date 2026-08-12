@@ -282,12 +282,89 @@ public sealed class MapCanvas : Control
         var (originX, originY) = Origin;
         DrawTiles(context, originX, originY, w, h);
 
+        DrawTrack(context, originX, originY);
+
         _hitTargets.Clear();
         if (_vm is null) return;
 
         DrawPendingBoundingBox(context, originX, originY);
         DrawMarkers(context, originX, originY, w, h);
         DrawSpider(context);
+    }
+
+    // -- Track overlay (location history) -----------------------------------
+
+    private IReadOnlyList<(double Lat, double Lon)> _track = Array.Empty<(double, double)>();
+
+    private static readonly IPen TrackPen =
+        new Pen(new SolidColorBrush(Color.FromRgb(0x2d, 0x8c, 0xff)), 2);
+    private static readonly IBrush TrackPointFill = new SolidColorBrush(Color.FromRgb(0xff, 0xc1, 0x07));
+
+    /// <summary>Draws a recorded path over the basemap and fits the view to it.
+    /// Used by the location-history window, which shows one peer's track rather
+    /// than the live node markers, so it needs no view model.</summary>
+    public void ShowTrack(IReadOnlyList<(double Lat, double Lon)> points)
+    {
+        _track = points;
+        if (points.Count > 0) FitToCoordinates(points);
+        InvalidateVisual();
+    }
+
+    private void DrawTrack(DrawingContext context, double originX, double originY)
+    {
+        if (_track.Count == 0) return;
+
+        if (_track.Count > 1)
+        {
+            var geometry = new StreamGeometry();
+            using (var ctx = geometry.Open())
+            {
+                for (int i = 0; i < _track.Count; i++)
+                {
+                    var p = new Point(LonToX(_track[i].Lon, _zoom) - originX,
+                                      LatToY(_track[i].Lat, _zoom) - originY);
+                    if (i == 0) ctx.BeginFigure(p, false);
+                    else ctx.LineTo(p);
+                }
+                ctx.EndFigure(false);
+            }
+            context.DrawGeometry(null, TrackPen, geometry);
+        }
+
+        // Endpoints of each recorded fix, so individual samples stay visible
+        // when the track doubles back on itself.
+        foreach (var (lat, lon) in _track)
+            context.DrawEllipse(TrackPointFill, null,
+                new Point(LonToX(lon, _zoom) - originX, LatToY(lat, _zoom) - originY), 2.5, 2.5);
+    }
+
+    /// <summary>Centre and zoom so every supplied coordinate fits.</summary>
+    private void FitToCoordinates(IReadOnlyList<(double Lat, double Lon)> points)
+    {
+        double minLat = double.MaxValue, maxLat = double.MinValue;
+        double minLon = double.MaxValue, maxLon = double.MinValue;
+        foreach (var (lat, lon) in points)
+        {
+            minLat = Math.Min(minLat, lat); maxLat = Math.Max(maxLat, lat);
+            minLon = Math.Min(minLon, lon); maxLon = Math.Max(maxLon, lon);
+        }
+
+        _centerLat = ClampLat((minLat + maxLat) / 2.0);
+        _centerLon = (minLon + maxLon) / 2.0;
+        _userMovedView = true;
+
+        if (points.Count == 1) { _zoom = 15; return; }
+
+        double w = Bounds.Width > 0 ? Bounds.Width : 600;
+        double h = Bounds.Height > 0 ? Bounds.Height : 400;
+        int best = MinZoom;
+        for (int z = MaxZoom; z >= MinZoom; z--)
+        {
+            double spanX = Math.Abs(LonToX(maxLon, z) - LonToX(minLon, z));
+            double spanY = Math.Abs(LatToY(minLat, z) - LatToY(maxLat, z));
+            if (spanX <= w * 0.85 && spanY <= h * 0.85) { best = z; break; }
+        }
+        _zoom = best;
     }
 
     private void DrawTiles(DrawingContext context, double originX, double originY, double w, double h)

@@ -64,6 +64,26 @@ public partial class RadioViewModel
     [RelayCommand]
     private void ToggleRevealPrivateKey() => IsPrivateKeyRevealed = !IsPrivateKeyRevealed;
 
+    /// <summary>Our own node number, for the self-history buttons.</summary>
+    public uint MyNodeNumber => _rxHost.MyNodeNum;
+
+    /// <summary>A conversation view model to render history against. Reuses the
+    /// open DM tab when there is one so the window and the tab share state;
+    /// otherwise builds a detached one, which is how history is shown for a
+    /// node with no conversation — including our own.</summary>
+    public ConversationTabViewModel HistoryConversationFor(uint nodeNum)
+    {
+        var existing = Tabs.OfType<ConversationTabViewModel>().FirstOrDefault(c => c.NodeNum == nodeNum);
+        if (existing is not null) return existing;
+
+        return new ConversationTabViewModel(
+            nodeNum,
+            nodeNum == _rxHost.MyNodeNum ? (MyLongName ?? "Me") : _rxHost.NodeDisplayName(nodeNum),
+            _nodeStore,
+            () => FormatTemperature,
+            () => (Func<float, string>)(hpa => $"{hpa:0.0} hPa"));
+    }
+
     // ----- USB serial GPS -----
 
     private readonly UsbSerialGpsService _gpsService = new();

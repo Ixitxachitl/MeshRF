@@ -484,6 +484,26 @@ public partial class MainWindow : Window
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
     }
 
+    // ----- History windows -----
+
+    private void OnOpenNodeTelemetryHistory(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        TelemetryHistoryWindow.Show(this, _viewModel.HistoryConversationFor(node.NodeNum));
+    }
+
+    private void OnOpenNodeLocationHistory(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        LocationHistoryWindow.Show(this, _viewModel.HistoryConversationFor(node.NodeNum));
+    }
+
+    private void OnOpenSelfTelemetryHistory(object? sender, RoutedEventArgs e) =>
+        TelemetryHistoryWindow.Show(this, _viewModel.HistoryConversationFor(_viewModel.MyNodeNumber));
+
+    private void OnOpenSelfLocationHistory(object? sender, RoutedEventArgs e) =>
+        LocationHistoryWindow.Show(this, _viewModel.HistoryConversationFor(_viewModel.MyNodeNumber));
+
     // ----- Quick send: pick a destination first, like MeshRF.App -----
 
     /// <summary>Prompts for a channel (or an open DM peer) and runs

@@ -470,6 +470,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Enables PKC decode in the shared router; without it every direct
         // message stays undecodable.
         _rxHost.MyPrivateKeyProvider = () => TryParseKeyBase64(MyPrivateKey);
+        _rxHost.FormatTemperature = FormatTemperature;
+        _rxHost.FormatPressure = hpa => $"{hpa:0.0} hPa";
         // Restore per-channel ringtone mutes. The channel tabs exist by now
         // (the host loads them in its constructor), and MutedRingtoneChannels
         // is the same settings.json key MeshRF.App writes.

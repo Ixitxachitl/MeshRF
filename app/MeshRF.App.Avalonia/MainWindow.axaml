@@ -298,6 +298,12 @@
                         <DockPanel LastChildFill="True">
                             <Button DockPanel.Dock="Right" Content="Configure" Padding="8,2"
                                     Click="OnOpenNodeIdentity" ToolTip.Tip="Open My Node identity and settings" />
+                            <!-- Our own recorded history, the counterpart of the
+                                 per-node entries in the node grid's menu. -->
+                            <Button DockPanel.Dock="Right" Content="Location" Padding="8,2" Margin="0,0,4,0"
+                                    Click="OnOpenSelfLocationHistory" ToolTip.Tip="My recorded location history" />
+                            <Button DockPanel.Dock="Right" Content="Telemetry" Padding="8,2" Margin="0,0,4,0"
+                                    Click="OnOpenSelfTelemetryHistory" ToolTip.Tip="My recorded telemetry history" />
                             <TextBlock Text="My Node" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
                             <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource BrushSubtle}"
                                        Text="{Binding MyLongName}" TextTrimming="CharacterEllipsis" />
@@ -489,6 +495,8 @@
                                           Command="{Binding #RootWindow.DataContext.MessageNodeCommand}"
                                           CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
                                 <MenuItem Header="Show on map" Click="OnShowOnMap" />
+                                <MenuItem Header="Telemetry history…" Click="OnOpenNodeTelemetryHistory" />
+                                <MenuItem Header="Location history…" Click="OnOpenNodeLocationHistory" />
                                 <Separator />
                                 <MenuItem Header="Request node info"
                                           Command="{Binding #RootWindow.DataContext.RequestNodeInfoCommand}"

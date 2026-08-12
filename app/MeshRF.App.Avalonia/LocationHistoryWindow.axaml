@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.LocationHistoryWindow"
+        x:DataType="local:ConversationTabViewModel"
+        Title="Location History"
+        Width="900" Height="640" MinWidth="640" MinHeight="420"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Grid Margin="6" RowDefinitions="Auto,Auto,*">
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,4">
+            <Button DockPanel.Dock="Right" Content="Clear" Padding="8,2"
+                    Command="{Binding ClearLocationHistoryCommand}" />
+            <TextBlock Text="{Binding TabHeader}" FontWeight="SemiBold" VerticalAlignment="Center" />
+        </DockPanel>
+
+        <TextBlock Grid.Row="1" Margin="0,0,0,4" FontSize="11"
+                   Foreground="{DynamicResource BrushSubtle}"
+                   Text="No recorded positions yet."
+                   IsVisible="{Binding !HasLocationHistory}" />
+
+        <!-- Track on the left, the points that make it up on the right. -->
+        <Grid Grid.Row="2" IsVisible="{Binding HasLocationHistory}" ColumnDefinitions="*,6,320">
+            <Border Grid.Column="0"
+                    Background="{DynamicResource BrushSpectrumBackground}"
+                    BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                <local:MapCanvas x:Name="Map" />
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="6" Background="{DynamicResource BrushSplitter}" />
+
+            <DataGrid Grid.Column="2" x:Name="PointsGrid"
+                      ItemsSource="{Binding LocationHistory}"
+                      AutoGenerateColumns="False" IsReadOnly="True"
+                      GridLinesVisibility="Horizontal" SelectionMode="Single">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Width="*"
+                                        Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="Lat" Width="Auto" Binding="{Binding Latitude, StringFormat='{}{0:0.#####}'}" />
+                    <DataGridTextColumn Header="Lon" Width="Auto" Binding="{Binding Longitude, StringFormat='{}{0:0.#####}'}" />
+                    <DataGridTextColumn Header="Alt" Width="Auto" Binding="{Binding AltitudeDisplay}" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </Grid>
+</Window>

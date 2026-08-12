@@ -63,6 +63,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// is saturated with refloods.</summary>
     public Func<byte[]>? MyPrivateKeyProvider { get; set; }
 
+    /// <summary>Unit-aware formatters for history display strings. Owned by the
+    /// view model, which holds the unit setting.</summary>
+    public Func<float, string>? FormatTemperature { get; set; }
+    public Func<float, string>? FormatPressure { get; set; }
+
     byte[] IMeshRxHost.MyPrivateKeyBytes => MyPrivateKeyProvider?.Invoke() ?? Array.Empty<byte>();
     IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
@@ -352,7 +357,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     {
         if (_conversationsByNode.TryGetValue(nodeNum, out var existing)) return existing;
 
-        var convo = new ConversationTabViewModel(nodeNum, NodeDisplayName(nodeNum));
+        // The store is handed over so the tab can load this peer's recorded
+        // location/telemetry history; the formatters keep its display strings
+        // on the app's unit setting.
+        var convo = new ConversationTabViewModel(nodeNum, NodeDisplayName(nodeNum),
+                                                 _nodeStore, () => FormatTemperature, () => FormatPressure);
         _conversationsByNode[nodeNum] = convo;
         Tabs.Add(convo);
 
