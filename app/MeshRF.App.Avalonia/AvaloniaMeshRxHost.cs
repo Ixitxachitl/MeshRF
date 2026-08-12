@@ -98,6 +98,25 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// retransmit and the mesh reflood.</summary>
     public Action<MeshHeader, string?, bool>? AckRequested { get; set; }
 
+    /// <summary>Appends a telemetry history point, skipping a payload that
+    /// repeats the previous one for the same metric groups — nodes re-send
+    /// unchanged telemetry on a timer, and those would otherwise fill the
+    /// history with identical rows.</summary>
+    private void RecordTelemetryHistory(uint nodeNum, MeshTelemetry telemetry, long rxEpoch)
+    {
+        if (!TelemetryHistoryFactory.HasAnyMetrics(telemetry)) return;
+
+        var kind = TelemetryHistoryFactory.Kind(telemetry);
+        var signature = TelemetryHistoryFactory.Signature(telemetry);
+        if (string.Equals(_nodeStore.LatestTelemetrySignature(nodeNum, kind), signature, StringComparison.Ordinal))
+            return;
+
+        var timestamp = rxEpoch > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime
+            : DateTime.UtcNow;
+        _nodeStore.AddTelemetryHistory(TelemetryHistoryFactory.Build(nodeNum, timestamp, telemetry));
+    }
+
     /// <summary>Stored public key for a peer, as hex; empty when unknown.</summary>
     public string PublicKeyHexFor(uint nodeNum) => _nodeStore.Get(nodeNum)?.PublicKey ?? string.Empty;
 
@@ -566,6 +585,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     AutoReplyRequested?.Invoke(PortNum.Position, header.From, result.ChannelName);
                     break;
                 }
+                // Record a history point only when the coordinates actually
+                // moved: position packets repeat unchanged, and storing every
+                // one would bury real movement in duplicates.
+                var previous = _nodeStore.Get(header.From);
+                bool positionChanged =
+                    previous?.Latitude != result.Position.Latitude ||
+                    previous?.Longitude != result.Position.Longitude;
+
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
@@ -573,6 +600,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     Longitude = result.Position.Longitude,
                     AltitudeM = result.Position.AltitudeM,
                 });
+                if (positionChanged)
+                    _nodeStore.AddLocationHistory(
+                        header.From,
+                        DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime,
+                        result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM);
                 MarkNodeDirty(header.From);
                 break;
 
@@ -602,6 +634,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     UptimeSeconds = t.UptimeSeconds,
                     TemperatureC = t.TemperatureC,
                 });
+                RecordTelemetryHistory(header.From, t, rxEpoch);
                 MarkNodeDirty(header.From);
                 if (IsDirectedRequest(header, result))
                     AutoReplyRequested?.Invoke(PortNum.Telemetry, header.From, result.ChannelName);
