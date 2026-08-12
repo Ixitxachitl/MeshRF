@@ -116,6 +116,23 @@ jobs:
           if ('${{ inputs.version }}') { $params.Version = '${{ inputs.version }}' }
           ./scripts/build-release.ps1 @params
 
+      # ExternalProject writes each step's output to a stamp log and only
+      # reports "exited with code 1" to the console, so a vendored-submodule
+      # failure is undiagnosable from the job log alone.
+      - name: Dump vendored-submodule build logs
+        if: failure()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          found=0
+          for f in build/*/[a-z]*-prefix/src/*-stamp/*.log; do
+            found=1
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+          [ "$found" = 1 ] || echo "No ExternalProject stamp logs found."
+
       - uses: actions/upload-artifact@v4
         with:
           name: meshrf-${{ matrix.platform }}

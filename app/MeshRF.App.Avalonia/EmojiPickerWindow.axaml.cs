@@ -110,7 +110,7 @@ public partial class EmojiPickerWindow : Window
         int index = _groups.FindIndex(g => g.Group == group);
         if (index < 0) return;
 
-        var panel = new WrapPanel { Orientation = Orientation.Horizontal };
+        var panel = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
         foreach (var entry in _groups[index].Entries)
         {
             var b = new Button
@@ -123,8 +123,10 @@ public partial class EmojiPickerWindow : Window
                     FontSize = 18,
                     FontFamily = new FontFamily(_catalog!.FontFamily),
                 },
-                Padding = new Thickness(4, 2),
-                Margin = new Thickness(1),
+                // Roomy enough that the glyphs read as a grid rather than a
+                // wall, and that each one is a comfortable click target.
+                Padding = new Thickness(7, 5),
+                Margin = new Thickness(3),
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Tag = entry.Glyph,

@@ -1,13 +1,25 @@
 # MeshRF
 
-MeshRF is a Windows-native Meshtastic SDR transceiver.
+MeshRF is a cross-platform Meshtastic SDR transceiver for Windows, Linux and
+macOS.
 
 Instead of using a LoRa modem chip, MeshRF uses an SDR (HackRF One or RTL-SDR)
 and performs LoRa demodulation/modulation in software on the host CPU. It
 decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-Current release line: **v1.0.8**
+Current release line: **v2.0.0**
+
+### Two apps, for one release
+
+| App | Version | Platforms | Status |
+| --- | --- | --- | --- |
+| `MeshRF.App.Avalonia` | 2.0.0 | Windows, Linux, macOS | The app MeshRF ships |
+| `MeshRF.App` (WPF) | 1.0.9 | Windows only | Final release — no longer maintained |
+
+Both read the same `settings.json` and the same SQLite databases, so you can
+move between them. After 2.0.0 / 1.0.9, only the Avalonia app is developed, and
+everything below describes it.
 
 <img width="1386" height="993" alt="image" src="https://github.com/user-attachments/assets/108e4d84-f767-44c0-a9bb-2750e67c33d7" />
 
@@ -20,6 +32,9 @@ Current release line: **v1.0.8**
   control/management packets.
 - The app is actively maintained with frequent updates focused on map scale,
   messaging UX, telemetry/routing controls, and observability.
+- Windows, Linux and macOS all build the native core and the app from source.
+  Windows is the most exercised; Linux and macOS builds are produced by CI and
+  have had far less time on real radio hardware.
 
 ## Key Capabilities
 
@@ -59,8 +74,6 @@ Current release line: **v1.0.8**
 - Self-reported firmware version/edition (Identity settings) surfaced to MQTT
   map reports, defaulting to the same baseline as stock firmware
   (`2.8.0` / `VANILLA`).
-- Snake, Tetris, Breakout, and Chirpy Runner high-score leaderboards received
-  over the mesh (toggle in the About window; off by default).
 
 ### Nodes, Telemetry, and Mapping
 
@@ -81,7 +94,10 @@ Current release line: **v1.0.8**
 - Channel/DM tabs with persisted history.
 - RTTTL notification controls (including per-channel mute options).
 - Improved auto-scroll and large-node-count map performance tuning.
-- Payload recording and JSON-focused logging improvements for analysis/replay.
+- Drag-to-reorder for secondary channel tabs and DM tabs.
+- Emoji picker built from the colour emoji font's actual glyph coverage, so it
+  offers every emoji the system can draw and nothing it can't.
+- Raw decoded-packet JSON feed with export, for analysis and replay.
 
 ## Architecture
 
@@ -107,30 +123,53 @@ MeshRF.Native (C++20, built with CMake)
 
 ## Requirements
 
-- Windows 10/11 x64.
-- Visual Studio 2022 with:
-  - Desktop development with C++
-  - .NET desktop development
+Common to every platform:
+
 - CMake 3.25+
 - .NET 8 SDK
-- SDR hardware and drivers (typically via Zadig/WinUSB as needed):
-  - HackRF One, or
-  - RTL-SDR dongle
+- SDR hardware: HackRF One, or an RTL-SDR dongle
+
+**Windows 10/11 x64**
+
+- Visual Studio 2022 with "Desktop development with C++" and ".NET desktop
+  development". The `windows-x64` preset asks for the VS 2022 generator
+  specifically, so VS 2026 alone is not enough.
+- SDR drivers as needed (typically via Zadig/WinUSB).
+
+**Linux x64**
+
+```bash
+sudo apt-get install -y ninja-build cmake libhackrf-dev librtlsdr-dev \
+                        libusb-1.0-0-dev libudev-dev \
+                        autoconf autoconf-archive automake libtool
+```
+
+**macOS (arm64 or x64)**
+
+```bash
+brew install ninja cmake hackrf librtlsdr libusb autoconf autoconf-archive automake libtool
+```
+
+Linux and macOS also need `VCPKG_ROOT` pointing at a vcpkg checkout.
 
 Notes:
 
-- Native SDR dependencies are built from source submodules (`third_party/hackrf`
-  and `third_party/rtlsdr`) during native build; resulting runtime DLLs are
-  copied next to app outputs.
-- On Windows, CMake auto-provisions a repo-local `.vcpkg` and installs required
-  native packages (currently `libusb` and `pthreads`) when needed.
+- On Windows, native SDR dependencies are built from source submodules
+  (`third_party/hackrf`, `third_party/rtlsdr`) and the resulting runtime DLLs
+  are copied next to app outputs. On Linux and macOS they come from system
+  packages and are loaded at runtime via `dlopen`, so the submodules are not
+  built there.
+- On Windows, CMake auto-provisions a repo-local `.vcpkg` when no toolchain is
+  supplied. It is cloned in full on purpose: `vcpkg.json` pins a
+  `builtin-baseline` commit that a shallow clone cannot resolve.
+- The autotools packages above are for vcpkg's own `libusb` port, which
+  configures from source.
 - Meshtastic protobuf schemas are linked via git submodule at
   `third_party/meshtastic_protobufs`, tracking the `games` branch of
   [Ixitxachitl/meshtastic-protobufs](https://github.com/Ixitxachitl/meshtastic-protobufs/tree/games)
   — a fork of upstream [meshtastic/protobufs](https://github.com/meshtastic/protobufs)
-  that adds the game/leaderboard protobuf messages MeshRF's high-score
-  windows decode. All other fields (geofence, ATAK, etc.) come from upstream
-  Meshtastic.
+  whose only addition is a set of game/leaderboard messages. Every other field
+  MeshRF uses (geofence, ATAK, etc.) is upstream Meshtastic.
 - Default development flow expects native `RelWithDebInfo` for practical SDR
   throughput.
 
@@ -169,27 +208,41 @@ This task chain will:
 ### Native (CMake)
 
 ```powershell
+# Windows
 cmake --preset windows-x64
 cmake --build build/windows-x64 --config RelWithDebInfo -j
+```
+
+```bash
+# Linux. Ninja is single-config, so the build type is set at configure time.
+cmake --preset linux-x64 -D CMAKE_BUILD_TYPE=Release
+cmake --build build/linux-x64 -j
+
+# macOS (use macos-x64 on Intel)
+cmake --preset macos-arm64 -D CMAKE_BUILD_TYPE=Release
+cmake --build build/macos-arm64 -j
 ```
 
 ### Managed App
 
 ```powershell
-dotnet build app/MeshRF.App/MeshRF.App.csproj -c Debug --nologo
+dotnet build app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj -c Debug --nologo
 ```
 
-The app project copies `MeshRF.Native.dll` and required SDR runtime DLLs from
-`build/windows-x64/bin/<NativeConfig>/` into the managed output folder after
-build.
+The app project copies the native bridge (`MeshRF.Native.dll`,
+`libMeshRF.Native.so` or `libMeshRF.Native.dylib`) — and on Windows the SDR
+runtime DLLs — from the platform's `build/<preset>/bin/` directory into the
+managed output folder after build.
 
 ## Run
 
 ```powershell
-dotnet run --project app/MeshRF.App/MeshRF.App.csproj -c Debug --no-build
+dotnet run --project app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj -c Debug --no-build
 ```
 
-VS Code tasks are already included for configure/build/test/run workflows.
+VS Code tasks are included for configure/build/test/run workflows; the primary
+Build/Run buttons target the Avalonia app, with the WPF app under a "legacy"
+group.
 
 ## Testing
 
@@ -207,28 +260,42 @@ dotnet test tests/managed/MeshRF.Tests.csproj --nologo
 
 ## Release Packaging
 
-`scripts/build-release.ps1` builds a self-contained, single-file `win-x64`
-release and packages it as:
+`scripts/build-release.ps1` runs under PowerShell 7 on all three platforms. It
+detects the host, picks the matching CMake preset, RID and archive format, and
+builds a self-contained single-file release into `dist/`:
 
-`dist/MeshRF-v<version>-win-x64.zip`
-
-Usage:
+| Host | Artifact |
+| --- | --- |
+| Windows | `MeshRF-v<version>-win-x64.zip` |
+| Linux | `MeshRF-v<version>-linux-x64.tar.gz` |
+| macOS | `MeshRF-v<version>-osx-arm64.zip` (or `-osx-x64`) |
 
 ```powershell
-# Use VersionPrefix from Directory.Build.props
+# The Avalonia app, versioned from its own project
 pwsh scripts/build-release.ps1
 
-# Override version and optionally tag
-pwsh scripts/build-release.ps1 -Version 0.8.2
-pwsh scripts/build-release.ps1 -Version 0.8.2 -Tag
+# The legacy WPF app, or both (Windows only)
+pwsh scripts/build-release.ps1 -App Wpf
+pwsh scripts/build-release.ps1 -App Both
+
+# Override the version, and optionally tag the repo version
+pwsh scripts/build-release.ps1 -Version 2.0.1
+pwsh scripts/build-release.ps1 -Tag
 ```
 
-The release bundle includes:
+Each app is versioned from its own project file, falling back to
+`Directory.Build.props`, so `-App Both` produces `MeshRF-v2.0.0-*` and
+`MeshRF-wpf-v1.0.9-*` in one run.
 
-- Published MeshRF app
-- Native bridge/runtime DLLs
-- `LICENSE`
-- `README.md`
+The bundle includes the published app, the native bridge (plus the SDR runtime
+DLLs on Windows), `LICENSE`, `README.md`, and on Linux a `.desktop` entry and
+icon.
+
+Native libraries cannot be cross-compiled, so each platform's artifact must be
+built on that platform — or in CI. `.github/workflows/release.yml` builds all
+three on their own runners and drafts a GitHub release when a `v*` tag is
+pushed; it checks the tag against `VersionPrefix` first and fails loudly on a
+mismatch.
 
 ## Repository Layout
 
