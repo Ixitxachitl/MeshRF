@@ -2,20 +2,60 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="MeshRF.AvaloniaApp.AboutWindow"
         Title="About MeshRF"
-        Width="460" SizeToContent="Height"
+        Width="500" SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
-    <StackPanel Margin="16" Spacing="6">
-        <TextBlock Text="MeshRF" FontSize="20" FontWeight="Bold" />
-        <TextBlock Name="VersionText" Foreground="{DynamicResource BrushSubtle}" />
-        <TextBlock Name="RuntimeText" Foreground="{DynamicResource BrushSubtle}" FontSize="11" />
-        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap"
-                   Text="A Meshtastic client driving a HackRF / RTL-SDR software-defined radio, with a LoRa modem implemented in native code." />
-        <TextBlock Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+    <StackPanel Margin="20">
+        <StackPanel Orientation="Horizontal" Spacing="12">
+            <Image Source="avares://MeshRF/Assets/icon.png" Width="48" Height="48"
+                   VerticalAlignment="Top" />
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="MeshRF" FontSize="22" FontWeight="Bold" />
+                <TextBlock Name="VersionText" FontSize="13" />
+                <TextBlock Name="CommitText" FontSize="11"
+                           Foreground="{DynamicResource BrushSubtle}" />
+            </StackPanel>
+        </StackPanel>
+
+        <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" FontSize="12"
+                   Text="A Meshtastic client that needs no Meshtastic hardware: it modulates and demodulates LoRa chirps in software on a HackRF One or RTL-SDR, and decodes Meshtastic frames on the host CPU." />
+
+        <!-- Selectable so a bug report can be pasted verbatim. -->
+        <Border Margin="0,14,0,0" Padding="10,8" CornerRadius="3"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+            <SelectableTextBlock Name="EnvironmentText" FontFamily="Consolas" FontSize="11"
+                                 Foreground="{DynamicResource BrushSubtle}" TextWrapping="Wrap" />
+        </Border>
+
+        <TextBlock Margin="0,14,0,4" FontSize="11" FontWeight="SemiBold"
+                   Foreground="{DynamicResource BrushSubtle}" Text="LINKS" />
+        <!-- HyperlinkButton opens NavigateUri through the platform launcher
+             itself, so these need no click handler. -->
+        <WrapPanel>
+            <HyperlinkButton Content="Meshtastic" NavigateUri="https://meshtastic.org/"
+                             Padding="0,2" Margin="0,0,14,0" />
+            <!-- Doubled underscore: string content is parsed as AccessText,
+                 where a single "_" is a mnemonic prefix and would render
+                 "gr-lorasdr". A TextBlock child would avoid that too, but it
+                 loses the link colour to the app-wide TextBlock style. -->
+            <HyperlinkButton Content="gr-lora__sdr" NavigateUri="https://github.com/tapparelj/gr-lora_sdr"
+                             Padding="0,2" Margin="0,0,14,0" />
+            <HyperlinkButton Content="OpenStreetMap" NavigateUri="https://www.openstreetmap.org/copyright"
+                             Padding="0,2" Margin="0,0,14,0" />
+            <HyperlinkButton Content="Source" NavigateUri="https://github.com/Ixitxachitl/MeshRF"
+                             Padding="0,2" />
+        </WrapPanel>
+
+        <TextBlock Margin="0,14,0,0" FontSize="11" TextWrapping="Wrap"
                    Foreground="{DynamicResource BrushSubtle}"
-                   Text="LoRa PHY derived from gr-lora_sdr (github.com/tapparelj/gr-lora_sdr). Licensed under the GPL." />
-        <Button Content="Close" HorizontalAlignment="Right" Margin="0,12,0,0" Click="OnClose" />
+                   Text="Licensed under GPL-3.0-or-later. The LoRa PHY is derived from gr-lora_sdr; map tiles are © OpenStreetMap contributors. Not affiliated with or endorsed by the Meshtastic project." />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,18,0,0">
+            <Button Name="CopyButton" Content="Copy version info" Padding="10,4" Click="OnCopy" />
+            <Button Content="Close" Padding="10,4" IsDefault="True" IsCancel="True" Click="OnClose" />
+        </StackPanel>
     </StackPanel>
 </Window>

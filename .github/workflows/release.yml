@@ -73,19 +73,30 @@ jobs:
           "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$HOME/vcpkg" >> "$GITHUB_ENV"
 
+      # The two apps carry their own versions, so a tag cannot simply be forced
+      # onto both. Check the tag against the repo version instead: a mismatch
+      # fails loudly here rather than silently producing artifacts whose names
+      # disagree with the release they are attached to.
+      - name: Check tag matches the declared version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $declared = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.VersionPrefix |
+                        Where-Object { $_ } | Select-Object -First 1
+          $tag = '${{ github.ref_name }}' -replace '^v', ''
+          if ($declared -ne $tag) {
+            throw "Tag v$tag does not match VersionPrefix $declared in Directory.Build.props."
+          }
+          Write-Host "Tag v$tag matches the declared version."
+
       - name: Build release
         shell: pwsh
         run: |
-          # A tag build must be named after the tag it will be attached to.
-          # Falling through to VersionPrefix would silently produce artifacts
-          # whose version disagrees with the release they land on.
-          $v = '${{ inputs.version }}'
-          if (-not $v -and '${{ github.ref_type }}' -eq 'tag') {
-            $v = '${{ github.ref_name }}' -replace '^v', ''
-          }
           # Not $args — that is an automatic variable in PowerShell.
           $scriptArgs = @('-App', '${{ matrix.app }}')
-          if ($v) { $scriptArgs += @('-Version', $v) }
+          # Only an explicit workflow_dispatch input overrides; otherwise each
+          # app uses the version it declares.
+          if ('${{ inputs.version }}') { $scriptArgs += @('-Version', '${{ inputs.version }}') }
           ./scripts/build-release.ps1 @scriptArgs
 
       - uses: actions/upload-artifact@v4

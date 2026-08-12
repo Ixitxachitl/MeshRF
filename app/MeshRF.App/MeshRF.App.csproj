@@ -18,6 +18,12 @@
          "Cannot open project file ..._wpftmp.csproj" errors. -->
     <IncludePackageReferencesDuringMarkupCompilation>true</IncludePackageReferencesDuringMarkupCompilation>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The legacy WPF app is versioned independently of the repo (2.0.0, the
+         Avalonia app's). This is its final release: after it ships alongside
+         the first Avalonia build, only Avalonia is maintained. -->
+    <VersionPrefix>1.0.9</VersionPrefix>
+    <AssemblyVersion>1.0.9.0</AssemblyVersion>
+    <FileVersion>1.0.9.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

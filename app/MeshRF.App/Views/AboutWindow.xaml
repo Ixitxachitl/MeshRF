@@ -21,6 +21,10 @@
             <TextBlock TextWrapping="Wrap" FontSize="12"
                        Text="Windows-native Meshtastic client. Demodulates and modulates LoRa chirps in software using a HackRF One or RTL-SDR and decodes Meshtastic frames on the host CPU." />
 
+            <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" FontSize="12"
+                       Foreground="{DynamicResource BrushSubtle}"
+                       Text="This is the final release of the WPF app. Development continues in the cross-platform MeshRF build (Windows, Linux and macOS), which reads the same settings and databases." />
+
             <TextBlock Margin="0,14,0,0" FontSize="12">
                 <Hyperlink NavigateUri="https://meshtastic.org/"
                            RequestNavigate="OnNavigate">Meshtastic project</Hyperlink>

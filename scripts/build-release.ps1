@@ -104,13 +104,24 @@ function Resolve-Cmake {
 $cmake = Resolve-Cmake
 
 # --- Resolve version -----------------------------------------------------
-if (-not $Version) {
-    $props = Join-Path $repoRoot 'Directory.Build.props'
-    $xml = [xml](Get-Content $props)
-    $Version = ($xml.Project.PropertyGroup.VersionPrefix | Where-Object { $_ }) | Select-Object -First 1
-    if (-not $Version) { throw 'Could not read VersionPrefix from Directory.Build.props.' }
+# The two apps are versioned independently (the WPF app pins its own final
+# version), so this resolves per project rather than once: the app's own
+# VersionPrefix if it declares one, otherwise the repo default.
+function Resolve-AppVersion {
+    param([string]$ProjectPath)
+
+    if ($Version) { return $Version }   # explicit -Version overrides everything
+
+    foreach ($file in @($ProjectPath, (Join-Path $repoRoot 'Directory.Build.props'))) {
+        if (-not (Test-Path $file)) { continue }
+        $xml = [xml](Get-Content $file)
+        $v = ($xml.Project.PropertyGroup.VersionPrefix | Where-Object { $_ }) | Select-Object -First 1
+        if ($v) { return $v }
+    }
+    throw "Could not resolve a version for $ProjectPath (no VersionPrefix in it or Directory.Build.props)."
 }
-Write-Host "Building MeshRF v$Version — $platform/$rid ($nativeConfig), app: $App" -ForegroundColor Cyan
+
+Write-Host "Building MeshRF — $platform/$rid ($nativeConfig), app: $App" -ForegroundColor Cyan
 
 # --- Don't fight a running instance for the shared library ---------------
 # Warned about rather than done silently: this runs before any build step has
@@ -149,13 +160,14 @@ function New-Package {
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-    Write-Host "==> Publishing $ArtifactName ($PublishRid)" -ForegroundColor Yellow
+    $appVersion = Resolve-AppVersion -ProjectPath (Join-Path $repoRoot $ProjectPath)
+    Write-Host "==> Publishing $ArtifactName v$appVersion ($PublishRid)" -ForegroundColor Yellow
     dotnet publish $ProjectPath `
         -c Release -r $PublishRid --self-contained true `
         -p:PublishSingleFile=true `
         -p:NativeConfig=$nativeConfig `
         -p:NativeBinDir=$nativeBinDir `
-        -p:Version=$Version `
+        -p:Version=$appVersion `
         --nologo -o $stage
     if ($LASTEXITCODE) { throw "dotnet publish failed ($LASTEXITCODE)" }
 
@@ -188,7 +200,7 @@ function New-Package {
         ) -join "`n" | Set-Content (Join-Path $stage 'MeshRF.desktop') -Encoding utf8
     }
 
-    $base = "$ArtifactName-v$Version-$PublishRid"
+    $base = "$ArtifactName-v$appVersion-$PublishRid"
     if ($archive -eq 'zip') {
         $out = Join-Path $repoRoot "dist/$base.zip"
         if (Test-Path $out) { Remove-Item $out -Force }
@@ -223,7 +235,10 @@ if ($App -in @('Wpf', 'Both')) {
 
 # --- Optional git tag ----------------------------------------------------
 if ($Tag) {
-    $tagName = "v$Version"
+    # Tag the repo version (the Avalonia app's); the WPF app's own version is
+    # not what the repo is at.
+    $tagVersion = Resolve-AppVersion -ProjectPath (Join-Path $repoRoot 'app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj')
+    $tagName = "v$tagVersion"
     if (git tag --list $tagName) {
         Write-Warning "Tag $tagName already exists; skipping."
     } else {

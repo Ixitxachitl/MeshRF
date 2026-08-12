@@ -1,8 +1,13 @@
 <Project>
 
   <!-- Shared identity / versioning for every managed project in the repo.
-       Bump <VersionPrefix> (and the AssemblyVersion/FileVersion below) to cut
-       a new release; scripts/build-release.ps1 reads VersionPrefix from here. -->
+       This is the repo's own version, which is the cross-platform Avalonia
+       app's: 2.0.0 marks it becoming the app MeshRF ships. The legacy WPF app
+       pins its own final version in MeshRF.App.csproj instead, so the two are
+       versioned independently from here on.
+
+       scripts/build-release.ps1 reads VersionPrefix from the app project being
+       packaged, falling back to this file. -->
   <PropertyGroup>
     <Product>MeshRF</Product>
     <Company>MeshRF</Company>
@@ -11,11 +16,11 @@
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Ixitxachitl/MeshRF</RepositoryUrl>
 
-        <VersionPrefix>1.0.8</VersionPrefix>
+    <VersionPrefix>2.0.0</VersionPrefix>
     <!-- AssemblyVersion is kept at major.minor.0.0 for binding stability;
          FileVersion and InformationalVersion carry the full build identity. -->
-        <AssemblyVersion>1.0.8.0</AssemblyVersion>
-        <FileVersion>1.0.8.0</FileVersion>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
   </PropertyGroup>
 
   <!-- Append the short git commit hash to the informational version so the
