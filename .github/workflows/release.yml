@@ -66,10 +66,14 @@ jobs:
         if: matrix.platform == 'macos'
         run: brew install ninja hackrf librtlsdr libusb
 
+      # Full commit history, blobs on demand. NOT --depth 1: vcpkg.json pins a
+      # "builtin-baseline" commit that manifest mode resolves with
+      # `git show <sha>:versions/baseline.json`, which a shallow clone cannot
+      # answer. On Windows, CMakeLists.txt provisions vcpkg itself the same way.
       - name: Set up vcpkg
         if: matrix.platform != 'windows'
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
           "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$HOME/vcpkg" >> "$GITHUB_ENV"
 
