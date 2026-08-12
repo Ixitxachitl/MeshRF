@@ -107,12 +107,14 @@ jobs:
       - name: Build release
         shell: pwsh
         run: |
-          # Not $args — that is an automatic variable in PowerShell.
-          $scriptArgs = @('-App', '${{ matrix.app }}')
+          # Hashtable splat, not an array: array splatting binds positionally,
+          # so @('-App','Avalonia') put the literal string "-App" into the
+          # script's first parameter ($Version) and published "MeshRF v-App".
+          $params = @{ App = '${{ matrix.app }}' }
           # Only an explicit workflow_dispatch input overrides; otherwise each
           # app uses the version it declares.
-          if ('${{ inputs.version }}') { $scriptArgs += @('-Version', '${{ inputs.version }}') }
-          ./scripts/build-release.ps1 @scriptArgs
+          if ('${{ inputs.version }}') { $params.Version = '${{ inputs.version }}' }
+          ./scripts/build-release.ps1 @params
 
       - uses: actions/upload-artifact@v4
         with:
