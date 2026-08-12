@@ -1,0 +1,113 @@
+# Builds MeshRF for every supported platform and attaches the artifacts to a
+# GitHub release. Native libraries cannot be cross-compiled, so each platform
+# builds on its own runner — this workflow is the only way mac/linux artifacts
+# get produced without owning those machines.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build (defaults to VersionPrefix in Directory.Build.props)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      # One platform failing should not discard artifacts the others already
+      # produced — especially macOS, whose native build is unverified.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            # The last WPF release ships alongside the first Avalonia one; after
+            # that this becomes 'Avalonia'.
+            app: Both
+            artifact: dist/*.zip
+          - os: ubuntu-latest
+            platform: linux
+            app: Avalonia
+            artifact: dist/*.tar.gz
+          - os: macos-latest
+            platform: macos
+            app: Avalonia
+            artifact: dist/*.zip
+
+    runs-on: ${{ matrix.os }}
+    # macOS is expected to fail until someone verifies the native build there;
+    # let it report red without blocking the release.
+    continue-on-error: ${{ matrix.platform == 'macos' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Radio backends are dlopen'd at runtime rather than linked, so the dev
+      # packages only need to exist at build time for the headers.
+      - name: Install native dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libhackrf-dev librtlsdr-dev libusb-1.0-0-dev
+
+      - name: Install native dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install ninja hackrf librtlsdr libusb
+
+      - name: Set up vcpkg
+        if: matrix.platform != 'windows'
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+          "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$HOME/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Build release
+        shell: pwsh
+        run: |
+          # A tag build must be named after the tag it will be attached to.
+          # Falling through to VersionPrefix would silently produce artifacts
+          # whose version disagrees with the release they land on.
+          $v = '${{ inputs.version }}'
+          if (-not $v -and '${{ github.ref_type }}' -eq 'tag') {
+            $v = '${{ github.ref_name }}' -replace '^v', ''
+          }
+          # Not $args — that is an automatic variable in PowerShell.
+          $scriptArgs = @('-App', '${{ matrix.app }}')
+          if ($v) { $scriptArgs += @('-Version', $v) }
+          ./scripts/build-release.ps1 @scriptArgs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meshrf-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    # Only a tag push publishes; workflow_dispatch is for test builds, which
+    # stop at the uploaded artifacts.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: true
+          generate_release_notes: true

@@ -3,34 +3,34 @@
     "VsCodeTaskButtons.tasks": [
         {
             "label": "$(rocket) Build & Run",
-            "task": "Build & Run",
-            "tooltip": "Build native + app, deploy DLL, then launch the WPF app"
+            "task": "Build & Run Avalonia",
+            "tooltip": "Build native + Avalonia app, then launch it"
         },
         {
             "label": "$(tools) Build All",
             "task": "Build All",
-            "tooltip": "Build native, deploy DLL, build WPF app"
+            "tooltip": "Build native, then build the Avalonia app"
         },
         {
             "label": "$(play) Run",
-            "task": "Run App",
-            "tooltip": "Launch the WPF app (no rebuild)"
+            "task": "Run Avalonia App",
+            "tooltip": "Launch the Avalonia app (no rebuild)"
         },
         {
-            "label": "$(window) Avalonia",
-            "tooltip": "Cross-platform (Avalonia) app tasks",
+            "label": "$(history) WPF (legacy)",
+            "tooltip": "Windows-only WPF app — retired after the final dual release",
             "tasks": [
                 {
-                    "label": "Build & Run Avalonia",
-                    "task": "Build & Run Avalonia"
+                    "label": "Build & Run WPF",
+                    "task": "Build & Run WPF"
                 },
                 {
-                    "label": "Build Avalonia App",
-                    "task": "Build Avalonia App"
+                    "label": "Build WPF App",
+                    "task": "Build App"
                 },
                 {
-                    "label": "Run Avalonia App (no rebuild)",
-                    "task": "Run Avalonia App"
+                    "label": "Run WPF App (no rebuild)",
+                    "task": "Run App"
                 }
             ]
         },
@@ -51,20 +51,46 @@
                     "task": "Test Native"
                 },
                 {
-                    "label": "Deploy Native DLL",
+                    "label": "Deploy Native DLL (WPF only)",
                     "task": "Deploy Native DLL"
                 }
             ]
         },
         {
             "label": "$(beaker) Test",
-            "task": "Test Native",
-            "tooltip": "Build native and run ctest"
+            "tooltip": "Run the managed and/or native test suites",
+            "tasks": [
+                {
+                    "label": "Test Managed (dotnet test)",
+                    "task": "Test Managed"
+                },
+                {
+                    "label": "Test Native (ctest)",
+                    "task": "Test Native"
+                },
+                {
+                    "label": "Test All",
+                    "task": "Test All"
+                }
+            ]
         },
         {
-            "label": "$(package) Release Zip",
-            "task": "Build Release Zip",
-            "tooltip": "Run scripts/build-release.ps1 and package dist/MeshRF-v0.6.0-win-x64.zip"
+            "label": "$(package) Release",
+            "tooltip": "Package a release into dist/ via scripts/build-release.ps1",
+            "tasks": [
+                {
+                    "label": "Release: Avalonia",
+                    "task": "Build Release (Avalonia)"
+                },
+                {
+                    "label": "Release: WPF (legacy)",
+                    "task": "Build Release (WPF)"
+                },
+                {
+                    "label": "Release: both apps",
+                    "task": "Build Release (Both)"
+                }
+            ]
         },
         {
             "label": "$(trash) Clean",

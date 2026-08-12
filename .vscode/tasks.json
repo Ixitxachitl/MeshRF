@@ -1,4 +1,6 @@
 {
+	// The Avalonia app is the primary target; the WPF tasks are kept for the
+	// final dual release and are suffixed "WPF" throughout.
 	"version": "2.0.0",
 	"tasks": [
 		{
@@ -80,17 +82,15 @@
 			}
 		},
 		{
-			"label": "Build App",
+			"label": "Test Managed",
 			"type": "shell",
 			"command": "dotnet",
 			"args": [
-				"build",
-				"app/MeshRF.App/MeshRF.App.csproj",
-				"-c",
-				"Debug",
+				"test",
+				"tests/managed/MeshRF.Tests.csproj",
 				"--nologo"
 			],
-			"group": "build",
+			"group": "test",
 			"problemMatcher": [
 				"$msCompile"
 			],
@@ -101,60 +101,16 @@
 			}
 		},
 		{
-			"label": "Deploy Native DLL",
-			"type": "shell",
-			"command": "powershell",
-			"args": [
-				"-NoProfile",
-				"-Command",
-				"Copy-Item build/windows-x64/bin/RelWithDebInfo/MeshRF.Native.dll app/MeshRF.App/bin/Debug/net8.0-windows/ -Force; Write-Host 'Deployed.'"
-			],
-			"problemMatcher": [],
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "silent"
-			}
-		},
-		{
-			"label": "Build All",
+			"label": "Test All",
 			"dependsOrder": "sequence",
 			"dependsOn": [
-				"Build Native",
-				"Deploy Native DLL",
-				"Build App"
+				"Test Managed",
+				"Test Native"
 			],
 			"group": {
-				"kind": "build",
+				"kind": "test",
 				"isDefault": true
 			},
-			"problemMatcher": []
-		},
-		{
-			"label": "Run App",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"run",
-				"--project",
-				"app/MeshRF.App/MeshRF.App.csproj",
-				"-c",
-				"Debug",
-				"--no-build"
-			],
-			"problemMatcher": [],
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "always",
-				"clear": true
-			}
-		},
-		{
-			"label": "Build & Run",
-			"dependsOrder": "sequence",
-			"dependsOn": [
-				"Build All",
-				"Run App"
-			],
 			"problemMatcher": []
 		},
 		{
@@ -198,20 +154,111 @@
 			}
 		},
 		{
-			// No "Deploy Native DLL" step here: MeshRF.App.Avalonia.csproj's
+			// No "Deploy Native DLL" step: MeshRF.App.Avalonia.csproj's
 			// CopyNativeBridge target already copies the native bridge (and the
 			// hackrf/rtlsdr runtime DLLs) into its own output on every build.
-			"label": "Build & Run Avalonia",
+			"label": "Build All",
 			"dependsOrder": "sequence",
 			"dependsOn": [
 				"Build Native",
-				"Build Avalonia App",
+				"Build Avalonia App"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Build & Run Avalonia",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Build All",
 				"Run Avalonia App"
 			],
 			"problemMatcher": []
 		},
 		{
-			"label": "Build Release Zip",
+			"label": "Build App",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"app/MeshRF.App/MeshRF.App.csproj",
+				"-c",
+				"Debug",
+				"--nologo"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		},
+		{
+			// The WPF csproj has no equivalent of the Avalonia project's
+			// CopyNativeBridge target, so its native DLL is staged by hand.
+			"label": "Deploy Native DLL",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Copy-Item build/windows-x64/bin/RelWithDebInfo/MeshRF.Native.dll app/MeshRF.App/bin/Debug/net8.0-windows/ -Force; Write-Host 'Deployed.'"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "silent"
+			}
+		},
+		{
+			"label": "Build All WPF",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Build Native",
+				"Deploy Native DLL",
+				"Build App"
+			],
+			"group": "build",
+			"problemMatcher": []
+		},
+		{
+			"label": "Run App",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"app/MeshRF.App/MeshRF.App.csproj",
+				"-c",
+				"Debug",
+				"--no-build"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		},
+		{
+			"label": "Build & Run WPF",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Build All WPF",
+				"Run App"
+			],
+			"problemMatcher": []
+		},
+		{
+			// build-release.ps1 detects the host OS and picks the preset, RID
+			// and archive format itself; -App selects which app(s) to package.
+			"label": "Build Release (Avalonia)",
 			"type": "shell",
 			"command": "powershell",
 			"args": [
@@ -219,7 +266,49 @@
 				"-ExecutionPolicy",
 				"Bypass",
 				"-File",
-				"scripts/build-release.ps1"
+				"scripts/build-release.ps1",
+				"-App",
+				"Avalonia"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		},
+		{
+			"label": "Build Release (WPF)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"scripts/build-release.ps1",
+				"-App",
+				"Wpf"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		},
+		{
+			"label": "Build Release (Both)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"scripts/build-release.ps1",
+				"-App",
+				"Both"
 			],
 			"problemMatcher": [],
 			"presentation": {
@@ -235,7 +324,7 @@
 			"args": [
 				"-NoProfile",
 				"-Command",
-				"if (Test-Path build/windows-x64) { cmake --build build/windows-x64 --target clean }; dotnet clean app/MeshRF.App/MeshRF.App.csproj"
+				"if (Test-Path build/windows-x64) { cmake --build build/windows-x64 --target clean }; dotnet clean app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj; dotnet clean app/MeshRF.App/MeshRF.App.csproj"
 			],
 			"problemMatcher": [],
 			"presentation": {

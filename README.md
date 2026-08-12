@@ -75,7 +75,9 @@ Current release line: **v1.0.8**
 
 ### UI and Workflow
 
-- WPF desktop app (.NET 8) with MVVM architecture.
+- Cross-platform Avalonia desktop app (.NET 8, Windows/Linux/macOS) with MVVM
+  architecture. The original Windows-only WPF app is being retired; both ship
+  side by side for one release, after which Avalonia is the only app.
 - Channel/DM tabs with persisted history.
 - RTTTL notification controls (including per-channel mute options).
 - Improved auto-scroll and large-node-count map performance tuning.
@@ -84,9 +86,12 @@ Current release line: **v1.0.8**
 ## Architecture
 
 ```text
-MeshRF.App   (.NET 8 WPF)
+MeshRF.App.Avalonia  (.NET 8 Avalonia — Windows/Linux/macOS)
   - UI, map, waterfall, view models, app settings
-  - P/Invoke into native bridge DLL
+  - P/Invoke into native bridge library
+
+MeshRF.App   (.NET 8 WPF — Windows only, being retired)
+  - Same, for the legacy Windows build
 
 MeshRF.Core  (.NET 8 class library)
   - Native interop bindings
@@ -229,7 +234,8 @@ The release bundle includes:
 
 | Path | Purpose |
 | --- | --- |
-| `app/MeshRF.App/` | WPF desktop application |
+| `app/MeshRF.App.Avalonia/` | Cross-platform desktop application (Windows/Linux/macOS) |
+| `app/MeshRF.App/` | Legacy WPF desktop application (Windows only, being retired) |
 | `app/MeshRF.Core/` | Managed protocol/interop/storage library |
 | `native/core/` | C++ SDR/DSP/LoRa core |
 | `native/bridge/` | C ABI bridge DLL for P/Invoke |
