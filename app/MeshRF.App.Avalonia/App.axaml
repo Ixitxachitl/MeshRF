@@ -15,10 +15,24 @@
         <SolidColorBrush x:Key="BrushSpectrumBackground" Color="#FF101418" />
         <SolidColorBrush x:Key="BrushHover"              Color="#FF3A3A3A" />
         <SolidColorBrush x:Key="BrushPressed"             Color="#FF222222" />
+
+        <!-- Compact sliders. Avalonia's Fluent Slider is built for touch: its
+             natural height is 50px (15px pre-margin + 20px thumb + 15px
+             post-margin), which is what made the gain/waterfall toolbar rows
+             tower over MeshRF.App's. Overriding these theme resources shrinks
+             the template itself to ~16px; forcing Height on the control instead
+             just clips the thumb, since the template still wants its 50px. -->
+        <GridLength x:Key="SliderPreContentMargin">0</GridLength>
+        <GridLength x:Key="SliderPostContentMargin">0</GridLength>
+        <x:Double x:Key="SliderHorizontalThumbWidth">12</x:Double>
+        <x:Double x:Key="SliderHorizontalThumbHeight">12</x:Double>
+        <x:Double x:Key="SliderHorizontalHeight">16</x:Double>
     </Application.Resources>
 
     <Application.Styles>
         <FluentTheme />
+        <!-- Node/waypoint tables (Avalonia.Controls.DataGrid). -->
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
 
         <!-- MeshRF.App runs at WPF's default ~12px control text; Avalonia's
              FluentTheme defaults noticeably larger (14px+, with generous
@@ -27,6 +41,12 @@
         <Style Selector="Window">
             <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
             <Setter Property="FontSize" Value="12" />
+            <!-- Program.cs calls WithInterFont(), and Inter carries no colour
+                 emoji glyphs — without an explicit fallback chain every emoji in
+                 the app (node indicators, reactions, compose button) renders
+                 monochrome. Listing the platform emoji fonts after Inter lets
+                 text keep Inter while emoji fall through to a colour font. -->
+            <Setter Property="FontFamily" Value="Inter, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
         </Style>
         <Style Selector="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
@@ -35,15 +55,21 @@
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="Padding" Value="4,2" />
             <Setter Property="MinHeight" Value="0" />
+            <!-- Avalonia's default is Top, which floats the caret/text against
+                 the top edge on any TextBox given an explicit Height. -->
+            <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Padding" Value="6,2" />
             <Setter Property="MinHeight" Value="0" />
+            <!-- Centre the label in the button box (Avalonia defaults to Left/Top). -->
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource BrushHover}" />
@@ -51,12 +77,30 @@
         <Style Selector="Button:pressed /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource BrushPressed}" />
         </Style>
+        <Style Selector="ToggleButton">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ToggleButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+        </Style>
+        <Style Selector="ToggleButton:checked /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FF2F5D8A" />
+        </Style>
         <Style Selector="ComboBox">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="Padding" Value="4,2" />
             <Setter Property="MinHeight" Value="0" />
+            <!-- Keep the selected item vertically centred in the fixed-height
+                 toolbar combos rather than hugging the top edge. -->
+            <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="ComboBoxItem">
             <Setter Property="Padding" Value="6,3" />
@@ -83,6 +127,127 @@
         <Style Selector="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
             <Setter Property="MinHeight" Value="0" />
+        </Style>
+
+        <Style Selector="Slider">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- Fluent's Expander is touch-sized (tall header, wide padding) and
+             left-aligns its content. Compact the header and let the expanded
+             content fill the panel width. -->
+        <Style Selector="Expander">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+        <Style Selector="Expander /template/ Border#ExpanderContent">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+        </Style>
+        <Style Selector="Expander /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+
+        <!-- Node/waypoint tables: pull the Fluent DataGrid onto this app's dark
+             palette and down to the compact row height MeshRF.App's grids use. -->
+        <Style Selector="DataGrid">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="RowBackground" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="DataGridRow">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="20" />
+        </Style>
+        <Style Selector="DataGridCell">
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Padding" Value="6,0,0,0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <!-- Fluent's DataGridCell centres its content; MeshRF.App's grids
+                 are left-aligned like a normal table. -->
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+        <!-- DataGridTextColumn gives its generated CellTextBlock a 12px margin
+             on the left AND right. The text is technically left-aligned, but
+             that symmetric 24px inset makes short values sit in the middle of a
+             narrow column — which is what read as "centered". Alignment setters
+             don't touch it; the margin has to be zeroed, and the cell's own
+             Padding then supplies the single left inset. Measured: x=12 before,
+             x=6 (the cell padding) after. -->
+        <Style Selector="DataGridCell TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Margin" Value="0" />
+        </Style>
+        <Style Selector="DataGridColumnHeader">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="4,1,0,1" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="SeparatorBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <!-- The stock header template parks the sort arrow in its own grid
+                 column, which holds ~32px whether or not the column is sorted —
+                 on a narrow column that reserve is most of the width and clips
+                 the title. This template puts the arrow directly after the
+                 label instead, so nothing is reserved when unsorted. -->
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Grid Name="PART_ColumnHeaderRoot" ColumnDefinitions="*,Auto">
+                        <Border Name="HeaderBorder" Grid.ColumnSpan="2"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" />
+                        <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                    Margin="{TemplateBinding Padding}" VerticalAlignment="Center">
+                            <ContentPresenter Name="PART_ContentPresenter"
+                                              Content="{TemplateBinding Content}"
+                                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              VerticalAlignment="Center" />
+                            <Path Name="SortIcon" Width="8" Height="5" Stretch="Fill" Margin="4,0,0,0"
+                                  Fill="{TemplateBinding Foreground}" IsVisible="False"
+                                  Data="M 0,0 L 8,0 L 4,5 Z" />
+                        </StackPanel>
+                        <Rectangle Name="VerticalSeparator" Grid.Column="1" Width="1"
+                                   VerticalAlignment="Stretch"
+                                   Fill="{TemplateBinding SeparatorBrush}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="DataGridColumnHeader:sortascending /template/ Path#SortIcon">
+            <Setter Property="IsVisible" Value="True" />
+            <Setter Property="Data" Value="M 0,5 L 8,5 L 4,0 Z" />
+        </Style>
+        <Style Selector="DataGridColumnHeader:sortdescending /template/ Path#SortIcon">
+            <Setter Property="IsVisible" Value="True" />
+            <Setter Property="Data" Value="M 0,0 L 8,0 L 4,5 Z" />
+        </Style>
+        <Style Selector="DataGridColumnHeader TextBlock">
+            <Setter Property="FontSize" Value="11" />
         </Style>
     </Application.Styles>
 

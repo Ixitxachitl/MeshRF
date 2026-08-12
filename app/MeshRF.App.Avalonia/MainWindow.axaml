@@ -10,70 +10,233 @@
         Title="MeshRF"
         Width="1280" Height="900">
 
+    <Window.Resources>
+      <ResourceDictionary>
+        <!-- Shared by both channel and DM-conversation tab content templates
+             (see TabControl.Resources below) so the message list markup,
+             including its reply/react context menu, isn't duplicated. -->
+        <!-- Message row: [timestamp] [from] [body + reactions], matching
+             MeshRF.App's three-column layout and monospace body. -->
+        <DataTemplate x:Key="MessageListTemplate" x:DataType="mesh:ITabItem">
+            <ListBox ItemsSource="{Binding Messages}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
+                     local:AutoScrollBehavior.IsEnabled="{Binding #RootWindow.DataContext.AutoScroll}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="mesh:ChannelMessage">
+                        <Grid ColumnDefinitions="Auto,Auto,*">
+                            <Grid.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Reply"
+                                              Command="{Binding #RootWindow.DataContext.ReplyToMessageCommand}"
+                                              CommandParameter="{Binding}" />
+                                    <MenuItem Header="React…" Click="OnReactPick" />
+                                    <Separator />
+                                    <MenuItem Header="Copy message" Click="OnCopyMessage" />
+                                </ContextMenu>
+                            </Grid.ContextMenu>
+                            <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" FontSize="11"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                            <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}" FontSize="11"
+                                       ToolTip.Tip="{Binding FromId}" />
+                            <StackPanel Grid.Column="2" Margin="0,0,0,2">
+                                <SelectableTextBlock local:MarkdownText.Text="{Binding TextWithStatus}"
+                                                     FontSize="11" TextWrapping="Wrap" />
+                                <ItemsControl ItemsSource="{Binding Reactions}" Margin="0,3,0,0"
+                                              IsVisible="{Binding HasReactions}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="mesh:MessageReaction">
+                                            <Border Margin="0,0,4,0" Padding="6,1" CornerRadius="8"
+                                                    Background="{DynamicResource BrushPanelBackground}"
+                                                    BorderBrush="{DynamicResource BrushPanelBorder}"
+                                                    BorderThickness="1"
+                                                    ToolTip.Tip="{Binding Reactors}">
+                                                <TextBlock Text="{Binding Display}" FontSize="11" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DataTemplate>
+      </ResourceDictionary>
+    </Window.Resources>
+
     <DockPanel LastChildFill="True">
 
-        <!-- Toolbar row 1: device / region / preset / slot / frequency / start-stop. -->
+        <!-- Toolbar row 1: device / region / preset / slot / frequency / start-stop,
+             with the About button pinned top-right (as in MeshRF.App). -->
         <Border DockPanel.Dock="Top"
                 Background="{DynamicResource BrushPanelBackground}"
                 BorderBrush="{DynamicResource BrushPanelBorder}"
                 BorderThickness="0,0,0,1"
-                Padding="6,4">
+                Padding="4,2">
+          <DockPanel LastChildFill="True">
+            <Button DockPanel.Dock="Right" Content="&#x24D8;" FontSize="15"
+                    Width="28" Height="26" Padding="0" Margin="6,0,0,2"
+                    VerticalAlignment="Top"
+                    Click="OnAbout" ToolTip.Tip="About MeshRF" />
             <WrapPanel>
-                <TextBlock Text="RX" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <TextBlock Text="RX" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding AvailableDevices}"
                           SelectedItem="{Binding SelectedDevice}"
                           IsEnabled="{Binding !IsRunning}"
-                          FontSize="11" Width="100" Margin="0,0,10,4" />
-                <TextBlock Text="Region" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                          FontSize="11" Width="150" Height="26" Margin="0,0,8,2" />
+                <TextBlock Text="Rate" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <ComboBox ItemsSource="{Binding SampleRateOptions}"
+                          SelectedItem="{Binding SelectedRxSampleRate}"
+                          IsEnabled="{Binding CanSelectRxSampleRate}"
+                          FontSize="11" Width="110" Height="26" Margin="0,0,8,2"
+                          ToolTip.Tip="RX sample rate in MS/s; choices are limited to the selected receiver's supported rates" />
+                <TextBlock Text="TX" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <ComboBox ItemsSource="{Binding AvailableTxDevices}"
+                          SelectedItem="{Binding SelectedTxDevice}"
+                          IsEnabled="{Binding !IsRunning}"
+                          FontSize="11" Width="150" Height="26" Margin="0,0,8,2"
+                          ToolTip.Tip="Transmit SDR backend; HackRF can transmit, RTL-SDR cannot" />
+                <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
+                <TextBlock Text="Region" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding AvailableRegions}"
                           SelectedItem="{Binding SelectedRegion}"
                           IsEnabled="{Binding !IsRunning}"
-                          FontSize="11" Width="80" Margin="0,0,10,4" />
-                <TextBlock Text="Preset" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                          FontSize="11" Width="90" Height="26" Margin="0,0,8,2" />
+                <TextBlock Text="Preset" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding AvailablePresets}"
                           SelectedItem="{Binding SelectedPreset}"
                           IsEnabled="{Binding !IsRunning}"
-                          FontSize="11" Width="120" Margin="0,0,10,4" />
-                <TextBlock Text="Slot" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                          FontSize="11" Width="130" Height="26" Margin="0,0,8,2" />
+                <TextBlock Text="SF" FontSize="11" VerticalAlignment="Center" Margin="0,0,2,2"
+                           ToolTip.Tip="Spreading factor — auto-filled from preset; edit to override" />
+                <TextBox Text="{Binding OverrideSf}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="28" Height="26" Margin="0,0,6,2" />
+                <TextBlock Text="BW" FontSize="11" VerticalAlignment="Center" Margin="0,0,2,2"
+                           ToolTip.Tip="Bandwidth in kHz — auto-filled from preset; edit to override" />
+                <TextBox Text="{Binding OverrideBwKhz}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="52" Height="26" Margin="0,0,6,2" />
+                <TextBlock Text="CR" FontSize="11" VerticalAlignment="Center" Margin="0,0,2,2"
+                           ToolTip.Tip="Coding rate denominator (4/N) — auto-filled from preset; edit to override" />
+                <TextBox Text="{Binding OverrideCr}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="24" Height="26" Margin="0,0,8,2" />
+                <TextBlock Text="Slot" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding Slots}"
                           SelectedItem="{Binding SelectedSlot}"
                           IsEnabled="{Binding !IsRunning}"
-                          FontSize="11" Width="60" Margin="0,0,10,4" />
-                <TextBlock Text="Freq (MHz)" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
+                          FontSize="11" Width="70" Height="26" Margin="0,0,8,2" />
+                <TextBlock Text="Freq (MHz)" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
-                         FontSize="11" Width="80" Margin="0,0,10,4" />
-                <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" Margin="0,0,10,4" />
+                         FontSize="11" Width="100" Height="26" Margin="0,0,8,2" />
+                <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
+                <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" FontSize="11" Height="26" Margin="0,0,10,2" />
                 <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}" FontSize="11"
-                           IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,4" />
+                           IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,2" />
             </WrapPanel>
+          </DockPanel>
         </Border>
 
-        <!-- Toolbar row 2: SF/BW/CR overrides + RX gains. -->
+        <!-- Toolbar row 2: RX/TX gains, gated by which device is selected (like MeshRF.App's IsHackRf/IsRtlSdr/IsTxHackRf). -->
         <Border DockPanel.Dock="Top"
                 Background="{DynamicResource BrushPanelBackground}"
                 BorderBrush="{DynamicResource BrushPanelBorder}"
                 BorderThickness="0,0,0,1"
-                Padding="6,4">
+                Padding="4,1">
             <WrapPanel>
-                <TextBlock Text="SF" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4"
-                           ToolTip.Tip="Spreading factor — auto-filled from preset; edit to override" />
-                <TextBox Text="{Binding OverrideSf}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="36" Margin="0,0,10,4" />
-                <TextBlock Text="BW" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4"
-                           ToolTip.Tip="Bandwidth in kHz — auto-filled from preset; edit to override" />
-                <TextBox Text="{Binding OverrideBwKhz}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="56" Margin="0,0,10,4" />
-                <TextBlock Text="CR" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4"
-                           ToolTip.Tip="Coding rate denominator (4/N) — auto-filled from preset; edit to override" />
-                <TextBox Text="{Binding OverrideCr}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="36" Margin="0,0,10,4" />
-                <Border Width="1" Margin="4,0,10,4" Background="{DynamicResource BrushPanelBorder}" />
-                <TextBlock Text="LNA" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" ToolTip.Tip="HackRF LNA gain (dB)" />
-                <TextBox Text="{Binding LnaGainDb}" FontSize="11" Width="36" Margin="0,0,10,4" />
-                <TextBlock Text="VGA" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" ToolTip.Tip="HackRF VGA gain (dB)" />
-                <TextBox Text="{Binding VgaGainDb}" FontSize="11" Width="36" Margin="0,0,10,4" />
-                <CheckBox Content="Amp" IsChecked="{Binding AmpEnable}" FontSize="11" Margin="0,0,10,4" ToolTip.Tip="HackRF RF amplifier" />
-                <Border Width="1" Margin="4,0,10,4" Background="{DynamicResource BrushPanelBorder}" />
-                <TextBlock Text="RTL gain" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,4" />
-                <TextBox Text="{Binding RtlGainDb}" IsEnabled="{Binding !RtlAgcEnable}" FontSize="11" Width="36" Margin="0,0,10,4" />
-                <CheckBox Content="RTL AGC" IsChecked="{Binding RtlAgcEnable}" FontSize="11" Margin="0,0,10,4" />
+                <StackPanel Orientation="Horizontal" IsVisible="{Binding IsHackRf}">
+                    <TextBlock Text="RX" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,2" />
+                    <TextBlock Text="LNA" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" ToolTip.Tip="HackRF LNA gain (RF-stage), 0..40 dB step 8" />
+                    <Slider Width="110" Minimum="0" Maximum="40" TickFrequency="8" IsSnapToTickEnabled="True"
+                            SmallChange="8" LargeChange="8" Value="{Binding LnaGainDb}" VerticalAlignment="Center" Margin="0,0,4,2" />
+                    <TextBlock Width="32" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2" Text="{Binding LnaGainDb, StringFormat='{}{0} dB'}" />
+                    <TextBlock Text="VGA" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" ToolTip.Tip="HackRF baseband VGA gain, 0..62 dB step 2" />
+                    <Slider Width="130" Minimum="0" Maximum="62" TickFrequency="2" IsSnapToTickEnabled="True"
+                            SmallChange="2" LargeChange="2" Value="{Binding VgaGainDb}" VerticalAlignment="Center" Margin="0,0,4,2" />
+                    <TextBlock Width="32" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2" Text="{Binding VgaGainDb, StringFormat='{}{0} dB'}" />
+                    <ToggleButton Content="AMP (+14 dB)" IsChecked="{Binding AmpEnable}" FontSize="11" Margin="0,0,8,2" ToolTip.Tip="Enable HackRF front-end RF amplifier" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" IsVisible="{Binding IsRtlSdr}">
+                    <TextBlock Text="RX" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,2" />
+                    <TextBlock Text="Gain" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" ToolTip.Tip="RTL-SDR manual tuner gain, 0..49 dB" />
+                    <Slider Width="220" Minimum="0" Maximum="49" TickFrequency="1" IsSnapToTickEnabled="True"
+                            SmallChange="1" LargeChange="5" Value="{Binding RtlGainDb}" IsEnabled="{Binding !RtlAgcEnable}"
+                            VerticalAlignment="Center" Margin="0,0,4,2" />
+                    <TextBlock Width="40" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2" Text="{Binding RtlGainDb, StringFormat='{}{0} dB'}" />
+                    <ToggleButton Content="AGC" IsChecked="{Binding RtlAgcEnable}" FontSize="11" Margin="0,0,8,2"
+                                  ToolTip.Tip="Tuner automatic gain control (overrides the manual gain slider)" />
+                    <ToggleButton Content="Bias-T" IsChecked="{Binding BiasTee}" FontSize="11" Margin="0,0,8,2"
+                                  ToolTip.Tip="Enable 5V bias-T on the antenna port to power an external LNA/active antenna" />
+                </StackPanel>
+
+                <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" IsVisible="{Binding IsTxHackRf}" />
+
+                <StackPanel Orientation="Horizontal" IsVisible="{Binding IsTxHackRf}">
+                    <TextBlock Text="TX" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,2" />
+                    <TextBlock Text="Gain" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" ToolTip.Tip="HackRF TX VGA gain, 0..47 dB" />
+                    <Slider Width="120" Minimum="0" Maximum="47" TickFrequency="1" IsSnapToTickEnabled="True"
+                            SmallChange="1" LargeChange="4" Value="{Binding TxGainDb}" VerticalAlignment="Center" Margin="0,0,4,2" />
+                    <TextBlock Width="40" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2" Text="{Binding TxGainDb, StringFormat='{}{0} dB'}" />
+                    <ToggleButton Content="AMP (+14 dB)" IsChecked="{Binding TxAmpEnable}" FontSize="11" Margin="0,0,8,2"
+                                  ToolTip.Tip="Enable the HackRF RF amplifier for transmit output" />
+                </StackPanel>
+            </WrapPanel>
+        </Border>
+
+        <!-- Toolbar row 3: waterfall display settings. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                BorderThickness="0,0,0,1"
+                Padding="4,1">
+            <WrapPanel>
+                <TextBlock Text="Colormap" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <ComboBox ItemsSource="{Binding AvailableColormaps}"
+                          SelectedItem="{Binding WaterfallColormap}"
+                          FontSize="11" Width="90" Margin="0,0,10,2" />
+                <ToggleButton Content="Auto levels" IsChecked="{Binding WaterfallAutoLevels}" FontSize="11" Margin="0,0,8,2"
+                              ToolTip.Tip="Track 5th/99th percentile of recent frames" />
+                <TextBlock Text="floor" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <Slider Width="140" Minimum="-140" Maximum="0" TickFrequency="5" Value="{Binding WaterfallFloorDb}" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <TextBlock Width="48" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                           Text="{Binding WaterfallFloorDb, StringFormat='{}{0:F0} dB'}" />
+                <TextBlock Text="ceil" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <Slider Width="140" Minimum="-100" Maximum="20" TickFrequency="5" Value="{Binding WaterfallCeilDb}" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <TextBlock Width="48" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                           Text="{Binding WaterfallCeilDb, StringFormat='{}{0:F0} dB'}" />
+                <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
+                <TextBlock Text="Speed" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <Slider Width="120" Minimum="5" Maximum="240" TickFrequency="5" Value="{Binding WaterfallRowsPerSecond}" VerticalAlignment="Center" Margin="0,0,4,2"
+                        ToolTip.Tip="Waterfall scroll speed in rows per second (time resolution)" />
+                <TextBlock Width="48" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                           Text="{Binding WaterfallRowsPerSecond, StringFormat='{}{0:F0}/s'}" />
+                <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
+                <ToggleButton Content="DC block" IsChecked="{Binding DcBlockEnable}" FontSize="11" Margin="0,0,8,2"
+                              ToolTip.Tip="IIR high-pass to remove the LO leakage spike at the tuned centre frequency" />
+            </WrapPanel>
+        </Border>
+
+        <!-- Toolbar row 4: ringtone for incoming direct messages. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                BorderThickness="0,0,0,1"
+                Padding="4,1">
+            <WrapPanel>
+                <TextBlock Text="Ringtone" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <ComboBox ItemsSource="{Binding RingtoneModes}" SelectedItem="{Binding RingtoneMode}"
+                          FontSize="11" Width="100" Height="26" Margin="0,0,10,2"
+                          ToolTip.Tip="How long the alert tone plays when a direct message arrives" />
+                <TextBlock Text="Volume" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <Slider Width="120" Minimum="0" Maximum="100" TickFrequency="5"
+                        Value="{Binding RingtoneVolume}" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <TextBlock Width="36" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,2"
+                           Text="{Binding RingtoneVolume, StringFormat='{}{0:F0}%'}" />
+                <TextBlock Text="RTTTL" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <TextBox Text="{Binding RingtoneRtttl}" FontSize="11" Width="520" Height="26" Margin="0,0,4,2"
+                         ToolTip.Tip="Ringtone in Meshtastic RTTTL format" />
+                <Button Content="Preview" FontSize="11" Height="26" Margin="0,0,0,2"
+                        Command="{Binding TestRingtoneCommand}" ToolTip.Tip="Preview the current ringtone" />
             </WrapPanel>
         </Border>
 
@@ -91,18 +254,19 @@
 
         <!-- Main content: same 2x2 quadrant layout as MeshRF.App (map / nodes
              on the left, spectrum+waterfall / chat+log on the right), so the
-             two apps read as the same product even though the top quarters
-             here are still placeholders — map and waterfall haven't been
-             ported yet. -->
+             two apps read as the same product. The map quarter is still a
+             placeholder; spectrum/waterfall are ported (see SpectrumView /
+             WaterfallView / FrequencyAxis). -->
         <Grid x:Name="MainLayoutGrid" Margin="6">
+            <!-- Equal halves, matching MeshRF.App's LeftPaneGrid/RightPaneGrid split. -->
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1*" MinWidth="200" />
+                <ColumnDefinition Width="*" MinWidth="200" />
                 <ColumnDefinition Width="5" />
-                <ColumnDefinition Width="2*" MinWidth="260" />
+                <ColumnDefinition Width="*" MinWidth="260" />
             </Grid.ColumnDefinitions>
 
             <!-- Left: map (top, placeholder) over nodes/waypoints (bottom). -->
-            <Grid Grid.Column="0">
+            <Grid x:Name="LeftPaneGrid" Grid.Column="0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="1*" MinHeight="120" />
                     <RowDefinition Height="5" />
@@ -119,59 +283,351 @@
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                               Background="{DynamicResource BrushSplitter}" />
 
-                <Grid Grid.Row="2" Margin="0,3,0,0" RowDefinitions="Auto,2*,5,Auto,1*">
-                    <TextBlock Grid.Row="0" Margin="4,0,0,4" FontWeight="Bold"
-                               Text="{Binding Nodes.Count, StringFormat='Nodes ({0})'}" />
-                    <ListBox Grid.Row="1" ItemsSource="{Binding Nodes}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate x:DataType="nodes:NodeRecord">
-                                <Grid ColumnDefinitions="*,Auto" Margin="0,4">
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="{Binding LongName}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding DisplayId}" FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
-                                        <TextBlock FontSize="11" Foreground="{DynamicResource BrushSubtle}">
-                                            <Run Text="{Binding RssiDbm, StringFormat='{}{0:F0} dBm'}" />
-                                            <Run Text="{Binding SnrDb, StringFormat='  {0:F1} dB'}" />
-                                            <Run Text="{Binding BatteryPct, StringFormat='  {0}%'}" />
-                                        </TextBlock>
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Content="Msg" VerticalAlignment="Center"
-                                            Command="{Binding #RootWindow.DataContext.MessageNodeCommand}"
-                                            CommandParameter="{Binding}" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                <Grid Grid.Row="2" Margin="0,3,0,0" RowDefinitions="Auto,Auto,Auto,2*,5,Auto,1*">
+                    <!-- Compact My Node bar — opens the identity settings dialog. -->
+                    <Border Grid.Row="0" Margin="0,0,0,4" Padding="6,4"
+                            Background="{DynamicResource BrushPanelBackground}"
+                            BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="Configure" Padding="8,2"
+                                    Click="OnOpenNodeIdentity" ToolTip.Tip="Open My Node identity and settings" />
+                            <TextBlock Text="My Node" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource BrushSubtle}"
+                                       Text="{Binding MyLongName}" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                    </Border>
 
-                    <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
+                    <!-- Quick send bar — mirrors MeshRF.App's, minus the payload
+                         types this app can't build yet (env/AQ telemetry, status). -->
+                    <Border Grid.Row="1" Margin="0,0,0,4" Padding="6,4"
+                            Background="{DynamicResource BrushPanelBackground}"
+                            BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="Quick send" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
+                            <Button Content="Node info" Padding="10,3" Command="{Binding SendSelfNodeInfoCommand}"
+                                    ToolTip.Tip="Broadcast your NODEINFO payload on the primary channel" />
+                            <Button Content="Position" Padding="10,3" Command="{Binding SendSelfPositionCommand}"
+                                    ToolTip.Tip="Broadcast your POSITION payload on the primary channel" />
+                            <Button Content="Device metrics" Padding="10,3" Command="{Binding SendSelfDeviceMetricsCommand}"
+                                    ToolTip.Tip="Broadcast your device-metrics telemetry on the primary channel" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Grid.Row="2">
+                        <TextBlock Margin="4,0,0,4" FontWeight="Bold" Text="{Binding NodesHeader}" />
+
+                        <!-- Node list filter bar (mirrors MeshRF.App's). -->
+                        <Border Margin="0,0,0,3" Padding="4,3"
+                                Background="{DynamicResource BrushPanelBackground}"
+                                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                            <StackPanel>
+                                <DockPanel LastChildFill="True" Margin="0,0,0,3">
+                                    <Button DockPanel.Dock="Right" Content="Clear" FontSize="11" Padding="8,2"
+                                            Margin="6,0,0,0" Command="{Binding ClearNodeFiltersCommand}"
+                                            ToolTip.Tip="Clear all filters" />
+                                    <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" FontSize="11"
+                                               Margin="0,0,6,0" Text="Search" />
+                                    <TextBox Height="22" FontSize="11" Text="{Binding NodeSearchText}"
+                                             ToolTip.Tip="Search by name, short name, or node ID" />
+                                </DockPanel>
+
+                                <Expander Header="Filters" FontSize="11">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled" MaxHeight="220">
+                                        <Grid Margin="0,6,0,0" ColumnDefinitions="120,*"
+                                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Hops" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="0" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding NodeHopsFilterOptions}" SelectedItem="{Binding NodeHopsFilter}" />
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Key status" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="1" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding NodeKeyFilterOptions}" SelectedItem="{Binding NodeKeyFilter}" />
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Signed" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="2" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding NodeSignedFilterOptions}" SelectedItem="{Binding NodeSignedFilter}" />
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Position" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="3" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding NodeLocationFilterOptions}" SelectedItem="{Binding NodeLocationFilter}" />
+
+                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Invalid pos" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <CheckBox Grid.Row="4" Grid.Column="1" FontSize="11" Content="Hide invalid positions"
+                                                      IsChecked="{Binding NodeHideInvalidLocations}" />
+
+                                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Ignored nodes" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="5" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding NodeIgnoredFilterOptions}" SelectedItem="{Binding NodeIgnoredFilter}" />
+
+                                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Via MQTT" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="6" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding NodeMqttFilterOptions}" SelectedItem="{Binding NodeMqttFilter}" />
+
+                                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Heard within" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <TextBox Grid.Row="7" Grid.Column="1" Height="22" FontSize="11" Text="{Binding NodeMaxAgeMinutesText}"
+                                                     PlaceholderText="minutes" ToolTip.Tip="Only show nodes heard within this many minutes" />
+
+                                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Max distance" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <TextBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11" Text="{Binding NodeDistanceKmText}"
+                                                     PlaceholderText="km" ToolTip.Tip="Needs a home location set in My Node → Configure" />
+
+                                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Has temperature" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeTemperatureFilter}" />
+
+                                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Has humidity" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="10" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeHumidityFilter}" />
+
+                                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Has pressure" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="11" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePressureFilter}" />
+
+                                            <TextBlock Grid.Row="12" Grid.Column="0" Text="Has gas resist." FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="12" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeGasResistanceFilter}" />
+
+                                            <TextBlock Grid.Row="13" Grid.Column="0" Text="Has IAQ" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="13" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeIaqFilter}" />
+
+                                            <TextBlock Grid.Row="14" Grid.Column="0" Text="Has PM1.0 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="14" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm10StdFilter}" />
+
+                                            <TextBlock Grid.Row="15" Grid.Column="0" Text="Has PM2.5 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="15" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm25StdFilter}" />
+
+                                            <TextBlock Grid.Row="16" Grid.Column="0" Text="Has PM10 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="16" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm100StdFilter}" />
+
+                                            <TextBlock Grid.Row="17" Grid.Column="0" Text="Has PM1.0 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="17" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm10EnvFilter}" />
+
+                                            <TextBlock Grid.Row="18" Grid.Column="0" Text="Has PM2.5 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="18" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm25EnvFilter}" />
+
+                                            <TextBlock Grid.Row="19" Grid.Column="0" Text="Has PM10 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="19" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm100EnvFilter}" />
+
+                                            <TextBlock Grid.Row="20" Grid.Column="0" Text="Has Ch1 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="20" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                                <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                          ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh1VoltageFilter}" />
+                                                <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                          ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh1CurrentFilter}" />
+                                            </Grid>
+
+                                            <TextBlock Grid.Row="21" Grid.Column="0" Text="Has Ch2 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="21" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                                <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                          ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh2VoltageFilter}" />
+                                                <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                          ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh2CurrentFilter}" />
+                                            </Grid>
+
+                                            <TextBlock Grid.Row="22" Grid.Column="0" Text="Has Ch3 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="22" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                                <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                          ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh3VoltageFilter}" />
+                                                <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                          ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh3CurrentFilter}" />
+                                            </Grid>
+                                        </Grid>
+                                    </ScrollViewer>
+                                </Expander>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <DataGrid Grid.Row="3" x:Name="NodesGridProxy" ItemsSource="{Binding NodesView}"
+                              AutoGenerateColumns="False" IsReadOnly="True"
+                              GridLinesVisibility="Horizontal"
+                              CanUserSortColumns="True" CanUserResizeColumns="True"
+                              DoubleTapped="OnNodeDoubleTapped">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Message"
+                                          Command="{Binding #RootWindow.DataContext.MessageNodeCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <Separator />
+                                <MenuItem Header="Request node info"
+                                          Command="{Binding #RootWindow.DataContext.RequestNodeInfoCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Exchange node info"
+                                          Command="{Binding #RootWindow.DataContext.ExchangeNodeInfoCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Request location"
+                                          Command="{Binding #RootWindow.DataContext.RequestLocationCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Exchange location"
+                                          Command="{Binding #RootWindow.DataContext.ExchangeLocationCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Request telemetry"
+                                          Command="{Binding #RootWindow.DataContext.RequestTelemetryCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Traceroute"
+                                          Command="{Binding #RootWindow.DataContext.TracerouteCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Request new keys"
+                                          Command="{Binding #RootWindow.DataContext.RequestNewKeysCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <Separator />
+                                <MenuItem Header="Toggle ignore"
+                                          Command="{Binding #RootWindow.DataContext.ToggleIgnoreNodeCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Toggle favorite"
+                                          Command="{Binding #RootWindow.DataContext.ToggleFavoriteNodeCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Copy" Click="OnCopyNode" InputGesture="Ctrl+C" />
+                                <Separator />
+                                <MenuItem Header="Delete"
+                                          Command="{Binding #RootWindow.DataContext.DeleteNodeCommand}"
+                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <!-- Indicator columns, mirroring MeshRF.App's. That app
+                                 uses Segoe MDL2 glyphs, which are Windows-only, so
+                                 these use plain Unicode symbols instead. -->
+                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="★" ToolTip.Tip="Favorite" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="★" Foreground="#FFD479" ToolTip.Tip="Favorite"
+                                                   IsVisible="{Binding Favorite}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="🔑" ToolTip.Tip="Public key on file (red = key mismatch)" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <Panel>
+                                            <TextBlock Text="🔑" ToolTip.Tip="Public key on file"
+                                                       IsVisible="{Binding HasPublicKey}" />
+                                            <TextBlock Text="🔑" Foreground="#FF6B6B" ToolTip.Tip="Key mismatch — this node's key changed"
+                                                       IsVisible="{Binding HasKeyMismatch}" />
+                                        </Panel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="🛡" ToolTip.Tip="Verified: a valid XEdDSA signature was confirmed from this node" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="🛡" Foreground="#7BD88F"
+                                                   ToolTip.Tip="Verified: a valid XEdDSA signature was confirmed from this node"
+                                                   IsVisible="{Binding IsXeddsaVerified}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="🚫" ToolTip.Tip="Node is marked unmessagable" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="🚫" ToolTip.Tip="Node is marked unmessagable"
+                                                   IsVisible="{Binding IsUnmessagableTrue}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="📍" ToolTip.Tip="Position known (red = reported position is invalid)" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <Panel>
+                                            <TextBlock Text="📍" ToolTip.Tip="Location known"
+                                                       IsVisible="{Binding HasLocation}" />
+                                            <TextBlock Text="📍" Foreground="#FF6B6B" ToolTip.Tip="Reported location is invalid"
+                                                       IsVisible="{Binding HasInvalidLocation}" />
+                                        </Panel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="🔇" ToolTip.Tip="Ignored" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="🔇" ToolTip.Tip="Ignored" IsVisible="{Binding Ignored}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Short" Width="Auto" Binding="{Binding ShortName, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                            <DataGridTextColumn Header="Node name" Width="*" Binding="{Binding LongName, DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="Status" Width="2*" Binding="{Binding NodeStatus, DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="Role" Width="Auto" Binding="{Binding Role, DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="Node ID" Width="Auto" Binding="{Binding DisplayId, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                            <DataGridTextColumn Header="Last heard" Width="Auto" Binding="{Binding LastHeard, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}', DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="RSSI" Width="Auto" Binding="{Binding RssiDbm, StringFormat='{}{0:F0} dBm', DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="SNR" Width="Auto" Binding="{Binding SnrDb, StringFormat='{}{0:F1}', DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Width="Auto" Binding="{Binding HopsAway, DataType=nodes:NodeRecord}" >
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="🐇" ToolTip.Tip="Hops away" />
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <GridSplitter Grid.Row="4" Height="5" HorizontalAlignment="Stretch"
                                   Background="{DynamicResource BrushSplitter}" />
 
-                    <TextBlock Grid.Row="3" Margin="4,3,0,4" FontWeight="Bold"
+                    <TextBlock Grid.Row="5" Margin="4,3,0,4" FontWeight="Bold"
                                Text="{Binding Waypoints.Count, StringFormat='Waypoints ({0})'}" />
-                    <ListBox Grid.Row="4" ItemsSource="{Binding Waypoints}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate x:DataType="waypoints:WaypointRecord">
-                                <StackPanel Margin="0,4">
-                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock FontSize="11" Foreground="{DynamicResource BrushSubtle}">
-                                        <Run Text="{Binding Latitude, StringFormat='{}{0:F5},'}" />
-                                        <Run Text="{Binding Longitude, StringFormat='{}{0:F5}'}" />
-                                    </TextBlock>
-                                    <TextBlock Text="{Binding Description}" FontSize="11"
-                                               Foreground="{DynamicResource BrushSubtle}" TextWrapping="Wrap"
-                                               IsVisible="{Binding Description, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                    <DataGrid Grid.Row="6" x:Name="WaypointsGridProxy" ItemsSource="{Binding Waypoints}"
+                              AutoGenerateColumns="False" IsReadOnly="True"
+                              GridLinesVisibility="Horizontal"
+                              CanUserSortColumns="True" CanUserResizeColumns="True">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Edit..." Click="OnEditWaypoint" />
+                                <MenuItem Header="Resend"
+                                          Command="{Binding #RootWindow.DataContext.ResendWaypointCommand}"
+                                          CommandParameter="{Binding #WaypointsGridProxy.SelectedItem}" />
+                                <Separator />
+                                <MenuItem Header="Delete"
+                                          Command="{Binding #RootWindow.DataContext.DeleteWaypointCommand}"
+                                          CommandParameter="{Binding #WaypointsGridProxy.SelectedItem}" />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Icon" Width="42" Binding="{Binding IconText}" />
+                            <DataGridTextColumn Header="Type" Width="80" Binding="{Binding GeofenceKindText}" />
+                            <DataGridTextColumn Header="Name" Width="2*" Binding="{Binding DisplayName}" />
+                            <DataGridTextColumn Header="Description" Width="2*" Binding="{Binding Description}" />
+                            <DataGridTextColumn Header="From" Width="96" Binding="{Binding FromId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                            <DataGridTextColumn Header="Lat" Width="88" Binding="{Binding Latitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                            <DataGridTextColumn Header="Lon" Width="88" Binding="{Binding Longitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                            <DataGridTextColumn Header="Status" Width="74" Binding="{Binding ExpiryStatus}" />
+                            <DataGridTextColumn Header="Expires" Width="132" Binding="{Binding ExpireTime, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                            <DataGridTextColumn Header="Heard" Width="156" Binding="{Binding RxTime, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
                 </Grid>
             </Grid>
 
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
                           Background="{DynamicResource BrushSplitter}" />
 
-            <!-- Right: spectrum/waterfall (top, placeholder) over chat tabs + log (bottom). -->
-            <Grid Grid.Column="2">
+            <!-- Right: spectrum/waterfall (top) over chat tabs + log (bottom). -->
+            <Grid x:Name="RightPaneGrid" Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="1*" MinHeight="120" />
                     <RowDefinition Height="5" />
@@ -181,56 +637,149 @@
                 <Border Grid.Row="0" Margin="3,0,0,3"
                         Background="{DynamicResource BrushSpectrumBackground}"
                         BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-                    <TextBlock Text="Spectrum / waterfall (not ported yet)" Foreground="{DynamicResource BrushSubtle}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Grid x:Name="SpectrumLayoutGrid" RowDefinitions="1*,5,2*">
+                        <local:SpectrumView x:Name="Spectrum" Grid.Row="0"
+                                            FloorDb="{Binding WaterfallFloorDb}"
+                                            CeilDb="{Binding WaterfallCeilDb}" />
+
+                        <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                                      Background="{DynamicResource BrushSplitter}" />
+
+                        <!-- 22 (freq axis) / * (live waterfall) / 84 (frozen "last packet"
+                             snapshot panel, same fixed height as MeshRF.App's LastPacketRow) —
+                             matching MeshRF.App's row proportions here matters: reserving that
+                             84px keeps the live waterfall the same on-screen height as Windows,
+                             so a fixed real-world time span always renders the same number of
+                             rows tall on both apps. -->
+                        <Grid Grid.Row="2" RowDefinitions="22,*,84" Background="{DynamicResource BrushSpectrumBackground}">
+                            <local:FrequencyAxis Grid.Row="0"
+                                                 CenterFreqHz="{Binding SpectrumCenterHz}"
+                                                 SpanHz="{Binding SpectrumSpanHz}"
+                                                 Foreground="{DynamicResource BrushAppForeground}" />
+                            <local:WaterfallView x:Name="Waterfall" Grid.Row="1"
+                                                 FloorDb="{Binding WaterfallFloorDb, Mode=TwoWay}"
+                                                 CeilDb="{Binding WaterfallCeilDb, Mode=TwoWay}"
+                                                 AutoLevels="{Binding WaterfallAutoLevels, Mode=TwoWay}"
+                                                 Colormap="{Binding WaterfallColormap}" />
+                            <Border Grid.Row="2" Margin="0,2,0,2"
+                                    Background="{DynamicResource BrushPanelBackground}"
+                                    BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                                <TextBlock Text="Last packet (not ported yet)" FontSize="11"
+                                           Foreground="{DynamicResource BrushSubtle}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                    </Grid>
                 </Border>
 
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                               Background="{DynamicResource BrushSplitter}" />
 
-                <Grid Grid.Row="2" Margin="3,3,0,0" RowDefinitions="Auto,2*,Auto,Auto,5,1*">
-                    <TextBlock Grid.Row="0" Margin="4,0,0,4" FontWeight="Bold" Text="Channels &amp; conversations" />
+                <Grid x:Name="MessagesLayoutGrid" Grid.Row="2" Margin="3,3,0,0" RowDefinitions="Auto,2*,5,1*">
+                    <!-- Header layout is kept identical to the Log header below:
+                         title on the left, Auto-scroll rightmost, other actions
+                         immediately to its left. -->
+                    <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,3" MinHeight="26">
+                        <ToggleButton DockPanel.Dock="Right" Content="Auto-scroll" FontSize="11" Padding="6,1"
+                                      Margin="4,0,0,0" VerticalAlignment="Center"
+                                      IsChecked="{Binding AutoScroll}"
+                                      ToolTip.Tip="Keep the newest message in view" />
+                        <Button DockPanel.Dock="Right" Width="22" Height="22" Padding="0" Margin="4,0,0,0"
+                                Content="&#x2212;" FontSize="13" VerticalAlignment="Center"
+                                IsEnabled="{Binding CanRemoveSelectedChannel}"
+                                Command="{Binding RemoveSelectedChannelCommand}"
+                                ToolTip.Tip="Remove selected channel" />
+                        <Button DockPanel.Dock="Right" Width="22" Height="22" Padding="0"
+                                Content="+" FontSize="13" VerticalAlignment="Center"
+                                Command="{Binding AddChannelCommand}"
+                                ToolTip.Tip="Add a new channel (random PSK)" />
+                        <TextBlock Text="Channels" FontWeight="Bold" Margin="4,0,0,0" VerticalAlignment="Center" />
+                    </DockPanel>
 
-                    <TabControl Grid.Row="1"
+                    <!-- Tabs, reply banner and composer live in one outer row so
+                         the splitter below resizes the chat area against the log
+                         instead of squeezing the composer. -->
+                    <Grid Grid.Row="1" RowDefinitions="*,Auto,Auto">
+                    <TabControl Grid.Row="0"
                                 ItemsSource="{Binding Tabs}"
                                 SelectedItem="{Binding SelectedTab}">
                         <TabControl.ItemTemplate>
                             <DataTemplate x:DataType="mesh:ITabItem">
-                                <TextBlock Text="{Binding TabHeader}" />
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center" />
+                                    <Button Content="&#x2715;" FontSize="9" Padding="3,0" Margin="2,0,-4,0"
+                                            BorderThickness="0" Background="Transparent"
+                                            ToolTip.Tip="Close conversation"
+                                            IsVisible="{Binding CanClose}"
+                                            Command="{Binding #RootWindow.DataContext.CloseTabCommand}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
                             </DataTemplate>
                         </TabControl.ItemTemplate>
-                        <TabControl.ContentTemplate>
-                            <DataTemplate x:DataType="mesh:ITabItem">
-                                <ListBox ItemsSource="{Binding Messages}">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate x:DataType="mesh:ChannelMessage">
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding FromId}" FontWeight="Bold" />
-                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
+                        <TabControl.DataTemplates>
+                            <DataTemplate DataType="local:ChannelTabViewModel">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal"
+                                                HorizontalAlignment="Right" Spacing="4" Margin="0,0,0,4">
+                                        <Button Content="Settings" Padding="6,1" Click="OnOpenChannelSettings"
+                                                ToolTip.Tip="Configure channel name, role, PSK and location sharing" />
+                                        <Button Content="Copy" Padding="6,1" Click="OnCopyMessages"
+                                                ToolTip.Tip="Copy this channel's messages to the clipboard" />
+                                        <Button Content="Clear" Padding="6,1" Click="OnClearMessages"
+                                                ToolTip.Tip="Clear this channel's messages (cannot be undone)" />
+                                    </StackPanel>
+                                    <ContentControl DockPanel.Dock="Bottom" Content="{Binding}" ContentTemplate="{StaticResource MessageListTemplate}" />
+                                </DockPanel>
                             </DataTemplate>
-                        </TabControl.ContentTemplate>
+                            <DataTemplate DataType="local:ConversationTabViewModel">
+                                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource MessageListTemplate}" />
+                            </DataTemplate>
+                        </TabControl.DataTemplates>
                     </TabControl>
 
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
-                        <TextBox Text="{Binding NewChannelName}" PlaceholderText="New channel name..." Width="180" />
-                        <Button Content="Add channel" Command="{Binding AddChannelCommand}" />
-                    </StackPanel>
+                    <Border Grid.Row="1" IsVisible="{Binding HasPendingReply}"
+                            Background="{DynamicResource BrushPanelBackground}"
+                            BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1"
+                            Padding="6,3" Margin="0,6,0,0">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Text="{Binding PendingReplyContext}" FontSize="11"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="&#x2715;" FontSize="9" Padding="3,0"
+                                    BorderThickness="0" Background="Transparent"
+                                    Command="{Binding CancelReplyCommand}" />
+                        </Grid>
+                    </Border>
 
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
-                        <TextBox Text="{Binding MessageText}" PlaceholderText="Message..." Width="360" />
-                        <Button Content="Send" Command="{Binding SendMessageCommand}" />
-                    </StackPanel>
+                    <DockPanel Grid.Row="2" Margin="0,6,0,0" LastChildFill="True">
+                        <Button DockPanel.Dock="Right" Content="Send" Margin="4,0,0,0"
+                                Command="{Binding SendMessageCommand}" />
+                        <Button DockPanel.Dock="Left" Content="😀" Margin="0,0,4,0" Padding="6,1"
+                                Click="OnPickComposeEmoji" ToolTip.Tip="Insert an emoji" />
+                        <TextBox Name="ComposeBox" Text="{Binding MessageText}"
+                                 PlaceholderText="Type a message and press Enter or Send"
+                                 KeyDown="OnComposeKeyDown" />
+                    </DockPanel>
+                    </Grid>
 
-                    <GridSplitter Grid.Row="4" Height="5" HorizontalAlignment="Stretch" Margin="0,6,0,0"
+                    <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch" Margin="0,6,0,0"
                                   Background="{DynamicResource BrushSplitter}" />
 
-                    <DockPanel Grid.Row="5" Margin="0,3,0,0">
-                        <TextBlock DockPanel.Dock="Top" Text="Log" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,2" />
-                        <ListBox DockPanel.Dock="Bottom" ItemsSource="{Binding LogLines}" FontFamily="Consolas" FontSize="11" />
+                    <DockPanel Grid.Row="3" Margin="0,3,0,0">
+                        <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,3" MinHeight="26">
+                            <ToggleButton DockPanel.Dock="Right" Content="Auto-scroll" FontSize="11" Padding="6,1"
+                                          Margin="4,0,0,0" VerticalAlignment="Center"
+                                          IsChecked="{Binding LogAutoScroll}"
+                                          ToolTip.Tip="Keep the newest log line in view" />
+                            <Button DockPanel.Dock="Right" Content="Clear" FontSize="11" Padding="6,1"
+                                    Margin="4,0,0,0" VerticalAlignment="Center" Click="OnClearLog"
+                                    ToolTip.Tip="Clear the log" />
+                            <Button DockPanel.Dock="Right" Content="Copy" FontSize="11" Padding="6,1"
+                                    VerticalAlignment="Center" Click="OnCopyLog"
+                                    ToolTip.Tip="Copy the log to the clipboard" />
+                            <TextBlock Text="Log" FontWeight="Bold" Margin="4,0,0,0" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ListBox ItemsSource="{Binding LogLines}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" FontSize="11"
+                                 local:AutoScrollBehavior.IsEnabled="{Binding LogAutoScroll}" />
                     </DockPanel>
                 </Grid>
             </Grid>

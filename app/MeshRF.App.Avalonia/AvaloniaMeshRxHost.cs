@@ -13,12 +13,12 @@ namespace MeshRF.AvaloniaApp;
 /// configured channel (persisted via <see cref="ChannelStore"/>, same
 /// %APPDATA%/config path the WPF app uses) into per-channel message tabs,
 /// routes direct messages addressed to us into per-peer conversation tabs,
-/// and keeps <see cref="NodeStore"/> updated from NodeInfo/Position/
-/// Telemetry. No relay, MQTT, geofencing, or games yet — those stay
-/// WPF-only until ported. PKC (public-key) direct messages aren't
-/// supported (no node identity/PKI management in this scaffold yet); DMs
-/// are sent/received as legacy channel-PSK-encrypted unicast instead,
-/// exactly like a broadcast but addressed to one node.
+/// classifies reply/reaction text messages, and keeps <see cref="NodeStore"/>
+/// updated from NodeInfo/Position/Telemetry. No relay, MQTT, geofencing, or
+/// games yet — those stay WPF-only until ported. PKC (public-key) direct
+/// messages aren't supported (no node identity/PKI management in this
+/// scaffold yet); DMs are sent/received as legacy channel-PSK-encrypted
+/// unicast instead, exactly like a broadcast but addressed to one node.
 /// </summary>
 public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 {
@@ -32,6 +32,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     private const int RecentUndecodedLimit = 512;
     private const int MaxMessagesPerTab = 500;
 
+    /// <summary>Outstanding traceroute requests we sent: packetId -> destination node.</summary>
+    private readonly Dictionary<uint, uint> _pendingTraceroutes = new();
+
     /// <summary>Channel tabs and DM conversation tabs, in one list (channels
     /// first, in persisted order; conversations appended as they open).</summary>
     public ObservableCollection<ITabItem> Tabs { get; } = new();
@@ -40,13 +43,16 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
 
-    /// <summary>
-    /// Session node number: MeshRF.App's UserNodeNum when set (shared
+    /// <summary>Session node number: MeshRF.App's UserNodeNum when set (shared
     /// settings.json), otherwise an ephemeral random identity so a
     /// transmitted frame still carries a valid "from" and gets recognized
-    /// as our own echo (isFromUs) instead of a new incoming packet.
-    /// </summary>
-    public uint MyNodeNum { get; }
+    /// as our own echo (isFromUs) instead of a new incoming packet.</summary>
+    public uint MyNodeNum { get; private set; }
+
+    /// <summary>Changes our node number mid-session (edited via the Node
+    /// Identity dialog). Existing DM tabs/history keep their old peer keys —
+    /// this only affects how future traffic is classified as ours.</summary>
+    public void UpdateMyNodeNum(uint nodeNum) => MyNodeNum = nodeNum;
 
     uint IMeshRxHost.MyNodeNum => MyNodeNum;
     byte[] IMeshRxHost.MyPrivateKeyBytes => Array.Empty<byte>();
@@ -54,8 +60,22 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
 
+    /// <summary>Raised whenever a conversation tab opens or closes, so the
+    /// owner can persist the updated open-tabs list.</summary>
+    public event Action? OpenConversationsChanged;
+
+    /// <summary>Raised when a text message addressed to us arrives from a node
+    /// that isn't ignored, so the owner can play the alert tone.</summary>
+    public Action? IncomingDirectMessage { get; set; }
+
+    /// <summary>Raised when a directed request we're the target of wants an
+    /// auto-reply (NodeInfo/Position/Telemetry/Traceroute). The owner (which
+    /// holds the transmit-capable MeshtasticCore) wires this up; left null
+    /// means such requests are simply not answered.</summary>
+    public Action<byte[]>? TransmitAutoReply { get; set; }
+
     public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore, WaypointStore waypointStore,
-        MessageStore messageStore, uint myNodeNum)
+        MessageStore messageStore, uint myNodeNum, IReadOnlyList<uint> openConversationNodeNums)
     {
         _nodeStore = nodeStore;
         _channelStore = channelStore;
@@ -66,35 +86,128 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         LoadChannels();
         foreach (var wp in _waypointStore.All()) Waypoints.Add(wp);
         foreach (var n in _nodeStore.All()) Nodes.Add(n);
-        LoadMessageHistory();
+        LoadMessageHistory(openConversationNodeNums);
     }
 
-    /// <summary>Rebuilds channel chat rooms and DM conversation tabs from
-    /// persisted history, same as MainViewModel does on startup — otherwise
-    /// this app would only ever show messages received during the current
-    /// session, even though the shared database already has history.</summary>
-    private void LoadMessageHistory()
+    /// <summary>Loads channel chat history, then reopens only the DM tabs that
+    /// were left open last session (not every peer we have history with) —
+    /// mirrors MeshRF.App's MainViewModel, which persists
+    /// <c>AppSettings.OpenConversations</c> and replays only those.</summary>
+    private void LoadMessageHistory(IReadOnlyList<uint> openConversationNodeNums)
     {
+        // Reactions are stored as their own rows, so replay in two passes per
+        // tab: real messages first, then attach each reaction to its target.
+        // Otherwise a restart turns every reaction into a stray message row.
+        var deferred = new Dictionary<ChannelTabViewModel, List<MessageRecord>>();
         foreach (var m in _messageStore.TextHistory())
         {
             if (m.ToNode != 0xFFFFFFFFu) continue; // DMs are rebuilt separately below.
             var tab = ResolveChannelTab(m.Channel);
-            tab?.Messages.Insert(0, ToChannelMessage(m));
+            if (tab is null) continue;
+
+            if (IsReactionRecord(m))
+            {
+                if (!deferred.TryGetValue(tab, out var list))
+                    deferred[tab] = list = new List<MessageRecord>();
+                list.Add(m);
+                continue;
+            }
+            tab.Messages.Add(BuildHistoryMessage(m, tab.Messages));
         }
+        foreach (var (tab, reactions) in deferred)
+            ApplyHistoryReactions(tab.Messages, reactions);
 
         if (MyNodeNum == 0) return;
-        foreach (var peer in _messageStore.ConversationPeers(MyNodeNum))
+        foreach (var peer in openConversationNodeNums)
         {
-            var convo = OpenConversation(peer);
-            foreach (var m in _messageStore.Conversation(peer, MyNodeNum))
-                convo.Messages.Insert(0, ToChannelMessage(m));
+            if (peer == 0 || peer == 0xFFFFFFFFu || peer == MyNodeNum) continue;
+            OpenConversation(peer);
         }
+    }
+
+    /// <summary>Insert by timestamp. History replays chronologically, but
+    /// reactions are resolved in a second pass — appending them would bunch
+    /// every orphaned reaction at the bottom instead of leaving it where it
+    /// happened. Mirrors MeshRF.App's InsertMessageChronologically.</summary>
+    private static void InsertChronologically(IList<ChannelMessage> messages, ChannelMessage message)
+    {
+        int index = messages.Count;
+        while (index > 0 && messages[index - 1].Timestamp > message.Timestamp)
+            index--;
+        messages.Insert(index, message);
+    }
+
+    /// <summary>A stored row that represents a tapback rather than a message.</summary>
+    private static bool IsReactionRecord(MessageRecord m) =>
+        m.IsReaction || (m.Emoji != 0 && m.ReplyId != 0);
+
+    /// <summary>Replay one stored row, rendering reply-linked messages with
+    /// their quoted context the same way live ones are.</summary>
+    private ChannelMessage BuildHistoryMessage(MessageRecord m, IList<ChannelMessage> existing) =>
+        m.ReplyId != 0 ? BuildReplyLinkedMessage(m, existing) : ToChannelMessage(m);
+
+    private void ApplyHistoryReactions(ObservableCollection<ChannelMessage> messages, List<MessageRecord> reactions)
+    {
+        foreach (var r in reactions)
+        {
+            if (!TryApplyReaction(messages, r.ReplyId, r.Text, r.Emoji, r.FromNode))
+                InsertChronologically(messages, BuildStandaloneReactionMessage(r));
+        }
+    }
+
+    /// <summary>Persist a message we transmitted, so it survives a restart —
+    /// mirrors MeshRF.App's PersistOutgoingText.</summary>
+    public void PersistOutgoingText(uint to, uint packetId, string text, string channel, uint replyId = 0)
+    {
+        if (MyNodeNum == 0) return;
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = packetId,
+                FromNode = MyNodeNum,
+                ToNode = to,
+                Channel = channel ?? string.Empty,
+                PortNum = (int)PortNum.TextMessage,
+                Text = text ?? string.Empty,
+                ReplyId = replyId,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Delivery = (int)MessageDelivery.Sent,
+            });
+        }
+        catch (Exception ex) { Log($"message store failed: {ex.Message}"); }
+    }
+
+    /// <summary>Persist a tapback we sent — mirrors PersistOutgoingReaction.</summary>
+    public void PersistOutgoingReaction(uint to, uint packetId, uint replyId, string emojiText, string channel)
+    {
+        if (MyNodeNum == 0) return;
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = packetId,
+                FromNode = MyNodeNum,
+                ToNode = to,
+                Channel = channel ?? string.Empty,
+                PortNum = (int)PortNum.TextMessage,
+                Text = emojiText ?? string.Empty,
+                ReplyId = replyId,
+                Emoji = 1,
+                IsReaction = true,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Delivery = (int)MessageDelivery.None,
+            });
+        }
+        catch (Exception ex) { Log($"reaction store failed: {ex.Message}"); }
     }
 
     private ChannelMessage ToChannelMessage(MessageRecord m) => new()
     {
         Timestamp = DateTimeOffset.FromUnixTimeSeconds(m.RxEpoch).LocalDateTime,
-        FromId = $"!{m.FromNode:x8}",
+        FromId = m.FromNode == 0 ? "note" : NodeDisplayName(m.FromNode),
         SenderNodeNum = m.FromNode,
         Text = m.Text,
         RssiDbm = m.RssiDbfs,
@@ -117,17 +230,22 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             Tabs.Add(new ChannelTabViewModel(c));
     }
 
-    /// <summary>Adds and persists a new secondary channel with a fresh random PSK.</summary>
-    public ChannelTabViewModel AddChannel(string name)
+    /// <summary>Adds and persists a new secondary channel with an
+    /// auto-generated "Channel N" name and a fresh random PSK — mirrors
+    /// MeshRF.App's "+" button exactly (no name prompt; rename via the
+    /// channel's Settings dialog afterward).</summary>
+    public ChannelTabViewModel AddChannel()
     {
-        var existingChannels = Tabs.OfType<ChannelTabViewModel>().ToList();
-        int nextIndex = existingChannels.Count == 0 ? 0 : existingChannels.Max(t => t.Config.Index) + 1;
+        var taken = Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config.Index).ToHashSet();
+        int idx = 1;
+        while (taken.Contains(idx)) idx++;
         var config = new ChannelConfig
         {
-            Index = nextIndex,
-            Name = name,
+            Index = idx,
+            Name = $"Channel {idx}",
             Role = ChannelRole.Secondary,
             Psk = ChannelConfig.NewRandomPsk(),
+            PositionPrecision = 0,
         };
         _channelStore.Upsert(config);
         var tab = new ChannelTabViewModel(config);
@@ -135,6 +253,32 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         int insertAt = Tabs.OfType<ChannelTabViewModel>().Count();
         Tabs.Insert(insertAt, tab);
         return tab;
+    }
+
+    /// <summary>Removes a secondary channel (the primary channel can never be
+    /// removed). Returns false if <paramref name="channel"/> is null or primary.</summary>
+    public bool RemoveChannel(ChannelTabViewModel? channel)
+    {
+        if (channel is null || channel.Config.Role == ChannelRole.Primary) return false;
+        _channelStore.Delete(channel.Config.Index);
+        Tabs.Remove(channel);
+        return true;
+    }
+
+    /// <summary>Persists in-place edits to a channel's config (name/role/psk/
+    /// position precision, made via the Settings dialog) and refreshes its
+    /// tab header.</summary>
+    public void SaveChannelConfig(ChannelTabViewModel channel)
+    {
+        _channelStore.Upsert(channel.Config);
+        channel.NotifyConfigChanged();
+    }
+
+    public ChannelConfig? FindChannelByName(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return Tabs.OfType<ChannelTabViewModel>().FirstOrDefault()?.Config;
+        return Tabs.OfType<ChannelTabViewModel>()
+            .FirstOrDefault(t => string.Equals(t.Config.Name, name, StringComparison.OrdinalIgnoreCase))?.Config;
     }
 
     private ChannelTabViewModel? ResolveChannelTab(string? channelName)
@@ -149,7 +293,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         return channelTabs.FirstOrDefault();
     }
 
-    /// <summary>Finds or opens the DM conversation tab for a peer node.</summary>
+    /// <summary>Finds or opens the DM conversation tab for a peer node,
+    /// loading its persisted history (including notes and reactions) the
+    /// first time it's opened.</summary>
     public ConversationTabViewModel OpenConversation(uint nodeNum)
     {
         if (_conversationsByNode.TryGetValue(nodeNum, out var existing)) return existing;
@@ -157,11 +303,68 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         var convo = new ConversationTabViewModel(nodeNum, NodeDisplayName(nodeNum));
         _conversationsByNode[nodeNum] = convo;
         Tabs.Add(convo);
+
+        // Same two-pass replay as the channel tabs: messages, then reactions.
+        var reactions = new List<MessageRecord>();
+        foreach (var m in _messageStore.Conversation(nodeNum, MyNodeNum))
+        {
+            if (IsReactionRecord(m)) { reactions.Add(m); continue; }
+            convo.Messages.Add(BuildHistoryMessage(m, convo.Messages));
+        }
+        ApplyHistoryReactions(convo.Messages, reactions);
+
+        OpenConversationsChanged?.Invoke();
         return convo;
     }
 
-    private string NodeDisplayName(uint nodeNum)
+    /// <summary>Closes a DM conversation tab (channels can't be closed).</summary>
+    public void CloseConversation(ConversationTabViewModel convo)
     {
+        _conversationsByNode.Remove(convo.NodeNum);
+        Tabs.Remove(convo);
+        OpenConversationsChanged?.Invoke();
+    }
+
+    public IEnumerable<uint> OpenConversationNodeNums => _conversationsByNode.Keys;
+
+    /// <summary>Append a locally-generated note (request sent, traceroute
+    /// result, etc.) to a peer's DM tab and persist it so it survives a
+    /// restart — mirrors MainViewModel's PersistConversationNote.</summary>
+    public void AddNote(uint peer, bool outgoing, uint packetId, string tag, string text,
+        float? rssi = null, float? snr = null)
+    {
+        if (MyNodeNum == 0 || peer == 0 || peer == 0xFFFFFFFFu) return;
+        var convo = OpenConversation(peer);
+        convo.Messages.Add(new ChannelMessage
+        {
+            FromId = tag,
+            Text = text,
+            IsOutgoing = outgoing,
+            PacketId = packetId,
+        });
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = packetId,
+                FromNode = outgoing ? MyNodeNum : peer,
+                ToNode = outgoing ? peer : MyNodeNum,
+                Channel = tag,
+                PortNum = MessageStore.ConversationNotePort,
+                Text = text,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                RssiDbfs = rssi,
+                SnrDb = snr,
+                Delivery = (int)MessageDelivery.None,
+            });
+        }
+        catch (Exception ex) { Log($"note store failed: {ex.Message}"); }
+    }
+
+    public string NodeDisplayName(uint nodeNum)
+    {
+        if (MyNodeNum != 0 && nodeNum == MyNodeNum) return "me";
         var rec = _nodeStore.Get(nodeNum);
         if (rec is not null)
         {
@@ -169,6 +372,29 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             if (!string.IsNullOrWhiteSpace(rec.ShortName)) return rec.ShortName;
         }
         return $"!{nodeNum:x8}";
+    }
+
+    public bool IsNodeIgnored(uint nodeNum) => _nodeStore.Get(nodeNum)?.Ignored == true;
+
+    public void SetNodeIgnored(uint nodeNum, bool ignored)
+    {
+        _nodeStore.SetIgnored(nodeNum, ignored);
+        MarkNodeDirty(nodeNum);
+    }
+
+    public void SetNodeFavorite(uint nodeNum, bool favorite)
+    {
+        _nodeStore.SetFavorite(nodeNum, favorite);
+        MarkNodeDirty(nodeNum);
+    }
+
+    public void ForgetNode(uint nodeNum)
+    {
+        _nodeStore.Forget(nodeNum);
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            if (Nodes[i].NodeNum == nodeNum) { Nodes.RemoveAt(i); break; }
+        }
     }
 
     string? IMeshRxHost.GetStoredPublicKeyHex(uint nodeNum) => _nodeStore.Get(nodeNum)?.PublicKey;
@@ -221,29 +447,16 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
         long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway)
     {
+        // Log every successful decode, like MeshRF.App's OnMessageDecoded does.
+        // Without this the log only ever shows MeshRxRouter's "(dup)" and
+        // "rx undecoded" lines, making normal flood retransmissions look like
+        // every packet was being rejected as a duplicate.
+        Log(BuildDecodedPortSummary(header, result, NodeDisplayName(header.From)));
+
         switch (result.Port)
         {
             case PortNum.TextMessage:
-                bool isDirectToUs = MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum;
-                var messages = isDirectToUs ? OpenConversation(header.From).Messages : ResolveChannelTab(result.ChannelName)?.Messages;
-                if (messages is not null)
-                {
-                    messages.Insert(0, new ChannelMessage
-                    {
-                        Timestamp = DateTimeOffset.FromUnixTimeSeconds(rxEpoch).LocalDateTime,
-                        FromId = header.FromId,
-                        SenderNodeNum = header.From,
-                        Text = record.Text,
-                        RssiDbm = record.RssiDbfs,
-                        SnrDb = record.SnrDb,
-                        PacketId = header.PacketId,
-                    });
-                    while (messages.Count > MaxMessagesPerTab)
-                        messages.RemoveAt(messages.Count - 1);
-                }
-
-                if (isDirectToUs) _conversationsByNode[header.From].TabNeedsAttention = true;
-                else if (ResolveChannelTab(result.ChannelName) is { } chanTab) chanTab.TabNeedsAttention = true;
+                HandleTextMessage(header, record, result);
                 break;
 
             case PortNum.NodeInfo when result.User is not null:
@@ -276,42 +489,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
 
             case PortNum.Waypoint when result.Waypoint is not null:
-                var wp = result.Waypoint;
-                // Some senders omit waypoint id (0); fall back to packet id
-                // as a stable per-sender key, same as MainViewModel.
-                uint waypointId = wp.Id != 0 ? wp.Id : header.PacketId;
-                var waypointRecord = new WaypointRecord
-                {
-                    FromNode = header.From,
-                    WaypointId = waypointId,
-                    PacketId = header.PacketId,
-                    Channel = result.ChannelName,
-                    Name = wp.Name,
-                    Description = wp.Description,
-                    Icon = wp.Icon,
-                    Latitude = wp.Latitude,
-                    Longitude = wp.Longitude,
-                    ExpireEpoch = wp.ExpireEpoch,
-                    LockedTo = wp.LockedTo,
-                    RxEpoch = rxEpoch,
-                    GeofenceRadius = wp.GeofenceRadius,
-                    BboxWest = wp.BoundingBox?.West,
-                    BboxSouth = wp.BoundingBox?.South,
-                    BboxEast = wp.BoundingBox?.East,
-                    BboxNorth = wp.BoundingBox?.North,
-                };
-                _waypointStore.Upsert(waypointRecord);
-                var existingWpIndex = -1;
-                for (int i = 0; i < Waypoints.Count; i++)
-                {
-                    if (Waypoints[i].FromNode == header.From && Waypoints[i].WaypointId == waypointId)
-                    {
-                        existingWpIndex = i;
-                        break;
-                    }
-                }
-                if (existingWpIndex >= 0) Waypoints[existingWpIndex] = waypointRecord;
-                else Waypoints.Add(waypointRecord);
+                HandleWaypoint(header, result);
                 break;
 
             case PortNum.Telemetry when result.Telemetry is not null:
@@ -330,7 +508,313 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 });
                 MarkNodeDirty(header.From);
                 break;
+
+            case PortNum.Traceroute:
+                HandleTraceroute(header, result);
+                break;
         }
+    }
+
+    /// <summary>One-line log summary of a decoded packet, mirroring
+    /// MeshRF.App's BuildDecodedPortSummary.</summary>
+    private string BuildDecodedPortSummary(MeshHeader header, MeshDecodeResult result, string senderName)
+    {
+        string prefix = $"  [{result.ChannelName}] {senderName} {result.Port}";
+        string size = $" ({result.AppPayload.Length} B)";
+
+        return result.Port switch
+        {
+            PortNum.TextMessage when result.ReplyId != 0 && result.Emoji != 0
+                => $"{prefix}: reaction {ResolveReactionGlyph(result.Text, result.Emoji)} -> {result.ReplyId:x8}{size}",
+            PortNum.TextMessage
+                => $"{prefix}: \"{TrimForReplyPreview(result.Text)}\"{size}",
+            PortNum.NodeInfo when result.User is not null
+                => $"{prefix}: user={result.User.LongName} ({result.User.ShortName}){size}",
+            PortNum.Position when result.Position is not null
+                => $"{prefix}: lat={result.Position.Latitude:F5} lon={result.Position.Longitude:F5}{size}",
+            PortNum.Waypoint when result.Waypoint is not null
+                => $"{prefix}: waypoint={result.Waypoint.Name} lat={result.Waypoint.Latitude:F5} lon={result.Waypoint.Longitude:F5}{size}",
+            PortNum.Telemetry when result.Telemetry is not null
+                => $"{prefix}: telemetry{size}",
+            PortNum.NodeStatus when result.StatusMessage is not null
+                => $"{prefix}: status=\"{TrimForReplyPreview(result.StatusMessage.Status)}\"{size}",
+            PortNum.Routing when result.RoutingError >= 0
+                => $"{prefix}: {(result.RoutingError == 0 ? "ACK" : $"NAK reason={result.RoutingError}")}{size}",
+            PortNum.Traceroute when result.RouteDiscovery is not null
+                => $"{prefix}: route={result.RouteDiscovery.Route.Count} back={result.RouteDiscovery.RouteBack.Count}{size}",
+            PortNum.NeighborInfo when result.NeighborInfo is not null
+                => $"{prefix}: node=!{result.NeighborInfo.NodeId:x8} neighbors={result.NeighborInfo.Neighbors.Count}{size}",
+            PortNum.StoreForward when result.StoreForward is not null
+                => $"{prefix}: type={result.StoreForward.Type}{size}",
+            _ => $"{prefix}: to={header.ToId}{size}",
+        };
+    }
+
+    private void HandleTextMessage(MeshHeader header, MessageRecord record, MeshDecodeResult result)
+    {
+        uint reactionTargetId = ResolveReactionTargetId(result);
+        bool isReaction = reactionTargetId != 0 && result.Emoji != 0;
+        bool isReplyLinkedNonReaction = reactionTargetId != 0 && !isReaction;
+        bool isDirectToUs = MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum;
+
+        ObservableCollection<ChannelMessage>? messages;
+        bool existed;
+        if (isDirectToUs)
+        {
+            existed = _conversationsByNode.ContainsKey(header.From);
+            messages = OpenConversation(header.From).Messages;
+        }
+        else
+        {
+            var chanTab = ResolveChannelTab(result.ChannelName);
+            existed = chanTab is not null;
+            messages = chanTab?.Messages;
+        }
+
+        if (messages is not null)
+        {
+            if (isReaction)
+            {
+                if (!TryApplyReaction(messages, reactionTargetId, result.Text, result.Emoji, header.From))
+                    messages.Add(BuildStandaloneReactionMessage(record));
+            }
+            else if (isReplyLinkedNonReaction)
+            {
+                if (existed) messages.Add(BuildReplyLinkedMessage(record, messages));
+            }
+            else if (existed)
+            {
+                messages.Add(new ChannelMessage
+                {
+                    FromId = header.FromId,
+                    SenderNodeNum = header.From,
+                    Text = record.Text,
+                    RssiDbm = record.RssiDbfs,
+                    SnrDb = record.SnrDb,
+                    PacketId = header.PacketId,
+                    IsIgnoredSender = IsNodeIgnored(header.From),
+                });
+            }
+            while (messages.Count > MaxMessagesPerTab) messages.RemoveAt(0); // oldest first now
+        }
+
+        if (isDirectToUs)
+        {
+            _conversationsByNode[header.From].TabNeedsAttention = true;
+            // Alert only for real messages from nodes we haven't ignored —
+            // a tapback shouldn't ring.
+            if (!isReaction && !IsNodeIgnored(header.From)) IncomingDirectMessage?.Invoke();
+        }
+        else if (ResolveChannelTab(result.ChannelName) is { } chanTab2) chanTab2.TabNeedsAttention = true;
+    }
+
+    private void HandleWaypoint(MeshHeader header, MeshDecodeResult result)
+    {
+        var wp = result.Waypoint!;
+        // Some senders omit waypoint id (0); fall back to packet id
+        // as a stable per-sender key, same as MainViewModel.
+        uint waypointId = wp.Id != 0 ? wp.Id : header.PacketId;
+        var waypointRecord = new WaypointRecord
+        {
+            FromNode = header.From,
+            WaypointId = waypointId,
+            PacketId = header.PacketId,
+            Channel = result.ChannelName,
+            Name = wp.Name,
+            Description = wp.Description,
+            Icon = wp.Icon,
+            Latitude = wp.Latitude,
+            Longitude = wp.Longitude,
+            ExpireEpoch = wp.ExpireEpoch,
+            LockedTo = wp.LockedTo,
+            RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            GeofenceRadius = wp.GeofenceRadius,
+            BboxWest = wp.BoundingBox?.West,
+            BboxSouth = wp.BoundingBox?.South,
+            BboxEast = wp.BoundingBox?.East,
+            BboxNorth = wp.BoundingBox?.North,
+        };
+        _waypointStore.Upsert(waypointRecord);
+        var existingWpIndex = -1;
+        for (int i = 0; i < Waypoints.Count; i++)
+        {
+            if (Waypoints[i].FromNode == header.From && Waypoints[i].WaypointId == waypointId)
+            {
+                existingWpIndex = i;
+                break;
+            }
+        }
+        if (existingWpIndex >= 0) Waypoints[existingWpIndex] = waypointRecord;
+        else Waypoints.Add(waypointRecord);
+    }
+
+    /// <summary>Handle a TRACEROUTE_APP frame: either the accumulated-path
+    /// reply to a request we sent, or (if want_response and addressed to us)
+    /// a request from someone else, auto-replied via <see cref="TransmitAutoReply"/>.</summary>
+    private void HandleTraceroute(MeshHeader header, MeshDecodeResult result)
+    {
+        if (result.RequestId != 0 && _pendingTraceroutes.TryGetValue(result.RequestId, out var dest))
+        {
+            _pendingTraceroutes.Remove(result.RequestId);
+            var path = FormatTraceroute(MyNodeNum, dest, result.RouteDiscovery);
+            AddNote(dest, outgoing: false, header.PacketId, "traceroute", $"Route to {NodeDisplayName(dest)}: {path}");
+        }
+
+        if (MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum && result.WantResponse
+            && TransmitAutoReply is { } reply)
+        {
+            var primary = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
+                          ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+            if (primary is not null)
+            {
+                var frame = MeshEncoder.EncodeTracerouteReply(primary.Config, MyNodeNum, header.From,
+                    (uint)Random.Shared.NextInt64(1, uint.MaxValue), header.PacketId, route: null, snrTowards: null);
+                reply(frame);
+            }
+        }
+    }
+
+    public void RegisterOutgoingTraceroute(uint packetId, uint destination) => _pendingTraceroutes[packetId] = destination;
+
+    private static string FormatTraceroute(uint origin, uint dest, MeshRouteDiscovery? rd)
+    {
+        var nodes = new List<uint> { origin };
+        if (rd?.Route is { Count: > 0 } hops) nodes.AddRange(hops);
+        nodes.Add(dest);
+        var snr = rd?.SnrTowards ?? (IReadOnlyList<int>)Array.Empty<int>();
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(" -> ");
+                int idx = i - 1;
+                if (idx < snr.Count)
+                {
+                    int raw = snr[idx];
+                    sb.Append(raw <= -128 ? "(?) " : $"({(raw / 4.0):0.#} dB) ");
+                }
+            }
+            sb.Append(nodes[i] == 0 || nodes[i] == 0xFFFFFFFFu ? "unknown" : $"!{nodes[i]:x8}");
+        }
+        int hopCount = nodes.Count - 1;
+        sb.Append(hopCount <= 1 ? "  [direct]" : $"  [{hopCount} hops]");
+        return sb.ToString();
+    }
+
+    private bool TryApplyReaction(IList<ChannelMessage> messages, uint replyId, string? reactionText, uint emoji, uint fromNode)
+    {
+        if (replyId == 0 || emoji == 0 || messages.Count == 0) return false;
+        var glyph = ResolveReactionGlyph(reactionText, emoji);
+        if (glyph.Length == 0) return false;
+
+        for (int i = 0; i < messages.Count; i++)
+        {
+            var msg = messages[i];
+            if (msg.PacketId != replyId) continue;
+            msg.AddReaction(glyph, NodeDisplayName(fromNode));
+            return true;
+        }
+        return false;
+    }
+
+    private static string ResolveReactionGlyph(string? reactionText, uint emoji)
+    {
+        var text = (reactionText ?? string.Empty).Trim();
+        if (text.Length > 0) return text;
+        return CodePointToEmoji(emoji);
+    }
+
+    private ChannelMessage BuildStandaloneReactionMessage(MessageRecord reaction)
+    {
+        bool outgoing = MyNodeNum != 0 && reaction.FromNode == MyNodeNum;
+        var glyph = ResolveReactionGlyph(reaction.Text, reaction.Emoji);
+        if (glyph.Length == 0) glyph = "(reaction)";
+        var targetText = reaction.ReplyId != 0 ? $"{reaction.ReplyId:x8}" : "unknown";
+
+        return new ChannelMessage
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(reaction.RxEpoch).LocalDateTime,
+            FromId = NodeDisplayName(reaction.FromNode),
+            SenderNodeNum = reaction.FromNode,
+            Text = $"reacted {glyph} (original message {targetText} not found)",
+            RssiDbm = reaction.RssiDbfs,
+            SnrDb = reaction.SnrDb,
+            PacketId = reaction.PacketId,
+            IsOutgoing = outgoing,
+            IsIgnoredSender = !outgoing && IsNodeIgnored(reaction.FromNode),
+        };
+    }
+
+    private ChannelMessage BuildReplyLinkedMessage(MessageRecord reply, IList<ChannelMessage> messages)
+    {
+        bool outgoing = MyNodeNum != 0 && reply.FromNode == MyNodeNum;
+        var body = string.IsNullOrWhiteSpace(reply.Text) ? "(empty reply)" : reply.Text;
+
+        ChannelMessage? target = null;
+        foreach (var candidate in messages)
+        {
+            if (candidate.PacketId != reply.ReplyId) continue;
+            target = candidate;
+            break;
+        }
+
+        string context = target is not null
+            ? BuildReplyContextText(target)
+            : $"replying to {reply.ReplyId:x8} (original message not found)";
+
+        return new ChannelMessage
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(reply.RxEpoch).LocalDateTime,
+            FromId = NodeDisplayName(reply.FromNode),
+            SenderNodeNum = reply.FromNode,
+            Text = $"{context}\n{body}",
+            RssiDbm = reply.RssiDbfs,
+            SnrDb = reply.SnrDb,
+            PacketId = reply.PacketId,
+            IsOutgoing = outgoing,
+            IsIgnoredSender = !outgoing && IsNodeIgnored(reply.FromNode),
+            IsReplyLinked = true,
+            ReplyTargetFound = target is not null,
+            ReplyToPacketId = reply.ReplyId,
+        };
+    }
+
+    private static string BuildReplyContextText(ChannelMessage message)
+    {
+        var from = string.IsNullOrWhiteSpace(message.FromId) ? "unknown" : message.FromId.Trim();
+        var original = TrimForReplyPreview(ExtractReplyLeafText(message.Text));
+        return $"replying to {from}: \"{original}\"";
+    }
+
+    private static string ExtractReplyLeafText(string? text)
+    {
+        var raw = text ?? string.Empty;
+        if (raw.Length == 0) return string.Empty;
+        var lines = raw.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        return lines.Length == 0 ? string.Empty : lines[^1].Trim();
+    }
+
+    private static string TrimForReplyPreview(string? text)
+    {
+        var normalized = (text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+        if (normalized.Length == 0) return "(empty)";
+        return normalized.Length <= 80 ? normalized : normalized[..80] + "...";
+    }
+
+    private static uint ResolveReactionTargetId(MeshDecodeResult result)
+    {
+        if (result.ReplyId != 0) return result.ReplyId;
+        if (result.RequestId != 0) return result.RequestId;
+        return 0;
+    }
+
+    private static string CodePointToEmoji(uint codePoint)
+    {
+        if (codePoint is 0 or > 0x10FFFFu) return string.Empty;
+        try { return char.ConvertFromUtf32((int)codePoint); }
+        catch { return string.Empty; }
     }
 
     public void Dispose()

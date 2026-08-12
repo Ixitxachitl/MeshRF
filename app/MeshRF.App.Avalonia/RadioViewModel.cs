@@ -2,6 +2,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Avalonia.Collections;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,11 +14,21 @@ using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
 
+/// <summary>One selectable RX sample rate. ToString() drives the ComboBox's
+/// default (no-ItemTemplate) display text.</summary>
+public sealed record SampleRateOption(uint Hz, string Label)
+{
+    public override string ToString() => Label;
+}
+
 /// <summary>
 /// Radio control surface: device select / start-stop RX / signal stats,
 /// plus a real (not mocked) message/node list — received frames are fed
 /// through the same MeshRxRouter (MeshRF.Core) the WPF app uses, via
-/// AvaloniaMeshRxHost.
+/// AvaloniaMeshRxHost. Also owns node/waypoint/message context-menu actions
+/// (traceroute, telemetry/position/nodeinfo requests, reply/react, etc.) —
+/// mirrors MeshRF.App's MainViewModel, minus map/games/MQTT/PKI, which
+/// aren't ported yet.
 /// </summary>
 public partial class RadioViewModel : ObservableObject, IDisposable
 {
@@ -26,6 +37,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private static readonly Regex PayloadLineRegex = new(
         @"payload(?:\[(?<status>OK|BAD)\])?\s+len=(?<len>\d+)(?:\s+crc=(?<rx>[0-9A-Fa-f]+)/(?<calc>[0-9A-Fa-f]+))?\s+(?<hex>[0-9A-Fa-f]+)",
         RegexOptions.Compiled);
+
+    private static readonly TimeSpan TracerouteCooldown = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PositionRequestCooldown = TimeSpan.FromSeconds(30);
 
     private readonly AppSettings _settings;
     private readonly MeshtasticCore? _core;
@@ -36,6 +50,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private readonly WaypointStore _waypointStore = new();
     private readonly AvaloniaMeshRxHost _rxHost;
     private readonly MeshRxRouter _rxRouter;
+    private DateTime _lastTracerouteUtc = DateTime.MinValue;
+    private DateTime _lastPositionRequestUtc = DateTime.MinValue;
+    private ITabItem? _previousTab;
+
+    /// <summary>False until the constructor has finished loading every setting
+    /// from disk. Gates <see cref="SaveSettings"/> so mid-construction property
+    /// cascades can't persist not-yet-loaded defaults over saved values.</summary>
+    private bool _settingsLoaded;
 
     public ObservableCollection<ITabItem> Tabs => _rxHost.Tabs;
     public ObservableCollection<NodeRecord> Nodes => _rxHost.Nodes;
@@ -46,10 +68,34 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private ITabItem? _selectedTab;
 
     [ObservableProperty]
-    private string _newChannelName = string.Empty;
+    private RadioDeviceKind _selectedDevice = RadioDeviceKind.Auto;
 
     [ObservableProperty]
-    private RadioDeviceKind _selectedDevice = RadioDeviceKind.Auto;
+    private RadioDeviceKind _selectedTxDevice = RadioDeviceKind.HackRf;
+
+    /// <summary>TX can't run on RTL-SDR (receive-only hardware).</summary>
+    public RadioDeviceKind[] AvailableTxDevices { get; } = { RadioDeviceKind.Null, RadioDeviceKind.HackRf };
+
+    private static readonly uint[] HackRfSampleRatesHz =
+        [2_000_000, 2_400_000, 4_000_000, 8_000_000, 10_000_000, 12_500_000, 16_000_000, 20_000_000];
+    private static readonly uint[] RtlSdrSampleRatesHz =
+        [960_000, 1_024_000, 1_200_000, 1_440_000, 1_600_000, 1_800_000, 1_920_000,
+         2_048_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000];
+    private const uint HackRfMaxSelectableRateHz = 20_000_000;
+    private const uint RtlSdrDecodeSafeMaxRateHz = 2_560_000;
+    private bool _suppressSampleRateUpdate;
+
+    [ObservableProperty]
+    private IReadOnlyList<SampleRateOption> _sampleRateOptions = Array.Empty<SampleRateOption>();
+
+    [ObservableProperty]
+    private SampleRateOption? _selectedRxSampleRate;
+
+    public bool CanSelectRxSampleRate => !IsRunning && SelectedDevice != RadioDeviceKind.Null && SampleRateOptions.Count > 0;
+
+    public bool IsHackRf => SelectedDevice == RadioDeviceKind.HackRf;
+    public bool IsRtlSdr => SelectedDevice == RadioDeviceKind.RtlSdr;
+    public bool IsTxHackRf => SelectedTxDevice == RadioDeviceKind.HackRf;
 
     // 906.875 MHz = US LongFast slot 20, same default MeshRF.App's
     // MainViewModel starts from.
@@ -108,6 +154,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _rtlAgcEnable;
 
+    [ObservableProperty]
+    private bool _biasTee;
+
+    [ObservableProperty]
+    private byte _txGainDb = 47;
+
+    [ObservableProperty]
+    private bool _txAmpEnable;
+
+    [ObservableProperty]
+    private bool _dcBlockEnable = true;
+
     private bool _suppressLoraParamSync;
     private bool _suppressSlotSync;
     private bool _suppressRetune;
@@ -127,12 +185,202 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _messageText = string.Empty;
 
+    /// <summary>Keep the newest message in view. Persisted alongside the rest
+    /// of the chat state, same as MeshRF.App's AutoScroll.</summary>
+    [ObservableProperty]
+    private bool _autoScroll = true;
+
+    /// <summary>Same, for the log panel.</summary>
+    [ObservableProperty]
+    private bool _logAutoScroll = true;
+
+    // ----- Ringtone -----
+
+    private readonly IRingtonePlayer _ringtone = new AvaloniaRingtonePlayer();
+
+    public string[] RingtoneModes { get; } = { "Off", "Play once", "5 seconds", "10 seconds", "30 seconds" };
+
+    [ObservableProperty]
+    private string _ringtoneMode = "Play once";
+
+    [ObservableProperty]
+    private double _ringtoneVolume = 70;
+
+    [ObservableProperty]
+    private string _ringtoneRtttl = IRingtonePlayer.MeshtasticDefault;
+
+    /// <summary>Map the display name to the enum, matching MeshRF.App's labels.
+    /// Fully qualified because the RingtoneMode property above shadows the
+    /// enum type name inside this class.</summary>
+    private static MeshRF.RingtoneMode ParseRingtoneMode(string? name) => name switch
+    {
+        "Off" => MeshRF.RingtoneMode.Off,
+        "5 seconds" => MeshRF.RingtoneMode.Seconds5,
+        "10 seconds" => MeshRF.RingtoneMode.Seconds10,
+        "30 seconds" => MeshRF.RingtoneMode.Seconds30,
+        _ => MeshRF.RingtoneMode.PlayOnce,
+    };
+
+    [RelayCommand]
+    private void TestRingtone() =>
+        _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+
+    /// <summary>Play the incoming-message alert, unless it's muted.</summary>
+    public void PlayIncomingRingtone() =>
+        _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+
+    partial void OnRingtoneModeChanged(string value) => SaveSettings();
+    partial void OnRingtoneVolumeChanged(double value) => SaveSettings();
+    partial void OnRingtoneRtttlChanged(string value) => SaveSettings();
+
+    [ObservableProperty]
+    private uint _pendingReplyPacketId;
+
+    [ObservableProperty]
+    private string _pendingReplyContext = string.Empty;
+
+    public bool HasPendingReply => PendingReplyPacketId != 0;
+
     public RadioDeviceKind[] AvailableDevices { get; } = Enum.GetValues<RadioDeviceKind>();
 
     public string ToggleButtonText => IsRunning ? "Stop RX" : "Start RX";
 
+    /// <summary>Exposed so MainWindow's code-behind can drive the
+    /// spectrum/waterfall pull loop — mirrors how MeshRF.App's
+    /// MainWindow.xaml.cs owns that render loop rather than MainViewModel.</summary>
+    public MeshtasticCore? Core => _core;
+
+    [ObservableProperty]
+    private double _spectrumCenterHz;
+
+    [ObservableProperty]
+    private double _spectrumSpanHz;
+
+    [ObservableProperty]
+    private double _waterfallFloorDb = -100.0;
+
+    [ObservableProperty]
+    private double _waterfallCeilDb = 0.0;
+
+    [ObservableProperty]
+    private bool _waterfallAutoLevels = true;
+
+    [ObservableProperty]
+    private WaterfallColormap _waterfallColormap = WaterfallColormap.Turbo;
+
+    public WaterfallColormap[] AvailableColormaps { get; } = Enum.GetValues<WaterfallColormap>();
+
+    [ObservableProperty]
+    private double _waterfallRowsPerSecond = 60.0;
+
+    // ----- My Node identity (Configure dialog) -----
+
+    public string[] NodeRoleOptions { get; } =
+    {
+        "Client", "ClientMute", "ClientHidden", "Router", "RouterClient",
+        "Repeater", "Tracker", "Sensor", "TAK", "TakTracker", "LostAndFound",
+        "RouterLate", "ClientBase",
+    };
+
+    public IReadOnlyList<string> HwModelOptions { get; } = HardwareModels.AllNames;
+
+    [ObservableProperty]
+    private string _myNodeIdText = string.Empty;
+
+    [ObservableProperty]
+    private string _myLongName = "MeshRF";
+
+    [ObservableProperty]
+    private string _myShortName = "MRF";
+
+    [ObservableProperty]
+    private string _myRole = "Client";
+
+    [ObservableProperty]
+    private string _myHwModel = "UNSET";
+
+    [ObservableProperty]
+    private string _myPublicKey = string.Empty;
+
+    [ObservableProperty]
+    private string _myPrivateKey = string.Empty;
+
+    [ObservableProperty]
+    private string _myNodeStatus = string.Empty;
+
+    [ObservableProperty]
+    private int _hopLimit = 3;
+
+    [ObservableProperty]
+    private bool _okToMqtt;
+
+    [ObservableProperty]
+    private string _homeLatitudeText = string.Empty;
+
+    [ObservableProperty]
+    private string _homeLongitudeText = string.Empty;
+
+    [ObservableProperty]
+    private string _homeAltitudeText = string.Empty;
+
+    [ObservableProperty]
+    private string _myFirmwareVersion = "2.8.0";
+
+    [ObservableProperty]
+    private string _myFirmwareEdition = "VANILLA";
+
+    public string[] FirmwareEditionOptions { get; } = { "VANILLA", "PREMIUM" };
+
+    [ObservableProperty]
+    private string _rebroadcastMode = "All";
+
+    public string[] RebroadcastModeOptions { get; } =
+        { "All", "AllSkipDecoding", "LocalOnly", "KnownOnly", "None", "CorePortnumsOnly" };
+
+    [ObservableProperty]
+    private bool _routingRelayEnabled;
+
+    [ObservableProperty]
+    private string _homeLocationSource = "Manual";
+
+    public string[] HomeLocationSourceOptions { get; } = { "Manual", "UsbSerialGps" };
+
+    public bool IsUsbSerialLocationSource => HomeLocationSource == "UsbSerialGps";
+    public bool IsManualLocationSource => !IsUsbSerialLocationSource;
+
+    [ObservableProperty]
+    private string _gpsSerialPort = string.Empty;
+
+    [ObservableProperty]
+    private string _gpsBaudRateText = string.Empty;
+
+    // ----- Display units -----
+
+    public string[] UnitSystems { get; } = { "Metric", "Imperial" };
+
+    [ObservableProperty]
+    private string _unitSystemName = "Metric";
+
+    [ObservableProperty]
+    private bool _useFahrenheit;
+
+    [ObservableProperty]
+    private bool _useMiles;
+
+    public UnitSystem CurrentUnitSystem =>
+        string.Equals(UnitSystemName, "Imperial", StringComparison.OrdinalIgnoreCase)
+            ? UnitSystem.Imperial : UnitSystem.Metric;
+
+    /// <summary>Altitude field label, unit-aware like MeshRF.App's.</summary>
+    public string HomeAltitudeLabel => CurrentUnitSystem == UnitSystem.Imperial ? "Alt (ft)" : "Alt (m)";
+
+    /// <summary>Index of the last selected channel tab, persisted so the same
+    /// tab is reselected next launch (MeshRF.App's LastSelectedChannelIndex).</summary>
+    private int _lastSelectedChannelIndex;
+
     public RadioViewModel()
     {
+        NodesView = new DataGridCollectionView(FilteredNodes);
         _settings = AppSettings.Load();
 
         // Snapshot everything we need from _settings into locals up front.
@@ -143,6 +391,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // in-progress values instead of what was actually on disk, silently
         // clobbering the saved slot/frequency with a preset's default.
         var savedRxDeviceKind = _settings.RxDeviceKind;
+        var savedTxDeviceKind = _settings.TxDeviceKind;
         var savedRegion = _settings.Region;
         var savedPreset = _settings.Preset;
         var savedOverrideSf = _settings.OverrideSf;
@@ -155,6 +404,50 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedAmpEnable = _settings.AmpEnable;
         var savedRtlGainDb = _settings.RtlGainDb;
         var savedRtlAgcEnable = _settings.RtlAgcEnable;
+        var savedBiasTee = _settings.BiasTee;
+        var savedTxGainDb = _settings.TxGainDb;
+        var savedTxAmpEnable = _settings.TxAmpEnable;
+        var savedDcBlockEnable = _settings.DcBlockEnable;
+        var savedWaterfallFloorDb = _settings.WaterfallFloorDb;
+        var savedWaterfallCeilDb = _settings.WaterfallCeilDb;
+        var savedWaterfallAutoLevels = _settings.WaterfallAutoLevels;
+        var savedWaterfallRowsPerSecond = _settings.WaterfallRowsPerSecond;
+        var savedWaterfallColormap = _settings.WaterfallColormap;
+        var savedOpenConversations = _settings.OpenConversations?.ToList() ?? new List<uint>();
+        // Identity fields (My Node dialog) — also snapshotted here, not read
+        // directly further down, for the same reason as everything above:
+        // the property assignments below trigger OnXxxChanged -> SaveSettings()
+        // cascades that would otherwise write these still-at-their-compile-time-
+        // default fields back into _settings before we get a chance to load
+        // the real saved values, permanently wiping identity settings on every
+        // single startup.
+        var savedUserLongName = _settings.UserLongName;
+        var savedUserShortName = _settings.UserShortName;
+        var savedUserRole = _settings.UserRole;
+        var savedUserHwModel = _settings.UserHwModel;
+        var savedUserPublicKey = _settings.UserPublicKey;
+        var savedUserPrivateKey = _settings.UserPrivateKey;
+        var savedUserNodeStatus = _settings.UserNodeStatus;
+        var savedHopLimit = _settings.HopLimit;
+        var savedOkToMqtt = _settings.OkToMqtt;
+        var savedHomeLatitude = _settings.HomeLatitude;
+        var savedHomeLongitude = _settings.HomeLongitude;
+        var savedHomeAltitude = _settings.HomeAltitude;
+        var savedFirmwareVersion = _settings.UserFirmwareVersion;
+        var savedFirmwareEdition = _settings.UserFirmwareEdition;
+        var savedRebroadcastMode = _settings.RebroadcastMode;
+        var savedRoutingRelayEnabled = _settings.RoutingRelayEnabled;
+        var savedHomeLocationSource = _settings.HomeLocationSource;
+        var savedGpsSerialPort = _settings.GpsSerialPort;
+        var savedGpsBaudRate = _settings.GpsBaudRate;
+        var savedUnitSystem = _settings.UnitSystem;
+        var savedUseFahrenheit = _settings.UseFahrenheit;
+        var savedUseMiles = _settings.UseMiles;
+        var savedRingtoneMode = _settings.RingtoneMode;
+        var savedRingtoneVolume = _settings.RingtoneVolume;
+        var savedRingtoneRtttl = _settings.RingtoneRtttl;
+        var savedLastSelectedChannelIndex = _settings.LastSelectedChannelIndex;
+        var savedSelectedConversationNode = _settings.SelectedConversationNode;
 
         // Shared with MeshRF.App's UserNodeNum when set (same settings.json);
         // otherwise an ephemeral random identity for this session — see
@@ -163,11 +456,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var myNodeNum = _settings.UserNodeNum != 0
             ? _settings.UserNodeNum
             : (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE);
-        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum);
+        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum, savedOpenConversations);
+        _rxHost.OpenConversationsChanged += SaveOpenConversations;
+        _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
         SelectedTab = Tabs.FirstOrDefault();
         if (Enum.TryParse<RadioDeviceKind>(savedRxDeviceKind, out var device))
             SelectedDevice = device;
+        if (Enum.TryParse<RadioDeviceKind>(savedTxDeviceKind, out var txDevice) && AvailableTxDevices.Contains(txDevice))
+            SelectedTxDevice = txDevice;
         if (Enum.TryParse<Region>(savedRegion, out var region))
             SelectedRegion = region;
         if (Enum.TryParse<LoraPreset>(savedPreset, out var preset))
@@ -193,15 +490,73 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         AmpEnable = savedAmpEnable;
         RtlGainDb = savedRtlGainDb;
         RtlAgcEnable = savedRtlAgcEnable;
+        BiasTee = savedBiasTee;
+        TxGainDb = savedTxGainDb;
+        TxAmpEnable = savedTxAmpEnable;
+        DcBlockEnable = savedDcBlockEnable;
+        WaterfallFloorDb = savedWaterfallFloorDb;
+        WaterfallCeilDb = savedWaterfallCeilDb;
+        WaterfallAutoLevels = savedWaterfallAutoLevels;
+        WaterfallRowsPerSecond = savedWaterfallRowsPerSecond;
+        if (Enum.TryParse<WaterfallColormap>(savedWaterfallColormap, out var cmap))
+            WaterfallColormap = cmap;
 
-        // Final sync: re-save so _settings/disk reflect the fully-resolved
-        // state above rather than whatever an intermediate cascade wrote.
+        MyNodeIdText = $"!{myNodeNum:x8}";
+        MyLongName = string.IsNullOrEmpty(savedUserLongName) ? MyLongName : savedUserLongName;
+        MyShortName = string.IsNullOrEmpty(savedUserShortName) ? MyShortName : savedUserShortName;
+        MyRole = string.IsNullOrEmpty(savedUserRole) ? MyRole : savedUserRole;
+        MyHwModel = string.IsNullOrEmpty(savedUserHwModel) ? MyHwModel : savedUserHwModel;
+        MyPublicKey = savedUserPublicKey;
+        MyPrivateKey = savedUserPrivateKey;
+        MyNodeStatus = savedUserNodeStatus;
+        HopLimit = savedHopLimit > 0 ? savedHopLimit : HopLimit;
+        OkToMqtt = savedOkToMqtt;
+        HomeLatitudeText = savedHomeLatitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
+        HomeLongitudeText = savedHomeLongitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
+        HomeAltitudeText = savedHomeAltitude?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+
+        if (!string.IsNullOrEmpty(savedFirmwareVersion)) MyFirmwareVersion = savedFirmwareVersion;
+        if (FirmwareEditionOptions.Contains(savedFirmwareEdition)) MyFirmwareEdition = savedFirmwareEdition;
+        if (RebroadcastModeOptions.Contains(savedRebroadcastMode)) RebroadcastMode = savedRebroadcastMode;
+        RoutingRelayEnabled = savedRoutingRelayEnabled;
+        if (HomeLocationSourceOptions.Contains(savedHomeLocationSource)) HomeLocationSource = savedHomeLocationSource;
+        GpsSerialPort = savedGpsSerialPort;
+        GpsBaudRateText = savedGpsBaudRate > 0 ? savedGpsBaudRate.ToString(CultureInfo.InvariantCulture) : string.Empty;
+        if (UnitSystems.Contains(savedUnitSystem)) UnitSystemName = savedUnitSystem;
+        UseFahrenheit = savedUseFahrenheit;
+        UseMiles = savedUseMiles;
+        if (RingtoneModes.Contains(savedRingtoneMode)) RingtoneMode = savedRingtoneMode;
+        RingtoneVolume = savedRingtoneVolume;
+        if (!string.IsNullOrWhiteSpace(savedRingtoneRtttl)) RingtoneRtttl = savedRingtoneRtttl;
+        LoadNodeFilterSettings(_settings);
+
+        // Everything is loaded — from here on property changes may persist.
+        _settingsLoaded = true;
         SaveSettings();
+
+        HookNodeFilter();
+        RestoreSelectedTab(savedLastSelectedChannelIndex, savedSelectedConversationNode);
+
+        // Unconditional (not relying on OnCenterFreqMHzChanged, whose
+        // generated setter can no-op if CenterFreqMHz never actually
+        // changed value during the loads above).
+        SpectrumCenterHz = CenterFreqMHz * 1_000_000.0;
 
         try
         {
             _core = new MeshtasticCore();
             StatusText = $"Native bridge loaded ({Environment.OSVersion.Platform}).";
+            _core.SetRxDevice(SelectedDevice);
+            _core.SetTxDevice(SelectedTxDevice);
+            ApplyGains();
+            ApplyTxAncillary();
+            RefreshSampleRateSelection(SelectedDevice, GetSavedRxSampleRateHz(SelectedDevice));
+            _rxHost.TransmitAutoReply = frame =>
+            {
+                var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+                try { _core.Transmit(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable); }
+                catch { /* best-effort auto-reply */ }
+            };
         }
         catch (Exception ex)
         {
@@ -309,6 +664,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             _core.SetGains(LnaGainDb, VgaGainDb, AmpEnable);
     }
 
+    private void ApplyTxAncillary()
+    {
+        if (_core is null) return;
+        _core.SetDeviceOption("bias_tee", BiasTee ? 1 : 0);
+        _core.SetDcBlock(DcBlockEnable);
+    }
+
     /// <summary>Syncs OverrideSf/BwKhz/Cr to the firmware defaults for
     /// <paramref name="preset"/> without triggering a save loop.</summary>
     private void ApplyPresetToLoraParams(LoraPreset preset)
@@ -352,7 +714,111 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         finally { _suppressRetune = false; }
     }
 
-    partial void OnSelectedDeviceChanged(RadioDeviceKind value) { ApplyGains(); SaveSettings(); }
+    partial void OnSelectedDeviceChanged(RadioDeviceKind value)
+    {
+        ApplyGains();
+        if (_core is not null)
+        {
+            _core.SetRxDevice(value);
+            RefreshSampleRateSelection(value, GetSavedRxSampleRateHz(value));
+        }
+        OnPropertyChanged(nameof(IsHackRf));
+        OnPropertyChanged(nameof(IsRtlSdr));
+        SaveSettings();
+    }
+    partial void OnSelectedTxDeviceChanged(RadioDeviceKind value)
+    {
+        _core?.SetTxDevice(value);
+        OnPropertyChanged(nameof(IsTxHackRf));
+        SaveSettings();
+    }
+
+    partial void OnSelectedRxSampleRateChanged(SampleRateOption? value)
+    {
+        if (_suppressSampleRateUpdate || value is null) return;
+        _core?.SetDeviceOption("rx_sample_rate_hz", checked((int)value.Hz));
+        StoreSavedRxSampleRateHz(SelectedDevice, value.Hz);
+        SpectrumSpanHz = value.Hz;
+        SaveSettings();
+    }
+
+    private IReadOnlyList<SampleRateOption> BuildRxSampleRateOptions(RadioDeviceKind kind)
+    {
+        uint[] baseRates = kind switch
+        {
+            RadioDeviceKind.HackRf => HackRfSampleRatesHz,
+            RadioDeviceKind.RtlSdr => RtlSdrSampleRatesHz,
+            _ => Array.Empty<uint>(),
+        };
+        uint maxRateHz = kind switch
+        {
+            RadioDeviceKind.HackRf => HackRfMaxSelectableRateHz,
+            RadioDeviceKind.RtlSdr => RtlSdrDecodeSafeMaxRateHz,
+            _ => 0u,
+        };
+        IEnumerable<uint> rates = maxRateHz > 0 ? baseRates.Where(r => r <= maxRateHz) : baseRates;
+        return rates.Select(r => new SampleRateOption(r, FormatSampleRateLabel(r))).ToArray();
+    }
+
+    private void RefreshSampleRateSelection(RadioDeviceKind kind, uint requestedHz)
+    {
+        SampleRateOptions = BuildRxSampleRateOptions(kind);
+        _suppressSampleRateUpdate = true;
+        try { SelectedRxSampleRate = SelectNearestSampleRate(SampleRateOptions, requestedHz); }
+        finally { _suppressSampleRateUpdate = false; }
+
+        if (SelectedRxSampleRate is { } opt)
+        {
+            _core?.SetDeviceOption("rx_sample_rate_hz", checked((int)opt.Hz));
+            SpectrumSpanHz = opt.Hz;
+        }
+        else if (!IsRunning)
+        {
+            SpectrumSpanHz = 0.0;
+        }
+        OnPropertyChanged(nameof(CanSelectRxSampleRate));
+    }
+
+    private static SampleRateOption? SelectNearestSampleRate(IReadOnlyList<SampleRateOption> options, uint requestedHz)
+    {
+        if (options.Count == 0) return null;
+        if (requestedHz == 0) return options.FirstOrDefault(o => o.Hz == 2_400_000u) ?? options[0];
+
+        var best = options[0];
+        var bestDelta = AbsDiff(best.Hz, requestedHz);
+        for (int i = 1; i < options.Count; i++)
+        {
+            var delta = AbsDiff(options[i].Hz, requestedHz);
+            if (delta < bestDelta) { best = options[i]; bestDelta = delta; }
+        }
+        return best;
+    }
+
+    private static ulong AbsDiff(uint left, uint right) => left >= right ? (ulong)(left - right) : (ulong)(right - left);
+
+    private static string FormatSampleRateLabel(uint hz) =>
+        $"{(hz / 1_000_000.0).ToString("0.###", CultureInfo.InvariantCulture)} MS/s";
+
+    /// <summary>Each device kind remembers its own last-used sample rate,
+    /// mirroring MeshRF.App's per-device storage (shared settings.json).</summary>
+    private uint GetSavedRxSampleRateHz(RadioDeviceKind kind) => kind switch
+    {
+        RadioDeviceKind.HackRf => _settings.HackRfRxSampleRateHz != 2_400_000u || _settings.RxSampleRateHz == 2_400_000u
+            ? _settings.HackRfRxSampleRateHz : _settings.RxSampleRateHz,
+        RadioDeviceKind.RtlSdr => _settings.RtlSdrRxSampleRateHz != 2_400_000u || _settings.RxSampleRateHz == 2_400_000u
+            ? _settings.RtlSdrRxSampleRateHz : _settings.RxSampleRateHz,
+        _ => _settings.RxSampleRateHz,
+    };
+
+    private void StoreSavedRxSampleRateHz(RadioDeviceKind kind, uint hz)
+    {
+        switch (kind)
+        {
+            case RadioDeviceKind.HackRf: _settings.HackRfRxSampleRateHz = hz; break;
+            case RadioDeviceKind.RtlSdr: _settings.RtlSdrRxSampleRateHz = hz; break;
+        }
+        _settings.RxSampleRateHz = hz;
+    }
 
     partial void OnSelectedPresetChanged(LoraPreset value)
     {
@@ -376,17 +842,156 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnOverrideBwKhzChanged(double value) { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
     partial void OnOverrideCrChanged(byte value)      { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
 
-    partial void OnCenterFreqMHzChanged(double value) { if (!_suppressRetune) SaveSettings(); }
+    partial void OnCenterFreqMHzChanged(double value)
+    {
+        if (!_suppressRetune) SaveSettings();
+        SpectrumCenterHz = value * 1_000_000.0;
+    }
 
     partial void OnLnaGainDbChanged(byte value) { ApplyGains(); SaveSettings(); }
     partial void OnVgaGainDbChanged(byte value) { ApplyGains(); SaveSettings(); }
     partial void OnAmpEnableChanged(bool value) { ApplyGains(); SaveSettings(); }
     partial void OnRtlGainDbChanged(byte value) { ApplyGains(); SaveSettings(); }
     partial void OnRtlAgcEnableChanged(bool value) { ApplyGains(); SaveSettings(); }
+    partial void OnBiasTeeChanged(bool value) { _core?.SetDeviceOption("bias_tee", value ? 1 : 0); SaveSettings(); }
+    partial void OnDcBlockEnableChanged(bool value) { _core?.SetDcBlock(value); SaveSettings(); }
+    partial void OnTxGainDbChanged(byte value) => SaveSettings();
+    partial void OnTxAmpEnableChanged(bool value) => SaveSettings();
+    partial void OnWaterfallColormapChanged(WaterfallColormap value) => SaveSettings();
+    partial void OnWaterfallRowsPerSecondChanged(double value) => SaveSettings();
+    partial void OnWaterfallFloorDbChanged(double value) => SaveSettings();
+    partial void OnWaterfallCeilDbChanged(double value) => SaveSettings();
+    partial void OnWaterfallAutoLevelsChanged(bool value) => SaveSettings();
+    partial void OnPendingReplyPacketIdChanged(uint value) => OnPropertyChanged(nameof(HasPendingReply));
+
+    partial void OnMyNodeIdTextChanged(string value)
+    {
+        var parsed = ParseNodeId(value);
+        if (parsed != 0 && parsed != 0xFFFFFFFFu)
+        {
+            _rxHost.UpdateMyNodeNum(parsed);
+            _settings.UserNodeNum = parsed;
+        }
+        SaveSettings();
+    }
+
+    private static uint ParseNodeId(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+        var s = text.Trim();
+        if (s.StartsWith('!')) s = s[1..];
+        else if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
+        else if (uint.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var dec))
+            return dec;
+        return uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex) ? hex : 0;
+    }
+
+    [RelayCommand]
+    private void GenerateRandomNodeId()
+    {
+        uint id;
+        do { id = (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE); } while (id == 0 || id == 0xFFFFFFFFu);
+        MyNodeIdText = $"!{id:x8}";
+    }
+
+    [RelayCommand]
+    private void GenerateKeyPair()
+    {
+        var priv = Curve25519.GeneratePrivateKey();
+        var pub = Curve25519.GetPublicKey(priv);
+        MyPrivateKey = Convert.ToBase64String(priv);
+        MyPublicKey = Convert.ToBase64String(pub);
+    }
+
+    partial void OnMyLongNameChanged(string value) => SaveSettings();
+    partial void OnMyShortNameChanged(string value) => SaveSettings();
+    partial void OnMyRoleChanged(string value) => SaveSettings();
+    partial void OnMyHwModelChanged(string value) => SaveSettings();
+    partial void OnMyPublicKeyChanged(string value) => SaveSettings();
+    partial void OnMyPrivateKeyChanged(string value) => SaveSettings();
+    partial void OnMyNodeStatusChanged(string value) => SaveSettings();
+    partial void OnHopLimitChanged(int value) => SaveSettings();
+    partial void OnOkToMqttChanged(bool value) => SaveSettings();
+
+    partial void OnHomeLatitudeTextChanged(string value) => SaveSettings();
+    partial void OnHomeLongitudeTextChanged(string value) => SaveSettings();
+    partial void OnHomeAltitudeTextChanged(string value) => SaveSettings();
+    partial void OnMyFirmwareVersionChanged(string value) => SaveSettings();
+    partial void OnMyFirmwareEditionChanged(string value) => SaveSettings();
+    partial void OnRebroadcastModeChanged(string value) => SaveSettings();
+    partial void OnRoutingRelayEnabledChanged(bool value) => SaveSettings();
+    partial void OnGpsSerialPortChanged(string value) => SaveSettings();
+    partial void OnGpsBaudRateTextChanged(string value) => SaveSettings();
+    partial void OnUseFahrenheitChanged(bool value) => SaveSettings();
+    partial void OnUseMilesChanged(bool value) => SaveSettings();
+
+    partial void OnHomeLocationSourceChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsUsbSerialLocationSource));
+        OnPropertyChanged(nameof(IsManualLocationSource));
+        SaveSettings();
+    }
+
+    partial void OnUnitSystemNameChanged(string value)
+    {
+        OnPropertyChanged(nameof(CurrentUnitSystem));
+        OnPropertyChanged(nameof(HomeAltitudeLabel));
+        SaveSettings();
+    }
+
+    /// <summary>Reselect the tab that was active last session: the saved DM
+    /// conversation if it reopened, otherwise the saved channel index.</summary>
+    private void RestoreSelectedTab(int channelIndex, uint conversationNode)
+    {
+        if (conversationNode != 0)
+        {
+            var convo = Tabs.OfType<ConversationTabViewModel>().FirstOrDefault(t => t.NodeNum == conversationNode);
+            if (convo is not null) { SelectedTab = convo; return; }
+        }
+        var channel = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Index == channelIndex)
+                      ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+        if (channel is not null) SelectedTab = channel;
+    }
+
+    partial void OnIsRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ToggleButtonText));
+        OnPropertyChanged(nameof(CanSelectRxSampleRate));
+        SendMessageCommand.NotifyCanExecuteChanged();
+    }
 
     private void SaveSettings()
     {
+        // Mirrors MeshRF.App's _settingsLoaded guard. Assigning the view
+        // model's properties during construction fires OnXxxChanged ->
+        // SaveSettings() cascades; without this gate those mid-construction
+        // saves write whatever fields haven't been loaded from disk yet
+        // (still at their compile-time defaults) straight back over the real
+        // saved values — which is how a saved short name got overwritten with
+        // the default "MRF". Nothing persists until the load finishes.
+        if (!_settingsLoaded) return;
+
+        // Read-modify-write against the FILE, not our startup snapshot.
+        // settings.json is shared with MeshRF.App, and Save() serializes the
+        // whole object — so writing our own copy would silently revert every
+        // field MeshRF.App changed since we launched (map centre/zoom, hardware
+        // model, hop limit, ...). Only the fields this app owns are applied on
+        // top of what's currently on disk. MeshRF.App's SaveLayout does the same.
+        var disk = AppSettings.Load();
+        ApplyOwnedSettings(disk);
+        disk.Save();
+        // Keep the in-memory copy in step for any later reads.
+        ApplyOwnedSettings(_settings);
+    }
+
+    /// <summary>Copy the settings this app is the source of truth for onto
+    /// <paramref name="s"/>. Everything else on <paramref name="s"/> is left
+    /// exactly as loaded, so concurrent MeshRF.App edits survive.</summary>
+    private void ApplyOwnedSettings(AppSettings settings)
+    {
+        var _settings = settings; // shadow so the assignments below read naturally
         _settings.RxDeviceKind = SelectedDevice.ToString();
+        _settings.TxDeviceKind = SelectedTxDevice.ToString();
         _settings.Preset = SelectedPreset.ToString();
         _settings.CenterFreqMHz = CenterFreqMHz;
         _settings.Region = SelectedRegion.ToString();
@@ -399,7 +1004,67 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.AmpEnable = AmpEnable;
         _settings.RtlGainDb = RtlGainDb;
         _settings.RtlAgcEnable = RtlAgcEnable;
-        _settings.Save();
+        _settings.BiasTee = BiasTee;
+        _settings.TxGainDb = TxGainDb;
+        _settings.TxAmpEnable = TxAmpEnable;
+        _settings.DcBlockEnable = DcBlockEnable;
+        _settings.WaterfallColormap = WaterfallColormap.ToString();
+        _settings.WaterfallFloorDb = WaterfallFloorDb;
+        _settings.WaterfallCeilDb = WaterfallCeilDb;
+        _settings.WaterfallAutoLevels = WaterfallAutoLevels;
+        _settings.WaterfallRowsPerSecond = WaterfallRowsPerSecond;
+        StoreNodeFilterSettings(_settings);
+        _settings.UserFirmwareVersion = MyFirmwareVersion;
+        _settings.UserFirmwareEdition = MyFirmwareEdition;
+        _settings.RebroadcastMode = RebroadcastMode;
+        _settings.RoutingRelayEnabled = RoutingRelayEnabled;
+        _settings.HomeLocationSource = HomeLocationSource;
+        _settings.GpsSerialPort = GpsSerialPort;
+        _settings.GpsBaudRate = int.TryParse(GpsBaudRateText, out var baud) ? baud : 0;
+        _settings.RingtoneMode = RingtoneMode;
+        _settings.RingtoneVolume = (int)Math.Round(RingtoneVolume);
+        _settings.RingtoneRtttl = RingtoneRtttl;
+        _settings.UnitSystem = UnitSystemName;
+        _settings.UseFahrenheit = UseFahrenheit;
+        _settings.UseMiles = UseMiles;
+        _settings.LastSelectedChannelIndex = _lastSelectedChannelIndex;
+        _settings.SelectedChannelIndex = _lastSelectedChannelIndex;
+        _settings.SelectedConversationNode = SelectedTab is ConversationTabViewModel c ? c.NodeNum : 0;
+        _settings.UserNodeNum = _rxHost.MyNodeNum;
+        _settings.UserLongName = MyLongName;
+        _settings.UserShortName = MyShortName;
+        _settings.UserRole = MyRole;
+        _settings.UserHwModel = MyHwModel;
+        _settings.UserPublicKey = MyPublicKey;
+        _settings.UserPrivateKey = MyPrivateKey;
+        _settings.UserNodeStatus = MyNodeStatus;
+        _settings.HopLimit = HopLimit;
+        _settings.OkToMqtt = OkToMqtt;
+        _settings.HomeLatitude = double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ? lat : null;
+        _settings.HomeLongitude = double.TryParse(HomeLongitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lon) ? lon : null;
+        _settings.HomeAltitude = int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var alt) ? alt : null;
+    }
+
+    private void SaveOpenConversations()
+    {
+        if (!_settingsLoaded) return; // Same gate as SaveSettings.
+        // Read-modify-write, for the same reason as SaveSettings.
+        var disk = AppSettings.Load();
+        disk.OpenConversations = _rxHost.OpenConversationNodeNums.ToList();
+        disk.Save();
+        _settings.OpenConversations = disk.OpenConversations;
+    }
+
+    private uint NextPacketId() => (uint)Random.Shared.NextInt64(1, uint.MaxValue);
+
+    /// <summary>Transmit a pre-built frame using the currently selected
+    /// preset/frequency/TX gain settings. Runs off the UI thread.</summary>
+    private async Task<bool> TransmitFrameAsync(byte[] frame)
+    {
+        if (_core is null) return false;
+        var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+        var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
+        return await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp)).ConfigureAwait(true);
     }
 
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
@@ -431,12 +1096,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
 
         var text = MessageText.Trim();
-        var packetId = (uint)Random.Shared.NextInt64(1, uint.MaxValue);
-        var hz = (ulong)(CenterFreqMHz * 1_000_000);
+        var packetId = NextPacketId();
+        uint replyId = PendingReplyPacketId;
+        var replyContext = PendingReplyContext;
 
-        var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text, to: to);
+        var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text, to: to, replyId: replyId);
 
-        bool ok = await Task.Run(() => _core.Transmit(SelectedPreset, hz, frame)).ConfigureAwait(true);
+        bool ok = await TransmitFrameAsync(frame);
         if (!ok)
         {
             StatusText = "Failed to transmit (no TX-capable device selected?).";
@@ -445,22 +1111,38 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         // Echo locally — we won't decode our own transmission back off the
         // air (MeshRxRouter treats hearing it as isFromUs and drops it).
-        messages.Insert(0, new ChannelMessage
+        messages.Add(new ChannelMessage
         {
             FromId = $"!{_rxHost.MyNodeNum:x8}",
             SenderNodeNum = _rxHost.MyNodeNum,
-            Text = text,
+            Text = replyId != 0 ? $"{replyContext}\n{text}" : text,
             PacketId = packetId,
             IsOutgoing = true,
+            IsReplyLinked = replyId != 0,
+            ReplyTargetFound = replyId != 0,
+            ReplyToPacketId = replyId,
+            Delivery = MessageDelivery.Sent,
         });
+        // Persist the raw body (not the quoted display text) so a reload
+        // rebuilds the quote from reply_id, exactly like MeshRF.App.
+        _rxHost.PersistOutgoingText(to, packetId, text, channel.Name, replyId);
         MessageText = string.Empty;
+        CancelReply();
     }
 
     private bool CanSendMessage() =>
         _core?.CanTransmit == true && SelectedTab is not null && !string.IsNullOrWhiteSpace(MessageText);
 
     partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedTabChanged(ITabItem? value) => SendMessageCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedTabChanged(ITabItem? value)
+    {
+        if (value is not null) _previousTab = value;
+        if (value is ChannelTabViewModel ch) _lastSelectedChannelIndex = ch.Config.Index;
+        SendMessageCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanRemoveSelectedChannel));
+        RemoveSelectedChannelCommand.NotifyCanExecuteChanged();
+        SaveSettings();
+    }
 
     [RelayCommand]
     private void MessageNode(NodeRecord? node)
@@ -469,28 +1151,411 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SelectedTab = _rxHost.OpenConversation(node.NodeNum);
     }
 
-    partial void OnIsRunningChanged(bool value)
+    [RelayCommand]
+    private void ReplyToMessage(ChannelMessage? target)
     {
-        OnPropertyChanged(nameof(ToggleButtonText));
-        SendMessageCommand.NotifyCanExecuteChanged();
+        if (target is null || target.PacketId == 0) return;
+        PendingReplyPacketId = target.PacketId;
+        var from = string.IsNullOrWhiteSpace(target.FromId) ? "unknown" : target.FromId;
+        var preview = (target.Text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+        if (preview.Length > 80) preview = preview[..80] + "...";
+        if (preview.Length == 0) preview = "(empty)";
+        PendingReplyContext = $"replying to {from}: \"{preview}\"";
     }
 
-    [RelayCommand(CanExecute = nameof(CanAddChannel))]
-    private void AddChannel()
+    [RelayCommand]
+    private void CancelReply()
     {
-        var name = NewChannelName.Trim();
-        if (name.Length == 0) return;
-        SelectedTab = _rxHost.AddChannel(name);
-        NewChannelName = string.Empty;
+        PendingReplyPacketId = 0;
+        PendingReplyContext = string.Empty;
     }
 
-    private bool CanAddChannel() => !string.IsNullOrWhiteSpace(NewChannelName);
+    /// <summary>Send an emoji tapback for <paramref name="target"/>. Rides the
+    /// same TEXT_MESSAGE_APP port as a normal message: the glyph is the
+    /// payload text, reply_id points at the target packet, and the emoji
+    /// flag (Data.emoji=1) marks it as a reaction rather than a reply.</summary>
+    public async Task SendReactionAsync(ChannelMessage? target, string emoji)
+    {
+        if (_core is null || target is null || target.PacketId == 0 || string.IsNullOrEmpty(emoji)) return;
 
-    partial void OnNewChannelNameChanged(string value) => AddChannelCommand.NotifyCanExecuteChanged();
+        ChannelConfig channel;
+        uint to = 0xFFFFFFFFu;
+        switch (SelectedTab)
+        {
+            case ChannelTabViewModel chanTab: channel = chanTab.Config; break;
+            case ConversationTabViewModel convoTab:
+                var primary = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+                if (primary is null) return;
+                channel = primary.Config;
+                to = convoTab.NodeNum;
+                break;
+            default: return;
+        }
+
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, emoji,
+            to: to, replyId: target.PacketId, emoji: 1);
+
+        if (await TransmitFrameAsync(frame))
+        {
+            target.AddReaction(emoji, _rxHost.NodeDisplayName(_rxHost.MyNodeNum));
+            _rxHost.PersistOutgoingReaction(to, packetId, target.PacketId, emoji, channel.Name);
+        }
+        else
+        {
+            StatusText = "Failed to transmit reaction.";
+        }
+    }
+
+    [RelayCommand]
+    private void AddChannel() => SelectedTab = _rxHost.AddChannel();
+
+    public bool CanRemoveSelectedChannel => SelectedTab is ChannelTabViewModel { Config.Role: not ChannelRole.Primary };
+
+    [RelayCommand(CanExecute = nameof(CanRemoveSelectedChannel))]
+    private void RemoveSelectedChannel()
+    {
+        if (SelectedTab is not ChannelTabViewModel channel) return;
+        if (_rxHost.RemoveChannel(channel))
+            SelectedTab = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+    }
+
+    /// <summary>Persists edits made in the channel Settings dialog.</summary>
+    public void SaveChannelSettings(ChannelTabViewModel channel) => _rxHost.SaveChannelConfig(channel);
+
+    [RelayCommand]
+    private void CloseTab(ITabItem? tab)
+    {
+        if (tab is not ConversationTabViewModel convo) return;
+        if (ReferenceEquals(SelectedTab, convo))
+        {
+            var restoreTo = _previousTab is not null && !ReferenceEquals(_previousTab, convo) && Tabs.Contains(_previousTab)
+                ? _previousTab
+                : Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+            if (restoreTo is not null) SelectedTab = restoreTo;
+        }
+        _rxHost.CloseConversation(convo);
+    }
+
+    // ----- Node context-menu actions -----
+
+    private bool CanTransmit => _core?.CanTransmit == true && _rxHost.MyNodeNum != 0;
+
+    private ChannelConfig? PrimaryChannel() =>
+        (Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
+         ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault())?.Config;
+
+    private bool IsSelf(NodeRecord? node) => node is null || (_rxHost.MyNodeNum != 0 && node.NodeNum == _rxHost.MyNodeNum);
+
+    [RelayCommand]
+    private async Task RequestNodeInfo(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node) || !CanTransmit) return;
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodeNodeInfoRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId);
+        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        var name = _rxHost.NodeDisplayName(node.NodeNum);
+        _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "nodeinfo", $"Requested NodeInfo from {name}…");
+    }
+
+    [RelayCommand]
+    private async Task ExchangeNodeInfo(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node) || !CanTransmit) return;
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, packetId,
+            _settings.UserLongName, _settings.UserShortName,
+            hwModel: (uint)Math.Max(0, HardwareModels.Id(_settings.UserHwModel)), role: RoleEnumValue(_settings.UserRole),
+            publicKey: TryParseKeyBase64(_settings.UserPublicKey),
+            to: node.NodeNum, wantResponse: true);
+        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        var name = _rxHost.NodeDisplayName(node.NodeNum);
+        _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "nodeinfo", $"Exchanged NodeInfo with {name}…");
+    }
+
+    [RelayCommand]
+    private async Task RequestLocation(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node) || !CanTransmit) return;
+        var remaining = PositionRequestCooldown - (DateTime.UtcNow - _lastPositionRequestUtc);
+        if (remaining > TimeSpan.Zero) { StatusText = $"Position request on cooldown — wait {Math.Ceiling(remaining.TotalSeconds):F0}s."; return; }
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodePositionRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId);
+        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        _lastPositionRequestUtc = DateTime.UtcNow;
+        var name = _rxHost.NodeDisplayName(node.NodeNum);
+        _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "position", $"Position requested from {name}…");
+    }
+
+    [RelayCommand]
+    private async Task ExchangeLocation(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node) || !CanTransmit) return;
+        await RequestLocation(node);
+        var channel = PrimaryChannel();
+        if (channel is null || channel.PositionPrecision == 0) return;
+        if (_settings.HomeLatitude is not double lat || _settings.HomeLongitude is not double lon) return;
+        try
+        {
+            var packetId = NextPacketId();
+            var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, packetId, lat, lon,
+                altitudeM: _settings.HomeAltitude, precisionBits: channel.PositionPrecision, to: node.NodeNum);
+            await TransmitFrameAsync(frame);
+        }
+        catch { /* precision 0 or similar — best-effort */ }
+    }
+
+    [RelayCommand]
+    private async Task RequestTelemetry(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node) || !CanTransmit) return;
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodeTelemetryRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId);
+        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        var name = _rxHost.NodeDisplayName(node.NodeNum);
+        _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "telemetry", $"Requested telemetry from {name}…");
+    }
+
+    [RelayCommand]
+    private async Task Traceroute(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node) || !CanTransmit) return;
+        var remaining = TracerouteCooldown - (DateTime.UtcNow - _lastTracerouteUtc);
+        if (remaining > TimeSpan.Zero) { StatusText = $"Traceroute on cooldown — wait {Math.Ceiling(remaining.TotalSeconds):F0}s."; return; }
+        var primary = PrimaryChannel();
+        if (primary is null) return;
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodeTraceroute(primary, _rxHost.MyNodeNum, node.NodeNum, packetId);
+        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        _lastTracerouteUtc = DateTime.UtcNow;
+        _rxHost.RegisterOutgoingTraceroute(packetId, node.NodeNum);
+        var name = _rxHost.NodeDisplayName(node.NodeNum);
+        StatusText = $"Traceroute requested to {name}";
+        _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "traceroute", $"Traceroute requested to {name}…");
+    }
+
+    [RelayCommand]
+    private async Task RequestNewKeys(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node) || !CanTransmit) return;
+        _nodeStore.ClearPublicKey(node.NodeNum);
+        await ExchangeNodeInfo(node);
+    }
+
+    // ----- Quick send (broadcast our own payloads on the primary channel) -----
+
+    [RelayCommand]
+    private async Task SendSelfNodeInfo()
+    {
+        if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        var frame = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, NextPacketId(),
+            MyLongName, MyShortName,
+            hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
+            publicKey: TryParseKeyBase64(MyPublicKey),
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+        StatusText = await TransmitFrameAsync(frame) ? "Sent NodeInfo." : "Transmit failed.";
+    }
+
+    [RelayCommand]
+    private async Task SendSelfPosition()
+    {
+        if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        if (channel.PositionPrecision == 0) { StatusText = "Location sharing is disabled on this channel."; return; }
+        if (!double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ||
+            !double.TryParse(HomeLongitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lon))
+        {
+            StatusText = "Set your home location in My Node → Configure first.";
+            return;
+        }
+        int? alt = int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var a) ? a : null;
+        var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
+            altitudeM: alt, precisionBits: channel.PositionPrecision,
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+        StatusText = await TransmitFrameAsync(frame) ? "Sent position." : "Transmit failed.";
+    }
+
+    [RelayCommand]
+    private async Task SendSelfDeviceMetrics()
+    {
+        if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        var frame = MeshEncoder.EncodeTelemetryDeviceMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
+            batteryLevel: 101, // 101 = "powered from mains", same sentinel MeshRF.App uses on AC.
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+        StatusText = await TransmitFrameAsync(frame) ? "Sent device metrics." : "Transmit failed.";
+    }
+
+    [RelayCommand]
+    private void ToggleIgnoreNode(NodeRecord? node)
+    {
+        if (node is null) return;
+        _rxHost.SetNodeIgnored(node.NodeNum, !node.Ignored);
+    }
+
+    [RelayCommand]
+    private void ToggleFavoriteNode(NodeRecord? node)
+    {
+        if (node is null) return;
+        _rxHost.SetNodeFavorite(node.NodeNum, !node.Favorite);
+    }
+
+    [RelayCommand]
+    private void DeleteNode(NodeRecord? node)
+    {
+        if (node is null || IsSelf(node)) return;
+        _rxHost.ForgetNode(node.NodeNum);
+    }
+
+    private static uint RoleEnumValue(string? role) => role switch
+    {
+        "Client" => 0,
+        "ClientMute" => 1,
+        "Router" => 2,
+        "RouterClient" => 3,
+        "Repeater" => 4,
+        "Tracker" => 5,
+        "Sensor" => 6,
+        "TAK" => 7,
+        "ClientHidden" => 8,
+        "LostAndFound" => 9,
+        "TakTracker" => 10,
+        "RouterLate" => 11,
+        "ClientBase" => 12,
+        _ => 0,
+    };
+
+    private static byte[] TryParseKeyBase64(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return Array.Empty<byte>();
+        try { return Convert.FromBase64String(s.Trim()); }
+        catch { return Array.Empty<byte>(); }
+    }
+
+    // ----- Waypoint context-menu actions -----
+
+    [RelayCommand]
+    private async Task ResendWaypoint(WaypointRecord? wp)
+    {
+        if (wp is null || !CanTransmit) return;
+        var channel = _rxHost.FindChannelByName(wp.Channel);
+        if (channel is null) { StatusText = "No enabled channel to resend waypoint on."; return; }
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodeWaypoint(channel, _rxHost.MyNodeNum, packetId, wp.WaypointId,
+            wp.Latitude, wp.Longitude, name: wp.Name, description: wp.Description,
+            expireEpoch: wp.ExpireEpoch, lockedTo: wp.LockedTo, icon: wp.Icon,
+            geofenceRadiusM: wp.GeofenceRadius,
+            bboxWest: wp.BboxWest, bboxSouth: wp.BboxSouth, bboxEast: wp.BboxEast, bboxNorth: wp.BboxNorth,
+            notifyOnEnter: wp.NotifyOnEnter, notifyOnExit: wp.NotifyOnExit, notifyFavoritesOnly: wp.NotifyFavoritesOnly);
+        StatusText = await TransmitFrameAsync(frame)
+            ? $"Resent waypoint \"{wp.Name}\""
+            : "Transmit failed (device cannot transmit).";
+    }
+
+    [RelayCommand]
+    private async Task DeleteWaypoint(WaypointRecord? wp)
+    {
+        if (wp is null) return;
+        bool lockedToOther = wp.LockedTo != 0 && wp.LockedTo != _rxHost.MyNodeNum;
+        bool expired = wp.ExpireEpoch != 0 && wp.ExpireEpoch != WaypointRecord.NeverExpiresEpoch
+                       && wp.ExpireEpoch < DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (!lockedToOther && !expired && CanTransmit)
+        {
+            var channel = _rxHost.FindChannelByName(wp.Channel);
+            if (channel is not null)
+            {
+                try
+                {
+                    var packetId = NextPacketId();
+                    // expireEpoch=1 is the Meshtastic delete convention (no
+                    // dedicated delete message type).
+                    var frame = MeshEncoder.EncodeWaypoint(channel, _rxHost.MyNodeNum, packetId, wp.WaypointId,
+                        wp.Latitude, wp.Longitude, name: wp.Name, description: wp.Description,
+                        expireEpoch: 1, lockedTo: wp.LockedTo, icon: wp.Icon);
+                    await TransmitFrameAsync(frame);
+                }
+                catch { /* best-effort delete broadcast */ }
+            }
+        }
+        ForgetWaypointLocal(wp);
+    }
+
+    private void ForgetWaypointLocal(WaypointRecord wp)
+    {
+        _waypointStore.Forget(wp.Id);
+        for (int i = 0; i < Waypoints.Count; i++)
+        {
+            if (Waypoints[i].Id == wp.Id) { Waypoints.RemoveAt(i); break; }
+        }
+    }
+
+    /// <summary>Applies an edit to an existing waypoint and resends it (same
+    /// id, new content) over the mesh, then swaps the local cache entry.</summary>
+    public async Task<bool> UpdateWaypointAsync(WaypointRecord original, string name, string description, double lat, double lon)
+    {
+        if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device before editing waypoints."; return false; }
+        var channel = _rxHost.FindChannelByName(original.Channel);
+        if (channel is null) { StatusText = "No enabled channel to send the edit on."; return false; }
+
+        var packetId = NextPacketId();
+        var frame = MeshEncoder.EncodeWaypoint(channel, _rxHost.MyNodeNum, packetId, original.WaypointId,
+            lat, lon, name: name, description: description,
+            expireEpoch: original.ExpireEpoch, lockedTo: original.LockedTo, icon: original.Icon,
+            geofenceRadiusM: original.GeofenceRadius,
+            bboxWest: original.BboxWest, bboxSouth: original.BboxSouth, bboxEast: original.BboxEast, bboxNorth: original.BboxNorth,
+            notifyOnEnter: original.NotifyOnEnter, notifyOnExit: original.NotifyOnExit, notifyFavoritesOnly: original.NotifyFavoritesOnly);
+
+        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed (device cannot transmit)."; return false; }
+
+        var updated = new WaypointRecord
+        {
+            Id = original.Id,
+            FromNode = _rxHost.MyNodeNum,
+            WaypointId = original.WaypointId,
+            PacketId = packetId,
+            Channel = original.Channel,
+            Name = name,
+            Description = description,
+            Icon = original.Icon,
+            Latitude = lat,
+            Longitude = lon,
+            ExpireEpoch = original.ExpireEpoch,
+            LockedTo = original.LockedTo,
+            RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            GeofenceRadius = original.GeofenceRadius,
+            BboxWest = original.BboxWest,
+            BboxSouth = original.BboxSouth,
+            BboxEast = original.BboxEast,
+            BboxNorth = original.BboxNorth,
+            NotifyOnEnter = original.NotifyOnEnter,
+            NotifyOnExit = original.NotifyOnExit,
+            NotifyFavoritesOnly = original.NotifyFavoritesOnly,
+        };
+        _waypointStore.Upsert(updated);
+        for (int i = 0; i < Waypoints.Count; i++)
+        {
+            if (Waypoints[i].Id == original.Id) { Waypoints[i] = updated; break; }
+        }
+        StatusText = $"Updated waypoint \"{name}\"";
+        return true;
+    }
 
     public void Dispose()
     {
         _pollTimer.Stop();
+        _ringtone.Dispose();
         _rxRouter.Dispose();
         _rxHost.Dispose();
         _nodeStore.Dispose();

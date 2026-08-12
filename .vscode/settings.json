@@ -17,6 +17,24 @@
             "tooltip": "Launch the WPF app (no rebuild)"
         },
         {
+            "label": "$(window) Avalonia",
+            "tooltip": "Cross-platform (Avalonia) app tasks",
+            "tasks": [
+                {
+                    "label": "Build & Run Avalonia",
+                    "task": "Build & Run Avalonia"
+                },
+                {
+                    "label": "Build Avalonia App",
+                    "task": "Build Avalonia App"
+                },
+                {
+                    "label": "Run Avalonia App (no rebuild)",
+                    "task": "Run Avalonia App"
+                }
+            ]
+        },
+        {
             "label": "$(gear) Native",
             "tooltip": "Native (C++) tasks",
             "tasks": [

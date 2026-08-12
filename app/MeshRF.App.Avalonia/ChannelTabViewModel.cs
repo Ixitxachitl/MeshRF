@@ -31,4 +31,12 @@ public partial class ChannelTabViewModel : ObservableObject, ITabItem
     {
         Config = config;
     }
+
+    /// <summary>Config's fields (name/role/etc.) were edited in place — refresh
+    /// the computed display properties that don't otherwise get notified.</summary>
+    public void NotifyConfigChanged()
+    {
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(TabHeader));
+    }
 }

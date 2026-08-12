@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MeshRF.AvaloniaApp.EmojiPickerWindow"
+        Title="Pick an emoji"
+        Width="420" Height="380"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <DockPanel Margin="8">
+        <TextBox DockPanel.Dock="Top" Name="SearchBox" PlaceholderText="Search…" Margin="0,0,0,6" />
+        <TabControl Name="CategoryTabs" />
+    </DockPanel>
+</Window>

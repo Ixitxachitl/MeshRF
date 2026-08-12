@@ -158,6 +158,59 @@
 			"problemMatcher": []
 		},
 		{
+			"label": "Build Avalonia App",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj",
+				"-c",
+				"Debug",
+				"--nologo"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		},
+		{
+			"label": "Run Avalonia App",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj",
+				"-c",
+				"Debug",
+				"--no-build"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		},
+		{
+			// No "Deploy Native DLL" step here: MeshRF.App.Avalonia.csproj's
+			// CopyNativeBridge target already copies the native bridge (and the
+			// hackrf/rtlsdr runtime DLLs) into its own output on every build.
+			"label": "Build & Run Avalonia",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Build Native",
+				"Build Avalonia App",
+				"Run Avalonia App"
+			],
+			"problemMatcher": []
+		},
+		{
 			"label": "Build Release Zip",
 			"type": "shell",
 			"command": "powershell",

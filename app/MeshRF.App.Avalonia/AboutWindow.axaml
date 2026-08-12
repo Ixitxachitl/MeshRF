@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MeshRF.AvaloniaApp.AboutWindow"
+        Title="About MeshRF"
+        Width="460" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <StackPanel Margin="16" Spacing="6">
+        <TextBlock Text="MeshRF" FontSize="20" FontWeight="Bold" />
+        <TextBlock Name="VersionText" Foreground="{DynamicResource BrushSubtle}" />
+        <TextBlock Name="RuntimeText" Foreground="{DynamicResource BrushSubtle}" FontSize="11" />
+        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap"
+                   Text="A Meshtastic client driving a HackRF / RTL-SDR software-defined radio, with a LoRa modem implemented in native code." />
+        <TextBlock Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                   Foreground="{DynamicResource BrushSubtle}"
+                   Text="LoRa PHY derived from gr-lora_sdr (github.com/tapparelj/gr-lora_sdr). Licensed under the GPL." />
+        <Button Content="Close" HorizontalAlignment="Right" Margin="0,12,0,0" Click="OnClose" />
+    </StackPanel>
+</Window>

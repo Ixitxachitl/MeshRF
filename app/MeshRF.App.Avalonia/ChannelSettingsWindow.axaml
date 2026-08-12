@@ -1,0 +1,46 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mesh="clr-namespace:MeshRF;assembly=MeshRF.Core"
+        x:Class="MeshRF.AvaloniaApp.ChannelSettingsWindow"
+        Title="Channel Settings"
+        Width="560" SizeToContent="Height"
+        MinWidth="480"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Grid Margin="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <TextBox Name="NameBox" Grid.Row="0" Grid.Column="1" Margin="0,4,0,4" />
+        <TextBlock Name="HashText" Grid.Row="0" Grid.Column="2" Margin="8,4,0,4"
+                   Foreground="{DynamicResource BrushSubtle}" VerticalAlignment="Center" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Role" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <ComboBox Name="RoleCombo" Grid.Row="1" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="160" />
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="PSK" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <TextBox Name="PskBox" Grid.Row="2" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas"
+                 ToolTip.Tip="Empty = no encryption, AQ== = default key, or paste base64/hex" />
+        <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Margin="8,4,0,4" Spacing="4">
+            <Button Content="Default" Padding="8,2" Click="OnUseDefaultKey" />
+            <Button Content="Rnd 16" Padding="8,2" Click="OnRandom16" />
+            <Button Content="Rnd 32" Padding="8,2" Click="OnRandom32" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Location sharing" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <ComboBox Name="PrecisionCombo" Grid.Row="3" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+                  ToolTip.Tip="How precisely your location is shared on this channel">
+            <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="mesh:PositionPrecisionOption">
+                    <TextBlock Text="{Binding Label}" />
+                </DataTemplate>
+            </ComboBox.ItemTemplate>
+        </ComboBox>
+
+        <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+            <Button Content="Cancel" Click="OnCancel" />
+            <Button Content="Save" Click="OnSave" />
+        </StackPanel>
+    </Grid>
+</Window>
