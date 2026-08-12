@@ -142,7 +142,7 @@ public partial class RadioViewModel
                         hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
                         publicKey: TryParseKeyBase64(MyPublicKey),
                         to: to, hopLimit: (byte)HopLimit, wantResponse: false, okToMqtt: OkToMqtt);
-                    _ = TransmitFrameAsync(nodeInfo);
+                    TransmitBackground(nodeInfo);
                     break;
 
                 case PortNum.Position:
@@ -153,14 +153,14 @@ public partial class RadioViewModel
                     var position = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
                         altitudeM: alt, precisionBits: channel.PositionPrecision,
                         to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
-                    _ = TransmitFrameAsync(position);
+                    TransmitBackground(position);
                     break;
 
                 case PortNum.Telemetry:
                     var metrics = MeshEncoder.EncodeTelemetryDeviceMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
                         batteryLevel: 101, // 101 = mains-powered, the sentinel this app reports.
                         to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
-                    _ = TransmitFrameAsync(metrics);
+                    TransmitBackground(metrics);
                     break;
             }
         }
