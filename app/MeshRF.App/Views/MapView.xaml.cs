@@ -135,8 +135,6 @@ public partial class MapView : UserControl
     private readonly DispatcherTimer _liveToolTipTimer;
     private readonly HashSet<ToolTip> _liveToolTips = new();
     private bool _fullMarkerRefreshPending;
-    // Increased from 32 to 256 now that coordinates are cached and don't require
-    // expensive Web-Mercator projection calculations per update.
     private const int MaxNodeMarkerUpdatesPerTick = 256;
     private static readonly long MapRenderMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
     private static readonly long DragPreviewMinIntervalTicks = (long)Math.Ceiling(Stopwatch.Frequency / 60.0);
@@ -169,13 +167,6 @@ public partial class MapView : UserControl
     private sealed record NodeVisual(Ellipse Dot, FrameworkElement Label);
     private readonly Dictionary<uint, NodeVisual> _nodeVisuals = new();
     private readonly List<MainViewModel.MapMarker> _cachedMapMarkers = new();
-    // Coordinate cache: key is marker index, value is (screenX, screenY) in world coordinates
-    private readonly Dictionary<int, (double X, double Y)> _cachedMarkerScreenCoords = new();
-    private int _lastZoomForCoordCache = -1;  // Invalidate cache when zoom changes
-    private double _lastCenterLonForCoordCache = double.NaN;
-    private double _lastCenterLatForCoordCache = double.NaN;
-    private bool _coordCacheValid;
-    private CancellationTokenSource? _coordCacheCts;
     private readonly Dictionary<uint, int> _cachedNodeMarkerIndices = new();
     private readonly List<MainViewModel.MapPolyline> _cachedPolylines = new();
     private bool _mapMarkerCacheValid;
@@ -714,73 +705,13 @@ public partial class MapView : UserControl
     private static double MetersPerPixel(double lat, int zoom) =>
         156543.03392804062 * Math.Cos(lat * Math.PI / 180.0) / (1 << zoom);
 
-    // -- Coordinate caching for performance with large marker counts --------
-
-    /// <summary>Pre-computes and caches screen coordinates for all markers on a background thread.
-    /// This avoids expensive Web-Mercator calculations (Math.Log, Math.Tan, Math.Cos) per marker
-    /// during every render, which was causing drag lag with 500+ nodes.</summary>
-    private async void InvalidateAndRefreshCoordinateCache()
-    {
-        _coordCacheValid = false;
-        _coordCacheCts?.Cancel();
-        _coordCacheCts = new CancellationTokenSource();
-        var cts = _coordCacheCts;
-
-        // Pre-compute all marker screen coordinates on background thread
-        await Task.Run(() =>
-        {
-            if (cts.Token.IsCancellationRequested) return;
-
-            var newCache = new Dictionary<int, (double X, double Y)>(_cachedMapMarkers.Count);
-            for (int i = 0; i < _cachedMapMarkers.Count; i++)
-            {
-                if (cts.Token.IsCancellationRequested)
-                    return;
-
-                var mk = _cachedMapMarkers[i];
-                double x = LonToX(mk.Lon, _zoom);
-                double y = LatToY(mk.Lat, _zoom);
-                newCache[i] = (x, y);
-            }
-
-            if (cts.Token.IsCancellationRequested)
-                return;
-
-            // Update cache on UI thread
-            Dispatcher.InvokeAsync(() =>
-            {
-                if (cts.Token.IsCancellationRequested)
-                    return;
-
-                _cachedMarkerScreenCoords.Clear();
-                foreach (var kvp in newCache)
-                    _cachedMarkerScreenCoords[kvp.Key] = kvp.Value;
-
-                _lastZoomForCoordCache = _zoom;
-                _lastCenterLonForCoordCache = _centerLon;
-                _lastCenterLatForCoordCache = _centerLat;
-                _coordCacheValid = true;
-            }, System.Windows.Threading.DispatcherPriority.Background);
-        }, cts.Token).ConfigureAwait(true);
-    }
-
-    private void InvalidateCoordinateCache()
-    {
-        _coordCacheValid = false;
-        _coordCacheCts?.Cancel();
-    }
-
-    /// <summary>Gets pre-computed screen coordinates for a marker, or computes on-demand if cache miss.</summary>
-    private (double X, double Y) GetMarkerScreenCoords(int markerIndex, MainViewModel.MapMarker mk)
-    {
-        if (_coordCacheValid && _cachedMarkerScreenCoords.TryGetValue(markerIndex, out var coords))
-            return coords;
-
-        // Cache miss or invalid: compute on-demand (slower path, but rare during drag)
-        return (LonToX(mk.Lon, _zoom), LatToY(mk.Lat, _zoom));
-    }
-
     // -- Rendering ----------------------------------------------------------
+    // Note: an earlier revision cached per-marker Web-Mercator world
+    // coordinates keyed by marker-list index, refreshed asynchronously. The
+    // async apply raced incremental marker-list mutations, so indices could
+    // resolve to another marker's coordinates and stick until the next zoom —
+    // markers drawn (and culled) at the wrong position. The projection is a
+    // few dozen nanoseconds per marker, so it is simply computed inline now.
 
     private void Render() => RequestRender(fullRender: true);
 
@@ -913,13 +844,8 @@ public partial class MapView : UserControl
                     continue;
                 }
 
-                // Find marker index in cache for coordinate lookup
-                int markerIndex = _cachedNodeMarkerIndices.TryGetValue(nodeNum, out int idx) ? idx : -1;
-                var (worldX, worldY) = markerIndex >= 0
-                    ? GetMarkerScreenCoords(markerIndex, mk)
-                    : (LonToX(mk.Lon, _zoom), LatToY(mk.Lat, _zoom));
-                double px = worldX - originX;
-                double py = worldY - originY;
+                double px = LonToX(mk.Lon, _zoom) - originX;
+                double py = LatToY(mk.Lat, _zoom) - originY;
                 bool isOnScreen =
                     px >= -cullMarginPx && px <= w + cullMarginPx &&
                     py >= -cullMarginPx && py <= h + cullMarginPx;
@@ -961,13 +887,8 @@ public partial class MapView : UserControl
                 continue;
             }
 
-            // Find marker index in cache for coordinate lookup
-            int markerIndex = _cachedNodeMarkerIndices.TryGetValue(nodeNum, out int idx) ? idx : -1;
-            var (worldX, worldY) = markerIndex >= 0
-                ? GetMarkerScreenCoords(markerIndex, mk)
-                : (LonToX(mk.Lon, _zoom), LatToY(mk.Lat, _zoom));
-            double px = worldX - originX;
-            double py = worldY - originY;
+            double px = LonToX(mk.Lon, _zoom) - originX;
+            double py = LatToY(mk.Lat, _zoom) - originY;
             bool isOnScreen =
                 px >= -cullMarginPx && px <= w + cullMarginPx &&
                 py >= -cullMarginPx && py <= h + cullMarginPx;
@@ -1134,7 +1055,6 @@ public partial class MapView : UserControl
             _cachedMapMarkers.Clear();
             _cachedMapMarkers.AddRange(_vm.GetMapMarkers());
             RebuildCachedNodeMarkerIndex();
-                InvalidateAndRefreshCoordinateCache();  // Re-compute coords for updated markers
             _mapMarkerCacheValid = true;
         }
 
@@ -1167,23 +1087,16 @@ public partial class MapView : UserControl
 
             if (changedMarkers.TryGetValue(nodeNum, out var updated))
             {
-                int index;
                 if (hadExisting)
                 {
-                    index = existingIndex;
-                    _cachedMapMarkers[index] = updated;
+                    _cachedMapMarkers[existingIndex] = updated;
                 }
                 else
                 {
-                    index = _cachedMapMarkers.Count;
-                    _cachedNodeMarkerIndices[nodeNum] = index;
+                    _cachedNodeMarkerIndices[nodeNum] = _cachedMapMarkers.Count;
                     _cachedMapMarkers.Add(updated);
                 }
 
-                // Keep the screen-coordinate cache in step so a moved node's
-                // dot doesn't stay at its old position until the next zoom.
-                _cachedMarkerScreenCoords[index] =
-                    (LonToX(updated.Lon, _zoom), LatToY(updated.Lat, _zoom));
                 continue;
             }
 
@@ -1195,17 +1108,6 @@ public partial class MapView : UserControl
             _cachedMapMarkers[existingIndex] = swappedMarker;
             _cachedMapMarkers.RemoveAt(lastIndex);
             _cachedNodeMarkerIndices.Remove(nodeNum);
-
-            // Move the swapped marker's cached coords along with it.
-            if (_cachedMarkerScreenCoords.TryGetValue(lastIndex, out var lastCoords))
-            {
-                _cachedMarkerScreenCoords[existingIndex] = lastCoords;
-                _cachedMarkerScreenCoords.Remove(lastIndex);
-            }
-            else
-            {
-                _cachedMarkerScreenCoords.Remove(existingIndex);
-            }
 
             if (existingIndex < _cachedMapMarkers.Count && swappedMarker.NodeNum is uint swappedNodeNum)
                 _cachedNodeMarkerIndices[swappedNodeNum] = existingIndex;
@@ -1450,12 +1352,10 @@ public partial class MapView : UserControl
         // immediately since it never stacks with nodes.
         var nodes = new List<(MainViewModel.MapMarker mk, double px, double py)>();
 
-        // Use cached screen coordinates instead of expensive Web-Mercator calculations
-        foreach (var (markerIndex, mk) in _cachedMapMarkers.Select((m, i) => (i, m)))
+        foreach (var mk in _cachedMapMarkers)
         {
-            var (worldX, worldY) = GetMarkerScreenCoords(markerIndex, mk);
-            double px = worldX - originX;
-            double py = worldY - originY;
+            double px = LonToX(mk.Lon, _zoom) - originX;
+            double py = LatToY(mk.Lat, _zoom) - originY;
             bool isOnScreen =
                 px >= -cullMarginPx && px <= viewportW + cullMarginPx &&
                 py >= -cullMarginPx && py <= viewportH + cullMarginPx;
@@ -2474,7 +2374,6 @@ public partial class MapView : UserControl
         double anchorLat = YToLat(originY + anchor.Y, _zoom);
 
         _zoom = newZoom;
-        InvalidateAndRefreshCoordinateCache();  // Pre-compute coords for all markers at new zoom level
 
         // Recompute the center so the anchor stays under the cursor.
         double ax = LonToX(anchorLon, _zoom);
@@ -2510,7 +2409,6 @@ public partial class MapView : UserControl
             _zoom = settings.MapZoom;
             _userMovedView = true;
             _hasRestoredViewport = true;
-            InvalidateCoordinateCache();
             if (IsLoaded)
                 Render();
         }
@@ -2533,7 +2431,6 @@ public partial class MapView : UserControl
         _centerLon = lon;
         _zoom = Math.Clamp(zoom, MinZoom, MaxZoom);
         _userMovedView = true;
-        InvalidateCoordinateCache();
         Render();
     }
 
@@ -2554,7 +2451,6 @@ public partial class MapView : UserControl
             _centerLat = ClampLat(markers[0].Lat);
             _centerLon = markers[0].Lon;
             _zoom = 13;
-            InvalidateCoordinateCache();
             return Math.Abs(oldLat - _centerLat) > 1e-9
                 || Math.Abs(oldLon - _centerLon) > 1e-9
                 || oldZoom != _zoom;
@@ -2582,7 +2478,6 @@ public partial class MapView : UserControl
             if (spanX <= w * 0.85 && spanY <= h * 0.85) { best = z; break; }
         }
         _zoom = best;
-        InvalidateCoordinateCache();
 
         return Math.Abs(oldLat - _centerLat) > 1e-9
             || Math.Abs(oldLon - _centerLon) > 1e-9
