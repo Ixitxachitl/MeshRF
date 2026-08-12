@@ -150,6 +150,37 @@
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
         </Style>
+        <!-- Fluent's DatePicker/TimePicker are touch-sized: a ~32px segmented
+             bar with wide padding. Compact them to the app's control height so
+             the waypoint composer doesn't give two rows of chrome to a date.
+             MinWidth matters as much as height: Fluent's 296px minimum (242 for
+             TimePicker) makes them overflow a narrow panel and clip rather than
+             shrink to fit. -->
+        <Style Selector="DatePicker, TimePicker">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="DatePicker /template/ Button#PART_FlyoutButton, TimePicker /template/ Button#PART_FlyoutButton">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="DatePicker /template/ Button#PART_FlyoutButton /template/ ContentPresenter#PART_ContentPresenter, TimePicker /template/ Button#PART_FlyoutButton /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource BrushAppForeground}" />
+        </Style>
+        <Style Selector="DatePicker /template/ Button#PART_FlyoutButton:pointerover /template/ ContentPresenter#PART_ContentPresenter, TimePicker /template/ Button#PART_FlyoutButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource BrushAppForeground}" />
+        </Style>
+
         <Style Selector="Expander /template/ Border#ExpanderContent">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="Padding" Value="0" />

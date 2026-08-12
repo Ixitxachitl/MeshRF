@@ -417,6 +417,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedWaterfallAutoLevels = _settings.WaterfallAutoLevels;
         var savedWaterfallRowsPerSecond = _settings.WaterfallRowsPerSecond;
         var savedWaterfallColormap = _settings.WaterfallColormap;
+        var savedMapNodeLabelMode = _settings.MapNodeLabelMode;
         var savedOpenConversations = _settings.OpenConversations?.ToList() ?? new List<uint>();
         // Identity fields (My Node dialog) — also snapshotted here, not read
         // directly further down, for the same reason as everything above:
@@ -510,6 +511,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         WaterfallRowsPerSecond = savedWaterfallRowsPerSecond;
         if (Enum.TryParse<WaterfallColormap>(savedWaterfallColormap, out var cmap))
             WaterfallColormap = cmap;
+        if (MapNodeLabelModeOptions.Contains(savedMapNodeLabelMode))
+            MapNodeLabelMode = savedMapNodeLabelMode;
 
         MyNodeIdText = $"!{myNodeNum:x8}";
         MyLongName = string.IsNullOrEmpty(savedUserLongName) ? MyLongName : savedUserLongName;
@@ -1042,6 +1045,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.RingtoneRtttl = RingtoneRtttl;
         _settings.MutedRingtoneChannels = Tabs.OfType<ChannelTabViewModel>()
             .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
+        _settings.MapNodeLabelMode = MapNodeLabelMode;
         _settings.UnitSystem = UnitSystemName;
         _settings.UseFahrenheit = UseFahrenheit;
         _settings.UseMiles = UseMiles;

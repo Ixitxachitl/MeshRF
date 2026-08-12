@@ -63,18 +63,20 @@ public sealed class MapCanvas : Control
         // read clearly while the dark background survives.
         Gamma: 1.8);
 
+    /// <summary>No "Auto" entry, unlike MeshRF.App: that option exists to
+    /// follow a light/dark app theme, and this app's shell is always dark.</summary>
     public static readonly IReadOnlyList<string> MapTileThemeOptions =
-        ["Auto", "Light", "Light (CARTO)", "Voyager", "Dark"];
+        ["Dark", "Light", "Light (CARTO)", "Voyager"];
 
-    private string _mapTileTheme = "Auto";
+    private const string DefaultTileTheme = "Dark";
+    private string _mapTileTheme = DefaultTileTheme;
 
     private TileProvider CurrentTiles => _mapTileTheme switch
     {
         "Light" => LightTiles,
         "Light (CARTO)" => LightCartoTiles,
         "Voyager" => VoyagerTiles,
-        "Dark" => DarkTiles,
-        _ => DarkTiles, // "Auto" — this app's shell is dark-themed.
+        _ => DarkTiles,
     };
 
     public string Attribution => CurrentTiles.Attribution;
@@ -187,7 +189,34 @@ public sealed class MapCanvas : Control
         {
             FitToMarkers();
         }
-        Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Background);
+        // Coalesce rather than redraw now. This fires once per received packet
+        // (the node filter rebuilds on every node update), and a redraw
+        // re-projects and re-clusters every marker — at several hundred nodes
+        // that saturates the UI thread and makes the whole panel, including
+        // hovering the controls layered over it, feel sticky.
+        _renderPending = true;
+    }
+
+    private bool _renderPending;
+    private DispatcherTimer? _renderThrottle;
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _renderThrottle ??= new DispatcherTimer(
+            TimeSpan.FromMilliseconds(150), DispatcherPriority.Background, (_, _) =>
+            {
+                if (!_renderPending) return;
+                _renderPending = false;
+                InvalidateVisual();
+            });
+        _renderThrottle.Start();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _renderThrottle?.Stop();
     }
 
     // Marker projection is rebuilt only when the data changes, never per
@@ -273,22 +302,27 @@ public sealed class MapCanvas : Control
         for (int ty = firstTileY; ty <= lastTileY; ty++)
         {
             if (ty < 0 || ty >= n) continue; // No wrapping vertically.
+
+            // Snap each edge to a whole device pixel and derive the size from
+            // the *next* tile's snapped edge. Drawing at fractional offsets
+            // leaves a hairline seam between tiles, because each one's edge
+            // gets antialiased against the background independently instead of
+            // meeting its neighbour exactly.
+            double top = Math.Round(ty * (double)TileSize - originY);
+            double bottom = Math.Round((ty + 1) * (double)TileSize - originY);
+
             for (int tx = firstTileX; tx <= lastTileX; tx++)
             {
                 // Wrap horizontally so panning past the antimeridian works.
                 int wrappedX = ((tx % n) + n) % n;
-                double left = tx * (double)TileSize - originX;
-                double top = ty * (double)TileSize - originY;
+                double left = Math.Round(tx * (double)TileSize - originX);
+                double right = Math.Round((tx + 1) * (double)TileSize - originX);
 
                 var key = $"{provider.Id}/{_zoom}/{wrappedX}/{ty}";
                 if (s_memCache.TryGetValue(key, out var bmp))
-                {
-                    context.DrawImage(bmp, new Rect(left, top, TileSize, TileSize));
-                }
+                    context.DrawImage(bmp, new Rect(left, top, right - left, bottom - top));
                 else
-                {
                     RequestTile(key, provider, wrappedX, ty, _zoom);
-                }
             }
         }
     }
@@ -757,6 +791,17 @@ public sealed class MapCanvas : Control
         }
     }
 
+    /// <summary>Drop the hover tooltip when the pointer leaves. Without this it
+    /// stays armed while the pointer is over the controls layered on top of the
+    /// map, and can re-open over them.</summary>
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        if (ToolTip.GetTip(this) is null) return;
+        ToolTip.SetTip(this, null);
+        Cursor = Cursor.Default;
+    }
+
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
@@ -945,7 +990,10 @@ public sealed class MapCanvas : Control
     public void LoadFromSettings(AppSettings settings)
     {
         _clusterNodes = settings.MapClusterNodes;
-        _mapTileTheme = settings.MapTileTheme ?? "Auto";
+        // A saved "Auto" (this app's old default, or MeshRF.App's) is no
+        // longer an option here — fall back to Dark.
+        var theme = settings.MapTileTheme;
+        _mapTileTheme = MapTileThemeOptions.Contains(theme) ? theme! : DefaultTileTheme;
         AttributionChanged?.Invoke();
 
         if (settings.MapCenterLat is double lat && settings.MapCenterLon is double lon

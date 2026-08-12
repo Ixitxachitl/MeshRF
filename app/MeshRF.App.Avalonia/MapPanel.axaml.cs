@@ -18,7 +18,7 @@ public partial class MapPanel : UserControl
     {
         InitializeComponent();
         MapTileThemeCombo.ItemsSource = MapCanvas.MapTileThemeOptions;
-        MapTileThemeCombo.SelectedItem = "Auto";
+        MapTileThemeCombo.SelectedItem = Canvas.TileTheme;
 
         Canvas.AttributionChanged += () => AttributionText.Text = Canvas.Attribution;
         AttributionText.Text = Canvas.Attribution;

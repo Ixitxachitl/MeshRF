@@ -4,6 +4,32 @@
              x:Class="MeshRF.AvaloniaApp.MapPanel"
              x:DataType="local:RadioViewModel"
              ClipToBounds="True">
+    <UserControl.Styles>
+        <!-- Fluent paints a button's fill through its inner ContentPresenter
+             per visual state, ignoring the button's own Background, so the
+             states have to be coloured there or they fall back to the stock
+             light brushes. -->
+        <Style Selector="ToggleButton#WaypointToggle /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="ToggleButton#WaypointToggle:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="ToggleButton#WaypointToggle:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushPressed}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="ToggleButton#WaypointToggle:checked /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="ToggleButton#WaypointToggle:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+    </UserControl.Styles>
     <Grid>
         <!-- Base layer: the custom-drawn slippy map. Everything below is
              chrome floating over it. -->
@@ -61,12 +87,36 @@
             </StackPanel>
         </Border>
 
-        <!-- New-waypoint composer: what Ctrl+left-click sends. -->
-        <Expander HorizontalAlignment="Right" VerticalAlignment="Top"
-                  Margin="8" Header="Waypoint" IsExpanded="False"
-                  Background="{DynamicResource BrushPanelBackground}"
-                  BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-            <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
+        <!-- New-waypoint composer: what Ctrl+left-click sends.
+             Deliberately not an Expander. Fluent's Expander header paints its
+             hover fill through inner template presenters that don't span the
+             whole header, which over a dark map showed as mismatched patches.
+             A plain ToggleButton plus a Border is fully colour-controlled. -->
+        <!-- Docked rather than stacked so the open panel is bounded by the map's
+             height and scrolls, instead of overflowing and being clipped. -->
+        <DockPanel HorizontalAlignment="Right" VerticalAlignment="Stretch" Margin="8" Width="232">
+            <ToggleButton x:Name="WaypointToggle" DockPanel.Dock="Top" HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Stretch" Padding="6,2"
+                          Background="{DynamicResource BrushPanelBackground}"
+                          BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                <DockPanel>
+                    <Panel DockPanel.Dock="Right">
+                        <TextBlock Text="▾" FontSize="10" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource BrushSubtle}"
+                                   IsVisible="{Binding !#WaypointToggle.IsChecked}" />
+                        <TextBlock Text="▴" FontSize="10" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource BrushSubtle}"
+                                   IsVisible="{Binding #WaypointToggle.IsChecked}" />
+                    </Panel>
+                    <TextBlock Text="Waypoint" VerticalAlignment="Center"
+                               Foreground="{DynamicResource BrushAppForeground}" />
+                </DockPanel>
+            </ToggleButton>
+
+            <Border IsVisible="{Binding #WaypointToggle.IsChecked}" VerticalAlignment="Top"
+                    Background="{DynamicResource BrushPanelBackground}"
+                    BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1,0,1,1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Orientation="Vertical" Width="220" Margin="6,4">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="WP" VerticalAlignment="Center" />
@@ -129,6 +179,7 @@
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
-        </Expander>
+            </Border>
+        </DockPanel>
     </Grid>
 </UserControl>

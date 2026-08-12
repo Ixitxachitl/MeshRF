@@ -570,14 +570,18 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Short" Width="Auto" Binding="{Binding ShortName, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
-                            <DataGridTextColumn Header="Node name" Width="*" Binding="{Binding LongName, DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="Status" Width="2*" Binding="{Binding NodeStatus, DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="Role" Width="Auto" Binding="{Binding Role, DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="Node ID" Width="Auto" Binding="{Binding DisplayId, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
-                            <DataGridTextColumn Header="Last heard" Width="Auto" Binding="{Binding LastHeard, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}', DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="RSSI" Width="Auto" Binding="{Binding RssiDbm, StringFormat='{}{0:F0} dBm', DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="SNR" Width="Auto" Binding="{Binding SnrDb, StringFormat='{}{0:F1}', DataType=nodes:NodeRecord}" />
+                            <!-- SortMemberPath is spelled out because Avalonia only infers it
+                                 from a classic Binding, not the compiled bindings this project
+                                 uses by default. Without it every column reports an empty path,
+                                 so the saved node sort can be neither restored nor read back. -->
+                            <DataGridTextColumn Header="Short" Width="Auto" SortMemberPath="ShortName" Binding="{Binding ShortName, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                            <DataGridTextColumn Header="Node name" Width="*" SortMemberPath="LongName" Binding="{Binding LongName, DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="Status" Width="2*" SortMemberPath="NodeStatus" Binding="{Binding NodeStatus, DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="Role" Width="Auto" SortMemberPath="Role" Binding="{Binding Role, DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="Node ID" Width="Auto" SortMemberPath="DisplayId" Binding="{Binding DisplayId, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                            <DataGridTextColumn Header="Last heard" Width="Auto" SortMemberPath="LastHeard" Binding="{Binding LastHeard, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}', DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="RSSI" Width="Auto" SortMemberPath="RssiDbm" Binding="{Binding RssiDbm, StringFormat='{}{0:F0} dBm', DataType=nodes:NodeRecord}" />
+                            <DataGridTextColumn Header="SNR" Width="Auto" SortMemberPath="SnrDb" Binding="{Binding SnrDb, StringFormat='{}{0:F1}', DataType=nodes:NodeRecord}" />
                             <DataGridTextColumn Width="Auto" Binding="{Binding HopsAway, DataType=nodes:NodeRecord}" >
                                 <DataGridTextColumn.Header>
                                     <TextBlock Text="🐇" ToolTip.Tip="Hops away" />

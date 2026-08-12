@@ -90,8 +90,12 @@ public partial class RadioViewModel
         "Ch3 Voltage", "Ch3 Current",
     ];
 
+    /// <summary>Short name is the useful default — a node number label is just
+    /// the ID already shown in the grid. Overridden from settings at startup.</summary>
+    public const string DefaultMapNodeLabelMode = "Short Name";
+
     [ObservableProperty]
-    private string _mapNodeLabelMode = "Node Number";
+    private string _mapNodeLabelMode = DefaultMapNodeLabelMode;
 
     partial void OnMapNodeLabelModeChanged(string value)
     {

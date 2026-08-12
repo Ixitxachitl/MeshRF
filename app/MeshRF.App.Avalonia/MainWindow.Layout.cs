@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.ComponentModel;
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
+using Avalonia.Threading;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -39,9 +42,54 @@ public partial class MainWindow
 
         ApplyColumnWidths(NodesGridProxy, settings.NodeColumnWidths);
         ApplyColumnWidths(WaypointsGridProxy, settings.WaypointColumnWidths);
-        _viewModel.ApplyNodeSort(settings.NodeSortMemberPath, settings.NodeSortDescending);
+
+        // Restoring the sort has to wait for the grid: sorting through the
+        // column (rather than poking the collection view) is what also lights
+        // up the header's direction arrow, and columns aren't realized yet
+        // when ApplyLayout runs from the constructor.
+        _pendingNodeSortPath = settings.NodeSortMemberPath;
+        _pendingNodeSortDescending = settings.NodeSortDescending;
+        _lastNodeSort = (settings.NodeSortMemberPath ?? string.Empty, settings.NodeSortDescending);
+        NodesGridProxy.Loaded += OnNodesGridLoaded;
+        NodesGridProxy.Sorting += OnNodesGridSorting;
 
         _layoutApplied = true;
+    }
+
+    private string? _pendingNodeSortPath;
+    private bool _pendingNodeSortDescending;
+    private (string Path, bool Descending) _lastNodeSort;
+
+    /// <summary>Records the sort as the user makes it. Sorting fires before the
+    /// grid applies it, so read the resulting state on the next dispatcher
+    /// pass — this way the choice survives even if the app exits without a
+    /// clean Closing.</summary>
+    private void OnNodesGridSorting(object? sender, DataGridColumnEventArgs e) =>
+        Dispatcher.UIThread.Post(() =>
+        {
+            var current = _viewModel.CurrentNodeSort;
+            if (!string.IsNullOrEmpty(current.Path)) _lastNodeSort = current;
+        }, DispatcherPriority.Background);
+
+    private void OnNodesGridLoaded(object? sender, RoutedEventArgs e)
+    {
+        NodesGridProxy.Loaded -= OnNodesGridLoaded;
+        if (string.IsNullOrWhiteSpace(_pendingNodeSortPath)) return;
+
+        foreach (var column in NodesGridProxy.Columns)
+        {
+            if (!string.Equals(column.SortMemberPath, _pendingNodeSortPath, StringComparison.Ordinal))
+                continue;
+            // Sorting through the column also lights up the header arrow. Note
+            // it does not populate the collection view's SortDescriptions the
+            // way a user's header click does, which is why SaveLayout keeps the
+            // _lastNodeSort fallback — otherwise a restored-but-untouched sort
+            // would save as empty and be forgotten.
+            column.Sort(_pendingNodeSortDescending
+                ? ListSortDirection.Descending
+                : ListSortDirection.Ascending);
+            return;
+        }
     }
 
     /// <summary>Restore saved pixel widths onto the grid's columns, in order.</summary>
@@ -154,6 +202,7 @@ public partial class MainWindow
         settings.WaypointColumnWidths = SaveColumnWidths(WaypointsGridProxy);
 
         var (sortPath, sortDescending) = _viewModel.CurrentNodeSort;
+        if (string.IsNullOrEmpty(sortPath)) (sortPath, sortDescending) = _lastNodeSort;
         settings.NodeSortMemberPath = sortPath;
         settings.NodeSortDescending = sortDescending;
 
