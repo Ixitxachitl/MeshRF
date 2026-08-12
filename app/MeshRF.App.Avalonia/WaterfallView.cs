@@ -36,6 +36,90 @@ public sealed class WaterfallView : Image
     public static readonly StyledProperty<WaterfallColormap> ColormapProperty =
         AvaloniaProperty.Register<WaterfallView, WaterfallColormap>(nameof(Colormap), WaterfallColormap.Turbo);
 
+    /// <summary>Show every stored frame scaled to fit, instead of the live
+    /// scrolling ring. Used by the frozen last-packet panel.</summary>
+    public static readonly StyledProperty<bool> ScaleToFitProperty =
+        AvaloniaProperty.Register<WaterfallView, bool>(nameof(ScaleToFit));
+
+    /// <summary>Time on the horizontal axis (left = oldest) and frequency on
+    /// the vertical, so a chirp stretches across the panel instead of being a
+    /// cramped diagonal.</summary>
+    public static readonly StyledProperty<bool> TimeHorizontalProperty =
+        AvaloniaProperty.Register<WaterfallView, bool>(nameof(TimeHorizontal));
+
+    public bool ScaleToFit { get => GetValue(ScaleToFitProperty); set => SetValue(ScaleToFitProperty, value); }
+    public bool TimeHorizontal { get => GetValue(TimeHorizontalProperty); set => SetValue(TimeHorizontalProperty, value); }
+
+    // ScaleToFit storage: every frame from ReplaceFrames, row-major.
+    private float[]? _scaleFrames;
+    private int _scaleFrameCount;
+    private int _scaleBinCount;
+
+    /// <summary>Replace the displayed content with a fixed set of frames
+    /// (oldest first). Only meaningful with <see cref="ScaleToFit"/>.</summary>
+    public void ReplaceFrames(IReadOnlyList<float[]> frames)
+    {
+        if (frames.Count == 0 || frames[0].Length == 0)
+        {
+            _scaleFrames = null;
+            _scaleFrameCount = 0;
+            _scaleBinCount = 0;
+        }
+        else
+        {
+            _scaleBinCount = frames[0].Length;
+            _scaleFrameCount = frames.Count;
+            _scaleFrames = new float[(long)_scaleFrameCount * _scaleBinCount];
+            for (int i = 0; i < frames.Count; i++)
+            {
+                var f = frames[i];
+                if (f.Length != _scaleBinCount) continue;
+                Array.Copy(f, 0, _scaleFrames, (long)i * _scaleBinCount, _scaleBinCount);
+            }
+        }
+        // Derive display levels from this snapshot. Without this the frozen
+        // panel keeps whatever floor/ceil the live waterfall last set (or the
+        // -100/0 defaults), which washes the packet out — auto-levels otherwise
+        // only run on Push, which a replaced frame set never goes through.
+        if (AutoLevels) ApplySnapshotContrast();
+
+        if (_bmp is null) EnsureBitmap();
+        Render();
+    }
+
+    /// <summary>Robust per-snapshot levels (5th/99.5th percentile with a small
+    /// margin and a 24 dB minimum span), matching MeshRF.App's
+    /// ApplySnapshotContrast.</summary>
+    private void ApplySnapshotContrast()
+    {
+        if (_scaleFrames is null) return;
+        int total = _scaleFrameCount * _scaleBinCount;
+        if (total < 16) return;
+
+        var vals = new float[total];
+        int p = 0;
+        for (int i = 0; i < total; i++)
+        {
+            float v = _scaleFrames[i];
+            if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+            vals[p++] = v;
+        }
+        if (p < 16) return;
+
+        Array.Sort(vals, 0, p);
+        float p05 = vals[(int)Math.Clamp(Math.Round((p - 1) * 0.05), 0, p - 1)];
+        float p995 = vals[(int)Math.Clamp(Math.Round((p - 1) * 0.995), 0, p - 1)];
+
+        double floor = p05 - 2.0;
+        double ceil = p995 + 2.0;
+        if (ceil - floor < 24.0) ceil = floor + 24.0;
+
+        // Suppress the change-callback re-render; Render() runs right after.
+        _suppressRender = true;
+        try { FloorDb = floor; CeilDb = ceil; }
+        finally { _suppressRender = false; }
+    }
+
     public double FloorDb { get => GetValue(FloorDbProperty); set => SetValue(FloorDbProperty, value); }
     public double CeilDb { get => GetValue(CeilDbProperty); set => SetValue(CeilDbProperty, value); }
     public bool AutoLevels { get => GetValue(AutoLevelsProperty); set => SetValue(AutoLevelsProperty, value); }
@@ -278,6 +362,14 @@ public sealed class WaterfallView : Image
             byte* back = (byte*)fb.Address.ToPointer();
             int w = _w;
             int h = _h;
+
+            if (ScaleToFit && _scaleFrames is not null && _scaleFrameCount > 0 && _scaleBinCount > 0)
+            {
+                RenderScaled(back, stride, w, h, floorF, invRange);
+                InvalidateVisual();
+                return;
+            }
+
             int n = _binCount;
 
             if (_ring is null || n == 0)
@@ -327,6 +419,65 @@ public sealed class WaterfallView : Image
             }
         }
         InvalidateVisual();
+    }
+
+    /// <summary>Draw every stored frame scaled to the panel. With
+    /// <see cref="TimeHorizontal"/>, x = time (left oldest) and y = frequency
+    /// (top = high bin); otherwise x = frequency and y = time (top newest),
+    /// matching the live waterfall's orientation.</summary>
+    private unsafe void RenderScaled(byte* back, int stride, int w, int h, float floorF, float invRange)
+    {
+        int frames = _scaleFrameCount, bins = _scaleBinCount;
+        fixed (uint* lut = _lut)
+        fixed (float* src = _scaleFrames)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                uint* dstRow = (uint*)(back + y * stride);
+                for (int x = 0; x < w; x++)
+                {
+                    // Map this pixel to a (frame, bin) span and max-hold it, so
+                    // downscaling can't drop a one-pixel-wide chirp.
+                    int t0, t1, b0, b1;
+                    if (TimeHorizontal)
+                    {
+                        SpanFor(x, w, frames, out t0, out t1);
+                        SpanFor(h - 1 - y, h, bins, out b0, out b1);
+                    }
+                    else
+                    {
+                        SpanFor(y, h, frames, out t0, out t1);
+                        SpanFor(x, w, bins, out b0, out b1);
+                    }
+
+                    float v = float.NegativeInfinity;
+                    for (int t = t0; t < t1; t++)
+                    {
+                        float* frame = src + (long)t * bins;
+                        for (int b = b0; b < b1; b++)
+                        {
+                            float c = frame[b];
+                            if (!float.IsNaN(c) && !float.IsInfinity(c) && c > v) v = c;
+                        }
+                    }
+                    if (float.IsNegativeInfinity(v)) v = floorF;
+                    int idx = (int)((v - floorF) * invRange);
+                    if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                    dstRow[x] = lut[idx];
+                }
+            }
+        }
+    }
+
+    /// <summary>Map output pixel <paramref name="i"/> of <paramref name="outCount"/>
+    /// onto a half-open source span, always at least one wide.</summary>
+    private static void SpanFor(int i, int outCount, int srcCount, out int start, out int end)
+    {
+        start = (int)((long)i * srcCount / outCount);
+        end = (int)(((long)(i + 1) * srcCount + outCount - 1) / outCount);
+        if (start < 0) start = 0; else if (start >= srcCount) start = srcCount - 1;
+        if (end <= start) end = start + 1;
+        if (end > srcCount) end = srcCount;
     }
 
     private static byte ToByte(float f)

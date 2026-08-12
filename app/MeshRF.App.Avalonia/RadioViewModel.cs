@@ -245,6 +245,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     public string ToggleButtonText => IsRunning ? "Stop RX" : "Start RX";
 
+    /// <summary>Raised when a CRC-valid packet decodes, so the view can freeze
+    /// a spectrogram of it (MeshRF.App's PacketDecoded).</summary>
+    public event Action? PacketDecoded;
+
     /// <summary>Exposed so MainWindow's code-behind can drive the
     /// spectrum/waterfall pull loop — mirrors how MeshRF.App's
     /// MainWindow.xaml.cs owns that render loop rather than MainViewModel.</summary>
@@ -604,6 +608,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
         _rxRouter.ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: packetRssiDbm);
+
+        // A CRC-valid payload means a real packet just landed; the view freezes
+        // a spectrogram of it. Raised after routing so the snapshot can't delay
+        // message handling.
+        PacketDecoded?.Invoke();
     }
 
     private static byte[] HexToBytes(string hex)

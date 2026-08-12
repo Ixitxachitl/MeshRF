@@ -661,12 +661,17 @@
                                                  CeilDb="{Binding WaterfallCeilDb, Mode=TwoWay}"
                                                  AutoLevels="{Binding WaterfallAutoLevels, Mode=TwoWay}"
                                                  Colormap="{Binding WaterfallColormap}" />
+                            <!-- Frozen spectrogram of the most recently decoded packet. -->
                             <Border Grid.Row="2" Margin="0,2,0,2"
-                                    Background="{DynamicResource BrushPanelBackground}"
+                                    Background="#DD101418"
                                     BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-                                <TextBlock Text="Last packet (not ported yet)" FontSize="11"
-                                           Foreground="{DynamicResource BrushSubtle}"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Name="LastPacketTitle" Text="Last packet"
+                                               Margin="4,2,4,2" FontWeight="SemiBold" FontSize="11" />
+                                    <local:WaterfallView x:Name="LastPacket" Margin="2"
+                                                         AutoLevels="True" ScaleToFit="True" TimeHorizontal="True"
+                                                         Colormap="{Binding WaterfallColormap}" />
+                                </DockPanel>
                             </Border>
                         </Grid>
                     </Grid>

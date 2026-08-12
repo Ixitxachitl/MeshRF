@@ -52,6 +52,8 @@ public partial class MainWindow : Window
         _spectrumTimer.Tick += (_, _) => PullSpectrum();
         _spectrumTimer.Start();
 
+        _viewModel.PacketDecoded += OnPacketDecoded;
+
         // Capture layout while the visual tree is still alive; Closed fires
         // after teardown, when the grids' measured sizes are gone.
         Closing += (_, _) => SaveLayout();
@@ -131,6 +133,10 @@ public partial class MainWindow : Window
         for (int frameIdx = 0; frameIdx < framesPulled; frameIdx++)
         {
             var frame = _wfFrameBuffer.AsSpan(frameIdx * bins, bins);
+            // Snapshot history takes RAW frames, not the max-held rows below: a
+            // chirp sweeps its bandwidth in a few ms, so a row that max-holds
+            // tens of ms is hot at every frequency and renders as a solid bar.
+            AppendSnapshotHistory(frame);
             if (!_wfRowAccumValid || _wfRowAccum.Length != bins)
             {
                 if (_wfRowAccum.Length != bins) _wfRowAccum = new float[bins];
@@ -151,6 +157,136 @@ public partial class MainWindow : Window
                 _wfRowAccumValid = false;
             }
         }
+    }
+
+    // Rolling history of RAW spectrum frames for the frozen snapshot, kept at
+    // full time resolution so chirp structure survives. At ~2000 frames/s this
+    // holds roughly a second — long enough to contain a packet, and the burst
+    // crop below trims it to just the packet.
+    private const int HistoryFrames = 2048;
+    private float[][]? _specHistoryRing;
+    private int _specHistoryWrite;
+    private int _specHistoryCount;
+    private int _specHistoryBinCount;
+
+    private void AppendSnapshotHistory(ReadOnlySpan<float> frame)
+    {
+        if (_specHistoryRing is null || _specHistoryBinCount != frame.Length)
+        {
+            _specHistoryBinCount = frame.Length;
+            _specHistoryRing = new float[HistoryFrames][];
+            for (int i = 0; i < HistoryFrames; i++) _specHistoryRing[i] = new float[_specHistoryBinCount];
+            _specHistoryWrite = 0;
+            _specHistoryCount = 0;
+        }
+        frame.CopyTo(_specHistoryRing[_specHistoryWrite]);
+        _specHistoryWrite = (_specHistoryWrite + 1) % HistoryFrames;
+        if (_specHistoryCount < HistoryFrames) _specHistoryCount++;
+    }
+
+    /// <summary>Trim the row window down to the burst. Each row's peak is
+    /// compared against the window's median peak (the noise floor); rows more
+    /// than 6 dB above it are considered signal. Returns the input unchanged if
+    /// no clear burst stands out, so a marginal packet still shows something.</summary>
+    private static List<float[]> CropToBurst(List<float[]> rows)
+    {
+        if (rows.Count < 4) return rows;
+
+        var peaks = new float[rows.Count];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            float peak = float.NegativeInfinity;
+            foreach (var v in rows[i])
+                if (!float.IsNaN(v) && !float.IsInfinity(v) && v > peak) peak = v;
+            peaks[i] = float.IsNegativeInfinity(peak) ? 0f : peak;
+        }
+
+        var sorted = (float[])peaks.Clone();
+        Array.Sort(sorted);
+        float noise = sorted[sorted.Length / 2];
+        float threshold = noise + 6f;
+
+        int first = -1, last = -1;
+        for (int i = 0; i < peaks.Length; i++)
+        {
+            if (peaks[i] < threshold) continue;
+            if (first < 0) first = i;
+            last = i;
+        }
+        if (first < 0 || last <= first) return rows;
+
+        const int pad = 2;
+        first = Math.Max(0, first - pad);
+        last = Math.Min(rows.Count - 1, last + pad);
+        return rows.GetRange(first, last - first + 1);
+    }
+
+    /// <summary>Thin a burst down to about one frame per output pixel. The
+    /// renderer max-holds whatever extra frames land in a column, which
+    /// re-smears the chirp — the same averaging that made the snapshot a solid
+    /// bar, just at column scale. Picking nearest-neighbour frames keeps each
+    /// column a single instant in time, so the sweep stays sharp.</summary>
+    private static List<float[]> ThinToWidth(List<float[]> frames, int targetColumns)
+    {
+        if (targetColumns <= 0 || frames.Count <= targetColumns) return frames;
+
+        var thinned = new List<float[]>(targetColumns);
+        for (int i = 0; i < targetColumns; i++)
+        {
+            int src = (int)((long)i * frames.Count / targetColumns);
+            thinned.Add(frames[Math.Min(src, frames.Count - 1)]);
+        }
+        return thinned;
+    }
+
+    /// <summary>Oldest-first history row, index 0 = oldest retained.</summary>
+    private float[] GetHistoryFrameByAge(int index)
+    {
+        int oldest = (_specHistoryWrite - _specHistoryCount + HistoryFrames) % HistoryFrames;
+        return _specHistoryRing![(oldest + index) % HistoryFrames];
+    }
+
+    /// <summary>Freeze a spectrogram of the packet that just decoded, from the
+    /// row history above. Mirrors MeshRF.App's FreezeLastPacket.</summary>
+    private void OnPacketDecoded()
+    {
+        var core = _viewModel.Core;
+        if (core is null || _specHistoryRing is null || _specHistoryCount == 0) return;
+
+        int bins = _specHistoryBinCount;
+        if (bins <= 0) return;
+
+        // Zoom to roughly 1.4x the 250 kHz channel so the chirp fills the panel
+        // instead of being a sliver in the middle of the full span.
+        const double zoomHz = 350_000.0;
+        double spanHz = _viewModel.SpectrumSpanHz > 0 ? _viewModel.SpectrumSpanHz
+                      : core.SampleRateHz > 0 ? core.SampleRateHz
+                      : 2_400_000.0;
+        int half = Math.Clamp((int)Math.Round(zoomHz / spanHz * bins / 2.0), 16, bins / 2);
+        int lo = bins / 2 - half, width = half * 2;
+
+        // Slice the zoom window out of every retained row first.
+        var all = new List<float[]>(_specHistoryCount);
+        for (int i = 0; i < _specHistoryCount; i++)
+        {
+            var slice = new float[width];
+            Array.Copy(GetHistoryFrameByAge(i), lo, slice, 0, width);
+            all.Add(slice);
+        }
+
+        // The retained window is ~1-2s of rows but a packet is a few hundred ms,
+        // so showing all of them leaves the burst as a narrow off-centre sliver.
+        // Crop to the rows that actually carry signal (peak well above the
+        // window's noise floor), padded slightly so the edges stay visible.
+        var frames = CropToBurst(all);
+
+        // Hand the view roughly one frame per pixel column. More than that and
+        // the renderer max-holds them together, blurring the sweep again.
+        int columns = (int)Math.Round(LastPacket.Bounds.Width);
+        if (columns > 0) frames = ThinToWidth(frames, columns);
+
+        LastPacket.ReplaceFrames(frames);
+        LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
     }
 
     private async void OnCopyNode(object? sender, RoutedEventArgs e)
