@@ -27,8 +27,8 @@ public sealed record SampleRateOption(uint Hz, string Label)
 /// through the same MeshRxRouter (MeshRF.Core) the WPF app uses, via
 /// AvaloniaMeshRxHost. Also owns node/waypoint/message context-menu actions
 /// (traceroute, telemetry/position/nodeinfo requests, reply/react, etc.) —
-/// mirrors MeshRF.App's MainViewModel, minus map/games/MQTT/PKI, which
-/// aren't ported yet.
+/// mirrors MeshRF.App's MainViewModel, minus the games, which are deliberately
+/// not carried over.
 /// </summary>
 public partial class RadioViewModel : ObservableObject, IDisposable
 {
@@ -476,11 +476,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.RelayScheduler = new RelayScheduler
         {
             Transmit = frame => TransmitFrameAsync(frame),
-            Log = _rxHost.Log,
+            // The scheduler logs from a thread-pool continuation once its
+            // contention delay elapses, and _rxHost.Log mutates LogLines, which
+            // is bound to a ListBox — so it has to be marshalled.
+            Log = LogFromAnyThread,
         };
         // Enables PKC decode in the shared router; without it every direct
         // message stays undecodable.
         _rxHost.MyPrivateKeyProvider = () => TryParseKeyBase64(MyPrivateKey);
+        // Uplink is a parallel side-effect of receiving, alongside relaying —
+        // the shared router calls this for every non-echo frame it handles.
+        _rxHost.UplinkHandler = UplinkIfEligible;
+        InitMqtt();
         _rxHost.FormatTemperature = FormatTemperature;
         _rxHost.FormatPressure = hpa => $"{hpa:0.0} hPa";
         // Restore per-channel ringtone mutes. The channel tabs exist by now
@@ -563,10 +570,17 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // compile-time defaults over the saved schedules and then read them
         // back as "off".
         LoadAutoReportSettings();
+        LoadMqttSettings(_settings);
 
         // Everything is loaded — from here on property changes may persist.
         _settingsLoaded = true;
         SaveSettings();
+
+        // The bridge was deliberately not started during the load above (its
+        // change handlers bail out while _settingsLoaded is false), so connect
+        // once here with the complete configuration. The map report schedule
+        // needs no priming — it starts due, so the first poll tick publishes.
+        RefreshMqttBridge();
 
         HookNodeFilter();
         RefreshSelfNode(); // our own row, so the configured name resolves from the first frame
@@ -614,6 +628,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Ahead of the running check: auto-reports only need a TX-capable
         // device, not an active receive.
         KickAutoReportTick();
+        // Ahead of it too, and separate from the auto-report tick: a map report
+        // is published straight to the broker and never goes over the air, so
+        // it needs no TX-capable device at all.
+        TickMapReport();
 
         if (_core is null) return;
 
@@ -1094,6 +1112,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.HomeLatitude = double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ? lat : null;
         _settings.HomeLongitude = double.TryParse(HomeLongitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lon) ? lon : null;
         _settings.HomeAltitude = int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var alt) ? alt : null;
+        SaveMqttSettings(_settings);
     }
 
     private void SaveOpenConversations()
@@ -1108,6 +1127,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private uint NextPacketId() => (uint)Random.Shared.NextInt64(1, uint.MaxValue);
 
+    /// <summary>Appends a log line from whichever thread the caller is on.
+    /// LogLines is bound to the UI, so background callers must be marshalled.</summary>
+    private void LogFromAnyThread(string line)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) _rxHost.Log(line);
+        else Dispatcher.UIThread.Post(() => _rxHost.Log(line));
+    }
+
     /// <summary>Transmit a pre-built frame using the currently selected
     /// preset/frequency/TX gain settings. Runs off the UI thread.</summary>
     /// <summary>Transmits one frame, serialised against every other send and
@@ -1121,16 +1148,28 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
 
         await _txSemaphore.WaitAsync().ConfigureAwait(false);
+        bool sent;
         try
         {
             await WaitForTxOpportunityAsync().ConfigureAwait(false);
-            return await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
+            sent = await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
                              .ConfigureAwait(true);
         }
         finally
         {
             _txSemaphore.Release();
         }
+
+        // Every send in the app funnels through here, so this is the one place
+        // self-originated traffic needs to be offered to MQTT — firmware
+        // uplinks its own packets from Router::send for the same reason.
+        //
+        // Posted rather than called inline: the ConfigureAwait(false) above
+        // drops the UI context, and TransmitBackground enters this from a
+        // thread-pool thread anyway, so the uplink would otherwise read the
+        // channel tabs and append log lines off the UI thread.
+        if (sent) Dispatcher.UIThread.Post(() => UplinkSelfOriginatedIfEligible(frame));
+        return sent;
     }
 
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
@@ -1316,6 +1355,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // MuteRtttl lives in settings.json, not the channel store, so the
         // dialog's Save has to flush settings too.
         SaveSettings();
+        // A channel's name or downlink flag decides which broker topics we
+        // subscribe to, so the bridge has to re-evaluate its subscriptions.
+        RefreshMqttBridge();
     }
 
     [RelayCommand]
@@ -1662,6 +1704,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         _pollTimer.Stop();
         DisposeMyNode();
+        DisposeMqtt();
         _ringtone.Dispose();
         _rxRouter.Dispose();
         _rxHost.Dispose();

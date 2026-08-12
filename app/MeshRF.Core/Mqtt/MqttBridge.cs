@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-using MeshRF.Mqtt;
 using Meshtastic.Protobufs;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
 using MQTTnet.Packets;
 
-namespace MeshRF.App.Mqtt;
+namespace MeshRF.Mqtt;
 
 /// <summary>Effective configuration applied to a <see cref="MqttBridge"/>.
-/// Values here are already resolved (see <see cref="MeshRF.Mqtt.MqttPolicy"/>
+/// Values here are already resolved (see <see cref="MqttPolicy"/>
 /// for the "empty means firmware default" rules) except where noted.</summary>
 public sealed record MqttBridgeOptions(
     bool Enabled,
@@ -56,7 +55,9 @@ public sealed record MqttBridgeOptions(
 /// This class does no Meshtastic protocol interpretation beyond parsing the
 /// ServiceEnvelope wrapper — deciding whether to accept/decrypt/inject a
 /// received envelope, and what to publish for an outgoing packet, is
-/// <see cref="MeshRF.Mqtt.MqttPolicy"/>'s and the caller's job.
+/// <see cref="MqttPolicy"/>'s and the caller's job. It is UI-framework
+/// agnostic and lives here rather than in either app so the WPF and Avalonia
+/// front ends share one bridge.
 ///
 /// All events fire on MQTTnet's internal worker thread(s), not the UI
 /// thread — callers must marshal to the UI dispatcher themselves.
@@ -226,6 +227,12 @@ public sealed class MqttBridge : IDisposable
             await client.SubscribeAsync(filters).ConfigureAwait(false);
     }
 
+    /// <summary>Fires once per accepted publish, with the topic and payload
+    /// size. Every outgoing message goes through <see cref="Publish"/>, so
+    /// hooking this is enough to log all MQTT sends in one place. Fires on the
+    /// caller's thread — marshal to the UI dispatcher yourself.</summary>
+    public event Action<string, int>? Published;
+
     /// <summary>Enqueues a publish (fire-and-forget; the managed client
     /// queues it while offline and sends once connected, up to the configured
     /// pending-message limit). Safe to call even when disabled/disconnected —
@@ -234,7 +241,11 @@ public sealed class MqttBridge : IDisposable
     {
         IManagedMqttClient? client;
         lock (_lock) client = _client;
+        // Dropped rather than queued when there's no client, so this is
+        // deliberately below the null check — nothing was sent.
         if (client is null) return;
+
+        Published?.Invoke(topic, payload.Length);
 
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)

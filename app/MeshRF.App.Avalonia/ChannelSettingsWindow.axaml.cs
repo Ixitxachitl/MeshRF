@@ -5,9 +5,8 @@ using MeshRF.Channels;
 
 namespace MeshRF.AvaloniaApp;
 
-/// <summary>Per-channel settings dialog (name/role/PSK/location sharing/mute),
-/// ported from MeshRF.App's ChannelSettingsWindow. MQTT uplink/downlink isn't
-/// shown — this app has no MQTT bridge wired up yet.</summary>
+/// <summary>Per-channel settings dialog (name/role/PSK/location sharing/mute/
+/// MQTT uplink+downlink), ported from MeshRF.App's ChannelSettingsWindow.</summary>
 public partial class ChannelSettingsWindow : Window
 {
     private ChannelTabViewModel? _channel;
@@ -31,6 +30,8 @@ public partial class ChannelSettingsWindow : Window
         var options = (IReadOnlyList<PositionPrecisionOption>)w.PrecisionCombo.ItemsSource!;
         w.PrecisionCombo.SelectedItem = options.FirstOrDefault(o => o.Bits == channel.Config.PositionPrecision) ?? options[0];
         w.MuteRtttlCheck.IsChecked = channel.MuteRtttl;
+        w.UplinkCheck.IsChecked = channel.Config.UplinkEnabled;
+        w.DownlinkCheck.IsChecked = channel.Config.DownlinkEnabled;
         w.HashText.Text = $"hash 0x{channel.Config.Hash:X2}";
         w.Show(owner);
     }
@@ -76,6 +77,8 @@ public partial class ChannelSettingsWindow : Window
         _channel.Config.Psk = psk;
         if (PrecisionCombo.SelectedItem is PositionPrecisionOption precision)
             _channel.Config.PositionPrecision = precision.Bits;
+        _channel.Config.UplinkEnabled = UplinkCheck.IsChecked == true;
+        _channel.Config.DownlinkEnabled = DownlinkCheck.IsChecked == true;
         // Mute lives on the tab, not the ChannelConfig — it's a local
         // preference in settings.json rather than a mesh channel field.
         _channel.MuteRtttl = MuteRtttlCheck.IsChecked == true;

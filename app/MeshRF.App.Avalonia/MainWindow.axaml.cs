@@ -670,6 +670,16 @@ public partial class MainWindow : Window
         _identityWindow.Show(this);
     }
 
+    private MqttSettingsWindow? _mqttWindow;
+
+    private void OnOpenMqttSettings(object? sender, RoutedEventArgs e)
+    {
+        if (_mqttWindow is not null) { _mqttWindow.Activate(); return; }
+        _mqttWindow = new MqttSettingsWindow { DataContext = _viewModel };
+        _mqttWindow.Closed += (_, _) => _mqttWindow = null;
+        _mqttWindow.Show(this);
+    }
+
     private void OnOpenChannelSettings(object? sender, RoutedEventArgs e)
     {
         if (sender is not Control { DataContext: ChannelTabViewModel channel }) return;

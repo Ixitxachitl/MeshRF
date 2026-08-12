@@ -356,6 +356,9 @@
                         <DockPanel LastChildFill="True">
                             <Button DockPanel.Dock="Right" Content="Configure" Padding="8,2"
                                     Click="OnOpenNodeIdentity" ToolTip.Tip="Open My Node identity and settings" />
+                            <Button DockPanel.Dock="Right" Content="MQTT" Padding="8,2" Margin="0,0,4,0"
+                                    Click="OnOpenMqttSettings"
+                                    ToolTip.Tip="Open the MQTT bridge settings (uplink/downlink to a broker)" />
                             <!-- Our own recorded history, the counterpart of the
                                  per-node entries in the node grid's menu. -->
                             <Button DockPanel.Dock="Right" Content="Location" Padding="8,2" Margin="0,0,4,0"

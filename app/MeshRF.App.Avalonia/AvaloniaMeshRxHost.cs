@@ -14,11 +14,9 @@ namespace MeshRF.AvaloniaApp;
 /// %APPDATA%/config path the WPF app uses) into per-channel message tabs,
 /// routes direct messages addressed to us into per-peer conversation tabs,
 /// classifies reply/reaction text messages, and keeps <see cref="NodeStore"/>
-/// updated from NodeInfo/Position/Telemetry. No relay, MQTT, geofencing, or
-/// games yet — those stay WPF-only until ported. PKC (public-key) direct
-/// messages aren't supported (no node identity/PKI management in this
-/// scaffold yet); DMs are sent/received as legacy channel-PSK-encrypted
-/// unicast instead, exactly like a broadcast but addressed to one node.
+/// updated from NodeInfo/Position/Telemetry. Relaying and MQTT uplink are
+/// delegated out to the view model via <see cref="RelayScheduler"/> and
+/// <see cref="UplinkHandler"/>; the games stay WPF-only by choice.
 /// </summary>
 public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 {
@@ -586,7 +584,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         RelayScheduler.Schedule(header, relayFrame, nextHopLimit, delayMs);
     }
 
-    public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm) { }
+    /// <summary>Publishes eligible traffic to the MQTT bridge. Null until the
+    /// owner wires it up, which leaves uplink off.</summary>
+    public Action<byte[], MeshHeader, MeshDecodeResult?, bool, float?, float?>? UplinkHandler { get; set; }
+
+    public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm) =>
+        UplinkHandler?.Invoke(frame, header, result, isFromUs, snrDb, rssiDbm);
 
     public void OnOwnPacketHeard(MeshHeader header, MeshDecodeResult? ownDecode) { }
 

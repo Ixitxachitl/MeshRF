@@ -12,7 +12,24 @@ namespace MeshRF.Mesh;
 /// </summary>
 public sealed class RelayScheduler : IDisposable
 {
-    private readonly record struct Pending(CancellationTokenSource Cts, byte NextHopLimit);
+    private sealed class Pending
+    {
+        public required CancellationTokenSource Cts { get; init; }
+
+        /// <summary>hop_limit we will send at, i.e. already decremented.</summary>
+        public required byte NextHopLimit { get; init; }
+
+        /// <summary>hop_limit of the copy we heard, before any decrement. This —
+        /// not <see cref="NextHopLimit"/> — is what a later duplicate has to beat
+        /// to count as having taken a shorter path, since that is the like-for-like
+        /// comparison (firmware keeps the highest received hop limit per packet,
+        /// PacketHistory.cpp).</summary>
+        public required byte ReceivedHopLimit { get; init; }
+
+        /// <summary>Set once the delay has elapsed and we have committed to
+        /// sending. From then on the relay can no longer be called off.</summary>
+        public bool Transmitting;
+    }
 
     private readonly object _lock = new();
     private readonly Dictionary<ulong, Pending> _pending = new();
@@ -32,14 +49,20 @@ public sealed class RelayScheduler : IDisposable
     public void Schedule(MeshHeader header, byte[] relayFrame, byte nextHopLimit, int delayMs)
     {
         var key = Key(header.From, header.PacketId);
-        CancellationTokenSource cts;
+        Pending entry;
 
         lock (_lock)
         {
             if (_disposed || _pending.ContainsKey(key)) return;
-            cts = new CancellationTokenSource();
-            _pending[key] = new Pending(cts, nextHopLimit);
+            entry = new Pending
+            {
+                Cts = new CancellationTokenSource(),
+                NextHopLimit = nextHopLimit,
+                ReceivedHopLimit = header.HopLimit,
+            };
+            _pending[key] = entry;
         }
+        var cts = entry.Cts;
 
         _ = Task.Run(async () =>
         {
@@ -47,6 +70,12 @@ public sealed class RelayScheduler : IDisposable
             {
                 await Task.Delay(delayMs, cts.Token).ConfigureAwait(false);
                 if (cts.IsCancellationRequested) return;
+                // Latch before awaiting the send: Transmit waits on the TX
+                // semaphore and for a clear channel, which can take seconds, and
+                // a duplicate arriving in that window must not be able to cancel
+                // (pointless — the frame is already committed) or, worse, drop
+                // the entry and let a second relay of the same packet be queued.
+                lock (_lock) entry.Transmitting = true;
                 await Transmit(relayFrame).ConfigureAwait(false);
                 Log?.Invoke($"  relayed packet {header.PacketId:x8} ({header.HopLimit}->{nextHopLimit}) after {delayMs} ms");
             }
@@ -62,7 +91,7 @@ public sealed class RelayScheduler : IDisposable
             {
                 lock (_lock)
                 {
-                    if (_pending.TryGetValue(key, out var current) && current.Cts == cts)
+                    if (_pending.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
                         _pending.Remove(key);
                 }
                 cts.Dispose();
@@ -86,20 +115,31 @@ public sealed class RelayScheduler : IDisposable
         if (header.PacketId == 0) return false;
 
         var key = Key(header.From, header.PacketId);
-        Pending pending;
-        bool hasPending;
-        lock (_lock) hasPending = _pending.TryGetValue(key, out pending);
+        Pending? pending;
+        lock (_lock)
+        {
+            _pending.TryGetValue(key, out pending);
+            // Read under the lock: past this point the send is committed, so
+            // there is nothing left to cancel or upgrade.
+            if (pending is { Transmitting: true }) return false;
+        }
+        bool hasPending = pending is not null;
 
-        if (hasPending && header.HopLimit > pending.NextHopLimit && header.HopLimit > 0 &&
+        // Compare received-to-received. Against NextHopLimit (already
+        // decremented) an equal-distance duplicate looks like a shorter path,
+        // so two neighbours the same number of hops away would each re-arm us
+        // instead of cancelling — exactly the duplicate suppression this class
+        // exists to provide.
+        if (hasPending && header.HopLimit > pending!.ReceivedHopLimit && header.HopLimit > 0 &&
             RelayPolicy.IsRoutingRoleEnabled(ctx.Role))
         {
             Cancel(key, pending, log: false);
-            Log?.Invoke($"  relay upgraded for packet {header.PacketId:x8} (hop_limit {pending.NextHopLimit} -> {header.HopLimit})");
+            Log?.Invoke($"  relay upgraded for packet {header.PacketId:x8} (hop_limit {pending.ReceivedHopLimit} -> {header.HopLimit})");
             return true;
         }
 
         if (!RelayPolicy.RoleAllowsCancelingScheduledRelay(ctx, header)) return false;
-        if (hasPending) Cancel(key, pending, log: true);
+        if (hasPending) Cancel(key, pending!, log: true);
         return false;
     }
 
@@ -107,7 +147,7 @@ public sealed class RelayScheduler : IDisposable
     {
         lock (_lock)
         {
-            if (_pending.TryGetValue(key, out var current) && current.Cts == pending.Cts)
+            if (_pending.TryGetValue(key, out var current) && ReferenceEquals(current, pending))
                 _pending.Remove(key);
         }
 

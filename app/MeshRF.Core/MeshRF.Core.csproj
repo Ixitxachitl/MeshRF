@@ -21,6 +21,10 @@
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
     <PackageReference Include="Grpc.Tools" Version="2.67.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <!-- MQTT uplink/downlink bridge. Lives here rather than in an app project
+         so MeshRF.App and MeshRF.App.Avalonia share one implementation. -->
+    <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+    <PackageReference Include="MQTTnet.Extensions.ManagedClient" Version="4.3.7.1207" />
     <!-- USB serial GPS. Cross-platform, so the reader lives here rather than
          in either app. -->
     <PackageReference Include="System.IO.Ports" Version="9.0.0" />
