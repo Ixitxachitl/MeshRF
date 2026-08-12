@@ -3,7 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 
-namespace MeshRF.App.Location;
+namespace MeshRF.Location;
 
 public sealed record GpsSerialOptions(string? PortName, int? BaudRate);
 

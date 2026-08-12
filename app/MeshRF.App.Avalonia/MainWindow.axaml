@@ -296,8 +296,8 @@
                         </DockPanel>
                     </Border>
 
-                    <!-- Quick send bar — mirrors MeshRF.App's, minus the payload
-                         types this app can't build yet (env/AQ telemetry, status). -->
+                    <!-- Quick send bar. MeshRF.App prompts for a channel per
+                         payload; this one always uses the primary channel. -->
                     <Border Grid.Row="1" Margin="0,0,0,4" Padding="6,4"
                             Background="{DynamicResource BrushPanelBackground}"
                             BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
@@ -309,6 +309,12 @@
                                     ToolTip.Tip="Broadcast your POSITION payload on the primary channel" />
                             <Button Content="Device metrics" Padding="10,3" Command="{Binding SendSelfDeviceMetricsCommand}"
                                     ToolTip.Tip="Broadcast your device-metrics telemetry on the primary channel" />
+                            <Button Content="Env telemetry" Padding="10,3" Command="{Binding SendSelfEnvironmentMetricsCommand}"
+                                    ToolTip.Tip="Fetch weather for your home location, then broadcast TELEMETRY environment metrics" />
+                            <Button Content="AQ telemetry" Padding="10,3" Command="{Binding SendSelfAirQualityMetricsCommand}"
+                                    ToolTip.Tip="Fetch PM2.5/PM10 from the Open-Meteo air quality API, then broadcast TELEMETRY air quality metrics" />
+                            <Button Content="Status" Padding="10,3" Command="{Binding SendSelfNodeStatusCommand}"
+                                    ToolTip.Tip="Broadcast your NODE_STATUS_APP text on the primary channel" />
                         </StackPanel>
                     </Border>
 

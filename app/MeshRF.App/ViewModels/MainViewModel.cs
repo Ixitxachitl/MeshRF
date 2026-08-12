@@ -21,7 +21,7 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.App.Audio;
-using MeshRF.App.Location;
+using MeshRF.Location;
 using MeshRF.App.Mqtt;
 using MeshRF.App.Views;
 using MeshRF.Channels;

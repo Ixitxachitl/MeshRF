@@ -542,12 +542,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RingtoneVolume = savedRingtoneVolume;
         if (!string.IsNullOrWhiteSpace(savedRingtoneRtttl)) RingtoneRtttl = savedRingtoneRtttl;
         LoadNodeFilterSettings(_settings);
+        // Must precede the gate below: the SaveSettings() there writes every
+        // field this app owns, so loading after it would persist the
+        // compile-time defaults over the saved schedules and then read them
+        // back as "off".
+        LoadAutoReportSettings();
 
         // Everything is loaded — from here on property changes may persist.
         _settingsLoaded = true;
         SaveSettings();
 
         HookNodeFilter();
+        InitTelemetrySources();
+        InitGps();
         RestoreSelectedTab(savedLastSelectedChannelIndex, savedSelectedConversationNode);
 
         // Unconditional (not relying on OnCenterFreqMHzChanged, whose
@@ -587,6 +594,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private void Poll()
     {
+        // Ahead of the running check: auto-reports only need a TX-capable
+        // device, not an active receive.
+        KickAutoReportTick();
+
         if (_core is null) return;
 
         IsRunning = _core.IsRunning;
@@ -890,6 +901,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             _rxHost.UpdateMyNodeNum(parsed);
             _settings.UserNodeNum = parsed;
         }
+        OnPropertyChanged(nameof(MyMacAddress)); // derived from the node number
         SaveSettings();
     }
 
@@ -939,8 +951,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnMyFirmwareEditionChanged(string value) => SaveSettings();
     partial void OnRebroadcastModeChanged(string value) => SaveSettings();
     partial void OnRoutingRelayEnabledChanged(bool value) => SaveSettings();
-    partial void OnGpsSerialPortChanged(string value) => SaveSettings();
-    partial void OnGpsBaudRateTextChanged(string value) => SaveSettings();
+    // Port/baud edits restart the reader so a correction takes effect without
+    // toggling the source.
+    partial void OnGpsSerialPortChanged(string value) { ApplyLocationSource(startOrStop: true); SaveSettings(); }
+    partial void OnGpsBaudRateTextChanged(string value) { ApplyLocationSource(startOrStop: true); SaveSettings(); }
     partial void OnUseFahrenheitChanged(bool value) => SaveSettings();
     partial void OnUseMilesChanged(bool value) => SaveSettings();
 
@@ -948,6 +962,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(IsUsbSerialLocationSource));
         OnPropertyChanged(nameof(IsManualLocationSource));
+        ApplyLocationSource(startOrStop: true);
         SaveSettings();
     }
 
@@ -1046,6 +1061,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.MutedRingtoneChannels = Tabs.OfType<ChannelTabViewModel>()
             .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
         _settings.MapNodeLabelMode = MapNodeLabelMode;
+        StoreAutoReportSettings();
         _settings.UnitSystem = UnitSystemName;
         _settings.UseFahrenheit = UseFahrenheit;
         _settings.UseMiles = UseMiles;
@@ -1583,6 +1599,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _pollTimer.Stop();
+        DisposeMyNode();
         _ringtone.Dispose();
         _rxRouter.Dispose();
         _rxHost.Dispose();

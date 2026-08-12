@@ -1,0 +1,351 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+using System.Globalization;
+using Avalonia.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using MeshRF.Location;
+using MeshRF.Mesh;
+using MeshRF.Nodes;
+using MeshRF.Telemetry;
+
+namespace MeshRF.AvaloniaApp;
+
+/// <summary>
+/// The rest of the "My Node — Identity &amp; Settings" panel: derived identity
+/// fields, the USB serial GPS, the six auto-report schedules, and the
+/// weather/air-quality sources that fill environment and AQ telemetry.
+/// Completes the port of MeshRF.App's NodeIdentityWindow.
+/// </summary>
+public partial class RadioViewModel
+{
+    // ----- Derived identity -----
+
+    /// <summary>MAC derived from the node number (<c>02:00:xx:xx:xx:xx</c>),
+    /// matching the Meshtastic convention that the 32-bit node number is the
+    /// low four bytes. Read-only; set the node ID to change it.</summary>
+    public string MyMacAddress
+    {
+        get
+        {
+            uint n = _rxHost.MyNodeNum;
+            return n == 0
+                ? string.Empty
+                : $"02:00:{(n >> 24) & 0xFF:x2}:{(n >> 16) & 0xFF:x2}:{(n >> 8) & 0xFF:x2}:{n & 0xFF:x2}";
+        }
+    }
+
+    /// <summary>Derives the node ID from the current public key the same way
+    /// Meshtastic firmware does, so a PKI-derived identity stays consistent.</summary>
+    [RelayCommand]
+    private void GenerateNodeIdFromKey()
+    {
+        if (!PkiNodeNumber.TryFromPublicKey(TryParseKeyBase64(MyPublicKey), out var nodeNum)) return;
+        MyNodeIdText = $"!{nodeNum:x8}";
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPrivateKeyHidden))]
+    private bool _isPrivateKeyRevealed;
+
+    public bool IsPrivateKeyHidden => !IsPrivateKeyRevealed;
+
+    [RelayCommand]
+    private void ToggleRevealPrivateKey() => IsPrivateKeyRevealed = !IsPrivateKeyRevealed;
+
+    // ----- USB serial GPS -----
+
+    private readonly UsbSerialGpsService _gpsService = new();
+
+    [ObservableProperty] private string _gpsStatus = "Manual location selected.";
+
+    private void InitGps()
+    {
+        _gpsService.StatusChanged += status =>
+            Dispatcher.UIThread.Post(() => { if (IsUsbSerialLocationSource) GpsStatus = status; });
+        _gpsService.FixReceived += fix => Dispatcher.UIThread.Post(() => ApplyGpsFix(fix));
+        ApplyLocationSource(startOrStop: true);
+    }
+
+    private GpsSerialOptions BuildGpsOptions() => new(
+        string.IsNullOrWhiteSpace(GpsSerialPort) ? null : GpsSerialPort.Trim(),
+        int.TryParse(GpsBaudRateText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var baud) && baud > 0
+            ? baud : null);
+
+    /// <summary>Starts or stops the reader to match the selected source. The
+    /// lat/lon boxes stay the single source of truth for our position: a fix
+    /// writes into them, which is also what the map marker reads.</summary>
+    private void ApplyLocationSource(bool startOrStop)
+    {
+        var options = BuildGpsOptions();
+        _gpsService.UpdateOptions(options);
+
+        if (IsUsbSerialLocationSource)
+        {
+            if (startOrStop) _gpsService.Restart();
+            GpsStatus = options.PortName is null && options.BaudRate is null
+                ? "USB GPS: auto-detecting port and baud..."
+                : $"USB GPS: waiting on {options.PortName ?? "auto"} @ {(options.BaudRate?.ToString(CultureInfo.InvariantCulture)) ?? "auto"}...";
+        }
+        else
+        {
+            if (startOrStop) _gpsService.Stop();
+            GpsStatus = "Manual location selected.";
+        }
+    }
+
+    private void ApplyGpsFix(GpsFix fix)
+    {
+        GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}" +
+                    (fix.AltitudeM is int a ? $"  alt {a} m" : string.Empty);
+        if (!IsUsbSerialLocationSource) return;
+
+        HomeLatitudeText = fix.Latitude.ToString("F6", CultureInfo.InvariantCulture);
+        HomeLongitudeText = fix.Longitude.ToString("F6", CultureInfo.InvariantCulture);
+        if (fix.AltitudeM is int alt)
+            HomeAltitudeText = alt.ToString(CultureInfo.InvariantCulture);
+    }
+
+    // ----- Weather / air quality sources -----
+
+    private readonly OpenMeteoClient _openMeteo = new();
+
+    [ObservableProperty] private string _weatherTelemetryStatus = "Weather telemetry: idle.";
+    [ObservableProperty] private string _airQualityTelemetryStatus = "Air quality telemetry: idle.";
+
+    private void InitTelemetrySources()
+    {
+        _openMeteo.WeatherStatusChanged += s => Dispatcher.UIThread.Post(() => WeatherTelemetryStatus = s);
+        _openMeteo.AirQualityStatusChanged += s => Dispatcher.UIThread.Post(() => AirQualityTelemetryStatus = s);
+    }
+
+    // ----- Extra self-sends (the three the quick-send bar doesn't cover) -----
+
+    [RelayCommand]
+    private async Task SendSelfNodeStatus()
+    {
+        if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
+        if (string.IsNullOrWhiteSpace(MyNodeStatus)) { StatusText = "Set a status text first."; return; }
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        var frame = MeshEncoder.EncodeNodeStatus(channel, _rxHost.MyNodeNum, NextPacketId(),
+            MyNodeStatus.Trim(), hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+        StatusText = await TransmitFrameAsync(frame) ? "Sent node status." : "Transmit failed.";
+    }
+
+    [RelayCommand]
+    private async Task SendSelfEnvironmentMetrics()
+    {
+        if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        if (!TryGetHomeLocation(out double lat, out double lon))
+        {
+            StatusText = "Set your home location before sending environment telemetry.";
+            return;
+        }
+
+        var weather = await _openMeteo.GetWeatherAsync(lat, lon, forceRefresh: true);
+        if (weather is null) { StatusText = "Environment telemetry: no weather data."; return; }
+
+        var frame = MeshEncoder.EncodeTelemetryEnvironmentMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
+            temperatureC: weather.TemperatureC,
+            relativeHumidityPct: weather.RelativeHumidityPct,
+            barometricPressureHpa: weather.BarometricPressureHpa,
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+        StatusText = await TransmitFrameAsync(frame) ? "Sent environment metrics." : "Transmit failed.";
+    }
+
+    [RelayCommand]
+    private async Task SendSelfAirQualityMetrics()
+    {
+        if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
+        var channel = PrimaryChannel();
+        if (channel is null) return;
+        if (!TryGetHomeLocation(out double lat, out double lon))
+        {
+            StatusText = "Set your home location before sending air quality telemetry.";
+            return;
+        }
+
+        var aq = await _openMeteo.GetAirQualityAsync(lat, lon, forceRefresh: true);
+        if (aq is null) { StatusText = "Air quality telemetry: no data."; return; }
+
+        var frame = MeshEncoder.EncodeTelemetryAirQualityMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
+            pm25Standard: aq.Pm25Standard, pm100Standard: aq.Pm100Standard,
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+        StatusText = await TransmitFrameAsync(frame) ? "Sent air quality metrics." : "Transmit failed.";
+    }
+
+    // ----- Auto-report schedules -----
+
+    [ObservableProperty] private bool _autoReportNodeInfoEnabled;
+    [ObservableProperty] private int _autoReportNodeInfoSeconds = 3600;
+    [ObservableProperty] private bool _autoReportPositionEnabled;
+    [ObservableProperty] private int _autoReportPositionSeconds = 3600;
+    [ObservableProperty] private bool _autoReportDeviceMetricsEnabled;
+    [ObservableProperty] private int _autoReportDeviceMetricsSeconds = 3600;
+    [ObservableProperty] private bool _autoReportEnvironmentMetricsEnabled;
+    [ObservableProperty] private int _autoReportEnvironmentMetricsSeconds = 3600;
+    [ObservableProperty] private bool _autoReportAirQualityMetricsEnabled;
+    [ObservableProperty] private int _autoReportAirQualityMetricsSeconds = 3600;
+    [ObservableProperty] private bool _autoReportNodeStatusEnabled;
+    [ObservableProperty] private int _autoReportNodeStatusSeconds = 3600;
+
+    [ObservableProperty]
+    private string _autoReportLastSentSummary =
+        "Auto last: NI never | POS never | MET never | ENV never | AQ never | ST never";
+
+    /// <summary>Minimum interval. Guards against a typo'd 0 turning an auto
+    /// report into a transmit-as-fast-as-possible loop.</summary>
+    private const int MinAutoReportSeconds = 5;
+
+    private DateTime _nextNodeInfoUtc = DateTime.MaxValue;
+    private DateTime _nextPositionUtc = DateTime.MaxValue;
+    private DateTime _nextDeviceMetricsUtc = DateTime.MaxValue;
+    private DateTime _nextEnvironmentMetricsUtc = DateTime.MaxValue;
+    private DateTime _nextAirQualityMetricsUtc = DateTime.MaxValue;
+    private DateTime _nextNodeStatusUtc = DateTime.MaxValue;
+
+    private DateTime? _lastNodeInfoUtc, _lastPositionUtc, _lastDeviceMetricsUtc;
+    private DateTime? _lastEnvironmentMetricsUtc, _lastAirQualityMetricsUtc, _lastNodeStatusUtc;
+
+    private int _autoReportTickInFlight;
+
+    private static int Clamp(int seconds) => Math.Max(MinAutoReportSeconds, seconds);
+    private static DateTime Next(bool enabled, int seconds) =>
+        enabled ? DateTime.UtcNow.AddSeconds(Clamp(seconds)) : DateTime.MaxValue;
+
+    partial void OnAutoReportNodeInfoEnabledChanged(bool value) { _nextNodeInfoUtc = Next(value, AutoReportNodeInfoSeconds); SaveSettings(); }
+    partial void OnAutoReportPositionEnabledChanged(bool value) { _nextPositionUtc = Next(value, AutoReportPositionSeconds); SaveSettings(); }
+    partial void OnAutoReportDeviceMetricsEnabledChanged(bool value) { _nextDeviceMetricsUtc = Next(value, AutoReportDeviceMetricsSeconds); SaveSettings(); }
+    partial void OnAutoReportEnvironmentMetricsEnabledChanged(bool value) { _nextEnvironmentMetricsUtc = Next(value, AutoReportEnvironmentMetricsSeconds); SaveSettings(); }
+    partial void OnAutoReportAirQualityMetricsEnabledChanged(bool value) { _nextAirQualityMetricsUtc = Next(value, AutoReportAirQualityMetricsSeconds); SaveSettings(); }
+    partial void OnAutoReportNodeStatusEnabledChanged(bool value) { _nextNodeStatusUtc = Next(value, AutoReportNodeStatusSeconds); SaveSettings(); }
+
+    partial void OnAutoReportNodeInfoSecondsChanged(int value) { _nextNodeInfoUtc = Next(AutoReportNodeInfoEnabled, value); SaveSettings(); }
+    partial void OnAutoReportPositionSecondsChanged(int value) { _nextPositionUtc = Next(AutoReportPositionEnabled, value); SaveSettings(); }
+    partial void OnAutoReportDeviceMetricsSecondsChanged(int value) { _nextDeviceMetricsUtc = Next(AutoReportDeviceMetricsEnabled, value); SaveSettings(); }
+    partial void OnAutoReportEnvironmentMetricsSecondsChanged(int value) { _nextEnvironmentMetricsUtc = Next(AutoReportEnvironmentMetricsEnabled, value); SaveSettings(); }
+    partial void OnAutoReportAirQualityMetricsSecondsChanged(int value) { _nextAirQualityMetricsUtc = Next(AutoReportAirQualityMetricsEnabled, value); SaveSettings(); }
+    partial void OnAutoReportNodeStatusSecondsChanged(int value) { _nextNodeStatusUtc = Next(AutoReportNodeStatusEnabled, value); SaveSettings(); }
+
+    private void LoadAutoReportSettings()
+    {
+        AutoReportNodeInfoEnabled = _settings.AutoReportNodeInfoEnabled;
+        AutoReportNodeInfoSeconds = Clamp(_settings.AutoReportNodeInfoSeconds);
+        AutoReportPositionEnabled = _settings.AutoReportPositionEnabled;
+        AutoReportPositionSeconds = Clamp(_settings.AutoReportPositionSeconds);
+        AutoReportDeviceMetricsEnabled = _settings.AutoReportDeviceMetricsEnabled;
+        AutoReportDeviceMetricsSeconds = Clamp(_settings.AutoReportDeviceMetricsSeconds);
+        AutoReportEnvironmentMetricsEnabled = _settings.AutoReportEnvironmentMetricsEnabled;
+        AutoReportEnvironmentMetricsSeconds = Clamp(_settings.AutoReportEnvironmentMetricsSeconds);
+        AutoReportAirQualityMetricsEnabled = _settings.AutoReportAirQualityMetricsEnabled;
+        AutoReportAirQualityMetricsSeconds = Clamp(_settings.AutoReportAirQualityMetricsSeconds);
+        AutoReportNodeStatusEnabled = _settings.AutoReportNodeStatusEnabled;
+        AutoReportNodeStatusSeconds = Clamp(_settings.AutoReportNodeStatusSeconds);
+    }
+
+    private void StoreAutoReportSettings()
+    {
+        _settings.AutoReportNodeInfoEnabled = AutoReportNodeInfoEnabled;
+        _settings.AutoReportNodeInfoSeconds = Clamp(AutoReportNodeInfoSeconds);
+        _settings.AutoReportPositionEnabled = AutoReportPositionEnabled;
+        _settings.AutoReportPositionSeconds = Clamp(AutoReportPositionSeconds);
+        _settings.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
+        _settings.AutoReportDeviceMetricsSeconds = Clamp(AutoReportDeviceMetricsSeconds);
+        _settings.AutoReportEnvironmentMetricsEnabled = AutoReportEnvironmentMetricsEnabled;
+        _settings.AutoReportEnvironmentMetricsSeconds = Clamp(AutoReportEnvironmentMetricsSeconds);
+        _settings.AutoReportAirQualityMetricsEnabled = AutoReportAirQualityMetricsEnabled;
+        _settings.AutoReportAirQualityMetricsSeconds = Clamp(AutoReportAirQualityMetricsSeconds);
+        _settings.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
+        _settings.AutoReportNodeStatusSeconds = Clamp(AutoReportNodeStatusSeconds);
+    }
+
+    private void UpdateAutoReportSummary()
+    {
+        static string T(DateTime? utc) => utc is DateTime d ? d.ToLocalTime().ToString("h:mm:ss tt") : "never";
+        AutoReportLastSentSummary =
+            $"Auto last: NI {T(_lastNodeInfoUtc)} | POS {T(_lastPositionUtc)} | MET {T(_lastDeviceMetricsUtc)} " +
+            $"| ENV {T(_lastEnvironmentMetricsUtc)} | AQ {T(_lastAirQualityMetricsUtc)} | ST {T(_lastNodeStatusUtc)}";
+    }
+
+    /// <summary>Called from the poll loop. Runs at most one tick at a time —
+    /// the sends await a transmit, which is far slower than the poll
+    /// interval.</summary>
+    private void KickAutoReportTick()
+    {
+        if (!CanTransmit) return;
+        if (Interlocked.Exchange(ref _autoReportTickInFlight, 1) != 0) return;
+        _ = RunAutoReportTickAsync();
+    }
+
+    private async Task RunAutoReportTickAsync()
+    {
+        try
+        {
+            // Each due check re-reads the clock because the send before it may
+            // have taken a while (a weather fetch plus an over-the-air frame).
+            if (AutoReportNodeInfoEnabled && DateTime.UtcNow >= _nextNodeInfoUtc)
+            {
+                _nextNodeInfoUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportNodeInfoSeconds));
+                await SendSelfNodeInfoCommand.ExecuteAsync(null);
+                if (StatusText.StartsWith("Sent NodeInfo", StringComparison.OrdinalIgnoreCase))
+                { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+            }
+
+            if (AutoReportPositionEnabled && DateTime.UtcNow >= _nextPositionUtc)
+            {
+                _nextPositionUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportPositionSeconds));
+                await SendSelfPositionCommand.ExecuteAsync(null);
+                if (StatusText.StartsWith("Sent position", StringComparison.OrdinalIgnoreCase))
+                { _lastPositionUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+            }
+
+            if (AutoReportDeviceMetricsEnabled && DateTime.UtcNow >= _nextDeviceMetricsUtc)
+            {
+                _nextDeviceMetricsUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportDeviceMetricsSeconds));
+                await SendSelfDeviceMetricsCommand.ExecuteAsync(null);
+                if (StatusText.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
+                { _lastDeviceMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+            }
+
+            if (AutoReportEnvironmentMetricsEnabled && DateTime.UtcNow >= _nextEnvironmentMetricsUtc)
+            {
+                _nextEnvironmentMetricsUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportEnvironmentMetricsSeconds));
+                await SendSelfEnvironmentMetricsCommand.ExecuteAsync(null);
+                if (StatusText.StartsWith("Sent environment metrics", StringComparison.OrdinalIgnoreCase))
+                { _lastEnvironmentMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+            }
+
+            if (AutoReportAirQualityMetricsEnabled && DateTime.UtcNow >= _nextAirQualityMetricsUtc)
+            {
+                _nextAirQualityMetricsUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportAirQualityMetricsSeconds));
+                await SendSelfAirQualityMetricsCommand.ExecuteAsync(null);
+                if (StatusText.StartsWith("Sent air quality metrics", StringComparison.OrdinalIgnoreCase))
+                { _lastAirQualityMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+            }
+
+            if (AutoReportNodeStatusEnabled && DateTime.UtcNow >= _nextNodeStatusUtc)
+            {
+                _nextNodeStatusUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportNodeStatusSeconds));
+                await SendSelfNodeStatusCommand.ExecuteAsync(null);
+                if (StatusText.StartsWith("Sent node status", StringComparison.OrdinalIgnoreCase))
+                { _lastNodeStatusUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Auto-report error: {ex.Message}";
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _autoReportTickInFlight, 0);
+        }
+    }
+
+    private void DisposeMyNode()
+    {
+        _gpsService.Dispose();
+        _openMeteo.Dispose();
+    }
+}

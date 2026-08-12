@@ -10,44 +10,65 @@
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="640">
-        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID" Margin="0,4,8,4" VerticalAlignment="Center" />
             <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,4,0,4">
                 <Button DockPanel.Dock="Right" Content="Random" Margin="6,0,0,0" Padding="8,2"
                         Command="{Binding GenerateRandomNodeIdCommand}" ToolTip.Tip="Generate a random node ID" />
+                <Button DockPanel.Dock="Right" Content="From Key" Margin="6,0,0,0" Padding="8,2"
+                        Command="{Binding GenerateNodeIdFromKeyCommand}"
+                        ToolTip.Tip="Derive the node ID from the current PKI public key the same way Meshtastic firmware does" />
                 <TextBox FontFamily="Consolas" ToolTip.Tip="!a1b2c3d4, 0xA1B2C3D4 or decimal"
                          Text="{Binding MyNodeIdText}" />
             </DockPanel>
 
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="Long name" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4" Text="{Binding MyLongName}" />
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="MAC address" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
+                     Foreground="{DynamicResource BrushSubtle}"
+                     ToolTip.Tip="Derived from node ID (02:00 + last 4 bytes). Set the node ID to change this."
+                     Text="{Binding MyMacAddress}" />
 
-            <TextBlock Grid.Row="2" Grid.Column="0" Text="Short name" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4,0,4" MaxLength="4" Text="{Binding MyShortName}" />
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Long name" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4,0,4" Text="{Binding MyLongName}" />
 
-            <TextBlock Grid.Row="3" Grid.Column="0" Text="Role" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <ComboBox Grid.Row="3" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="160"
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Short name" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4,0,4" MaxLength="4" Text="{Binding MyShortName}" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Role" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="4" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="160"
                       ItemsSource="{Binding NodeRoleOptions}" SelectedItem="{Binding MyRole}" />
 
-            <TextBlock Grid.Row="4" Grid.Column="0" Text="Hardware" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <ComboBox Grid.Row="4" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="200"
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="Hardware" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="5" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="200"
                       ItemsSource="{Binding HwModelOptions}" SelectedItem="{Binding MyHwModel}" />
 
-            <TextBlock Grid.Row="5" Grid.Column="0" Text="Public key" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBox Grid.Row="5" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Public key" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBox Grid.Row="6" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
                      ToolTip.Tip="Derived from private key — not editable" Text="{Binding MyPublicKey}" />
 
-            <TextBlock Grid.Row="6" Grid.Column="0" Text="Private key" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <DockPanel Grid.Row="6" Grid.Column="1" Margin="0,4,0,4">
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Private key" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="7" Grid.Column="1" Margin="0,4,0,4">
                 <Button DockPanel.Dock="Right" Content="Generate" Margin="6,0,0,0" Padding="8,2"
                         Command="{Binding GenerateKeyPairCommand}" ToolTip.Tip="Generate a new random key pair" />
-                <TextBox FontFamily="Consolas" PasswordChar="&#8226;"
-                         ToolTip.Tip="Base64 X25519 private key (kept locally)" Text="{Binding MyPrivateKey}" />
+                <Button DockPanel.Dock="Right" Content="Show" Margin="6,0,0,0" Padding="8,2"
+                        IsVisible="{Binding IsPrivateKeyHidden}"
+                        Command="{Binding ToggleRevealPrivateKeyCommand}" ToolTip.Tip="Reveal the private key" />
+                <Button DockPanel.Dock="Right" Content="Hide" Margin="6,0,0,0" Padding="8,2"
+                        IsVisible="{Binding IsPrivateKeyRevealed}"
+                        Command="{Binding ToggleRevealPrivateKeyCommand}" ToolTip.Tip="Hide the private key" />
+                <Panel>
+                    <TextBox FontFamily="Consolas" IsVisible="{Binding IsPrivateKeyRevealed}"
+                             ToolTip.Tip="Base64 X25519 private key (kept locally)" Text="{Binding MyPrivateKey}" />
+                    <TextBox FontFamily="Consolas" IsReadOnly="True" Focusable="False"
+                             IsVisible="{Binding IsPrivateKeyHidden}"
+                             ToolTip.Tip="Private key is hidden — click Show to reveal or edit"
+                             Text="●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●" />
+                </Panel>
             </DockPanel>
 
-            <TextBlock Grid.Row="7" Grid.Column="0" Text="Firmware" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <Grid Grid.Row="7" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="*,6,*">
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="Firmware" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <Grid Grid.Row="8" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="*,6,*">
                 <TextBox Grid.Column="0" Text="{Binding MyFirmwareVersion}"
                          ToolTip.Tip="Self-reported firmware version. MeshRF isn't real Meshtastic firmware — this is the compatibility baseline it presents." />
                 <ComboBox Grid.Column="2" HorizontalAlignment="Stretch"
@@ -55,40 +76,42 @@
                           ToolTip.Tip="Self-reported firmware edition" />
             </Grid>
 
-            <TextBlock Grid.Row="8" Grid.Column="0" Text="Rebroadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <ComboBox Grid.Row="8" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="200"
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="Rebroadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="9" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="200"
                       ItemsSource="{Binding RebroadcastModeOptions}" SelectedItem="{Binding RebroadcastMode}"
                       ToolTip.Tip="Rebroadcast policy. Stored and shared with MeshRF.App; this app doesn't relay yet." />
 
-            <TextBlock Grid.Row="9" Grid.Column="0" Text="Routing" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <CheckBox Grid.Row="9" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+            <TextBlock Grid.Row="10" Grid.Column="0" Text="Routing" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <CheckBox Grid.Row="10" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
                       Content="Enable relay routing (role + rebroadcast mode)"
                       IsChecked="{Binding RoutingRelayEnabled}"
                       ToolTip.Tip="Stored and shared with MeshRF.App; this app doesn't relay packets yet." />
 
-            <TextBlock Grid.Row="10" Grid.Column="0" Text="Location source" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="10" Grid.Column="1" Margin="0,4,0,4">
+            <TextBlock Grid.Row="11" Grid.Column="0" Text="Location source" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="11" Grid.Column="1" Margin="0,4,0,4">
                 <ComboBox HorizontalAlignment="Left" Width="160"
                           ItemsSource="{Binding HomeLocationSourceOptions}" SelectedItem="{Binding HomeLocationSource}"
-                          ToolTip.Tip="Fixed manual location, or a USB serial GPS. GPS reading isn't ported yet — the port/baud below are stored for MeshRF.App." />
+                          ToolTip.Tip="Choose between a fixed manual location and an auto-detected USB serial GPS." />
                 <Grid Margin="0,6,0,0" ColumnDefinitions="*,110" IsEnabled="{Binding IsUsbSerialLocationSource}">
                     <TextBox Grid.Column="0" Margin="0,0,4,0" FontFamily="Consolas" PlaceholderText="COM5"
                              Text="{Binding GpsSerialPort}" ToolTip.Tip="Optional COM port override; blank = auto-detect" />
                     <TextBox Grid.Column="1" Margin="4,0,0,0" FontFamily="Consolas" PlaceholderText="9600"
                              Text="{Binding GpsBaudRateText}" ToolTip.Tip="Optional baud override; blank = auto-detect" />
                 </Grid>
+                <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
+                           Foreground="{DynamicResource BrushSubtle}" Text="{Binding GpsStatus}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="11" Grid.Column="0" Text="Units" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="11" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="10">
+            <TextBlock Grid.Row="12" Grid.Column="0" Text="Units" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="12" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="10">
                 <ComboBox Width="110" ItemsSource="{Binding UnitSystems}" SelectedItem="{Binding UnitSystemName}"
                           ToolTip.Tip="Display units used throughout the app" />
                 <CheckBox Content="°F" IsChecked="{Binding UseFahrenheit}" VerticalAlignment="Center" />
                 <CheckBox Content="Miles" IsChecked="{Binding UseMiles}" VerticalAlignment="Center" />
             </StackPanel>
 
-            <TextBlock Grid.Row="12" Grid.Column="0" Text="{Binding HomeAltitudeLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <Grid Grid.Row="12" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
+            <TextBlock Grid.Row="13" Grid.Column="0" Text="{Binding HomeAltitudeLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <Grid Grid.Row="13" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
                   IsEnabled="{Binding IsManualLocationSource}">
                 <TextBox Grid.Column="0" Margin="0,0,2,0" FontFamily="Consolas"
                          ToolTip.Tip="Latitude in degrees (-90..90)" Text="{Binding HomeLatitudeText}" />
@@ -98,8 +121,8 @@
                          ToolTip.Tip="Altitude (optional)" Text="{Binding HomeAltitudeText}" />
             </Grid>
 
-            <TextBlock Grid.Row="13" Grid.Column="0" Text="Hop limit" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <DockPanel Grid.Row="13" Grid.Column="1" Margin="0,4,0,4">
+            <TextBlock Grid.Row="14" Grid.Column="0" Text="Hop limit" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="14" Grid.Column="1" Margin="0,4,0,4">
                 <TextBlock DockPanel.Dock="Right" Width="20" Margin="6,0,0,0" VerticalAlignment="Center"
                            TextAlignment="Center" Text="{Binding HopLimit}" />
                 <Slider Minimum="1" Maximum="7" TickFrequency="1" IsSnapToTickEnabled="True"
@@ -107,17 +130,84 @@
                         ToolTip.Tip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
             </DockPanel>
 
-            <TextBlock Grid.Row="14" Grid.Column="0" Text="OK to MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <CheckBox Grid.Row="14" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+            <TextBlock Grid.Row="15" Grid.Column="0" Text="OK to MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <CheckBox Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
                       Content="Allow gateways to uplink my packets to public MQTT"
                       IsChecked="{Binding OkToMqtt}" />
 
-            <TextBlock Grid.Row="15" Grid.Column="0" Text="Status text" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBox Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" MaxLength="280" Text="{Binding MyNodeStatus}" />
+            <TextBlock Grid.Row="16" Grid.Column="0" Text="Status text" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBox Grid.Row="16" Grid.Column="1" Margin="0,4,0,4" MaxLength="280" Text="{Binding MyNodeStatus}" />
 
-            <TextBlock Grid.Row="16" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+            <!-- Auto-report schedules. Each fires on the poll loop once its
+                 interval is up and a TX-capable device is configured. -->
+            <TextBlock Grid.Row="17" Grid.Column="0" Text="Auto node info" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="17" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeInfoEnabled}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeInfoSeconds}" />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="18" Grid.Column="0" Text="Auto position" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="18" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportPositionEnabled}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSeconds}" />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="19" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="19" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportDeviceMetricsEnabled}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="20" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="20" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportEnvironmentMetricsEnabled}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="21" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="21" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportAirQualityMetricsEnabled}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="22" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="22" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeStatusEnabled}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="23" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
+                       TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
+                       Text="{Binding AutoReportLastSentSummary}"
+                       ToolTip.Tip="Last successful auto-send times for NodeInfo, Position, Device Metrics, Environment Metrics, Air Quality, and Status." />
+
+            <TextBlock Grid.Row="24" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+                       TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
+                       Text="{Binding WeatherTelemetryStatus}"
+                       ToolTip.Tip="Live status of weather fetches used for environment telemetry (Open-Meteo)." />
+
+            <TextBlock Grid.Row="25" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+                       TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
+                       Text="{Binding AirQualityTelemetryStatus}"
+                       ToolTip.Tip="Live status of air quality fetches used for air quality telemetry (Open-Meteo AQ API)." />
+
+            <TextBlock Grid.Row="26" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource BrushSubtle}"
-                       Text="Auto-report scheduling and weather/AQ telemetry aren't ported to this app yet, so those MeshRF.App settings aren't shown. Rebroadcast, relay routing and the GPS port/baud above are stored and shared with MeshRF.App, but this app doesn't act on them yet." />
+                       Text="Rebroadcast and relay routing above are stored and shared with MeshRF.App, but this app doesn't relay packets yet." />
         </Grid>
     </ScrollViewer>
 </Window>
