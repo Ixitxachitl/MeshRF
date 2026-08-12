@@ -466,6 +466,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
         _rxHost.IncomingChannelMessage += PlayIncomingRingtone;
         _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
+        _rxHost.AckRequested += SendAck;
         // Restore per-channel ringtone mutes. The channel tabs exist by now
         // (the host loads them in its constructor), and MutedRingtoneChannels
         // is the same settings.json key MeshRF.App writes.

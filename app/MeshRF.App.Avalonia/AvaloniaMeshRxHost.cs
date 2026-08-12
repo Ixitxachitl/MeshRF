@@ -83,6 +83,16 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// holds our identity and the transmitter, so it builds the reply.</summary>
     public Action<PortNum, uint, string?>? AutoReplyRequested { get; set; }
 
+    /// <summary>Raised for a unicast addressed to us carrying want_ack, so the
+    /// owner can transmit the routing ack (header, channel name, whether it was
+    /// PKC). Raised even when the payload could not be decrypted: the
+    /// addressing is plaintext, and failing to ack is what makes senders
+    /// retransmit and the mesh reflood.</summary>
+    public Action<MeshHeader, string?, bool>? AckRequested { get; set; }
+
+    /// <summary>Stored public key for a peer, as hex; empty when unknown.</summary>
+    public string PublicKeyHexFor(uint nodeNum) => _nodeStore.Get(nodeNum)?.PublicKey ?? string.Empty;
+
     /// <summary>A request aimed specifically at us that asked for a response.
     /// Broadcast requests are ignored — answering those would have every
     /// listener reply at once.</summary>
@@ -463,6 +473,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     public bool RememberUndecodedPacket(MeshHeader header)
     {
+        // Ack first, and on every copy. We can't read the payload, but the
+        // addressing is plaintext, so we know it's for us and that the sender
+        // is waiting. Acking only the first copy would leave a retry that
+        // arrived before our ack got out unanswered — and a retry is exactly
+        // what a lost ack produces.
+        AckRequested?.Invoke(header, null, header.ChannelHash == 0x00);
+
         ulong key = ((ulong)header.From << 32) ^ header.PacketId;
         if (!_recentUndecodedKeys.Add(key)) return false;
         _recentUndecodedOrder.Enqueue(key);
@@ -492,6 +509,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // "rx undecoded" lines, making normal flood retransmissions look like
         // every packet was being rejected as a duplicate.
         Log(BuildDecodedPortSummary(header, result, NodeDisplayName(header.From)));
+
+        // Ack before handling: the sender is already counting down to a retry.
+        AckRequested?.Invoke(header, result.ChannelName,
+                             string.Equals(result.ChannelName, "PKC", StringComparison.Ordinal));
 
         switch (result.Port)
         {

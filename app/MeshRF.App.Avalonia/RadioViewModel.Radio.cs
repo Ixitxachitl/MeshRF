@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using MeshRF.Mesh;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -101,6 +102,71 @@ public partial class RadioViewModel
             try { await TransmitFrameAsync(frame).ConfigureAwait(false); }
             catch { /* best-effort */ }
         });
+    }
+
+    // -- Acknowledgements ---------------------------------------------------
+
+    /// <summary>
+    /// Acknowledges a unicast addressed to us that asked for one.
+    ///
+    /// Not optional politeness: an unacked want_ack packet is retransmitted by
+    /// its sender, and every repeater refloods each retry with a decrementing
+    /// hop limit. A node that never acks turns one direct message into dozens
+    /// of airtime-consuming copies across the whole mesh. This app had no ack
+    /// path at all, so every DM sent to it did exactly that.
+    ///
+    /// The addressing lives in the plaintext header, so a packet we cannot
+    /// decrypt is still known to be for us and is still acked — which is the
+    /// case that matters here, since PKC direct messages aren't decodable yet.
+    /// </summary>
+    private void SendAck(MeshHeader header, string? channelName, bool pkc)
+    {
+        if (!CanTransmit || _rxHost.MyNodeNum == 0) return;
+        if (header.IsBroadcast || header.To != _rxHost.MyNodeNum) return;
+        if (!header.WantAck) return;
+
+        try
+        {
+            uint packetId = NextPacketId();
+            byte[]? frame = null;
+
+            if (pkc)
+            {
+                // A PKC message must be acked over PKC, sealed back to the
+                // sender with our private key and their public key.
+                var myPriv = TryParseKeyBase64(MyPrivateKey);
+                var peerPub = TryParseHex(_rxHost.PublicKeyHexFor(header.From));
+                if (myPriv.Length == 32 && peerPub.Length == 32)
+                    frame = MeshEncoder.EncodePkcRouting(
+                        _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
+                        myPriv, peerPub, errorReason: 0, hopLimit: (byte)HopLimit);
+            }
+            else
+            {
+                var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+                if (channel is not null)
+                    frame = MeshEncoder.EncodeRouting(
+                        channel, _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
+                        errorReason: 0, hopLimit: (byte)HopLimit);
+            }
+
+            if (frame is not null) TransmitBackground(frame);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Ack failed: {ex.Message}";
+        }
+    }
+
+    private static byte[] TryParseHex(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return Array.Empty<byte>();
+        try
+        {
+            var bytes = Convert.FromHexString(hex);
+            return bytes.Length == 32 ? bytes : Array.Empty<byte>();
+        }
+        catch { return Array.Empty<byte>(); }
     }
 
     // -- Demodulator event drain -------------------------------------------
