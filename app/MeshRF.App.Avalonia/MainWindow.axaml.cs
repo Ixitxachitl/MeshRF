@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -44,6 +45,11 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = _viewModel;
+
+        // DragOver/Drop are attached events, so they are subscribed here rather
+        // than in the markup.
+        MainTabs.AddHandler(DragDrop.DragOverEvent, OnTabsDragOver);
+        MainTabs.AddHandler(DragDrop.DropEvent, OnTabsDrop);
 
         // Restore window geometry / splitter proportions before first show.
         ApplyLayout(AppSettings.Load());
@@ -678,6 +684,65 @@ public partial class MainWindow : Window
         _mqttWindow = new MqttSettingsWindow { DataContext = _viewModel };
         _mqttWindow.Closed += (_, _) => _mqttWindow = null;
         _mqttWindow.Show(this);
+    }
+
+    // -- Tab drag-to-reorder --------------------------------------------------
+
+    /// <summary>In-process drag payload: the dragged tab's view model itself,
+    /// so nothing has to be serialised and the drag can't leave the app.</summary>
+    private static readonly DataFormat<object> TabDragFormat =
+        DataFormat.CreateInProcessFormat<object>("MeshRF.Tab");
+
+    /// <summary>
+    /// Starts the drag straight from the press. Avalonia 12's DoDragDropAsync
+    /// only accepts PointerPressedEventArgs, so there is no "wait for the
+    /// pointer to move" step here — the platform's own drag loop applies the
+    /// click-versus-drag threshold and simply reports None for a plain click.
+    /// </summary>
+    private async void OnTabsPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(MainTabs).Properties.IsLeftButtonPressed) return;
+        if (e.Source is not Visual v) return;
+
+        // A press on the close button is a click, not the start of a drag.
+        if (v.FindAncestorOfType<Button>(includeSelf: true) is not null) return;
+        if (v.FindAncestorOfType<TabItem>(includeSelf: true)?.DataContext is not { } dragged) return;
+        if (!_viewModel.CanDragTab(dragged)) return;
+
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(TabDragFormat, dragged));
+        try
+        {
+            await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
+        }
+        catch (InvalidOperationException)
+        {
+            // A drag is already in progress, or the platform refused to start one.
+        }
+    }
+
+    private void OnTabsDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = ResolveDropTarget(e) is not null ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnTabsDrop(object? sender, DragEventArgs e)
+    {
+        if (ResolveDropTarget(e) is not ({ } dragged, { } target)) return;
+        _viewModel.ReorderTabPair(dragged, target);
+        e.Handled = true;
+    }
+
+    /// <summary>The (dragged, target) pair for this drag if it is a legal drop,
+    /// otherwise null. Shared so the hover feedback and the drop itself can
+    /// never disagree about what is allowed.</summary>
+    private (object Dragged, object Target)? ResolveDropTarget(DragEventArgs e)
+    {
+        if (e.DataTransfer.TryGetValue(TabDragFormat) is not { } dragged) return null;
+        if (e.Source is not Visual v) return null;
+        if (v.FindAncestorOfType<TabItem>(includeSelf: true)?.DataContext is not { } target) return null;
+        return _viewModel.CanReorderTabPair(dragged, target) ? (dragged, target) : null;
     }
 
     private void OnOpenChannelSettings(object? sender, RoutedEventArgs e)

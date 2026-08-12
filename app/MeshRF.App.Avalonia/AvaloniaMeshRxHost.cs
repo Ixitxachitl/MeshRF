@@ -343,13 +343,68 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     /// <summary>Persists in-place edits to a channel's config (name/role/psk/
-    /// position precision, made via the Settings dialog) and refreshes its
+    /// position precision/MQTT, made via the Settings dialog) and refreshes its
     /// tab header.</summary>
     public void SaveChannelConfig(ChannelTabViewModel channel)
     {
+        // Firmware invariant: exactly one channel may be Primary. Promoting one
+        // has to demote whichever held it, or the app ends up with two — and
+        // "the primary channel" is what a blank channel name, the map report's
+        // has_default_channel flag and the default send target all resolve
+        // through.
+        if (channel.Config.Role == ChannelRole.Primary)
+        {
+            foreach (var other in Tabs.OfType<ChannelTabViewModel>())
+            {
+                if (other.Config.Index == channel.Config.Index) continue;
+                if (other.Config.Role != ChannelRole.Primary) continue;
+                other.Config.Role = ChannelRole.Secondary;
+                _channelStore.Upsert(other.Config);
+                other.NotifyConfigChanged();
+            }
+        }
+
         _channelStore.Upsert(channel.Config);
         channel.NotifyConfigChanged();
     }
+
+    /// <summary>
+    /// Keeps an auto-named primary channel in step with the modem preset.
+    ///
+    /// A primary on the default key whose name is blank — or is still just a
+    /// preset name from a previous sync — takes the current preset's name, which
+    /// is what firmware shows for an unnamed default channel. A channel the user
+    /// actually named is left alone, as is one with its own PSK.
+    /// </summary>
+    /// <returns>True if a rename happened, so the caller can persist.</returns>
+    public bool SyncPrimaryChannelName(LoraPreset preset)
+    {
+        var primary = Tabs.OfType<ChannelTabViewModel>()
+            .FirstOrDefault(t => t.Config.Role == ChannelRole.Primary);
+        if (primary is null) return false;
+
+        var cfg = primary.Config;
+        if (!cfg.UsesDefaultKey) return false;
+
+        var presetName = preset.ToString();
+        bool autoNamed = string.IsNullOrEmpty(cfg.Name) ||
+                         Enum.GetNames<LoraPreset>().Contains(cfg.Name);
+        if (!autoNamed || cfg.Name == presetName) return false;
+
+        cfg.Name = presetName;
+        _channelStore.Upsert(cfg);
+        primary.NotifyConfigChanged();
+        return true;
+    }
+
+    /// <summary>Removes one channel row by index. Used by drag-reordering,
+    /// which clears the affected indices before writing the new mapping.</summary>
+    public void DeleteChannelIndex(int index) => _channelStore.Delete(index);
+
+    /// <summary>Writes a channel row straight through, without the
+    /// primary-demotion logic in <see cref="SaveChannelConfig"/> — reordering
+    /// never changes a role.</summary>
+    public void UpsertChannelConfig(ChannelConfig config) => _channelStore.Upsert(config);
 
     public ChannelConfig? FindChannelByName(string? name)
     {

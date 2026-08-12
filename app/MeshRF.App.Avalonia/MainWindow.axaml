@@ -827,9 +827,16 @@
                          the splitter below resizes the chat area against the log
                          instead of squeezing the composer. -->
                     <Grid Grid.Row="1" RowDefinitions="*,Auto,Auto">
-                    <TabControl Grid.Row="0"
+                    <!-- Drag-to-reorder: secondary channels among themselves and
+                         DM tabs among themselves, matching MeshRF.App. Handled
+                         on the TabControl rather than each TabItem because the
+                         events bubble, so the tab under the pointer is found
+                         from the event source. -->
+                    <TabControl Grid.Row="0" Name="MainTabs"
                                 ItemsSource="{Binding Tabs}"
-                                SelectedItem="{Binding SelectedTab}">
+                                SelectedItem="{Binding SelectedTab}"
+                                DragDrop.AllowDrop="True"
+                                PointerPressed="OnTabsPointerPressed">
                         <TabControl.ItemTemplate>
                             <DataTemplate x:DataType="mesh:ITabItem">
                                 <StackPanel Orientation="Horizontal" Spacing="4">

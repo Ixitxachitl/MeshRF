@@ -883,6 +883,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // overwriting any prior manual override here is the right UX.
         ApplyPresetToLoraParams(value);
         RebuildSlots(snapToDefault: true);
+        // An unnamed default primary channel is named after the preset, so it
+        // has to follow the preset when that changes.
+        _rxHost.SyncPrimaryChannelName(value);
         SaveSettings();
     }
 
@@ -1120,7 +1123,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!_settingsLoaded) return; // Same gate as SaveSettings.
         // Read-modify-write, for the same reason as SaveSettings.
         var disk = AppSettings.Load();
-        disk.OpenConversations = _rxHost.OpenConversationNodeNums.ToList();
+        // Taken from the tab strip, not the host's lookup dictionary: this list
+        // is what restores the tabs, so it has to carry the order the user
+        // dragged them into. Dictionary key order would not.
+        disk.OpenConversations = Tabs.OfType<ConversationTabViewModel>()
+            .Select(t => t.NodeNum)
+            .ToList();
         disk.Save();
         _settings.OpenConversations = disk.OpenConversations;
     }
@@ -1352,6 +1360,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public void SaveChannelSettings(ChannelTabViewModel channel)
     {
         _rxHost.SaveChannelConfig(channel);
+        // Clearing the primary's name, or promoting a different channel, can
+        // leave it eligible to inherit the preset name again.
+        _rxHost.SyncPrimaryChannelName(SelectedPreset);
         // MuteRtttl lives in settings.json, not the channel store, so the
         // dialog's Save has to flush settings too.
         SaveSettings();
