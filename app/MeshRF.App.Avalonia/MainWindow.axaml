@@ -22,9 +22,16 @@
                      local:AutoScrollBehavior.IsEnabled="{Binding #RootWindow.DataContext.AutoScroll}">
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="mesh:ChannelMessage">
-                        <Grid ColumnDefinitions="Auto,Auto,*">
-                            <Grid.ContextMenu>
-                                <ContextMenu>
+                        <!-- Transparent background so the whole row is hit-testable:
+                             a Grid with no brush only reports hits on its children,
+                             which left the gaps between columns dead. -->
+                        <Grid ColumnDefinitions="Auto,Auto,*" Background="Transparent"
+                              ContextMenu="{DynamicResource MessageContextMenu}">
+                            <Grid.Resources>
+                                <!-- Declared here rather than shared app-wide so each
+                                     row gets its own instance and {Binding} resolves
+                                     to that row's message. -->
+                                <ContextMenu x:Key="MessageContextMenu">
                                     <MenuItem Header="Reply"
                                               Command="{Binding #RootWindow.DataContext.ReplyToMessageCommand}"
                                               CommandParameter="{Binding}" />
@@ -32,14 +39,20 @@
                                     <Separator />
                                     <MenuItem Header="Copy message" Click="OnCopyMessage" />
                                 </ContextMenu>
-                            </Grid.ContextMenu>
+                            </Grid.Resources>
                             <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" FontSize="11"
                                        Foreground="{DynamicResource BrushSubtle}" />
                             <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}" FontSize="11"
                                        ToolTip.Tip="{Binding FromId}" />
                             <StackPanel Grid.Column="2" Margin="0,0,0,2">
+                                <!-- SelectableTextBlock handles its own pointer input
+                                     for text selection and doesn't let the request
+                                     reach the Grid, so it carries the menu itself —
+                                     this is the part of the row people actually
+                                     right-click. -->
                                 <SelectableTextBlock local:MarkdownText.Text="{Binding TextWithStatus}"
-                                                     FontSize="11" TextWrapping="Wrap" />
+                                                     FontSize="11" TextWrapping="Wrap"
+                                                     ContextMenu="{DynamicResource MessageContextMenu}" />
                                 <ItemsControl ItemsSource="{Binding Reactions}" Margin="0,3,0,0"
                                               IsVisible="{Binding HasReactions}">
                                     <ItemsControl.ItemsPanel>
