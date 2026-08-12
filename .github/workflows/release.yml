@@ -66,14 +66,14 @@ jobs:
         if: matrix.platform == 'macos'
         run: brew install ninja hackrf librtlsdr libusb
 
-      # Full commit history, blobs on demand. NOT --depth 1: vcpkg.json pins a
-      # "builtin-baseline" commit that manifest mode resolves with
-      # `git show <sha>:versions/baseline.json`, which a shallow clone cannot
-      # answer. On Windows, CMakeLists.txt provisions vcpkg itself the same way.
+      # A full clone, deliberately: vcpkg.json pins a "builtin-baseline" commit
+      # that a shallow clone cannot resolve, and a blob-filtered clone makes
+      # every pinned-port checkout a network fetch. On Windows, CMakeLists.txt
+      # provisions vcpkg itself the same way.
       - name: Set up vcpkg
         if: matrix.platform != 'windows'
         run: |
-          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
           "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$HOME/vcpkg" >> "$GITHUB_ENV"
 
@@ -113,13 +113,28 @@ jobs:
     needs: build
     # Only a tag push publishes; workflow_dispatch is for test builds, which
     # stop at the uploaded artifacts.
-    if: startsWith(github.ref, 'refs/tags/v')
+    #
+    # !cancelled() rather than plain success(): a failing matrix leg would
+    # otherwise skip this job entirely, and macOS is expected to fail until
+    # someone verifies its native build. Publish whatever did build; the guard
+    # below refuses to create an empty release.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Check something was built
+        run: |
+          count=$(find artifacts -type f | wc -l)
+          echo "Downloaded $count artifact file(s):"
+          find artifacts -type f -printf '  %f (%s bytes)\n'
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No artifacts were produced; refusing to create an empty release."
+            exit 1
+          fi
 
       - uses: softprops/action-gh-release@v2
         with:

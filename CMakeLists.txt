@@ -30,14 +30,16 @@ if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
 
         if(NOT EXISTS "${_mrf_vcpkg_root}/.git")
             message(STATUS "MRF: cloning vcpkg into ${_mrf_vcpkg_root}")
-            # Full commit history, blobs fetched on demand. NOT --depth 1:
-            # vcpkg.json pins a "builtin-baseline" commit, and manifest mode
-            # resolves it with `git show <sha>:versions/baseline.json`, which a
-            # shallow clone cannot answer ("failed to git show
-            # versions/baseline.json"). --filter=blob:none keeps it cheap while
-            # still carrying every commit.
+            # A full clone, deliberately. NOT --depth 1: vcpkg.json pins a
+            # "builtin-baseline" commit, and manifest mode resolves it with
+            # `git show <sha>:versions/baseline.json`, which a shallow clone
+            # cannot answer. NOT --filter=blob:none either: vcpkg checks out
+            # port trees at pinned versions throughout the build, so a partial
+            # clone turns every one of those into a network fetch and any
+            # transient DNS blip into a build failure. One slow clone beats a
+            # build that depends on the network staying up.
             execute_process(
-                COMMAND "${MRF_GIT_EXECUTABLE}" clone --filter=blob:none https://github.com/microsoft/vcpkg "${_mrf_vcpkg_root}"
+                COMMAND "${MRF_GIT_EXECUTABLE}" clone https://github.com/microsoft/vcpkg "${_mrf_vcpkg_root}"
                 RESULT_VARIABLE _mrf_vcpkg_clone_rc
             )
             if(NOT _mrf_vcpkg_clone_rc EQUAL 0)
@@ -48,7 +50,7 @@ if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
             # cloned shallow and so cannot resolve the baseline either.
             message(STATUS "MRF: unshallowing existing vcpkg checkout")
             execute_process(
-                COMMAND "${MRF_GIT_EXECUTABLE}" fetch --unshallow --filter=blob:none
+                COMMAND "${MRF_GIT_EXECUTABLE}" fetch --unshallow
                 WORKING_DIRECTORY "${_mrf_vcpkg_root}"
                 RESULT_VARIABLE _mrf_vcpkg_unshallow_rc
             )
