@@ -8,11 +8,12 @@ using MeshRF.Channels;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// Asks which channel — or which open DM peer — a map waypoint should go to.
-/// Avalonia counterpart of MeshRF.App's ChannelPickerWindow, built in code
-/// since it's a single combo and two buttons.
+/// Asks which channel — or which open DM peer — an outgoing payload should go
+/// to. Avalonia counterpart of MeshRF.App's ChannelPickerWindow, built in code
+/// since it's a single combo and two buttons. Used by the map's send-waypoint
+/// gesture and by the quick-send bar.
 /// </summary>
-public sealed class WaypointDestinationWindow : Window
+public sealed class ChannelPickerWindow : Window
 {
     /// <summary>One selectable destination: a broadcast channel, or an
     /// already-open DM conversation peer.</summary>
@@ -27,7 +28,7 @@ public sealed class WaypointDestinationWindow : Window
     private readonly ComboBox _combo;
     private bool _accepted;
 
-    private WaypointDestinationWindow(IReadOnlyList<PickerEntry> entries, PickerEntry? preferred)
+    private ChannelPickerWindow(IReadOnlyList<PickerEntry> entries, PickerEntry? preferred, string prompt)
     {
         Title = "Choose channel";
         Width = 380;
@@ -60,7 +61,7 @@ public sealed class WaypointDestinationWindow : Window
                 {
                     new TextBlock
                     {
-                        Text = "Send waypoint on which channel?",
+                        Text = prompt,
                         Margin = new Thickness(0, 0, 0, 8),
                         TextWrapping = TextWrapping.Wrap,
                     },
@@ -80,13 +81,13 @@ public sealed class WaypointDestinationWindow : Window
     /// <summary>Shows the picker. Returns null when cancelled or when there is
     /// nowhere to send.</summary>
     public static async Task<(ChannelConfig? Channel, uint? DmNodeNum)?> PickAsync(
-        Window owner, RadioViewModel vm)
+        Window owner, RadioViewModel vm, string prompt = "Send waypoint on which channel?")
     {
         var channels = vm.Tabs.OfType<ChannelTabViewModel>().ToList();
         var openDms = vm.Tabs.OfType<ConversationTabViewModel>().ToList();
         if (channels.Count == 0 && openDms.Count == 0)
         {
-            vm.StatusText = "No channel to send waypoint on.";
+            vm.StatusText = "No channel to send on.";
             return null;
         }
 
@@ -109,7 +110,7 @@ public sealed class WaypointDestinationWindow : Window
         var preferred = entries.FirstOrDefault(e => e.Channel?.Index == preferredIndex)
                         ?? entries.FirstOrDefault();
 
-        var w = new WaypointDestinationWindow(entries, preferred);
+        var w = new ChannelPickerWindow(entries, preferred, prompt);
         await w.ShowDialog(owner);
         if (!w._accepted || w._combo.SelectedItem is not PickerEntry picked) return null;
 

@@ -684,7 +684,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             {
                 messages.Add(new ChannelMessage
                 {
-                    FromId = header.FromId,
+                    // Resolved name, not the raw !id — history replay uses
+                    // NodeDisplayName, so using the id here is what made a
+                    // message change its sender label on reload.
+                    FromId = NodeDisplayName(header.From),
                     SenderNodeNum = header.From,
                     Text = record.Text,
                     RssiDbm = record.RssiDbfs,

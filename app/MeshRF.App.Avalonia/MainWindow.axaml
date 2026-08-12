@@ -304,24 +304,24 @@
                         </DockPanel>
                     </Border>
 
-                    <!-- Quick send bar. MeshRF.App prompts for a channel per
-                         payload; this one always uses the primary channel. -->
+                    <!-- Quick send bar. Each button prompts for the destination
+                         channel (or an open DM peer) first, as MeshRF.App does. -->
                     <Border Grid.Row="1" Margin="0,0,0,4" Padding="6,4"
                             Background="{DynamicResource BrushPanelBackground}"
                             BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <TextBlock Text="Quick send" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <Button Content="Node info" Padding="10,3" Command="{Binding SendSelfNodeInfoCommand}"
+                            <Button Content="Node info" Padding="10,3" Click="OnSendNodeInfoPrompted"
                                     ToolTip.Tip="Broadcast your NODEINFO payload on the primary channel" />
-                            <Button Content="Position" Padding="10,3" Command="{Binding SendSelfPositionCommand}"
+                            <Button Content="Position" Padding="10,3" Click="OnSendPositionPrompted"
                                     ToolTip.Tip="Broadcast your POSITION payload on the primary channel" />
-                            <Button Content="Device metrics" Padding="10,3" Command="{Binding SendSelfDeviceMetricsCommand}"
+                            <Button Content="Device metrics" Padding="10,3" Click="OnSendDeviceMetricsPrompted"
                                     ToolTip.Tip="Broadcast your device-metrics telemetry on the primary channel" />
-                            <Button Content="Env telemetry" Padding="10,3" Command="{Binding SendSelfEnvironmentMetricsCommand}"
+                            <Button Content="Env telemetry" Padding="10,3" Click="OnSendEnvironmentMetricsPrompted"
                                     ToolTip.Tip="Fetch weather for your home location, then broadcast TELEMETRY environment metrics" />
-                            <Button Content="AQ telemetry" Padding="10,3" Command="{Binding SendSelfAirQualityMetricsCommand}"
+                            <Button Content="AQ telemetry" Padding="10,3" Click="OnSendAirQualityMetricsPrompted"
                                     ToolTip.Tip="Fetch PM2.5/PM10 from the Open-Meteo air quality API, then broadcast TELEMETRY air quality metrics" />
-                            <Button Content="Status" Padding="10,3" Command="{Binding SendSelfNodeStatusCommand}"
+                            <Button Content="Status" Padding="10,3" Click="OnSendNodeStatusPrompted"
                                     ToolTip.Tip="Broadcast your NODE_STATUS_APP text on the primary channel" />
                         </StackPanel>
                     </Border>
@@ -344,7 +344,26 @@
                                              ToolTip.Tip="Search by name, short name, or node ID" />
                                 </DockPanel>
 
-                                <Expander Header="Filters" FontSize="11">
+                                <!-- Not an Expander, for the same reason as the map's
+                                     waypoint panel: Fluent's Expander header paints its
+                                     hover fill through inner template presenters that
+                                     don't span the whole header, so it highlights in
+                                     mismatched patches. -->
+                                <ToggleButton x:Name="FiltersToggle" HorizontalAlignment="Stretch"
+                                              HorizontalContentAlignment="Stretch" Padding="4,2" FontSize="11">
+                                    <DockPanel>
+                                        <Panel DockPanel.Dock="Right">
+                                            <TextBlock Text="▾" FontSize="9" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource BrushSubtle}"
+                                                       IsVisible="{Binding !#FiltersToggle.IsChecked}" />
+                                            <TextBlock Text="▴" FontSize="9" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource BrushSubtle}"
+                                                       IsVisible="{Binding #FiltersToggle.IsChecked}" />
+                                        </Panel>
+                                        <TextBlock Text="Filters" FontSize="11" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </ToggleButton>
+                                <Border IsVisible="{Binding #FiltersToggle.IsChecked}">
                                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled" MaxHeight="220">
                                         <Grid Margin="0,6,0,0" ColumnDefinitions="120,*"
@@ -454,7 +473,7 @@
                                             </Grid>
                                         </Grid>
                                     </ScrollViewer>
-                                </Expander>
+                                </Border>
                             </StackPanel>
                         </Border>
                     </StackPanel>

@@ -1432,24 +1432,31 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     // ----- Quick send (broadcast our own payloads on the primary channel) -----
 
     [RelayCommand]
-    private async Task SendSelfNodeInfo()
+    private Task SendSelfNodeInfo() => SendNodeInfoOnChannelAsync(null, null);
+
+    /// <summary>Sends our NodeInfo on a chosen channel, or directed at a peer.
+    /// Null channel means the primary — that's the auto-report path.</summary>
+    public async Task SendNodeInfoOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        var channel = PrimaryChannel();
+        channel ??= PrimaryChannel();
         if (channel is null) return;
         var frame = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, NextPacketId(),
             MyLongName, MyShortName,
             hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
             publicKey: TryParseKeyBase64(MyPublicKey),
+            to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
         StatusText = await TransmitFrameAsync(frame) ? "Sent NodeInfo." : "Transmit failed.";
     }
 
     [RelayCommand]
-    private async Task SendSelfPosition()
+    private Task SendSelfPosition() => SendPositionOnChannelAsync(null, null);
+
+    public async Task SendPositionOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        var channel = PrimaryChannel();
+        channel ??= PrimaryChannel();
         if (channel is null) return;
         if (channel.PositionPrecision == 0) { StatusText = "Location sharing is disabled on this channel."; return; }
         if (!double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ||
@@ -1461,18 +1468,22 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         int? alt = int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var a) ? a : null;
         var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
             altitudeM: alt, precisionBits: channel.PositionPrecision,
+            to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
         StatusText = await TransmitFrameAsync(frame) ? "Sent position." : "Transmit failed.";
     }
 
     [RelayCommand]
-    private async Task SendSelfDeviceMetrics()
+    private Task SendSelfDeviceMetrics() => SendDeviceMetricsOnChannelAsync(null, null);
+
+    public async Task SendDeviceMetricsOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        var channel = PrimaryChannel();
+        channel ??= PrimaryChannel();
         if (channel is null) return;
         var frame = MeshEncoder.EncodeTelemetryDeviceMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
             batteryLevel: 101, // 101 = "powered from mains", same sentinel MeshRF.App uses on AC.
+            to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
         StatusText = await TransmitFrameAsync(frame) ? "Sent device metrics." : "Transmit failed.";
     }

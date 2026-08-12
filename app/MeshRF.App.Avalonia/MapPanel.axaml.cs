@@ -88,7 +88,7 @@ public partial class MapPanel : UserControl
         var owner = TopLevel.GetTopLevel(this) as Window;
         if (owner is null) return;
 
-        var dest = await WaypointDestinationWindow.PickAsync(owner, _viewModel);
+        var dest = await ChannelPickerWindow.PickAsync(owner, _viewModel, "Send waypoint on which channel?");
         if (dest is null) return;
 
         await _viewModel.SendWaypointFromMapAsync(lat, lon, dest.Value.Channel, dest.Value.DmNodeNum);

@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.Location;
+using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Nodes;
 using MeshRF.Telemetry;
@@ -179,22 +180,26 @@ public partial class RadioViewModel
     // ----- Extra self-sends (the three the quick-send bar doesn't cover) -----
 
     [RelayCommand]
-    private async Task SendSelfNodeStatus()
+    private Task SendSelfNodeStatus() => SendNodeStatusOnChannelAsync(null, null);
+
+    public async Task SendNodeStatusOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
         if (string.IsNullOrWhiteSpace(MyNodeStatus)) { StatusText = "Set a status text first."; return; }
-        var channel = PrimaryChannel();
+        channel ??= PrimaryChannel();
         if (channel is null) return;
         var frame = MeshEncoder.EncodeNodeStatus(channel, _rxHost.MyNodeNum, NextPacketId(),
-            MyNodeStatus.Trim(), hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            MyNodeStatus.Trim(), to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
         StatusText = await TransmitFrameAsync(frame) ? "Sent node status." : "Transmit failed.";
     }
 
     [RelayCommand]
-    private async Task SendSelfEnvironmentMetrics()
+    private Task SendSelfEnvironmentMetrics() => SendEnvironmentMetricsOnChannelAsync(null, null);
+
+    public async Task SendEnvironmentMetricsOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        var channel = PrimaryChannel();
+        channel ??= PrimaryChannel();
         if (channel is null) return;
         if (!TryGetHomeLocation(out double lat, out double lon))
         {
@@ -209,15 +214,17 @@ public partial class RadioViewModel
             temperatureC: weather.TemperatureC,
             relativeHumidityPct: weather.RelativeHumidityPct,
             barometricPressureHpa: weather.BarometricPressureHpa,
-            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
         StatusText = await TransmitFrameAsync(frame) ? "Sent environment metrics." : "Transmit failed.";
     }
 
     [RelayCommand]
-    private async Task SendSelfAirQualityMetrics()
+    private Task SendSelfAirQualityMetrics() => SendAirQualityMetricsOnChannelAsync(null, null);
+
+    public async Task SendAirQualityMetricsOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        var channel = PrimaryChannel();
+        channel ??= PrimaryChannel();
         if (channel is null) return;
         if (!TryGetHomeLocation(out double lat, out double lon))
         {
@@ -230,7 +237,7 @@ public partial class RadioViewModel
 
         var frame = MeshEncoder.EncodeTelemetryAirQualityMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
             pm25Standard: aq.Pm25Standard, pm100Standard: aq.Pm100Standard,
-            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
         StatusText = await TransmitFrameAsync(frame) ? "Sent air quality metrics." : "Transmit failed.";
     }
 

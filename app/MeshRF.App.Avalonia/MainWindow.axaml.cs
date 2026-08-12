@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using MeshRF.Channels;
 using MeshRF.Nodes;
 using MeshRF.Waypoints;
 
@@ -482,6 +483,37 @@ public partial class MainWindow : Window
         LastPacket.ReplaceFrames(frames);
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
     }
+
+    // ----- Quick send: pick a destination first, like MeshRF.App -----
+
+    /// <summary>Prompts for a channel (or an open DM peer) and runs
+    /// <paramref name="send"/> against it. Returns without sending if the
+    /// picker is cancelled.</summary>
+    private async Task SendPromptedAsync(string prompt,
+                                         Func<ChannelConfig?, uint?, Task> send)
+    {
+        var dest = await ChannelPickerWindow.PickAsync(this, _viewModel, prompt);
+        if (dest is null) return;
+        await send(dest.Value.Channel, dest.Value.DmNodeNum);
+    }
+
+    private async void OnSendNodeInfoPrompted(object? sender, RoutedEventArgs e) =>
+        await SendPromptedAsync("Send node info on which channel?", _viewModel.SendNodeInfoOnChannelAsync);
+
+    private async void OnSendPositionPrompted(object? sender, RoutedEventArgs e) =>
+        await SendPromptedAsync("Send position on which channel?", _viewModel.SendPositionOnChannelAsync);
+
+    private async void OnSendDeviceMetricsPrompted(object? sender, RoutedEventArgs e) =>
+        await SendPromptedAsync("Send device metrics on which channel?", _viewModel.SendDeviceMetricsOnChannelAsync);
+
+    private async void OnSendEnvironmentMetricsPrompted(object? sender, RoutedEventArgs e) =>
+        await SendPromptedAsync("Send environment telemetry on which channel?", _viewModel.SendEnvironmentMetricsOnChannelAsync);
+
+    private async void OnSendAirQualityMetricsPrompted(object? sender, RoutedEventArgs e) =>
+        await SendPromptedAsync("Send air quality telemetry on which channel?", _viewModel.SendAirQualityMetricsOnChannelAsync);
+
+    private async void OnSendNodeStatusPrompted(object? sender, RoutedEventArgs e) =>
+        await SendPromptedAsync("Send status on which channel?", _viewModel.SendNodeStatusOnChannelAsync);
 
     /// <summary>Centers the map on the selected node's last known position.</summary>
     private void OnShowOnMap(object? sender, RoutedEventArgs e)
