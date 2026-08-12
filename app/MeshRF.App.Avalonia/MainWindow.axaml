@@ -195,17 +195,13 @@
                      this node's identity. -->
                 <TextBlock Text="Units" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding UnitSystems}" SelectedItem="{Binding UnitSystemName}"
-                          FontSize="11" Width="92" Margin="0,0,6,2"
+                          FontSize="11" Width="92" VerticalAlignment="Center" Margin="0,0,10,2"
                           ToolTip.Tip="Display units used throughout the app" />
-                <CheckBox Content="°F" IsChecked="{Binding UseFahrenheit}" FontSize="11"
-                          VerticalAlignment="Center" Margin="0,0,6,2" />
-                <CheckBox Content="Miles" IsChecked="{Binding UseMiles}" FontSize="11"
-                          VerticalAlignment="Center" Margin="0,0,10,2" />
                 <Border Width="1" Margin="0,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
                 <TextBlock Text="Colormap" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding AvailableColormaps}"
                           SelectedItem="{Binding WaterfallColormap}"
-                          FontSize="11" Width="90" Margin="0,0,10,2" />
+                          FontSize="11" Width="90" VerticalAlignment="Center" Margin="0,0,10,2" />
                 <ToggleButton Content="Auto levels" IsChecked="{Binding WaterfallAutoLevels}" FontSize="11" Margin="0,0,8,2"
                               ToolTip.Tip="Track 5th/99th percentile of recent frames" />
                 <TextBlock Text="floor" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />

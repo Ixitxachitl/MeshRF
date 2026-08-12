@@ -365,15 +365,17 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _unitSystemName = "Metric";
 
-    [ObservableProperty]
-    private bool _useFahrenheit;
-
-    [ObservableProperty]
-    private bool _useMiles;
-
     public UnitSystem CurrentUnitSystem =>
         string.Equals(UnitSystemName, "Imperial", StringComparison.OrdinalIgnoreCase)
             ? UnitSystem.Imperial : UnitSystem.Metric;
+
+    // The unit system alone drives temperature and distance display (as in
+    // MeshRF.App); the legacy per-quantity settings are kept in sync with it.
+    public bool UseImperial => CurrentUnitSystem == UnitSystem.Imperial;
+
+    public bool UseFahrenheit => UseImperial;
+
+    public bool UseMiles => UseImperial;
 
     /// <summary>Altitude field label, unit-aware like MeshRF.App's.</summary>
     public string HomeAltitudeLabel => CurrentUnitSystem == UnitSystem.Imperial ? "Alt (ft)" : "Alt (m)";
@@ -446,8 +448,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedGpsSerialPort = _settings.GpsSerialPort;
         var savedGpsBaudRate = _settings.GpsBaudRate;
         var savedUnitSystem = _settings.UnitSystem;
-        var savedUseFahrenheit = _settings.UseFahrenheit;
-        var savedUseMiles = _settings.UseMiles;
         var savedRingtoneMode = _settings.RingtoneMode;
         var savedRingtoneVolume = _settings.RingtoneVolume;
         var savedRingtoneRtttl = _settings.RingtoneRtttl;
@@ -537,8 +537,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         GpsSerialPort = savedGpsSerialPort;
         GpsBaudRateText = savedGpsBaudRate > 0 ? savedGpsBaudRate.ToString(CultureInfo.InvariantCulture) : string.Empty;
         if (UnitSystems.Contains(savedUnitSystem)) UnitSystemName = savedUnitSystem;
-        UseFahrenheit = savedUseFahrenheit;
-        UseMiles = savedUseMiles;
         if (RingtoneModes.Contains(savedRingtoneMode)) RingtoneMode = savedRingtoneMode;
         RingtoneVolume = savedRingtoneVolume;
         if (!string.IsNullOrWhiteSpace(savedRingtoneRtttl)) RingtoneRtttl = savedRingtoneRtttl;
@@ -609,15 +607,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RssiDbfs = _core.GetSignalStats().RssiDbfs;
         _rxHost.CurrentRssiDbfs = RssiDbfs;
 
-        for (int i = 0; i < 64; i++)
-        {
-            var ev = _core.PullEvent();
-            if (ev is null) break;
-            ProcessDemodEvent(ev);
-        }
+        DrainDemodEvents();
     }
 
-    private void ProcessDemodEvent(string ev)
+    private void DecodePayloadIfPossible(string ev)
     {
         if (ev.IndexOf("payload", StringComparison.Ordinal) < 0) return;
         var m = PayloadLineRegex.Match(ev);
@@ -629,12 +622,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!MeshHeader.TryParse(frame, out var header)) return;
 
         float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
-        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: packetRssiDbm);
-
-        // A CRC-valid payload means a real packet just landed; the view freezes
-        // a spectrogram of it. Raised after routing so the snapshot can't delay
-        // message handling.
-        PacketDecoded?.Invoke();
+        // SNR comes from the preamble that opened this frame, matching
+        // MeshRF.App — it was being dropped entirely before.
+        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: _lastPreamblePeakDb, packetRssiDbm: packetRssiDbm);
+        _lastPreamblePeakDb = null;
     }
 
     private static byte[] HexToBytes(string hex)
@@ -959,8 +950,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     // toggling the source.
     partial void OnGpsSerialPortChanged(string value) { ApplyLocationSource(startOrStop: true); SaveSettings(); }
     partial void OnGpsBaudRateTextChanged(string value) { ApplyLocationSource(startOrStop: true); SaveSettings(); }
-    partial void OnUseFahrenheitChanged(bool value) => SaveSettings();
-    partial void OnUseMilesChanged(bool value) => SaveSettings();
 
     partial void OnHomeLocationSourceChanged(string value)
     {
@@ -973,6 +962,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnUnitSystemNameChanged(string value)
     {
         OnPropertyChanged(nameof(CurrentUnitSystem));
+        OnPropertyChanged(nameof(UseImperial));
+        OnPropertyChanged(nameof(UseFahrenheit));
+        OnPropertyChanged(nameof(UseMiles));
         OnPropertyChanged(nameof(HomeAltitudeLabel));
         SaveSettings();
     }
@@ -1101,12 +1093,27 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     /// <summary>Transmit a pre-built frame using the currently selected
     /// preset/frequency/TX gain settings. Runs off the UI thread.</summary>
+    /// <summary>Transmits one frame, serialised against every other send and
+    /// deferred until the channel is idle. Never call Core.Transmit directly —
+    /// concurrent sends race on the shared native handle, and keying up during
+    /// a reception collides with the traffic being received.</summary>
     private async Task<bool> TransmitFrameAsync(byte[] frame)
     {
         if (_core is null) return false;
         var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
         var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
-        return await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp)).ConfigureAwait(true);
+
+        await _txSemaphore.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await WaitForTxOpportunityAsync().ConfigureAwait(false);
+            return await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
+                             .ConfigureAwait(true);
+        }
+        finally
+        {
+            _txSemaphore.Release();
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
