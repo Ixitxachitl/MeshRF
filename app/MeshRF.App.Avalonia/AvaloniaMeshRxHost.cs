@@ -63,6 +63,19 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// is saturated with refloods.</summary>
     public Func<byte[]>? MyPrivateKeyProvider { get; set; }
 
+    /// <summary>The tab currently on screen, supplied by the owner. Activity on
+    /// it isn't "unseen", so it must not be flagged for attention.</summary>
+    public Func<ITabItem?>? SelectedTabProvider { get; set; }
+
+    /// <summary>Flags a tab as having unseen activity, unless it's the one being
+    /// looked at.</summary>
+    private void MarkTabNeedsAttention(ITabItem? tab)
+    {
+        if (tab is null) return;
+        if (ReferenceEquals(SelectedTabProvider?.Invoke(), tab)) return;
+        tab.TabNeedsAttention = true;
+    }
+
     /// <summary>Unit-aware formatters for history display strings. Owned by the
     /// view model, which holds the unit setting.</summary>
     public Func<float, string>? FormatTemperature { get; set; }
@@ -758,14 +771,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
         if (isDirectToUs)
         {
-            _conversationsByNode[header.From].TabNeedsAttention = true;
+            MarkTabNeedsAttention(_conversationsByNode[header.From]);
             // Alert only for real messages from nodes we haven't ignored —
             // a tapback shouldn't ring.
             if (!isReaction && !IsNodeIgnored(header.From)) IncomingDirectMessage?.Invoke();
         }
         else if (ResolveChannelTab(result.ChannelName) is { } chanTab2)
         {
-            chanTab2.TabNeedsAttention = true;
+            MarkTabNeedsAttention(chanTab2);
             // Ring on channel traffic unless the channel is muted, the sender is
             // ignored, or that node is individually muted. Matches MeshRF.App,
             // which also rings for channel reactions (unlike the DM path above).

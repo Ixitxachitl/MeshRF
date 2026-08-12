@@ -10,6 +10,43 @@
         Title="MeshRF"
         Width="1280" Height="900">
 
+    <Window.Styles>
+        <!-- Unseen-activity pulse on a tab header, matching MeshRF.App's
+             flashing storyboard. Alternating playback fades out and back rather
+             than snapping, and it runs until the tab is selected and the view
+             model clears TabNeedsAttention. -->
+        <!-- Reaction chips are buttons but should read as inline tags, so the
+             stock button chrome is stripped back to a hover cue. -->
+        <Style Selector="Button.reactionChip">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.reactionChip /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="Button.reactionChip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+
+        <Style Selector="TextBlock.attention">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Style.Animations>
+                <Animation Duration="0:0:0.45" IterationCount="Infinite" PlaybackDirection="Alternate">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="Opacity" Value="1.0" />
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="Opacity" Value="0.35" />
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
+    </Window.Styles>
+
     <Window.Resources>
       <ResourceDictionary>
         <!-- Shared by both channel and DM-conversation tab content templates
@@ -62,13 +99,21 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="mesh:MessageReaction">
-                                            <Border Margin="0,0,4,0" Padding="6,1" CornerRadius="8"
+                                            <!-- Tapping a chip sends the same reaction, so
+                                                 agreeing with one costs a click instead of a
+                                                 trip through the emoji picker. Tag carries the
+                                                 message, which the reaction itself doesn't
+                                                 reference. -->
+                                            <Button Classes="reactionChip" Margin="0,0,4,0" Padding="6,1"
+                                                    CornerRadius="8" FontSize="11"
                                                     Background="{DynamicResource BrushPanelBackground}"
                                                     BorderBrush="{DynamicResource BrushPanelBorder}"
                                                     BorderThickness="1"
+                                                    Click="OnReactionChipTapped"
+                                                    Tag="{Binding $parent[ListBoxItem].DataContext}"
                                                     ToolTip.Tip="{Binding Reactors}">
                                                 <TextBlock Text="{Binding Display}" FontSize="11" />
-                                            </Border>
+                                            </Button>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
@@ -785,7 +830,12 @@
                         <TabControl.ItemTemplate>
                             <DataTemplate x:DataType="mesh:ITabItem">
                                 <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center" />
+                                    <!-- Classes.attention drives the pulse animation in
+                                         Window.Styles: Avalonia has no DataTrigger, so a
+                                         bound style class is how the WPF storyboard's
+                                         behaviour is expressed here. -->
+                                    <TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center"
+                                               Classes.attention="{Binding TabNeedsAttention}" />
                                     <Button Content="&#x2715;" FontSize="9" Padding="3,0" Margin="2,0,-4,0"
                                             BorderThickness="0" Background="Transparent"
                                             ToolTip.Tip="Close conversation"

@@ -468,6 +468,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
         _rxHost.AckRequested += SendAck;
         _rxHost.DecodedPacketForFeed += AppendDecodedPacketJson;
+        _rxHost.SelectedTabProvider = () => SelectedTab;
         // Enables PKC decode in the shared router; without it every direct
         // message stays undecodable.
         _rxHost.MyPrivateKeyProvider = () => TryParseKeyBase64(MyPrivateKey);
@@ -1212,6 +1213,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
     partial void OnSelectedTabChanged(ITabItem? value)
     {
+        // Looking at the tab is what marks its activity seen; without this the
+        // header would keep pulsing forever once anything arrived.
+        if (value is not null) value.TabNeedsAttention = false;
         if (value is not null) _previousTab = value;
         if (value is ChannelTabViewModel ch) _lastSelectedChannelIndex = ch.Config.Index;
         SendMessageCommand.NotifyCanExecuteChanged();

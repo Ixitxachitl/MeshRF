@@ -582,6 +582,15 @@ public partial class MainWindow : Window
         await _viewModel.SendReactionAsync(message, glyph);
     }
 
+    /// <summary>Tapping an existing reaction sends the same one, so agreeing
+    /// with a tapback doesn't require picking the emoji again.</summary>
+    private async void OnReactionChipTapped(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: MessageReaction reaction, Tag: ChannelMessage message }) return;
+        if (string.IsNullOrEmpty(reaction.Emoji)) return;
+        await _viewModel.SendReactionAsync(message, reaction.Emoji);
+    }
+
     private async void OnCopyMessage(object? sender, RoutedEventArgs e)
     {
         if (sender is not Control { DataContext: ChannelMessage message }) return;

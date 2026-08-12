@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -41,9 +42,45 @@ public static class AutoScrollBehavior
         });
     }
 
+    /// <summary>
+    /// Keeps a list pinned to the bottom when its content grows taller without
+    /// gaining items.
+    ///
+    /// A reaction attaches to an existing message rather than adding a new one,
+    /// so no CollectionChanged fires — but the row gets a reaction chip and
+    /// grows. Everything below shifts by that much, which walks the view off
+    /// the newest message. Watching the scroll extent catches that, and any
+    /// other in-place growth such as a message being re-rendered taller.
+    /// </summary>
+    private static void HookExtentGrowth(ListBox list)
+    {
+        var scroller = list.FindDescendantOfType<ScrollViewer>();
+        if (scroller is null) return;
+
+        double lastExtent = scroller.Extent.Height;
+        bool wasAtBottom = true;
+
+        scroller.ScrollChanged += (_, _) =>
+        {
+            double extent = scroller.Extent.Height;
+            double viewport = scroller.Viewport.Height;
+            double offset = scroller.Offset.Y;
+
+            if (extent > lastExtent && wasAtBottom && GetIsEnabled(list))
+                Dispatcher.UIThread.Post(() => ScrollToEnd(list), DispatcherPriority.Background);
+
+            // Sampled before the next change so "were we following?" reflects
+            // where the user was, not where the growth just left them. A small
+            // tolerance keeps fractional layout offsets from unpinning it.
+            wasAtBottom = offset + viewport >= extent - 2.0;
+            lastExtent = extent;
+        };
+    }
+
     private static void Attach(ListBox list)
     {
         Detach(list);
+        HookExtentGrowth(list);
         if (list.ItemsSource is not INotifyCollectionChanged incc) return;
 
         void Handler(object? _, NotifyCollectionChangedEventArgs args)
