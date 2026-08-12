@@ -484,6 +484,9 @@ public partial class MainWindow : Window
         LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
     }
 
+    private void OnOpenRawJsonLog(object? sender, RoutedEventArgs e) =>
+        RawJsonFeedWindow.Show(this, _viewModel);
+
     // ----- History windows -----
 
     private void OnOpenNodeTelemetryHistory(object? sender, RoutedEventArgs e)

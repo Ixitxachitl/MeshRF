@@ -4,6 +4,9 @@ using MeshRF.Nodes;
 
 namespace MeshRF.AvaloniaApp;
 
+/// <summary>One label/value row in a conversation's live telemetry panel.</summary>
+public sealed record TelemetryItem(string Label, string Value);
+
 /// <summary>One recorded position for a peer, with its display strings
 /// pre-rendered. Ported from MeshRF.App's ConversationViewModel.</summary>
 public sealed record LocationHistoryPoint(

@@ -103,6 +103,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// retransmit and the mesh reflood.</summary>
     public Action<MeshHeader, string?, bool>? AckRequested { get; set; }
 
+    /// <summary>Raised for every decoded packet so the owner can serialise it
+    /// into the raw JSON feed.</summary>
+    public Action<MeshHeader, MeshDecodeResult, long, float?, float?, byte, string>? DecodedPacketForFeed { get; set; }
+
     /// <summary>Appends a telemetry history point, skipping a payload that
     /// repeats the previous one for the same metric groups — nodes re-send
     /// unchanged telemetry on a timer, and those would otherwise fill the
@@ -361,7 +365,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // location/telemetry history; the formatters keep its display strings
         // on the app's unit setting.
         var convo = new ConversationTabViewModel(nodeNum, NodeDisplayName(nodeNum),
-                                                 _nodeStore, () => FormatTemperature, () => FormatPressure);
+                                                 _nodeStore, () => FormatTemperature, () => FormatPressure)
+        {
+            Node = _nodeStore.Get(nodeNum),
+        };
         _conversationsByNode[nodeNum] = convo;
         Tabs.Add(convo);
 
@@ -504,7 +511,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         else Nodes.Add(rec);
 
         if (_conversationsByNode.TryGetValue(nodeNum, out var convo))
+        {
             convo.PeerName = NodeDisplayName(nodeNum);
+            // Same record instance as before, so assigning it wouldn't raise
+            // the setter — refresh explicitly so the telemetry panel follows.
+            if (ReferenceEquals(convo.Node, rec)) convo.RefreshNodeSnapshot();
+            else convo.Node = rec;
+        }
     }
 
     public bool RememberUndecodedPacket(MeshHeader header)
@@ -542,7 +555,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // Without this the log only ever shows MeshRxRouter's "(dup)" and
         // "rx undecoded" lines, making normal flood retransmissions look like
         // every packet was being rejected as a duplicate.
-        Log(BuildDecodedPortSummary(header, result, NodeDisplayName(header.From)));
+        var summary = BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
+        Log(summary);
+        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary);
 
         // Only reached for a packet that decoded and passed dedupe, so this is
         // exactly one ack per unique message — matching MeshRF.App.

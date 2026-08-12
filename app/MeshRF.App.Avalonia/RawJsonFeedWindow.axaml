@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.RawJsonFeedWindow"
+        x:DataType="local:RadioViewModel"
+        Title="Raw JSON Feed"
+        Width="1000" Height="560" MinWidth="700" MinHeight="320"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Grid Margin="6" RowDefinitions="Auto,*">
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,4">
+            <Button DockPanel.Dock="Right" Content="Clear" Padding="8,2" Margin="4,0,0,0"
+                    Command="{Binding ClearDecodedPacketJsonFeedCommand}" />
+            <Button DockPanel.Dock="Right" Content="Export…" Padding="8,2" Margin="4,0,0,0"
+                    Click="OnExport" ToolTip.Tip="Save the whole feed to a .json file" />
+            <Button DockPanel.Dock="Right" Content="Copy" Padding="8,2"
+                    Click="OnCopy" ToolTip.Tip="Copy the whole feed to the clipboard" />
+            <ToggleButton x:Name="AutoScrollToggle" DockPanel.Dock="Right" Content="Auto-scroll"
+                          Padding="8,2" Margin="16,0,4,0" IsChecked="True"
+                          ToolTip.Tip="Scroll to new entries as they arrive" />
+            <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Decoded Packet JSON Feed" />
+        </DockPanel>
+
+        <ListBox x:Name="JsonList" Grid.Row="1"
+                 ItemsSource="{Binding DecodedPacketJsonEntries}"
+                 HorizontalAlignment="Stretch">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="local:DecodedPacketJsonEntry">
+                    <!-- Collapsed by default: the feed is scanned by header, and
+                         each body is a full packet dump. -->
+                    <Expander Margin="0,0,0,4">
+                        <Expander.Header>
+                            <TextBlock FontFamily="Consolas" TextWrapping="Wrap" Text="{Binding Header}" />
+                        </Expander.Header>
+                        <Border Margin="8,4,0,0" Padding="6"
+                                Background="{DynamicResource BrushPanelBackground}"
+                                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                            <SelectableTextBlock FontFamily="Consolas" FontSize="11"
+                                                 TextWrapping="Wrap" Text="{Binding DisplayJson}" />
+                        </Border>
+                    </Expander>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Grid>
+</Window>

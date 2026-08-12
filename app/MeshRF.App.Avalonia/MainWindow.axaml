@@ -811,7 +811,57 @@
                                 </DockPanel>
                             </DataTemplate>
                             <DataTemplate DataType="local:ConversationTabViewModel">
-                                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource MessageListTemplate}" />
+                                <DockPanel>
+                                    <!-- Peer header: identity plus the per-conversation
+                                         toggles MeshRF.App puts here. -->
+                                    <Border DockPanel.Dock="Top" Padding="6,4" Margin="0,0,0,4"
+                                            Background="{DynamicResource BrushPanelBackground}"
+                                            BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="Clear" Padding="6,1"
+                                                    VerticalAlignment="Center" Margin="4,0,0,0"
+                                                    Command="{Binding ClearMessagesCommand}"
+                                                    ToolTip.Tip="Clear this conversation from the view" />
+                                            <ToggleButton DockPanel.Dock="Right" Content="Mute Ringtone"
+                                                          Padding="6,1" VerticalAlignment="Center"
+                                                          IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
+                                                          ToolTip.Tip="Mute the incoming ringtone for this node" />
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding PeerName}" />
+                                                <TextBlock FontFamily="Consolas" Text="{Binding PeerId}"
+                                                           Foreground="{DynamicResource BrushSubtle}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <!-- Messages beside the peer's current values. -->
+                                    <Grid ColumnDefinitions="*,5,Auto">
+                                        <ContentControl Grid.Column="0" Content="{Binding}"
+                                                        ContentTemplate="{StaticResource MessageListTemplate}" />
+                                        <GridSplitter Grid.Column="1" Width="5"
+                                                      Background="{DynamicResource BrushSplitter}"
+                                                      IsVisible="{Binding HasTelemetry}" />
+                                        <Border Grid.Column="2" Width="240" Padding="6,4"
+                                                IsVisible="{Binding HasTelemetry}"
+                                                Background="{DynamicResource BrushPanelBackground}"
+                                                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                <ItemsControl ItemsSource="{Binding Telemetry}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="local:TelemetryItem">
+                                                            <Grid ColumnDefinitions="110,*" Margin="0,0,0,2">
+                                                                <TextBlock Grid.Column="0" FontSize="11" Text="{Binding Label}"
+                                                                           Foreground="{DynamicResource BrushSubtle}" />
+                                                                <TextBlock Grid.Column="1" FontSize="11" TextWrapping="Wrap"
+                                                                           Text="{Binding Value}" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </Border>
+                                    </Grid>
+                                </DockPanel>
                             </DataTemplate>
                         </TabControl.DataTemplates>
                     </TabControl>
@@ -855,6 +905,9 @@
                             <Button DockPanel.Dock="Right" Content="Copy" FontSize="11" Padding="6,1"
                                     VerticalAlignment="Center" Click="OnCopyLog"
                                     ToolTip.Tip="Copy the log to the clipboard" />
+                            <Button DockPanel.Dock="Right" Content="Raw JSON" FontSize="11" Padding="6,1"
+                                    Margin="4,0,4,0" VerticalAlignment="Center" Click="OnOpenRawJsonLog"
+                                    ToolTip.Tip="Every decoded packet as JSON" />
                             <TextBlock Text="Log" FontWeight="Bold" Margin="4,0,0,0" VerticalAlignment="Center" />
                         </DockPanel>
                         <ListBox ItemsSource="{Binding LogLines}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" FontSize="11"
