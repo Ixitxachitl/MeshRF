@@ -465,6 +465,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.OpenConversationsChanged += SaveOpenConversations;
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
         _rxHost.IncomingChannelMessage += PlayIncomingRingtone;
+        _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
         // Restore per-channel ringtone mutes. The channel tabs exist by now
         // (the host loads them in its constructor), and MutedRingtoneChannels
         // is the same settings.json key MeshRF.App writes.
@@ -553,6 +554,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SaveSettings();
 
         HookNodeFilter();
+        RefreshSelfNode(); // our own row, so the configured name resolves from the first frame
         InitTelemetrySources();
         InitGps();
         RestoreSelectedTab(savedLastSelectedChannelIndex, savedSelectedConversationNode);
@@ -903,6 +905,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
         OnPropertyChanged(nameof(MyMacAddress)); // derived from the node number
         SaveSettings();
+        RefreshSelfNode();
     }
 
     private static uint ParseNodeId(string? text)
@@ -933,13 +936,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         MyPublicKey = Convert.ToBase64String(pub);
     }
 
-    partial void OnMyLongNameChanged(string value) => SaveSettings();
-    partial void OnMyShortNameChanged(string value) => SaveSettings();
-    partial void OnMyRoleChanged(string value) => SaveSettings();
-    partial void OnMyHwModelChanged(string value) => SaveSettings();
+    // Identity edits have to reach the node store too, not just settings.json.
+    partial void OnMyLongNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyShortNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyRoleChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyPublicKeyChanged(string value) => SaveSettings();
     partial void OnMyPrivateKeyChanged(string value) => SaveSettings();
-    partial void OnMyNodeStatusChanged(string value) => SaveSettings();
+    partial void OnMyNodeStatusChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnHopLimitChanged(int value) => SaveSettings();
     partial void OnOkToMqttChanged(bool value) => SaveSettings();
 
@@ -1151,7 +1155,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // air (MeshRxRouter treats hearing it as isFromUs and drops it).
         messages.Add(new ChannelMessage
         {
-            FromId = $"!{_rxHost.MyNodeNum:x8}",
+            // Our configured name, not the raw node ID — this is the label the
+            // user sees against their own messages, and it must match what
+            // history replay resolves to.
+            FromId = _rxHost.NodeDisplayName(_rxHost.MyNodeNum),
             SenderNodeNum = _rxHost.MyNodeNum,
             Text = replyId != 0 ? $"{replyContext}\n{text}" : text,
             PacketId = packetId,

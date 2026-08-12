@@ -78,6 +78,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// means such requests are simply not answered.</summary>
     public Action<byte[]>? TransmitAutoReply { get; set; }
 
+    /// <summary>Raised when a peer directs a request at us that we should
+    /// answer (port, requester, channel the request arrived on). The owner
+    /// holds our identity and the transmitter, so it builds the reply.</summary>
+    public Action<PortNum, uint, string?>? AutoReplyRequested { get; set; }
+
+    /// <summary>A request aimed specifically at us that asked for a response.
+    /// Broadcast requests are ignored — answering those would have every
+    /// listener reply at once.</summary>
+    private bool IsDirectedRequest(MeshHeader header, MeshDecodeResult result) =>
+        MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum && result.WantResponse;
+
     public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore, WaypointStore waypointStore,
         MessageStore messageStore, uint myNodeNum, IReadOnlyList<uint> openConversationNodeNums)
     {
@@ -368,14 +379,39 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     public string NodeDisplayName(uint nodeNum)
     {
-        if (MyNodeNum != 0 && nodeNum == MyNodeNum) return "me";
+        // Our own record is checked first rather than short-circuiting to "me":
+        // once the identity is configured, our long name is the useful label,
+        // and it's what other clients see. "me" is only the fallback for a
+        // self node that has no name yet.
         var rec = _nodeStore.Get(nodeNum);
         if (rec is not null)
         {
             if (!string.IsNullOrWhiteSpace(rec.LongName)) return rec.LongName;
             if (!string.IsNullOrWhiteSpace(rec.ShortName)) return rec.ShortName;
         }
+        if (MyNodeNum != 0 && nodeNum == MyNodeNum) return "me";
         return $"!{nodeNum:x8}";
+    }
+
+    /// <summary>Writes our own node into the store so our configured name
+    /// resolves everywhere a node number is displayed — the node grid, chat
+    /// sender labels, and reaction attributions.</summary>
+    public void UpsertSelf(string longName, string shortName, string hwModel, string role,
+                           string nodeStatus, string publicKeyHex)
+    {
+        if (MyNodeNum == 0) return;
+        _nodeStore.Upsert(new NodeRecord
+        {
+            NodeNum = MyNodeNum,
+            UserId = $"!{MyNodeNum:x8}",
+            LongName = longName ?? string.Empty,
+            ShortName = shortName ?? string.Empty,
+            HwModel = hwModel ?? string.Empty,
+            Role = role ?? string.Empty,
+            NodeStatus = nodeStatus ?? string.Empty,
+            PublicKey = publicKeyHex ?? string.Empty,
+        });
+        MarkNodeDirty(MyNodeNum);
     }
 
     public bool IsNodeIgnored(uint nodeNum) => _nodeStore.Get(nodeNum)?.Ignored == true;
@@ -464,6 +500,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
 
             case PortNum.NodeInfo when result.User is not null:
+                // An empty NodeInfo payload carrying want_response is a pure
+                // *request*, not an advertisement. Answering it is how other
+                // nodes learn our name; upserting it would overwrite the
+                // sender's record with blanks.
+                if (result.AppPayload.Length == 0)
+                {
+                    if (IsDirectedRequest(header, result)) AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName);
+                    break;
+                }
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
@@ -479,9 +524,19 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     HopsAway = hopsAway,
                 });
                 MarkNodeDirty(header.From);
+                // An advertisement may still ask us to reply with ours.
+                if (IsDirectedRequest(header, result)) AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName);
                 break;
 
             case PortNum.Position when result.Position is not null:
+                // A zero-island position with want_response is the request
+                // form, the same convention NodeInfo uses.
+                if (result.Position.Latitude == 0 && result.Position.Longitude == 0 &&
+                    IsDirectedRequest(header, result))
+                {
+                    AutoReplyRequested?.Invoke(PortNum.Position, header.From, result.ChannelName);
+                    break;
+                }
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
@@ -497,6 +552,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
 
             case PortNum.Telemetry when result.Telemetry is not null:
+                // Firmware's DeviceTelemetryModule answers a directed telemetry
+                // request with its device metrics; an empty payload is the
+                // request form.
+                if (result.AppPayload.Length == 0 && IsDirectedRequest(header, result))
+                {
+                    AutoReplyRequested?.Invoke(PortNum.Telemetry, header.From, result.ChannelName);
+                    break;
+                }
                 var t = result.Telemetry;
                 _nodeStore.Upsert(new NodeRecord
                 {
@@ -511,6 +574,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     TemperatureC = t.TemperatureC,
                 });
                 MarkNodeDirty(header.From);
+                if (IsDirectedRequest(header, result))
+                    AutoReplyRequested?.Invoke(PortNum.Telemetry, header.From, result.ChannelName);
                 break;
 
             case PortNum.Traceroute:

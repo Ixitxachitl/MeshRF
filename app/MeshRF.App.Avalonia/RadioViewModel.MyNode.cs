@@ -43,6 +43,17 @@ public partial class RadioViewModel
         MyNodeIdText = $"!{nodeNum:x8}";
     }
 
+    /// <summary>Persists our own node record so the configured name resolves
+    /// wherever a node number is shown. Without this our node either has no
+    /// row at all or a stale one, and our messages fall back to the raw ID.</summary>
+    public void RefreshSelfNode()
+    {
+        if (!_settingsLoaded) return;
+        _rxHost.UpsertSelf(
+            MyLongName, MyShortName, MyHwModel, MyRole, MyNodeStatus,
+            Convert.ToHexString(TryParseKeyBase64(MyPublicKey)));
+    }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPrivateKeyHidden))]
     private bool _isPrivateKeyRevealed;
@@ -111,6 +122,53 @@ public partial class RadioViewModel
 
     [ObservableProperty] private string _weatherTelemetryStatus = "Weather telemetry: idle.";
     [ObservableProperty] private string _airQualityTelemetryStatus = "Air quality telemetry: idle.";
+
+    /// <summary>Answers a directed request from a peer. Without this our
+    /// NodeInfo only ever leaves on the auto-report schedule or a manual
+    /// click, so peers that ask for our name get nothing back.</summary>
+    private void HandleAutoReplyRequest(PortNum port, uint to, string? channelName)
+    {
+        if (!CanTransmit || to == 0 || to == 0xFFFFFFFFu) return;
+        var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+        if (channel is null) return;
+
+        try
+        {
+            switch (port)
+            {
+                case PortNum.NodeInfo:
+                    var nodeInfo = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, NextPacketId(),
+                        MyLongName, MyShortName,
+                        hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
+                        publicKey: TryParseKeyBase64(MyPublicKey),
+                        to: to, hopLimit: (byte)HopLimit, wantResponse: false, okToMqtt: OkToMqtt);
+                    _ = TransmitFrameAsync(nodeInfo);
+                    break;
+
+                case PortNum.Position:
+                    if (channel.PositionPrecision == 0) return;
+                    if (!TryGetHomeLocation(out double lat, out double lon)) return;
+                    int? alt = int.TryParse(HomeAltitudeText, NumberStyles.Integer,
+                                            CultureInfo.InvariantCulture, out var a) ? a : null;
+                    var position = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
+                        altitudeM: alt, precisionBits: channel.PositionPrecision,
+                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+                    _ = TransmitFrameAsync(position);
+                    break;
+
+                case PortNum.Telemetry:
+                    var metrics = MeshEncoder.EncodeTelemetryDeviceMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
+                        batteryLevel: 101, // 101 = mains-powered, the sentinel this app reports.
+                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+                    _ = TransmitFrameAsync(metrics);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Auto-reply failed: {ex.Message}";
+        }
+    }
 
     private void InitTelemetrySources()
     {

@@ -102,14 +102,6 @@
                            Foreground="{DynamicResource BrushSubtle}" Text="{Binding GpsStatus}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="12" Grid.Column="0" Text="Units" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="12" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="10">
-                <ComboBox Width="110" ItemsSource="{Binding UnitSystems}" SelectedItem="{Binding UnitSystemName}"
-                          ToolTip.Tip="Display units used throughout the app" />
-                <CheckBox Content="°F" IsChecked="{Binding UseFahrenheit}" VerticalAlignment="Center" />
-                <CheckBox Content="Miles" IsChecked="{Binding UseMiles}" VerticalAlignment="Center" />
-            </StackPanel>
-
             <TextBlock Grid.Row="13" Grid.Column="0" Text="{Binding HomeAltitudeLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
             <Grid Grid.Row="13" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
                   IsEnabled="{Binding IsManualLocationSource}">
