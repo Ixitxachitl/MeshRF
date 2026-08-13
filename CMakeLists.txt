@@ -235,8 +235,14 @@ if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
             -DPThreads4W_DIR=${_mrf_pthreads_cmake_dir}
             -DPThreads4W_INCLUDE_DIR=${_mrf_pthreads_include_dir}
             -DPThreads4W_LIBRARY=${_mrf_pthreads_lib}
+            -DPThreads4W_ROOT=${_mrf_vcpkg_triplet_dir}
             -DTHREADS_PTHREADS_INCLUDE_DIR=${_mrf_pthreads_include_dir}
             -DTHREADS_PTHREADS_LIBRARY=${_mrf_pthreads_lib}
+            # Without a prefix path the PThreads4W config package resolves its
+            # imported location to NOTFOUND on a fresh vcpkg, and hackrf links
+            # the literal "PThreads4W::PThreads4W-NOTFOUND.obj" (LNK1104). It
+            # only worked on machines whose .vcpkg predated the manifest.
+            -DCMAKE_PREFIX_PATH=${_mrf_vcpkg_triplet_dir}
         BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config $<CONFIG>
         INSTALL_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config $<CONFIG> --target install
         LOG_CONFIGURE ON
