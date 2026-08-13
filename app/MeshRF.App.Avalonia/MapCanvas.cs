@@ -9,6 +9,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -150,9 +151,12 @@ public sealed class MapCanvas : Control
     /// <summary>What sits under a given screen point. Rebuilt every render
     /// because markers aren't visuals and can't be hit-tested by the
     /// framework.</summary>
+    /// <param name="Marker">The marker drawn here, so a right-click can act on
+    /// it. Null for a cluster badge, which stands for several at once.</param>
     private readonly record struct HitTarget(
         double X, double Y, double Radius, string Tooltip,
-        List<(RadioViewModel.MapMarker mk, double px, double py)>? Cluster);
+        List<(RadioViewModel.MapMarker mk, double px, double py)>? Cluster,
+        RadioViewModel.MapMarker? Marker = null);
 
     private readonly List<HitTarget> _hitTargets = new();
 
@@ -529,7 +533,7 @@ public sealed class MapCanvas : Control
                     DrawGeofenceRectangle(context, bw, bs, be, bn, originX, originY);
                 DrawDot(context, mk.IsExpired ? WaypointExpiredFill : WaypointFill, px, py);
                 DrawLabel(context, mk.Label, px, py);
-                _hitTargets.Add(new HitTarget(px, py, MarkerRadiusPx + 2, mk.Title, null));
+                _hitTargets.Add(new HitTarget(px, py, MarkerRadiusPx + 2, mk.Title, null, mk));
             }
             else
             {
@@ -543,7 +547,7 @@ public sealed class MapCanvas : Control
             {
                 DrawDot(context, NodeFill, n.px, n.py);
                 DrawLabel(context, n.mk.Label, n.px, n.py);
-                _hitTargets.Add(new HitTarget(n.px, n.py, MarkerRadiusPx + 2, n.mk.Title, null));
+                _hitTargets.Add(new HitTarget(n.px, n.py, MarkerRadiusPx + 2, n.mk.Title, null, n.mk));
             }
             return;
         }
@@ -557,7 +561,7 @@ public sealed class MapCanvas : Control
                 var (mk, px, py) = cluster[0];
                 DrawDot(context, NodeFill, px, py);
                 DrawLabel(context, mk.Label, px, py);
-                _hitTargets.Add(new HitTarget(px, py, MarkerRadiusPx + 2, mk.Title, null));
+                _hitTargets.Add(new HitTarget(px, py, MarkerRadiusPx + 2, mk.Title, null, mk));
             }
             else
             {
@@ -575,7 +579,7 @@ public sealed class MapCanvas : Control
                                       LabelTypeface, 20, Brushes.Gold);
         context.DrawText(glyph, new Point(px - glyph.Width / 2, py - glyph.Height / 2));
         DrawLabel(context, mk.Label, px, py);
-        _hitTargets.Add(new HitTarget(px, py, 10, mk.Title, null));
+        _hitTargets.Add(new HitTarget(px, py, 10, mk.Title, null, mk));
     }
 
     /// <summary>Marker label, offset to the lower-right of the dot on a
@@ -742,7 +746,7 @@ public sealed class MapCanvas : Control
             context.FillRectangle(LabelBackground, new Rect(lx - 2, ly, ft.Width + 4, ft.Height));
             context.DrawText(ft, new Point(lx, ly));
 
-            _hitTargets.Add(new HitTarget(mx, my, MarkerRadiusPx + 2, members[i].mk.Title, null));
+            _hitTargets.Add(new HitTarget(mx, my, MarkerRadiusPx + 2, members[i].mk.Title, null, members[i].mk));
         }
     }
 
@@ -767,13 +771,26 @@ public sealed class MapCanvas : Control
 
         if (props.IsRightButtonPressed)
         {
-            // Ctrl+right-click drops the home location here.
-            if (_vm is not null && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            if (_vm is null) return;
+
+            // Ctrl+right-click drops the home location here. Checked before the
+            // marker menu so the gesture still works over a crowded map.
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
             {
                 var (lat, lon) = ScreenToGeo(p);
                 _vm.SetHomeLocation(lat, lon);
                 e.Handled = true;
+                return;
             }
+
+            // Markers aren't visuals, so there is nothing for the framework to
+            // attach a ContextMenu to — resolve the marker ourselves and build
+            // the menu for whatever is under the pointer.
+            if (BuildMarkerMenu(HitTest(p)?.Marker) is not { } menu) return;
+            menu.PlacementTarget = this;
+            menu.Placement = PlacementMode.Pointer;
+            menu.Open(this);
+            e.Handled = true;
             return;
         }
 
@@ -910,6 +927,70 @@ public sealed class MapCanvas : Control
     /// <summary>Ctrl+left-click asked to drop a waypoint at these coordinates.
     /// The host handles it so the destination picker can own a parent window.</summary>
     public event Action<double, double>? RequestSendWaypoint;
+
+    /// <summary>"Edit…" was chosen on a waypoint marker. Raised rather than
+    /// handled here for the same reason as <see cref="RequestSendWaypoint"/>:
+    /// the edit dialog needs a parent window, which the host owns.</summary>
+    public event Action<WaypointRecord>? RequestEditWaypoint;
+
+    // -- Marker context menu ------------------------------------------------
+
+    /// <summary>
+    /// Menu for the marker under the pointer, or null when there is nothing to
+    /// act on — empty map, the home marker (it is a setting, not a peer), or a
+    /// cluster badge, which stands for several nodes at once and would need one
+    /// picked first. Mirrors the node and waypoint grids' menus, minus the
+    /// entries that are inherently grid-bound (Copy, Show on map).
+    /// </summary>
+    private ContextMenu? BuildMarkerMenu(RadioViewModel.MapMarker? marker)
+    {
+        if (_vm is null || marker is not { } mk || mk.IsHome) return null;
+
+        if (mk.IsWaypoint)
+        {
+            if (mk.WaypointRowId is not long rowId) return null;
+            var wp = _vm.Waypoints.FirstOrDefault(w => w.Id == rowId);
+            if (wp is null) return null;
+
+            var edit = new MenuItem { Header = "Edit…" };
+            edit.Click += (_, _) => RequestEditWaypoint?.Invoke(wp);
+            return Menu(
+                edit,
+                Item("Resend", _vm.ResendWaypointCommand, wp),
+                new Separator(),
+                Item("Delete", _vm.DeleteWaypointCommand, wp));
+        }
+
+        if (mk.NodeNum is not uint nodeNum) return null;
+        var node = _vm.FilteredNodes.FirstOrDefault(n => n.NodeNum == nodeNum);
+        if (node is null) return null;
+
+        return Menu(
+            Item("Message", _vm.MessageNodeCommand, node),
+            new Separator(),
+            Item("Request node info", _vm.RequestNodeInfoCommand, node),
+            Item("Exchange node info", _vm.ExchangeNodeInfoCommand, node),
+            Item("Request location", _vm.RequestLocationCommand, node),
+            Item("Exchange location", _vm.ExchangeLocationCommand, node),
+            Item("Request telemetry", _vm.RequestTelemetryCommand, node),
+            Item("Traceroute", _vm.TracerouteCommand, node),
+            Item("Request new keys", _vm.RequestNewKeysCommand, node),
+            new Separator(),
+            Item("Toggle ignore", _vm.ToggleIgnoreNodeCommand, node),
+            Item("Toggle favorite", _vm.ToggleFavoriteNodeCommand, node),
+            new Separator(),
+            Item("Delete", _vm.DeleteNodeCommand, node));
+    }
+
+    private static ContextMenu Menu(params Control[] items)
+    {
+        var menu = new ContextMenu();
+        foreach (var item in items) menu.Items.Add(item);
+        return menu;
+    }
+
+    private static MenuItem Item(string header, System.Windows.Input.ICommand command, object parameter) =>
+        new() { Header = header, Command = command, CommandParameter = parameter };
 
     /// <summary>Follow mode turned itself off (the user panned).</summary>
     public event Action<bool>? FollowHomeChanged;

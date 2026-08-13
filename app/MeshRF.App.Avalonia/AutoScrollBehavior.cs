@@ -3,14 +3,17 @@ using System.Collections.Specialized;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// Attached property that keeps a ListBox pinned to its newest (last) item as
-/// items are appended. Port of MeshRF.App's Behaviors/AutoScroll, used by the
-/// chat lists so new traffic stays in view.
+/// Attached property that scrolls a ListBox to its newest (last) item when one
+/// is appended. Port of MeshRF.App's Behaviors/AutoScroll, used by the chat
+/// lists so new traffic stays in view.
+///
+/// Scrolls on a new entry and on nothing else: between entries the list is the
+/// user's to scroll, so the wheel works normally and reading back through
+/// history is not interrupted until the next message arrives.
 /// </summary>
 public static class AutoScrollBehavior
 {
@@ -42,45 +45,18 @@ public static class AutoScrollBehavior
         });
     }
 
-    /// <summary>
-    /// Keeps a list pinned to the bottom when its content grows taller without
-    /// gaining items.
-    ///
-    /// A reaction attaches to an existing message rather than adding a new one,
-    /// so no CollectionChanged fires — but the row gets a reaction chip and
-    /// grows. Everything below shifts by that much, which walks the view off
-    /// the newest message. Watching the scroll extent catches that, and any
-    /// other in-place growth such as a message being re-rendered taller.
-    /// </summary>
-    private static void HookExtentGrowth(ListBox list)
-    {
-        var scroller = list.FindDescendantOfType<ScrollViewer>();
-        if (scroller is null) return;
-
-        double lastExtent = scroller.Extent.Height;
-        bool wasAtBottom = true;
-
-        scroller.ScrollChanged += (_, _) =>
-        {
-            double extent = scroller.Extent.Height;
-            double viewport = scroller.Viewport.Height;
-            double offset = scroller.Offset.Y;
-
-            if (extent > lastExtent && wasAtBottom && GetIsEnabled(list))
-                Dispatcher.UIThread.Post(() => ScrollToEnd(list), DispatcherPriority.Background);
-
-            // Sampled before the next change so "were we following?" reflects
-            // where the user was, not where the growth just left them. A small
-            // tolerance keeps fractional layout offsets from unpinning it.
-            wasAtBottom = offset + viewport >= extent - 2.0;
-            lastExtent = extent;
-        };
-    }
+    // Deliberately no ScrollChanged hook. An earlier revision also chased the
+    // scroll extent, to follow content that grew taller without gaining items
+    // (a reaction chip appearing on an existing row). It made the wheel
+    // unusable: a virtualizing panel's extent changes as containers realize
+    // during a scroll, so the first wheel tick away from the bottom looked like
+    // in-place growth while the list still counted as "at the bottom", and the
+    // view was pulled straight back down. Scrolling now follows new entries
+    // only, which is the behaviour worth having.
 
     private static void Attach(ListBox list)
     {
         Detach(list);
-        HookExtentGrowth(list);
         if (list.ItemsSource is not INotifyCollectionChanged incc) return;
 
         void Handler(object? _, NotifyCollectionChangedEventArgs args)

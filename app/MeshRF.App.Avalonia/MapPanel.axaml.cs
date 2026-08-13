@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -30,6 +31,20 @@ public partial class MapPanel : UserControl
             if (FollowHomeButton.IsChecked != follow) FollowHomeButton.IsChecked = follow;
         };
         Canvas.RequestSendWaypoint += OnRequestSendWaypoint;
+        Canvas.RequestEditWaypoint += OnRequestEditWaypoint;
+    }
+
+    /// <summary>"Edit…" on a waypoint marker's context menu. Same dialog and
+    /// same update call as the waypoints grid's own Edit entry.</summary>
+    private async void OnRequestEditWaypoint(WaypointRecord wp)
+    {
+        if (_viewModel is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        var result = await WaypointEditWindow.EditAsync(owner, wp);
+        if (result is null) return;
+        await _viewModel.UpdateWaypointAsync(wp, result.Name, result.Description,
+                                             result.Latitude, result.Longitude);
     }
 
     /// <summary>Binds the panel to the view model and restores saved map
