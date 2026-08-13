@@ -47,14 +47,14 @@ public partial class EmojiPickerWindow : Window
     }
 
     /// <summary>
-    /// Built here rather than in the constructor: the font chain to filter
-    /// against comes from the Window style in App.axaml, which is only applied
-    /// once the window is attached.
+    /// Built on first open rather than in the constructor: filtering the
+    /// catalogue shapes every emoji in it, which is far too slow to do on the
+    /// UI thread for a window that may never be opened.
     /// </summary>
     protected override void OnOpened(EventArgs e)
     {
         base.OnOpened(e);
-        _catalog ??= EmojiCatalog.For(FontFamily);
+        _catalog ??= EmojiCatalog.For();
         Rebuild();
     }
 

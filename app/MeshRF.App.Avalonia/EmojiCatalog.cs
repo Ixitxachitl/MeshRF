@@ -35,9 +35,23 @@ internal static class EmojiCatalog
     private const string ResourceName = "emoji-catalog.txt";
 
     // U+1F600 GRINNING FACE. Present in every colour emoji font and in no text
-    // font, so it tells us which link of the FontFamily fallback chain is the
-    // emoji font without hardcoding platform font names a second time.
+    // font, so it tells us whether the platform emoji font is actually installed.
     private const int EmojiProbeCodePoint = 0x1F600;
+
+    /// <summary>
+    /// This platform's colour emoji font. Named per-OS rather than offered as a
+    /// cross-platform fallback chain because fontconfig never fails a lookup: on
+    /// Linux, asking for "Segoe UI Emoji" returns whatever it considers the
+    /// closest match (Noto Color Emoji once that is installed, DejaVu Sans
+    /// before). A chain listing all three therefore resolves every link to a
+    /// real font on Linux, and text lands in an emoji font that has no Latin
+    /// glyphs. Program.cs registers this as the font-manager fallback and the
+    /// picker probes it; nothing else should name an emoji font.
+    /// </summary>
+    internal static string PlatformFamily =>
+        OperatingSystem.IsWindows() ? "Segoe UI Emoji"
+        : OperatingSystem.IsMacOS() ? "Apple Color Emoji"
+        : "Noto Color Emoji";
 
     private static readonly Lazy<IReadOnlyList<(int[] CodePoints, string Name, string Group)>> Unfiltered =
         new(LoadResource);
@@ -45,24 +59,22 @@ internal static class EmojiCatalog
     private static readonly Dictionary<string, Snapshot> Cache = [];
 
     /// <summary>
-    /// Emoji drawable in <paramref name="fontFamily"/>, which should be the
-    /// font chain the picker will render with (App.axaml puts the platform
-    /// colour emoji fonts after Inter). Results are cached per chain.
+    /// Emoji drawable in <see cref="PlatformFamily"/>. Cached; the first call
+    /// shapes the whole catalogue.
     /// </summary>
-    internal static Snapshot For(FontFamily fontFamily)
+    internal static Snapshot For()
     {
-        // ToString keeps the whole fallback chain; Name is only its first link.
-        string key = fontFamily.ToString();
+        string key = PlatformFamily;
         lock (Cache)
         {
             if (Cache.TryGetValue(key, out var cached)) return cached;
-            var built = Build(fontFamily);
+            var built = Build(key);
             Cache[key] = built;
             return built;
         }
     }
 
-    private static Snapshot Build(FontFamily fontFamily)
+    private static Snapshot Build(string fontFamily)
     {
         var (family, font) = ResolveEmojiFont(fontFamily);
         if (font is null) return new Snapshot(family, []);
@@ -81,24 +93,19 @@ internal static class EmojiCatalog
     }
 
     /// <summary>
-    /// First family in the chain that carries colour emoji, plus its typeface.
-    /// Falls back to whatever font the text would actually land in, so an
-    /// emoji-font-less machine gets a short honest list rather than tofu.
+    /// <paramref name="family"/>'s typeface, or null when this machine has no
+    /// colour emoji font — a Linux box without fonts-noto-color-emoji gets a
+    /// short honest list rather than a grid of tofu. The U+1F600 probe is what
+    /// distinguishes "installed" from "substituted": every platform resolves an
+    /// absent family to *something*, so a successful lookup proves nothing on
+    /// its own.
     /// </summary>
-    private static (string Family, GlyphTypeface? Font) ResolveEmojiFont(FontFamily chain)
+    private static (string Family, GlyphTypeface? Font) ResolveEmojiFont(string family)
     {
-        foreach (var name in chain.FamilyNames)
-        {
-            // A family that isn't installed resolves to the default typeface,
-            // which the probe then rejects.
-            if (!FontManager.Current.TryGetGlyphTypeface(new Typeface(name), out var candidate)) continue;
-            if (!candidate.CharacterToGlyphMap.ContainsGlyph(EmojiProbeCodePoint)) continue;
-            return (name, candidate);
-        }
-
-        if (FontManager.Current.TryGetGlyphTypeface(new Typeface(chain), out var fallback))
-            return (chain.FamilyNames.PrimaryFamilyName, fallback);
-        return (chain.FamilyNames.PrimaryFamilyName, null);
+        if (FontManager.Current.TryGetGlyphTypeface(new Typeface(family), out var candidate)
+            && candidate.CharacterToGlyphMap.ContainsGlyph(EmojiProbeCodePoint))
+            return (family, candidate);
+        return (family, null);
     }
 
     /// <summary>

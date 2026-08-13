@@ -44,12 +44,13 @@
             <!-- Applied app-wide rather than per-window so every dialog gets the
                  title-bar icon too, not just the taskbar entry for MainWindow. -->
             <Setter Property="Icon" Value="/Assets/icon.ico" />
-            <!-- Program.cs calls WithInterFont(), and Inter carries no colour
-                 emoji glyphs — without an explicit fallback chain every emoji in
-                 the app (node indicators, reactions, compose button) renders
-                 monochrome. Listing the platform emoji fonts after Inter lets
-                 text keep Inter while emoji fall through to a colour font. -->
-            <Setter Property="FontFamily" Value="Inter, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+            <!-- Inter only. Emoji come from the per-codepoint font fallback that
+                 Program.cs registers; do not append emoji fonts here. A chain
+                 like "Inter, Segoe UI Emoji, ..." looks cross-platform but is
+                 not: fontconfig resolves every name to something, so on Linux
+                 the Windows and macOS links both become real fonts and text
+                 lands in an emoji font with no Latin glyphs. -->
+            <Setter Property="FontFamily" Value="Inter" />
         </Style>
         <Style Selector="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
