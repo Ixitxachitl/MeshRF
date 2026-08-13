@@ -668,10 +668,22 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             RelayIfEligible(frame, header, result, snrDb);
     }
 
+    /// <summary>Firmware's ignore_mqtt: while set, the relay never puts
+    /// MQTT-derived traffic back onto RF. Owned by the view model's
+    /// Ignore MQTT toggle.</summary>
+    public bool IgnoreMqttNodes { get; set; }
+
     public void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
     {
         if (RelayScheduler is null || RelayContextProvider?.Invoke() is not { } ctx) return;
-        if (!RelayPolicy.ShouldRelay(ctx, header, result, IsNodeIgnored(header.From))) return;
+        // Suppressed senders fold into the same gate as user-ignored nodes:
+        // with Ignore MQTT on, a packet that itself arrived via downlink is
+        // skipped, and so is anything from a node this store has marked as
+        // heard via MQTT — by default both DO relay, which is precisely what
+        // makes a downlink gateway a gateway.
+        bool senderSuppressed = IsNodeIgnored(header.From) ||
+            (IgnoreMqttNodes && (header.ViaMqtt || _nodeStore.Get(header.From)?.SeenViaMqtt == true));
+        if (!RelayPolicy.ShouldRelay(ctx, header, result, senderSuppressed)) return;
 
         byte nextHopLimit = RelayPolicy.ShouldDecrementHopLimit(ctx, header)
             ? (byte)Math.Max(0, header.HopLimit - 1)

@@ -121,6 +121,11 @@ public sealed class AppSettings
     /// <c>Config.LoRaConfig.hop_limit</c>, 1..7). Meshtastic default is 3.</summary>
     public int HopLimit { get; set; } = 3;
 
+    /// <summary>When true, the relay never rebroadcasts MQTT-derived traffic:
+    /// packets that arrived via MQTT downlink, and packets from any node marked
+    /// heard-via-MQTT. Mirrors firmware <c>Config.LoRaConfig.ignore_mqtt</c>.</summary>
+    public bool IgnoreMqtt { get; set; } = false;
+
     /// <summary>When true, transmitted packets set the <c>Data.bitfield</c>
     /// ok_to_mqtt flag so gateways may uplink them to the public MQTT broker.</summary>
     public bool OkToMqtt { get; set; } = false;

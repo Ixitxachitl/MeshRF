@@ -320,6 +320,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private int _hopLimit = 3;
 
+    /// <summary>Firmware ignore_mqtt: never relay MQTT-derived traffic.</summary>
+    [ObservableProperty]
+    private bool _ignoreMqtt;
+
     [ObservableProperty]
     private bool _okToMqtt;
 
@@ -445,6 +449,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedUserNodeStatus = _settings.UserNodeStatus;
         var savedHopLimit = _settings.HopLimit;
         var savedOkToMqtt = _settings.OkToMqtt;
+        var savedIgnoreMqtt = _settings.IgnoreMqtt;
         var savedHomeLatitude = _settings.HomeLatitude;
         var savedHomeLongitude = _settings.HomeLongitude;
         var savedHomeAltitude = _settings.HomeAltitude;
@@ -590,6 +595,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         MyNodeStatus = savedUserNodeStatus;
         HopLimit = savedHopLimit > 0 ? savedHopLimit : HopLimit;
         OkToMqtt = savedOkToMqtt;
+        IgnoreMqtt = savedIgnoreMqtt;
         HomeLatitudeText = savedHomeLatitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
         HomeLongitudeText = savedHomeLongitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
         HomeAltitudeText = savedHomeAltitude?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
@@ -1020,6 +1026,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnHopLimitChanged(int value) => SaveSettings();
     partial void OnOkToMqttChanged(bool value) => SaveSettings();
 
+    partial void OnIgnoreMqttChanged(bool value)
+    {
+        // The host owns the relay gate, so the flag is pushed rather than
+        // pulled — including here during settings load, which is what applies
+        // a persisted "on" before the first packet arrives.
+        _rxHost.IgnoreMqttNodes = value;
+        SaveSettings();
+    }
+
     // The map's home marker reads these, so a manual edit has to redraw it.
     partial void OnHomeLatitudeTextChanged(string value) { SaveSettings(); RaiseMapDataChanged(); }
     partial void OnHomeLongitudeTextChanged(string value) { SaveSettings(); RaiseMapDataChanged(); }
@@ -1157,6 +1172,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.UserNodeStatus = MyNodeStatus;
         _settings.HopLimit = HopLimit;
         _settings.OkToMqtt = OkToMqtt;
+        _settings.IgnoreMqtt = IgnoreMqtt;
         _settings.HomeLatitude = double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ? lat : null;
         _settings.HomeLongitude = double.TryParse(HomeLongitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lon) ? lon : null;
         _settings.HomeAltitude = int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var alt) ? alt : null;

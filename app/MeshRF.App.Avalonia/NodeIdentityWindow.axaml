@@ -10,7 +10,7 @@
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="640">
-        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID" Margin="0,4,8,4" VerticalAlignment="Center" />
             <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,4,0,4">
@@ -122,82 +122,88 @@
                         ToolTip.Tip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
             </DockPanel>
 
-            <TextBlock Grid.Row="15" Grid.Column="0" Text="OK to MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="15" Grid.Column="0" Text="Ignore MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
             <CheckBox Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+                      Content="Don't relay traffic from nodes heard via MQTT"
+                      IsChecked="{Binding IgnoreMqtt}"
+                      ToolTip.Tip="While on, the relay never rebroadcasts a packet that arrived via MQTT downlink, or anything from a node marked heard-via-MQTT — mirrors firmware's ignore_mqtt. Off by default: relaying downlinked traffic onto RF is what makes a downlink gateway a gateway." />
+
+            <TextBlock Grid.Row="16" Grid.Column="0" Text="OK to MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <CheckBox Grid.Row="16" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
                       Content="Allow gateways to uplink my packets to public MQTT"
                       IsChecked="{Binding OkToMqtt}" />
 
-            <TextBlock Grid.Row="16" Grid.Column="0" Text="Status text" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBox Grid.Row="16" Grid.Column="1" Margin="0,4,0,4" MaxLength="280" Text="{Binding MyNodeStatus}" />
+            <TextBlock Grid.Row="17" Grid.Column="0" Text="Status text" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBox Grid.Row="17" Grid.Column="1" Margin="0,4,0,4" MaxLength="280" Text="{Binding MyNodeStatus}" />
 
             <!-- Auto-report schedules. Each fires on the poll loop once its
                  interval is up and a TX-capable device is configured. -->
-            <TextBlock Grid.Row="17" Grid.Column="0" Text="Auto node info" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="17" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="18" Grid.Column="0" Text="Auto node info" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="18" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeInfoEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeInfoSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="18" Grid.Column="0" Text="Auto position" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="18" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="19" Grid.Column="0" Text="Auto position" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="19" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportPositionEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="19" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="19" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="20" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="20" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportDeviceMetricsEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="20" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="20" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="21" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="21" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportEnvironmentMetricsEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="21" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="21" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="22" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="22" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportAirQualityMetricsEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="22" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="22" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="23" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="23" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeStatusEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="23" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="24" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AutoReportLastSentSummary}"
                        ToolTip.Tip="Last successful auto-send times for NodeInfo, Position, Device Metrics, Environment Metrics, Air Quality, and Status." />
 
-            <TextBlock Grid.Row="24" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="25" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding WeatherTelemetryStatus}"
                        ToolTip.Tip="Live status of weather fetches used for environment telemetry (Open-Meteo)." />
 
-            <TextBlock Grid.Row="25" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="26" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="26" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AirQualityTelemetryStatus}"
                        ToolTip.Tip="Live status of air quality fetches used for air quality telemetry (Open-Meteo AQ API)." />
 
-            <TextBlock Grid.Row="26" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+            <TextBlock Grid.Row="27" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource BrushSubtle}"
                        Text="Relay routing rebroadcasts other nodes' traffic after a contention delay, following the role and rebroadcast mode above. It needs a TX-capable device, and stays off entirely while the Routing box is unchecked." />
         </Grid>
