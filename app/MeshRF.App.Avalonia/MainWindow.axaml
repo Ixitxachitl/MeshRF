@@ -635,6 +635,21 @@
                               GridLinesVisibility="Horizontal"
                               CanUserSortColumns="True" CanUserResizeColumns="True"
                               DoubleTapped="OnNodeDoubleTapped">
+                        <DataGrid.Styles>
+                            <!-- Ignored nodes read as red text instead of the old dedicated
+                                 icon column, mirroring MeshRF.App's row-highlight behavior.
+                                 The converter falls through to AvaloniaProperty.UnsetValue when
+                                 not ignored, so non-ignored rows keep the app's default text
+                                 color and icon columns (favorite star, key, shield, ...) keep
+                                 their own explicit colors since those are set directly on the
+                                 icon TextBlock rather than inherited from the cell. -->
+                            <Style Selector="DataGridRow" x:DataType="nodes:NodeRecord">
+                                <Setter Property="Foreground" Value="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                            </Style>
+                            <Style Selector="DataGridCell" x:DataType="nodes:NodeRecord">
+                                <Setter Property="Foreground" Value="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                            </Style>
+                        </DataGrid.Styles>
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Message"
@@ -696,13 +711,15 @@
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Width="Auto" CanUserSort="False">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="🔑" ToolTip.Tip="Public key on file (red = key mismatch)" />
+                                    <TextBlock Text="🔑" ToolTip.Tip="Public key on file (green = node ID derived from key, red = key mismatch)" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <Panel>
                                             <TextBlock Text="🔑" ToolTip.Tip="Public key on file"
                                                        IsVisible="{Binding HasPublicKey}" />
+                                            <TextBlock Text="🔑" Foreground="#7BD88F" ToolTip.Tip="Public key matches this node's Meshtastic PKI-derived node number"
+                                                       IsVisible="{Binding HasDerivedNodeNumMatch}" />
                                             <TextBlock Text="🔑" Foreground="#FF6B6B" ToolTip.Tip="Key mismatch — this node's key changed"
                                                        IsVisible="{Binding HasKeyMismatch}" />
                                         </Panel>
@@ -744,16 +761,6 @@
                                             <TextBlock Text="📍" Foreground="#FF6B6B" ToolTip.Tip="Reported location is invalid"
                                                        IsVisible="{Binding HasInvalidLocation}" />
                                         </Panel>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
-                                <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="🔇" ToolTip.Tip="Ignored" />
-                                </DataGridTemplateColumn.Header>
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate x:DataType="nodes:NodeRecord">
-                                        <TextBlock Text="🔇" ToolTip.Tip="Ignored" IsVisible="{Binding Ignored}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>

@@ -7,6 +7,8 @@
     <Application.Resources>
         <!-- Relabels RadioDeviceKind.Null as "None" in the RX/TX pickers. -->
         <local:RadioDeviceKindLabelConverter x:Key="DeviceKindLabel" />
+        <!-- Red text for ignored nodes in the node list. -->
+        <local:IgnoredNodeForegroundConverter x:Key="IgnoredForeground" />
         <!-- Mirrors MeshRF.App's Themes/Dark.xaml palette, so the two apps
              read as the same product. Light theme isn't ported yet. -->
         <SolidColorBrush x:Key="BrushAppBackground"      Color="#FF1E1E1E" />
