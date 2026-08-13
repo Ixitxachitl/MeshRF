@@ -105,6 +105,29 @@
         <Style Selector="ToggleButton:checked /template/ ContentPresenter">
             <Setter Property="Background" Value="#FF2F5D8A" />
         </Style>
+
+        <!-- Expander headers (the raw JSON feed rows). Same fix as the
+             waypoint and filter dropdowns: the header is a themed ToggleButton
+             whose hover/pressed states live on Border#ToggleButtonBackground
+             inside its own template, so the generic ToggleButton styles above
+             never reach it and it fell back to the stock light brushes. -->
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pressed /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="{DynamicResource BrushPressed}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ExpandCollapseChevronBorder">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Path#ExpandCollapseChevron">
+            <Setter Property="Stroke" Value="{DynamicResource BrushAppForeground}" />
+        </Style>
         <Style Selector="ComboBox">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
