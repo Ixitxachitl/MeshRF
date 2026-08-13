@@ -598,6 +598,59 @@ public partial class MainWindow : Window
         _viewModel.MessageNodeCommand.Execute(node);
     }
 
+    private async void OnDeleteNodes(object? sender, RoutedEventArgs e) => await ConfirmAndDeleteNodesAsync();
+
+    private async void OnNodesGridKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete) return;
+        e.Handled = true;
+        await ConfirmAndDeleteNodesAsync();
+    }
+
+    private async Task ConfirmAndDeleteNodesAsync()
+    {
+        var nodes = NodesGridProxy.SelectedItems.OfType<NodeRecord>().ToList();
+        if (nodes.Count == 0) return;
+
+        string message = nodes.Count == 1
+            ? $"Delete node \"{NodeLabel(nodes[0])}\"?\n\nThis removes it from the node list. It cannot be undone."
+            : $"Delete {nodes.Count} nodes?\n\nThis removes them from the node list. It cannot be undone.";
+        if (!await ConfirmDialog.ConfirmAsync(this, nodes.Count == 1 ? "Delete node" : "Delete nodes", message))
+            return;
+
+        foreach (var node in nodes)
+            _viewModel.DeleteNodeCommand.Execute(node);
+    }
+
+    private static string NodeLabel(NodeRecord node) =>
+        string.IsNullOrEmpty(node.LongName) ? node.DisplayId : node.LongName;
+
+    private async void OnDeleteWaypoints(object? sender, RoutedEventArgs e) => await ConfirmAndDeleteWaypointsAsync();
+
+    private async void OnWaypointsGridKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete) return;
+        e.Handled = true;
+        await ConfirmAndDeleteWaypointsAsync();
+    }
+
+    private async Task ConfirmAndDeleteWaypointsAsync()
+    {
+        var waypoints = WaypointsGridProxy.SelectedItems.OfType<WaypointRecord>().ToList();
+        if (waypoints.Count == 0) return;
+
+        string message = waypoints.Count == 1
+            ? $"Delete waypoint \"{waypoints[0].DisplayName}\"?\n\nThis cannot be undone."
+            : $"Delete {waypoints.Count} waypoints?\n\nThis cannot be undone.";
+        if (!await ConfirmDialog.ConfirmAsync(this, waypoints.Count == 1 ? "Delete waypoint" : "Delete waypoints", message))
+            return;
+
+        // Sequential, not fire-and-forget: DeleteWaypoint transmits an expire
+        // broadcast per waypoint, so overlapping them would race the radio.
+        foreach (var wp in waypoints)
+            await _viewModel.DeleteWaypointCommand.ExecuteAsync(wp);
+    }
+
     private async void OnEditWaypoint(object? sender, RoutedEventArgs e)
     {
         if (WaypointsGridProxy.SelectedItem is not WaypointRecord wp) return;

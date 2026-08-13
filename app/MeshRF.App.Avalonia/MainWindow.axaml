@@ -634,7 +634,9 @@
                               AutoGenerateColumns="False" IsReadOnly="True"
                               GridLinesVisibility="Horizontal"
                               CanUserSortColumns="True" CanUserResizeColumns="True"
-                              DoubleTapped="OnNodeDoubleTapped">
+                              SelectionMode="Extended"
+                              DoubleTapped="OnNodeDoubleTapped"
+                              KeyDown="OnNodesGridKeyDown">
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Message"
@@ -674,9 +676,7 @@
                                           CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
                                 <MenuItem Header="Copy" Click="OnCopyNode" InputGesture="Ctrl+C" />
                                 <Separator />
-                                <MenuItem Header="Delete"
-                                          Command="{Binding #RootWindow.DataContext.DeleteNodeCommand}"
-                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Delete" Click="OnDeleteNodes" InputGesture="Delete" />
                             </ContextMenu>
                         </DataGrid.ContextMenu>
                         <DataGrid.Columns>
@@ -875,7 +875,9 @@
                     <DataGrid Grid.Row="6" x:Name="WaypointsGridProxy" ItemsSource="{Binding Waypoints}"
                               AutoGenerateColumns="False" IsReadOnly="True"
                               GridLinesVisibility="Horizontal"
-                              CanUserSortColumns="True" CanUserResizeColumns="True">
+                              CanUserSortColumns="True" CanUserResizeColumns="True"
+                              SelectionMode="Extended"
+                              KeyDown="OnWaypointsGridKeyDown">
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Edit..." Click="OnEditWaypoint" />
@@ -883,9 +885,7 @@
                                           Command="{Binding #RootWindow.DataContext.ResendWaypointCommand}"
                                           CommandParameter="{Binding #WaypointsGridProxy.SelectedItem}" />
                                 <Separator />
-                                <MenuItem Header="Delete"
-                                          Command="{Binding #RootWindow.DataContext.DeleteWaypointCommand}"
-                                          CommandParameter="{Binding #WaypointsGridProxy.SelectedItem}" />
+                                <MenuItem Header="Delete" Click="OnDeleteWaypoints" InputGesture="Delete" />
                             </ContextMenu>
                         </DataGrid.ContextMenu>
                         <DataGrid.Columns>
