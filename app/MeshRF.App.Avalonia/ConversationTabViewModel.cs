@@ -202,6 +202,26 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
         RaiseHistoryFlags();
     }
 
+    /// <summary>
+    /// Rebuilds the history display points from the store, re-running the
+    /// formatters. The points carry pre-rendered strings (a temperature is
+    /// stored as "72.5 °F"), so a unit-system change can only take effect by
+    /// rebuilding them — notifications alone would re-show the same strings.
+    /// No-op until a history view has actually loaded anything.
+    /// </summary>
+    public void ReloadHistoryDisplays()
+    {
+        if (!_historyLoaded) return;
+        LocationHistory.Clear();
+        TelemetryHistory.Clear();
+        DeviceTelemetryHistory.Clear();
+        EnvironmentalTelemetryHistory.Clear();
+        AirQualityTelemetryHistory.Clear();
+        PowerTelemetryHistory.Clear();
+        _historyLoaded = false;
+        EnsureHistoryLoaded();
+    }
+
     /// <summary>Appends a newly received telemetry row (already persisted).</summary>
     public void AppendTelemetryRecord(NodeTelemetryHistoryRecord record)
     {

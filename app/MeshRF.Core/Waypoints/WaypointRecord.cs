@@ -2,8 +2,17 @@
 namespace MeshRF.Waypoints;
 
 /// <summary>A stored waypoint shared over the mesh.</summary>
-public sealed class WaypointRecord
+public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChanged
 {
+    // Coarse INPC, same shape as NodeRecord's: rows are replaced wholesale on
+    // update, and NotifyChanged lets the unit-system owner re-run every
+    // binding (the expiry/heard columns render dates in the unit-aware form).
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>Raise the all-properties change so bound rows re-render.</summary>
+    public void NotifyChanged() =>
+        PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(string.Empty));
+
     /// <summary>Sentinel for "never expires" that matches the official
     /// Meshtastic Android/iOS clients (they set/compare against
     /// <c>Int.MAX_VALUE</c> for a fresh waypoint's <c>expire</c> field, rather

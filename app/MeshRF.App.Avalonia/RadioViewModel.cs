@@ -1062,11 +1062,45 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
+    /// <summary>
+    /// Re-renders everything whose display depends on the unit system, so a
+    /// metric/imperial toggle takes effect immediately instead of waiting for
+    /// the next packet or window reopen. Three mechanisms, matched to how each
+    /// surface renders: all-properties notifications for rows whose display
+    /// properties compute on read (chat bubbles, node and waypoint grids),
+    /// a store reload for history points whose strings are pre-rendered at
+    /// build time, and explicit rebuilds for stored summary strings.
+    /// </summary>
+    private void RefreshUnitDependentDisplays()
+    {
+        foreach (var tab in Tabs)
+        {
+            switch (tab)
+            {
+                case ChannelTabViewModel channel:
+                    foreach (var m in channel.Messages) m.NotifyDisplayChanged();
+                    break;
+                case ConversationTabViewModel convo:
+                    foreach (var m in convo.Messages) m.NotifyDisplayChanged();
+                    convo.RefreshNodeSnapshot();    // temp/pressure/last-heard panel
+                    convo.ReloadHistoryDisplays();  // pre-rendered strings need a rebuild
+                    break;
+            }
+        }
+
+        foreach (var node in _rxHost.Nodes) node.NotifyChanged();
+        foreach (var wp in _rxHost.Waypoints) wp.NotifyChanged();
+        UpdateAutoReportSummary();
+    }
+
     partial void OnUnitSystemNameChanged(string value)
     {
         // Metric mode uses European date/time conventions everywhere dates
         // are rendered (grids, chat bubbles, log stamps, history windows).
         UiFormats.European = CurrentUnitSystem == UnitSystem.Metric;
+        // Skipped mid-construction: nothing is rendered yet, and the explicit
+        // UiFormats sync after settings load covers the initial state.
+        if (_settingsLoaded) RefreshUnitDependentDisplays();
         OnPropertyChanged(nameof(CurrentUnitSystem));
         OnPropertyChanged(nameof(UseImperial));
         OnPropertyChanged(nameof(UseFahrenheit));

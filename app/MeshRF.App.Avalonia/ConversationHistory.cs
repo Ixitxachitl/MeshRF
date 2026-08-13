@@ -12,14 +12,12 @@ public sealed record TelemetryItem(string Label, string Value);
 public sealed record LocationHistoryPoint(
     double Latitude, double Longitude, int? AltitudeM, string AltitudeDisplay, DateTime TimestampUtc)
 {
-    private const string UiDateTimeFormat = "M/d/yyyy h:mm:ss tt";
-
     public long Id { get; init; }
 
     public DateTime TimestampLocal => TimestampUtc.ToLocalTime();
 
     public string Display =>
-        $"{TimestampLocal.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}  {Latitude:0.#####}, {Longitude:0.#####}"
+        $"{UiFormats.Stamp(TimestampLocal)}  {Latitude:0.#####}, {Longitude:0.#####}"
         + (string.IsNullOrWhiteSpace(AltitudeDisplay) ? string.Empty : $"  {AltitudeDisplay}");
 }
 

@@ -81,6 +81,12 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>Timestamp column, in the unit-system-aware convention.</summary>
     public string TimePrefix => $"[{UiFormats.Stamp(Timestamp)}]";
 
+    /// <summary>Re-raises every binding on this bubble. Computed display
+    /// properties (the timestamp prefix follows the unit system) have no
+    /// notification of their own, so the unit-system owner calls this to make
+    /// already-rendered rows re-read them.</summary>
+    public void NotifyDisplayChanged() => OnPropertyChanged(string.Empty);
+
     /// <summary>Message body plus the delivery-status suffix, for the text column.</summary>
     public string TextWithStatus => $"{Text}{DeliverySuffix}";
 
