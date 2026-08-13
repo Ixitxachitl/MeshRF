@@ -21,7 +21,7 @@ Both read the same `settings.json` and the same SQLite databases, so you can
 move between them. After 2.0.0 / 1.0.9, only the Avalonia app is developed, and
 everything below describes it.
 
-<img width="1386" height="993" alt="image" src="https://github.com/user-attachments/assets/108e4d84-f767-44c0-a9bb-2750e67c33d7" />
+<img width="1547" height="990" alt="image" src="https://github.com/user-attachments/assets/ba593234-2b41-4b29-85e2-f85aba94e5fe" />
 
 
 ## Status
