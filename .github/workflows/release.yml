@@ -30,9 +30,9 @@ jobs:
           # (2026 here, 2022 on developer machines).
           - os: windows-latest
             platform: windows
-            # The last WPF release ships alongside the first Avalonia one; after
-            # that this becomes 'Avalonia'.
-            app: Both
+            # Avalonia only. The WPF app's final build (1.0.9) shipped with the
+            # 2.0.0 release and is never built again.
+            app: Avalonia
             artifact: dist/*.zip
           - os: ubuntu-latest
             platform: linux
