@@ -100,7 +100,7 @@ public sealed class OpenMeteoClient : IDisposable
                                                DateTime.UtcNow, "Open-Meteo");
             _weather = snapshot;
             WeatherStatusChanged?.Invoke(
-                $"Weather telemetry: OK {snapshot.FetchedUtc.ToLocalTime():h:mm:ss tt} " +
+                $"Weather telemetry: OK {UiFormats.Time(snapshot.FetchedUtc.ToLocalTime())} " +
                 $"({snapshot.TemperatureC:F1} C, {snapshot.RelativeHumidityPct:F0}% RH, {snapshot.BarometricPressureHpa:F1} hPa)");
             return snapshot;
         }
@@ -166,7 +166,7 @@ public sealed class OpenMeteoClient : IDisposable
             var pm25Str = pm25 is uint p25 ? $"{p25} µg/m³ PM2.5" : string.Empty;
             var pm10Str = pm10 is uint p10 ? $"{(pm25 is null ? "" : ", ")}{p10} µg/m³ PM10" : string.Empty;
             AirQualityStatusChanged?.Invoke(
-                $"Air quality telemetry: OK {snapshot.FetchedUtc.ToLocalTime():h:mm:ss tt} ({pm25Str}{pm10Str})");
+                $"Air quality telemetry: OK {UiFormats.Time(snapshot.FetchedUtc.ToLocalTime())} ({pm25Str}{pm10Str})");
             return snapshot;
         }
         catch (Exception ex)

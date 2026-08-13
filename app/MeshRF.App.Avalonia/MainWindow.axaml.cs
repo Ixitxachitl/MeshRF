@@ -424,7 +424,7 @@ public partial class MainWindow : Window
                 _snapshotPixelBuffer, targetW, targetH,
                 grid, rows, nFreq);
             _snapshotGridPoolIndex = poolIndex;
-            LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
+            LastPacketTitle.Text = $"Last packet  {UiFormats.Stamp(DateTime.Now)}";
         }
         finally
         {
@@ -514,7 +514,7 @@ public partial class MainWindow : Window
         if (columns > 0) frames = ThinToWidth(frames, columns);
 
         LastPacket.ReplaceFrames(frames);
-        LastPacketTitle.Text = $"Last packet  {DateTime.Now:M/d/yyyy h:mm:ss tt}";
+        LastPacketTitle.Text = $"Last packet  {UiFormats.Stamp(DateTime.Now)}";
     }
 
     private void OnOpenRawJsonLog(object? sender, RoutedEventArgs e) =>
