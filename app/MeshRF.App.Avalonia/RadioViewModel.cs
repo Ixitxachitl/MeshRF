@@ -385,6 +385,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <summary>Altitude field label, unit-aware like MeshRF.App's.</summary>
     public string HomeAltitudeLabel => CurrentUnitSystem == UnitSystem.Imperial ? "Alt (ft)" : "Alt (m)";
 
+    /// <summary>Placeholder for the node list's max-distance filter box.</summary>
+    public string NodeDistanceUnitShort => DisplayUnits.DistanceUnitShort(CurrentUnitSystem);
+
     /// <summary>Index of the last selected channel tab, persisted so the same
     /// tab is reselected next launch (MeshRF.App's LastSelectedChannelIndex).</summary>
     private int _lastSelectedChannelIndex;
@@ -1045,6 +1048,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(UseFahrenheit));
         OnPropertyChanged(nameof(UseMiles));
         OnPropertyChanged(nameof(HomeAltitudeLabel));
+        OnPropertyChanged(nameof(NodeDistanceUnitShort));
         SaveSettings();
     }
 

@@ -234,10 +234,15 @@ public partial class RadioViewModel
             if (ageMinutes > maxAge) return false;
         }
 
-        if (double.TryParse(NodeDistanceKmText, NumberStyles.Float, CultureInfo.CurrentCulture, out var maxDistKm) && maxDistKm > 0)
+        // Nodes with no location bypass this filter entirely rather than being
+        // hidden — NodeLocationFilter above is the dedicated has/no-position
+        // filter, so a max-distance value shouldn't also act as a "must have
+        // a position" requirement.
+        if (double.TryParse(NodeDistanceKmText, NumberStyles.Float, CultureInfo.CurrentCulture, out var maxDist) && maxDist > 0
+            && n.Latitude is double lat && n.Longitude is double lon)
         {
             if (!TryGetHomeLocation(out var hlat, out var hlon)) return false;
-            if (n.Latitude is not double lat || n.Longitude is not double lon) return false;
+            var maxDistKm = DisplayUnits.ConvertDistanceInputToKm(maxDist, CurrentUnitSystem);
             if (HaversineKm(hlat, hlon, lat, lon) > maxDistKm) return false;
         }
 

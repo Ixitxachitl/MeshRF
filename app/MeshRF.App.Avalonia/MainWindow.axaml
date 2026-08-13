@@ -554,7 +554,7 @@
 
                                             <TextBlock Grid.Row="8" Grid.Column="0" Text="Max distance" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <TextBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11" Text="{Binding NodeDistanceKmText}"
-                                                     PlaceholderText="km" ToolTip.Tip="Needs a home location set in My Node → Configure" />
+                                                     PlaceholderText="{Binding NodeDistanceUnitShort}" ToolTip.Tip="Needs a home location set in My Node → Configure" />
 
                                             <TextBlock Grid.Row="9" Grid.Column="0" Text="Has temperature" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
