@@ -50,7 +50,16 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// <summary>Changes our node number mid-session (edited via the Node
     /// Identity dialog). Existing DM tabs/history keep their old peer keys —
     /// this only affects how future traffic is classified as ours.</summary>
-    public void UpdateMyNodeNum(uint nodeNum) => MyNodeNum = nodeNum;
+    public void UpdateMyNodeNum(uint nodeNum)
+    {
+        MyNodeNum = nodeNum;
+        // Taking over a number we had already heard from: it is us now, so drop
+        // the peer row. MarkNodeDirty stops maintaining it from here on, which
+        // would otherwise leave it in the grid frozen at its last-heard state.
+        if (nodeNum == 0) return;
+        for (int i = Nodes.Count - 1; i >= 0; i--)
+            if (Nodes[i].NodeNum == nodeNum) Nodes.RemoveAt(i);
+    }
 
     uint IMeshRxHost.MyNodeNum => MyNodeNum;
     /// <summary>Supplies our X25519 private key so the shared router can
@@ -162,7 +171,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
         LoadChannels();
         foreach (var wp in _waypointStore.All()) Waypoints.Add(wp);
-        foreach (var n in _nodeStore.All()) Nodes.Add(n);
+        // Our own node lives in the database so chats can show our name, but we
+        // don't list ourselves among the discovered peers. Excluded here rather
+        // than in the node filter so Nodes.Count stays the peer count — the
+        // header compares it against FilteredNodes.Count to decide whether a
+        // filter is narrowing the list, and a permanently-hidden row would make
+        // it read "n-1 of n" with no filter set.
+        foreach (var n in _nodeStore.All())
+            if (MyNodeNum == 0 || n.NodeNum != MyNodeNum)
+                Nodes.Add(n);
         LoadMessageHistory(openConversationNodeNums);
     }
 
@@ -573,13 +590,20 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     {
         var rec = _nodeStore.Get(nodeNum);
         if (rec is null) return;
-        var existingIndex = -1;
-        for (int i = 0; i < Nodes.Count; i++)
+        // UpsertSelf calls this for our own node, which the peer list excludes
+        // (see the constructor) — without this guard the "not found, append it"
+        // branch below would put us straight back in. Only the list is skipped;
+        // any conversation bound to this node still refreshes.
+        if (MyNodeNum == 0 || nodeNum != MyNodeNum)
         {
-            if (Nodes[i].NodeNum == nodeNum) { existingIndex = i; break; }
+            var existingIndex = -1;
+            for (int i = 0; i < Nodes.Count; i++)
+            {
+                if (Nodes[i].NodeNum == nodeNum) { existingIndex = i; break; }
+            }
+            if (existingIndex >= 0) Nodes[existingIndex] = rec;
+            else Nodes.Add(rec);
         }
-        if (existingIndex >= 0) Nodes[existingIndex] = rec;
-        else Nodes.Add(rec);
 
         if (_conversationsByNode.TryGetValue(nodeNum, out var convo))
         {
