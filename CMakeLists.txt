@@ -244,6 +244,20 @@ if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
             -DPThreads4W_LIBRARY=${_mrf_pthreads_lib}
             -DTHREADS_PTHREADS_INCLUDE_DIR=${_mrf_pthreads_include_dir}
             -DTHREADS_PTHREADS_LIBRARY=${_mrf_pthreads_lib}
+            # hackrf's optional find_package(PThreads4W QUIET) is suppressed on
+            # purpose. vcpkg's PThreads4WConfig.cmake wires the imported
+            # target's IMPORTED_IMPLIB from PThreads4W_LIBRARY_RELEASE — a
+            # cache variable set only by find_library calls that the
+            # -DPThreads4W_LIBRARY override above *skips* — so whenever the
+            # config succeeds, the target exists with an empty implib and the
+            # link line gets the literal "PThreads4W::PThreads4W-NOTFOUND.obj"
+            # (LNK1104). That is exactly what clean CI machines hit. On warm
+            # checkouts the config's FOUND check happened to fail, no target
+            # was created, and hackrf fell back to Threads::Threads with the
+            # pthread lib supplied via LIBUSB_LIBRARIES above — the path that
+            # demonstrably links. Disabling the find_package forces that same
+            # proven path everywhere.
+            -DCMAKE_DISABLE_FIND_PACKAGE_PThreads4W=ON
         BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config $<CONFIG>
         INSTALL_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config $<CONFIG> --target install
         LOG_CONFIGURE ON
