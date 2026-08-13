@@ -235,6 +235,12 @@ if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
             -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}
             -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
             -DBUILD_SHARED_LIBS=ON
+            # We build these vendored deps as RelWithDebInfo, but vcpkg's
+            # config packages only define Release and Debug locations for their
+            # imported targets. Without this mapping the target has no location
+            # for our configuration and the link line gets the literal
+            # "PThreads4W::PThreads4W-NOTFOUND.obj" (LNK1104).
+            -DCMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO=Release$<SEMICOLON>Debug$<SEMICOLON>
             -DCMAKE_C_FLAGS=${_mrf_hackrf_cflags}
             -DCMAKE_SHARED_LINKER_FLAGS=${_mrf_hackrf_shared_linker_flags}
             -DLIBUSB_INCLUDE_DIR=${_mrf_hackrf_libusb_include}
@@ -261,6 +267,12 @@ if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
             -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON
             -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
             -DBUILD_SHARED_LIBS=ON
+            # We build these vendored deps as RelWithDebInfo, but vcpkg's
+            # config packages only define Release and Debug locations for their
+            # imported targets. Without this mapping the target has no location
+            # for our configuration and the link line gets the literal
+            # "PThreads4W::PThreads4W-NOTFOUND.obj" (LNK1104).
+            -DCMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO=Release$<SEMICOLON>Debug$<SEMICOLON>
             -DLIBUSB_INCLUDE_DIRS=${_mrf_libusb_include_dir}
             -DLIBUSB_LIBRARIES=${_mrf_libusb_lib}
             -DTHREADS_PTHREADS_INCLUDE_DIR=${_mrf_pthreads_include_dir}
