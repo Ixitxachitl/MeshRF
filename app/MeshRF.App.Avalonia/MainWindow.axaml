@@ -111,6 +111,24 @@
         <DataTemplate x:Key="MessageListTemplate" x:DataType="mesh:ITabItem">
             <ListBox ItemsSource="{Binding Messages}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
                      local:AutoScrollBehavior.IsEnabled="{Binding #RootWindow.DataContext.AutoScroll}">
+                <!-- Not the default VirtualizingStackPanel. Message rows wrap to
+                     different heights, so a virtualizing panel can only estimate
+                     total extent from the rows it has realized. Adding a
+                     reaction chip makes one row taller, the estimate grows, and
+                     the unchanged scroll offset then lands on earlier content —
+                     the view appears to jump upward even though nothing asked it
+                     to scroll. A real panel measures every row, so the offset
+                     keeps meaning the same thing and a row growing below the
+                     viewport moves nothing above it.
+
+                     Affordable because the list is capped (MaxMessagesPerTab =
+                     500) and a TabControl only realizes the selected tab's
+                     content, so this is 500 rows at worst for one tab. -->
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="mesh:ChannelMessage">
                         <!-- Transparent background so the whole row is hit-testable:
