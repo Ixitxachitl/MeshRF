@@ -68,7 +68,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private ITabItem? _selectedTab;
 
     [ObservableProperty]
-    private RadioDeviceKind _selectedDevice = RadioDeviceKind.Auto;
+    private RadioDeviceKind _selectedDevice = RadioDeviceKind.Null;
 
     [ObservableProperty]
     private RadioDeviceKind _selectedTxDevice = RadioDeviceKind.HackRf;
@@ -241,7 +241,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     public bool HasPendingReply => PendingReplyPacketId != 0;
 
-    public RadioDeviceKind[] AvailableDevices { get; } = Enum.GetValues<RadioDeviceKind>();
+    /// <summary>Selectable RX backends. Deliberately not Enum.GetValues: the
+    /// enum still carries Auto because its value is part of the C ABI, but
+    /// "pick a device for me" is not offered in the UI — you choose the radio
+    /// you actually have. Ordered to match <see cref="AvailableTxDevices"/>.</summary>
+    public RadioDeviceKind[] AvailableDevices { get; } =
+        { RadioDeviceKind.Null, RadioDeviceKind.HackRf, RadioDeviceKind.RtlSdr };
 
     public string ToggleButtonText => IsRunning ? "Stop RX" : "Start RX";
 
@@ -454,6 +459,35 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedLastSelectedChannelIndex = _settings.LastSelectedChannelIndex;
         var savedSelectedConversationNode = _settings.SelectedConversationNode;
 
+        // First run: mint a full Meshtastic identity instead of leaving the app
+        // with a bare random node number and no keys. Order matters — the
+        // private key is the root, the public key derives from it, and the node
+        // number derives from the public key (PkiNodeNumber, the same hash
+        // firmware uses), so our node id and PKI identity agree. A random node
+        // number with an unrelated key can never satisfy that check, which is
+        // what HasDerivedNodeNumMatch reports on the node grid.
+        //
+        // Gated on there being no key AND no node number, so an existing
+        // settings.json — including one written by MeshRF.App — is never
+        // re-minted. The names follow firmware's default: the node id's last
+        // four hex digits, as both "Meshtastic abcd" and the short name.
+        if (string.IsNullOrEmpty(savedUserPrivateKey) && _settings.UserNodeNum == 0)
+        {
+            var privateKey = Curve25519.GeneratePrivateKey();
+            var publicKey = Curve25519.GetPublicKey(privateKey);
+            if (PkiNodeNumber.TryFromPublicKey(publicKey, out var derivedNodeNum) &&
+                derivedNodeNum is not (0 or 0xFFFFFFFFu))
+            {
+                savedUserPrivateKey = Convert.ToBase64String(privateKey);
+                savedUserPublicKey = Convert.ToBase64String(publicKey);
+                _settings.UserNodeNum = derivedNodeNum;
+
+                var suffix = $"{derivedNodeNum:x8}"[^4..];
+                savedUserLongName = $"Meshtastic {suffix}";
+                savedUserShortName = suffix;
+            }
+        }
+
         // Shared with MeshRF.App's UserNodeNum when set (same settings.json);
         // otherwise an ephemeral random identity for this session — see
         // AvaloniaMeshRxHost.MyNodeNum. Avoid 0 (unset) and the broadcast
@@ -497,7 +531,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             channelTab.MuteRtttl = _settings.MutedRingtoneChannels.Contains(channelTab.Config.Index);
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
         SelectedTab = Tabs.FirstOrDefault();
-        if (Enum.TryParse<RadioDeviceKind>(savedRxDeviceKind, out var device))
+        // Contains() guards the same case the TX line below does, and one more:
+        // settings written before Auto was dropped still say "Auto". Falling
+        // through leaves the None default rather than selecting a value the
+        // picker can't show, which would blank the ComboBox.
+        if (Enum.TryParse<RadioDeviceKind>(savedRxDeviceKind, out var device) && AvailableDevices.Contains(device))
             SelectedDevice = device;
         if (Enum.TryParse<RadioDeviceKind>(savedTxDeviceKind, out var txDevice) && AvailableTxDevices.Contains(txDevice))
             SelectedTxDevice = txDevice;
@@ -632,6 +670,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // is published straight to the broker and never goes over the air, so
         // it needs no TX-capable device at all.
         TickMapReport();
+        // Also ahead of the running check: a message sent just before RX was
+        // stopped still deserves to stop saying nothing and settle as failed.
+        _rxHost.SweepPendingAcks();
 
         if (_core is null) return;
 
@@ -1238,7 +1279,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         // Echo locally — we won't decode our own transmission back off the
         // air (MeshRxRouter treats hearing it as isFromUs and drops it).
-        messages.Add(new ChannelMessage
+        var sent = new ChannelMessage
         {
             // Our configured name, not the raw node ID — this is the label the
             // user sees against their own messages, and it must match what
@@ -1252,7 +1293,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             ReplyTargetFound = replyId != 0,
             ReplyToPacketId = replyId,
             Delivery = MessageDelivery.Sent,
-        });
+        };
+        messages.Add(sent);
+        // Both kinds are tracked, but they settle on different evidence — a DM
+        // on the recipient's ROUTING reply, a channel message on hearing a
+        // neighbour relay it. See AvaloniaMeshRxHost.PendingAck.
+        _rxHost.TrackPendingAck(sent, broadcast: to == 0xFFFFFFFFu);
         // Persist the raw body (not the quoted display text) so a reload
         // rebuilds the quote from reply_id, exactly like MeshRF.App.
         // "PKC" is the channel name the router reports for PKC traffic, so

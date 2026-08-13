@@ -298,17 +298,38 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         catch (Exception ex) { Log($"reaction store failed: {ex.Message}"); }
     }
 
-    private ChannelMessage ToChannelMessage(MessageRecord m) => new()
+    private ChannelMessage ToChannelMessage(MessageRecord m)
     {
-        Timestamp = DateTimeOffset.FromUnixTimeSeconds(m.RxEpoch).LocalDateTime,
-        FromId = m.FromNode == 0 ? "note" : NodeDisplayName(m.FromNode),
-        SenderNodeNum = m.FromNode,
-        Text = m.Text,
-        RssiDbm = m.RssiDbfs,
-        SnrDb = m.SnrDb,
-        PacketId = m.PacketId,
-        IsOutgoing = MyNodeNum != 0 && m.FromNode == MyNodeNum,
-    };
+        bool outgoing = MyNodeNum != 0 && m.FromNode == MyNodeNum;
+        return new ChannelMessage
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(m.RxEpoch).LocalDateTime,
+            FromId = m.FromNode == 0 ? "note" : NodeDisplayName(m.FromNode),
+            SenderNodeNum = m.FromNode,
+            Text = m.Text,
+            RssiDbm = m.RssiDbfs,
+            SnrDb = m.SnrDb,
+            PacketId = m.PacketId,
+            IsOutgoing = outgoing,
+            Delivery = RestoredDelivery(m, outgoing),
+        };
+    }
+
+    /// <summary>
+    /// Delivery state to restore onto a replayed row. Without this a ✓ or ✗
+    /// lived only in memory and vanished on restart, even though the store had
+    /// it all along.
+    ///
+    /// Unlike MeshRF.App this does not exclude broadcasts: a channel message
+    /// now earns its mark by being heard relayed, so its state is worth
+    /// restoring too. Values outside the enum (rows written by a future
+    /// version, or a hand-edited database) degrade to None rather than
+    /// rendering a garbage glyph.
+    /// </summary>
+    private static MessageDelivery RestoredDelivery(MessageRecord m, bool outgoing) =>
+        outgoing && Enum.IsDefined(typeof(MessageDelivery), m.Delivery)
+            ? (MessageDelivery)m.Delivery
+            : MessageDelivery.None;
 
     private void LoadChannels()
     {
@@ -670,7 +691,116 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm) =>
         UplinkHandler?.Invoke(frame, header, result, isFromUs, snrDb, rssiDbm);
 
-    public void OnOwnPacketHeard(MeshHeader header, MeshDecodeResult? ownDecode) { }
+    // -- ACK / NAK tracking ---------------------------------------------------
+
+    /// <summary>Outgoing messages waiting to be confirmed, keyed by packet id.</summary>
+    private readonly Dictionary<uint, PendingAck> _pendingAcks = new();
+
+    /// <summary>How long to wait before giving up on a message. Generous
+    /// because a DM's ACK has to make the return trip across the mesh.</summary>
+    private static readonly TimeSpan AckTimeout = TimeSpan.FromSeconds(30);
+
+    /// <param name="Broadcast">
+    /// Channel messages are confirmed differently from DMs. A DM sets want_ack
+    /// and gets an explicit ROUTING reply from the recipient, so it can be
+    /// Delivered *or* Failed on a NAK. A broadcast is never acknowledged by
+    /// anyone — the only evidence it went anywhere is hearing a neighbour
+    /// rebroadcast it, which says "the mesh picked it up", not "someone read
+    /// it". So a channel message only ever goes Delivered (relay heard) or
+    /// Failed (nothing heard in time); there is no NAK for it.
+    /// </param>
+    private sealed record PendingAck(ChannelMessage Message, DateTime SentUtc, bool Broadcast);
+
+    /// <summary>Register a message we just transmitted so an ACK, a heard
+    /// rebroadcast, or the timeout can settle its delivery state.</summary>
+    public void TrackPendingAck(ChannelMessage message, bool broadcast)
+    {
+        if (message.PacketId == 0) return;
+        _pendingAcks[message.PacketId] = new PendingAck(message, DateTime.UtcNow, broadcast);
+    }
+
+    /// <summary>
+    /// Our own frame heard back off the air. If another node relayed it, that
+    /// is the only delivery confirmation a channel message can ever get, so it
+    /// settles the pending broadcast as delivered.
+    ///
+    /// hop_limit &lt; hop_start is what distinguishes a relay from simply hearing
+    /// our own transmitter (a receive-only SDR alongside a separate transmit
+    /// SDR hears every frame we send, undecremented). Firmware older than 2.3
+    /// leaves hop_start at 0, so the comparison is only meaningful above zero.
+    /// </summary>
+    public void OnOwnPacketHeard(MeshHeader header, MeshDecodeResult? ownDecode)
+    {
+        // Decode our own frame to surface the ok_to_mqtt bitfield, so the user
+        // can confirm the flag is actually present on the wire.
+        string mqttNote = ownDecode is not null
+            ? $", ok_to_mqtt={(ownDecode.OkToMqtt ? "yes" : "no")}"
+            : string.Empty;
+        bool relayed = header.HopStart > 0 && header.HopLimit < header.HopStart;
+        Log($"  tx confirmed (heard own packet id {header.PacketId:x8}{mqttNote}"
+            + (relayed ? ", relayed" : string.Empty) + ")");
+
+        if (!relayed) return;
+        if (!_pendingAcks.TryGetValue(header.PacketId, out var pending) || !pending.Broadcast) return;
+
+        _pendingAcks.Remove(header.PacketId);
+        SettleDelivery(pending.Message, MessageDelivery.Delivered);
+        Log($"  relayed by {NodeDisplayName(header.From)} — channel message {header.PacketId:x8} reached the mesh");
+    }
+
+    /// <summary>
+    /// ROUTING_APP addressed to us: match request_id against a DM we sent and
+    /// mark it delivered (ACK) or failed (NAK). Mirrors firmware's
+    /// <c>Router::handleReceived</c> ack handling.
+    /// </summary>
+    private void HandleRouting(MeshHeader header, MeshDecodeResult result)
+    {
+        if (MyNodeNum == 0 || header.To != MyNodeNum || result.RequestId == 0) return;
+        if (!_pendingAcks.TryGetValue(result.RequestId, out var pending)) return;
+
+        // A broadcast has no recipient to answer for it; anything claiming to
+        // route-ack one is not evidence about our message.
+        if (pending.Broadcast) return;
+
+        _pendingAcks.Remove(result.RequestId);
+        bool ack = result.RoutingError == 0;
+        SettleDelivery(pending.Message, ack ? MessageDelivery.Delivered : MessageDelivery.Failed);
+        Log(ack
+            ? $"  ACK from {NodeDisplayName(header.From)} for id {result.RequestId:x8}"
+            : $"  NAK (reason={result.RoutingError}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
+    }
+
+    /// <summary>Give up on anything that has waited past the timeout. Driven by
+    /// the view model's poll tick.</summary>
+    public void SweepPendingAcks()
+    {
+        if (_pendingAcks.Count == 0) return;
+        var now = DateTime.UtcNow;
+        List<uint>? expired = null;
+        foreach (var kv in _pendingAcks)
+        {
+            if (now - kv.Value.SentUtc < AckTimeout) continue;
+            (expired ??= []).Add(kv.Key);
+        }
+        if (expired is null) return;
+
+        foreach (var id in expired)
+        {
+            if (!_pendingAcks.Remove(id, out var pending)) continue;
+            if (pending.Message.Delivery != MessageDelivery.Sent) continue;
+            SettleDelivery(pending.Message, MessageDelivery.Failed);
+        }
+    }
+
+    /// <summary>Apply a final delivery state to the live bubble and persist it,
+    /// so the mark survives a restart.</summary>
+    private void SettleDelivery(ChannelMessage message, MessageDelivery delivery)
+    {
+        message.Delivery = delivery;
+        if (message.PacketId == 0 || MyNodeNum == 0) return;
+        try { _messageStore.UpdateDelivery(message.PacketId, MyNodeNum, (int)delivery); }
+        catch (Exception ex) { Log($"delivery update failed: {ex.Message}"); }
+    }
 
     public void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt)
     {
@@ -797,6 +927,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
             case PortNum.Traceroute:
                 HandleTraceroute(header, result);
+                break;
+
+            case PortNum.Routing:
+                HandleRouting(header, result);
                 break;
         }
     }
@@ -1043,6 +1177,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             PacketId = reaction.PacketId,
             IsOutgoing = outgoing,
             IsIgnoredSender = !outgoing && IsNodeIgnored(reaction.FromNode),
+            Delivery = RestoredDelivery(reaction, outgoing),
         };
     }
 
@@ -1077,6 +1212,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             IsReplyLinked = true,
             ReplyTargetFound = target is not null,
             ReplyToPacketId = reply.ReplyId,
+            Delivery = RestoredDelivery(reply, outgoing),
         };
     }
 

@@ -33,6 +33,15 @@ public partial class MainWindow : Window
     // the waterfall looking both "too slow" and "too zoomed out" — falling
     // behind constantly triggered the overflow skip-ahead path below,
     // dropping elapsed time instead of rendering it.
+    // Scroll-speed bounds, and UI policy rather than a pipeline limit. The hard
+    // ceiling is the native history frame rate — min(sample_rate / 1024, 3840)
+    // Hz after Core.cpp's compute_history_frame_stride decimation — because
+    // framesPerRow bottoms out at 1 and no setting can emit rows faster than
+    // frames arrive. That is ~2340/s at 2.4 MS/s, so this cap is well under it;
+    // it is set by what stays readable, since at 60 fps 480/s already advances
+    // eight rows per drawn frame.
+    private const double MinWaterfallRowsPerSecond = 5.0;
+    private const double MaxWaterfallRowsPerSecond = 480.0;
     private const int MaxFramesToPull = 64;
     private const int NativeFrameRingCapacity = 256; // Must match kFrameRingCapacity in C++.
     private ulong _wfLastFrameCount;
@@ -50,6 +59,16 @@ public partial class MainWindow : Window
         // than in the markup.
         MainTabs.AddHandler(DragDrop.DragOverEvent, OnTabsDragOver);
         MainTabs.AddHandler(DragDrop.DropEvent, OnTabsDrop);
+
+        // handledEventsToo, and so not a PointerPressed="..." attribute in the
+        // markup: TabControl derives from SelectingItemsControl, whose own
+        // pointer-press handler selects the tab and marks the event handled.
+        // That runs as a class handler on this same element, ahead of any
+        // instance handler, so a plain bubbling subscription is simply never
+        // invoked and no drag can ever start. Subscribing this way lets the
+        // selection happen first and still gives us the press.
+        MainTabs.AddHandler(InputElement.PointerPressedEvent, OnTabsPointerPressed,
+                            RoutingStrategies.Bubble, handledEventsToo: true);
 
         // Restore window geometry / splitter proportions before first show.
         ApplyLayout(AppSettings.Load());
@@ -97,6 +116,12 @@ public partial class MainWindow : Window
             Spectrum.Update(_spectrumBuffer.AsSpan(0, written));
 
         AdvanceWaterfall(core, rate, n);
+
+        // One render per tick, after every row for this tick is in. Waterfall
+        // rows are paced against received signal time, so a fast setting pushes
+        // several per tick; rendering each one cost a full rasterization of the
+        // control and only the last was ever seen.
+        Waterfall.RenderIfDirty();
     }
 
     private void AdvanceWaterfall(MeshtasticCore core, uint sampleRate, int bins)
@@ -122,7 +147,8 @@ public partial class MainWindow : Window
             _wfAccumFrames = 0;
         }
 
-        double rowsPerSecond = Math.Clamp(_viewModel.WaterfallRowsPerSecond, 5, 240);
+        double rowsPerSecond = Math.Clamp(_viewModel.WaterfallRowsPerSecond,
+                                          MinWaterfallRowsPerSecond, MaxWaterfallRowsPerSecond);
         int framesPerRow = 1;
         if (sampleRate > 0 && bins > 0)
         {

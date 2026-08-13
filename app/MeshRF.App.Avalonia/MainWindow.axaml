@@ -32,6 +32,60 @@
             <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
         </Style>
 
+        <!-- Channel / DM tab headers. Fluent's default is an underline cue with
+             no box, which at this app's 12px type reads as a row of loose words
+             rather than tabs. Padding is set on TabItem (it template-binds to
+             the header presenter) while the chrome is set on the template's
+             root Border: the theme's own :selected / :pointerover styles target
+             that part, so setting Background/BorderBrush on TabItem itself
+             would be overridden the moment a tab is selected or hovered. -->
+        <!-- MinHeight is deliberately NOT forced to 0 here. Squeezing the header
+             is what pulled the title down into Fluent's selection pipe, which is
+             pinned to the bottom edge of the header and drew straight through
+             the text. The visible box now comes from a Border inside the item
+             template (see TabControl.ItemTemplate), which does not depend on
+             the theme's internal part names. -->
+        <Style Selector="TabItem">
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <!-- Fluent marks the selected tab with a coloured pipe pinned to the
+             bottom edge of the header. With the shorter header this app uses it
+             lands across the title instead of under it, and the box below makes
+             it redundant anyway — selection now reads from the fill. -->
+        <!-- Part names verified against Avalonia.Themes.Fluent 12.1.1 rather
+             than assumed: the header root is "LayoutRoot" with no PART_ prefix,
+             while the selection bar is "PART_SelectedPipe" with one. Both are
+             matched by name only, without a type, so a template that swaps the
+             element type still gets styled. -->
+        <!-- A /template/ selector needs an element type or the setters have
+             nothing to resolve against (AVLN2200), so the type cannot be left
+             off even though only the name is load-bearing. The pipe is listed
+             as both Border and Rectangle because the theme's choice is not
+             visible from the compiled assembly; the one that does not match is
+             simply inert. -->
+        <Style Selector="TabItem /template/ Border#PART_SelectedPipe">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="TabItem /template/ Rectangle#PART_SelectedPipe">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="TabItem /template/ Border#LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4,4,0,0" />
+        </Style>
+        <Style Selector="TabItem:pointerover /template/ Border#LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+        </Style>
+        <Style Selector="TabItem:selected /template/ Border#LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+        </Style>
+
         <Style Selector="TextBlock.attention">
             <Setter Property="FontWeight" Value="SemiBold" />
             <Style.Animations>
@@ -145,7 +199,14 @@
                 <ComboBox ItemsSource="{Binding AvailableDevices}"
                           SelectedItem="{Binding SelectedDevice}"
                           IsEnabled="{Binding !IsRunning}"
-                          FontSize="11" Width="150" Height="26" Margin="0,0,8,2" />
+                          FontSize="11" Width="150" Height="26" Margin="0,0,8,2"
+                          ToolTip.Tip="Receive SDR backend">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="mesh:RadioDeviceKind">
+                            <TextBlock Text="{Binding ., Converter={StaticResource DeviceKindLabel}}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
                 <TextBlock Text="Rate" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding SampleRateOptions}"
                           SelectedItem="{Binding SelectedRxSampleRate}"
@@ -157,7 +218,13 @@
                           SelectedItem="{Binding SelectedTxDevice}"
                           IsEnabled="{Binding !IsRunning}"
                           FontSize="11" Width="150" Height="26" Margin="0,0,8,2"
-                          ToolTip.Tip="Transmit SDR backend; HackRF can transmit, RTL-SDR cannot" />
+                          ToolTip.Tip="Transmit SDR backend; HackRF can transmit, RTL-SDR cannot">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="mesh:RadioDeviceKind">
+                            <TextBlock Text="{Binding ., Converter={StaticResource DeviceKindLabel}}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
                 <TextBlock Text="Region" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding AvailableRegions}"
@@ -272,8 +339,8 @@
                            Text="{Binding WaterfallCeilDb, StringFormat='{}{0:F0} dB'}" />
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
                 <TextBlock Text="Speed" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
-                <Slider Width="120" Minimum="5" Maximum="240" TickFrequency="5" Value="{Binding WaterfallRowsPerSecond}" VerticalAlignment="Center" Margin="0,0,4,2"
-                        ToolTip.Tip="Waterfall scroll speed in rows per second (time resolution)" />
+                <Slider Width="120" Minimum="5" Maximum="480" TickFrequency="5" Value="{Binding WaterfallRowsPerSecond}" VerticalAlignment="Center" Margin="0,0,4,2"
+                        ToolTip.Tip="Waterfall scroll speed in rows per second (time resolution). Caps out at the receiver's native frame rate (sample rate / 1024)." />
                 <TextBlock Width="48" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
                            Text="{Binding WaterfallRowsPerSecond, StringFormat='{}{0:F0}/s'}" />
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
@@ -835,24 +902,34 @@
                     <TabControl Grid.Row="0" Name="MainTabs"
                                 ItemsSource="{Binding Tabs}"
                                 SelectedItem="{Binding SelectedTab}"
-                                DragDrop.AllowDrop="True"
-                                PointerPressed="OnTabsPointerPressed">
+                                DragDrop.AllowDrop="True">
                         <TabControl.ItemTemplate>
                             <DataTemplate x:DataType="mesh:ITabItem">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <!-- Classes.attention drives the pulse animation in
-                                         Window.Styles: Avalonia has no DataTrigger, so a
-                                         bound style class is how the WPF storyboard's
-                                         behaviour is expressed here. -->
-                                    <TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center"
-                                               Classes.attention="{Binding TabNeedsAttention}" />
-                                    <Button Content="&#x2715;" FontSize="9" Padding="3,0" Margin="2,0,-4,0"
-                                            BorderThickness="0" Background="Transparent"
-                                            ToolTip.Tip="Close conversation"
-                                            IsVisible="{Binding CanClose}"
-                                            Command="{Binding #RootWindow.DataContext.CloseTabCommand}"
-                                            CommandParameter="{Binding}" />
-                                </StackPanel>
+                                <!-- The box around the title lives here rather than in a
+                                     style targeting the TabItem template. Two attempts at
+                                     the latter failed silently on Avalonia 12's Fluent
+                                     theme (the root is "LayoutRoot", not the expected
+                                     "PART_LayoutRoot"), and a name that stops matching
+                                     after a theme update is invisible until someone
+                                     notices the chrome is gone. Owning the element makes
+                                     it independent of the theme's internals. -->
+                                <Border Padding="8,3" CornerRadius="3" Background="Transparent"
+                                        BorderBrush="{DynamicResource BrushTabBorder}" BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <!-- Classes.attention drives the pulse animation in
+                                             Window.Styles: Avalonia has no DataTrigger, so a
+                                             bound style class is how the WPF storyboard's
+                                             behaviour is expressed here. -->
+                                        <TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center"
+                                                   Classes.attention="{Binding TabNeedsAttention}" />
+                                        <Button Content="&#x2715;" FontSize="9" Padding="3,0" Margin="2,0,-4,0"
+                                                BorderThickness="0" Background="Transparent"
+                                                ToolTip.Tip="Close conversation"
+                                                IsVisible="{Binding CanClose}"
+                                                Command="{Binding #RootWindow.DataContext.CloseTabCommand}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Border>
                             </DataTemplate>
                         </TabControl.ItemTemplate>
                         <TabControl.DataTemplates>

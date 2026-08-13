@@ -67,11 +67,16 @@ public partial class ChannelMessage : ObservableObject
 
     partial void OnFromIdChanged(string value) => OnPropertyChanged(nameof(Display));
 
+    /// <summary>
+    /// Trailing delivery glyph. Sent renders nothing on purpose: every message
+    /// we transmit passes through that state, so labelling it said nothing and
+    /// put noise on every outgoing line. Only the two outcomes that carry
+    /// information get a mark — acknowledged, or gave up waiting.
+    /// </summary>
     private string DeliverySuffix => Delivery switch
     {
-        MessageDelivery.Sent      => "  · sent",
-        MessageDelivery.Delivered => "  · delivered",
-        MessageDelivery.Failed    => "  · no ack",
+        MessageDelivery.Delivered => "  ✓",
+        MessageDelivery.Failed    => "  ✗",
         _ => string.Empty,
     };
 

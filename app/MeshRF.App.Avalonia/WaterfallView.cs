@@ -145,6 +145,12 @@ public sealed class WaterfallView : Image
     private int _head;
     private int _filled;
 
+    // Set by Push, cleared by RenderIfDirty. Render() rasterizes the whole
+    // control, so its cost has to be paid once per displayed frame, not once
+    // per row: at the top speed the pump pushes several rows per UI tick, and
+    // rendering inside Push threw away all but the last of them.
+    private bool _dirty;
+
     private WriteableBitmap? _bmp;
     private int _w;
     private int _h;
@@ -279,6 +285,27 @@ public sealed class WaterfallView : Image
             _suppressRender = false;
         }
 
+        // Deliberately no Render() here — see RenderIfDirty.
+        _dirty = true;
+    }
+
+    /// <summary>
+    /// Renders the rows accumulated since the last call, if any.
+    ///
+    /// The caller pushes a whole UI tick's worth of rows and then calls this
+    /// once. <see cref="Push"/> used to render per row, which made the cost of
+    /// a frame scale with the waterfall speed rather than with the display:
+    /// at 240 rows/s the pump pushes ~4 rows per 16 ms tick, so the control was
+    /// rasterized four times over with nothing drawn in between, and the extra
+    /// three were pure waste. Past the tick budget the timer slipped and the
+    /// scroll went uneven, which is what "choppy at high speed" was.
+    ///
+    /// A no-op when nothing was pushed, so it is safe to call every tick.
+    /// </summary>
+    public void RenderIfDirty()
+    {
+        if (!_dirty) return;
+        _dirty = false;
         Render();
     }
 
@@ -364,6 +391,11 @@ public sealed class WaterfallView : Image
     private unsafe void Render()
     {
         if (_bmp is null) return;
+
+        // Cleared here rather than only in RenderIfDirty so that a resize,
+        // levels change or snapshot render also satisfies a row pushed moments
+        // earlier, instead of being followed by an identical second pass.
+        _dirty = false;
 
         EnsureLut();
 

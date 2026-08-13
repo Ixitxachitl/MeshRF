@@ -75,7 +75,9 @@ public sealed class AppSettings
     public bool WaterfallAutoLevels { get; set; } = true;
     public double WaterfallFloorDb { get; set; } = -100.0;
     public double WaterfallCeilDb { get; set; } = 0.0;
-    /// <summary>Waterfall scroll speed in rows per second (time resolution). Range 5–240.</summary>
+    /// <summary>Waterfall scroll speed in rows per second (time resolution).
+    /// Range 5–480 in the Avalonia app; MeshRF.App still clamps to 5–240 and
+    /// rewrites anything above that when it saves.</summary>
     public double WaterfallRowsPerSecond { get; set; } = 60.0;
 
     /// <summary>UI theme: "Light", "Dark", or "System".</summary>

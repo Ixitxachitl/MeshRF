@@ -1,9 +1,12 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
              x:Class="MeshRF.AvaloniaApp.App"
              RequestedThemeVariant="Dark">
 
     <Application.Resources>
+        <!-- Relabels RadioDeviceKind.Null as "None" in the RX/TX pickers. -->
+        <local:RadioDeviceKindLabelConverter x:Key="DeviceKindLabel" />
         <!-- Mirrors MeshRF.App's Themes/Dark.xaml palette, so the two apps
              read as the same product. Light theme isn't ported yet. -->
         <SolidColorBrush x:Key="BrushAppBackground"      Color="#FF1E1E1E" />
@@ -14,6 +17,10 @@
         <SolidColorBrush x:Key="BrushSplitter"           Color="#FF3F3F3F" />
         <SolidColorBrush x:Key="BrushSpectrumBackground" Color="#FF101418" />
         <SolidColorBrush x:Key="BrushHover"              Color="#FF3A3A3A" />
+        <!-- Tab outlines sit on the panel background, where BrushPanelBorder
+             (#3F3F3F on #2A2A2A) is too close in value to read as an edge.
+             Lifted until the box is actually visible unselected. -->
+        <SolidColorBrush x:Key="BrushTabBorder"          Color="#FF5F6266" />
         <SolidColorBrush x:Key="BrushPressed"             Color="#FF222222" />
 
         <!-- Compact sliders. Avalonia's Fluent Slider is built for touch: its

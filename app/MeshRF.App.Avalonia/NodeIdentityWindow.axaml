@@ -79,13 +79,13 @@
             <TextBlock Grid.Row="9" Grid.Column="0" Text="Rebroadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
             <ComboBox Grid.Row="9" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="200"
                       ItemsSource="{Binding RebroadcastModeOptions}" SelectedItem="{Binding RebroadcastMode}"
-                      ToolTip.Tip="Rebroadcast policy. Stored and shared with MeshRF.App; this app doesn't relay yet." />
+                      ToolTip.Tip="Which traffic this node rebroadcasts when relay routing is enabled. Shared with MeshRF.App." />
 
             <TextBlock Grid.Row="10" Grid.Column="0" Text="Routing" Margin="0,4,8,4" VerticalAlignment="Center" />
             <CheckBox Grid.Row="10" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
                       Content="Enable relay routing (role + rebroadcast mode)"
                       IsChecked="{Binding RoutingRelayEnabled}"
-                      ToolTip.Tip="Stored and shared with MeshRF.App; this app doesn't relay packets yet." />
+                      ToolTip.Tip="Rebroadcast other nodes' traffic, subject to the role and rebroadcast mode above. Needs a TX-capable device." />
 
             <TextBlock Grid.Row="11" Grid.Column="0" Text="Location source" Margin="0,4,8,4" VerticalAlignment="Center" />
             <StackPanel Grid.Row="11" Grid.Column="1" Margin="0,4,0,4">
@@ -199,7 +199,7 @@
 
             <TextBlock Grid.Row="26" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource BrushSubtle}"
-                       Text="Rebroadcast and relay routing above are stored and shared with MeshRF.App, but this app doesn't relay packets yet." />
+                       Text="Relay routing rebroadcasts other nodes' traffic after a contention delay, following the role and rebroadcast mode above. It needs a TX-capable device, and stays off entirely while the Routing box is unchecked." />
         </Grid>
     </ScrollViewer>
 </Window>
