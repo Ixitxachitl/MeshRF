@@ -102,7 +102,14 @@ if(MRF_BUILD_RADIO_DLLS_FROM_SUBMODULES AND WIN32)
         set(_mrf_triplet_install_root "${_mrf_vcpkg_root}/installed/${VCPKG_TARGET_TRIPLET}")
         if(EXISTS "${_mrf_pthreads_pkg_root}/include/pthread.h" AND NOT EXISTS "${_mrf_triplet_install_root}/include/pthread.h")
             file(MAKE_DIRECTORY "${_mrf_triplet_install_root}")
-            foreach(_mrf_copy_dir include lib bin debug/lib debug/bin)
+            # "share" matters as much as the binaries: it carries
+            # share/PThreads4W/PThreads4WConfig.cmake, which is what
+            # _mrf_pthreads_cmake_dir probes for below and what hackrf's
+            # find_package(PThreads4W) needs. Without it the imported target
+            # resolves empty and hackrf links the literal
+            # "PThreads4W::PThreads4W-NOTFOUND.obj" (LNK1104) -- the failure
+            # seen on clean CI machines but never on a warm .vcpkg.
+            foreach(_mrf_copy_dir include lib bin share debug/lib debug/bin)
                 if(EXISTS "${_mrf_pthreads_pkg_root}/${_mrf_copy_dir}")
                     file(COPY "${_mrf_pthreads_pkg_root}/${_mrf_copy_dir}" DESTINATION "${_mrf_triplet_install_root}")
                 endif()
