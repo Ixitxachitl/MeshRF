@@ -12,16 +12,25 @@ public partial class ChannelSettingsWindow : Window
     private ChannelTabViewModel? _channel;
     private RadioViewModel? _viewModel;
 
+    /// <summary>Set while Open populates the controls. Assigning ItemsSource and
+    /// the initial values raises the same change events the user's edits do, so
+    /// without this the dialog would save the channel back over itself — and
+    /// would do so before _channel was even assigned.</summary>
+    private bool _loading;
+
     public ChannelSettingsWindow()
     {
         InitializeComponent();
+        _loading = true;
         RoleCombo.ItemsSource = Enum.GetValues<ChannelRole>();
         PrecisionCombo.ItemsSource = DisplayUnits.BuildPositionPrecisionOptions(UnitSystem.Metric);
+        _loading = false;
     }
 
     public static void Open(Window owner, RadioViewModel viewModel, ChannelTabViewModel channel)
     {
         var w = new ChannelSettingsWindow();
+        w._loading = true;
         w._channel = channel;
         w._viewModel = viewModel;
         w.NameBox.Text = channel.Config.Name;
@@ -33,6 +42,7 @@ public partial class ChannelSettingsWindow : Window
         w.UplinkCheck.IsChecked = channel.Config.UplinkEnabled;
         w.DownlinkCheck.IsChecked = channel.Config.DownlinkEnabled;
         w.HashText.Text = $"hash 0x{channel.Config.Hash:X2}";
+        w._loading = false;
         w.Show(owner);
     }
 
@@ -55,20 +65,38 @@ public partial class ChannelSettingsWindow : Window
         return null;
     }
 
-    private void OnUseDefaultKey(object? sender, RoutedEventArgs e) => PskBox.Text = "default";
-    private void OnRandom16(object? sender, RoutedEventArgs e) => PskBox.Text = Convert.ToBase64String(ChannelConfig.NewRandomPsk(16));
-    private void OnRandom32(object? sender, RoutedEventArgs e) => PskBox.Text = Convert.ToBase64String(ChannelConfig.NewRandomPsk(32));
+    // These write a complete, valid key, so they commit immediately rather than
+    // waiting for focus to leave the box.
+    private void OnUseDefaultKey(object? sender, RoutedEventArgs e) { PskBox.Text = "default"; Apply(); }
+    private void OnRandom16(object? sender, RoutedEventArgs e) { PskBox.Text = Convert.ToBase64String(ChannelConfig.NewRandomPsk(16)); Apply(); }
+    private void OnRandom32(object? sender, RoutedEventArgs e) { PskBox.Text = Convert.ToBase64String(ChannelConfig.NewRandomPsk(32)); Apply(); }
 
-    private void OnCancel(object? sender, RoutedEventArgs e) => Close();
+    private void OnFieldChanged(object? sender, RoutedEventArgs e) => Apply();
 
-    private void OnSave(object? sender, RoutedEventArgs e)
+    /// <summary>Commits an edit whose field never lost focus — closing the
+    /// window while still typing in the name or PSK box.</summary>
+    protected override void OnClosing(WindowClosingEventArgs e)
     {
-        if (_channel is null || _viewModel is null) { Close(); return; }
+        Apply();
+        base.OnClosing(e);
+    }
+
+    /// <summary>
+    /// Writes the current control values through to the channel and saves.
+    ///
+    /// A rejected PSK aborts the whole save rather than just its own field: the
+    /// key and the name/role travel together as one channel definition, and
+    /// storing the rest against a key the user is mid-way through typing would
+    /// define a channel they never asked for.
+    /// </summary>
+    private void Apply()
+    {
+        if (_loading || _channel is null || _viewModel is null) return;
 
         var psk = PskFromText(PskBox.Text);
         if (psk is null)
         {
-            PskBox.Text = "(invalid — enter base64, hex, \"default\" or leave blank)";
+            StatusText.Text = "PSK not saved — enter base64, hex, \"default\", or leave blank.";
             return;
         }
 
@@ -84,6 +112,9 @@ public partial class ChannelSettingsWindow : Window
         _channel.MuteRtttl = MuteRtttlCheck.IsChecked == true;
 
         _viewModel.SaveChannelSettings(_channel);
-        Close();
+
+        // The name feeds the hash, so it can change under an edit.
+        HashText.Text = $"hash 0x{_channel.Config.Hash:X2}";
+        StatusText.Text = "Changes are saved as you make them.";
     }
 }
