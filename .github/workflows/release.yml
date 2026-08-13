@@ -25,12 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Pinned, not windows-latest: that image is now windows-2025-vs2026,
-          # which ships Visual Studio 2026, and the windows-x64 preset asks for
-          # the "Visual Studio 17 2022" generator. A preset that names a
-          # generator cannot be overridden with -G, so the runner has to match
-          # the preset until the preset learns to pick whatever VS is present.
-          - os: windows-2022
+          # windows-latest works again: the windows-x64 preset no longer pins a
+          # generator, so CMake picks whatever Visual Studio the image ships
+          # (2026 here, 2022 on developer machines).
+          - os: windows-latest
             platform: windows
             # The last WPF release ships alongside the first Avalonia one; after
             # that this becomes 'Avalonia'.

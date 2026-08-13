@@ -131,9 +131,9 @@ Common to every platform:
 
 **Windows 10/11 x64**
 
-- Visual Studio 2022 with "Desktop development with C++" and ".NET desktop
-  development". The `windows-x64` preset asks for the VS 2022 generator
-  specifically, so VS 2026 alone is not enough.
+- Visual Studio 2022 or newer with "Desktop development with C++" and ".NET
+  desktop development". The `windows-x64` preset pins no generator, so CMake
+  uses the newest Visual Studio it finds.
 - SDR drivers as needed (typically via Zadig/WinUSB).
 
 **Linux x64**

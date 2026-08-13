@@ -5,8 +5,7 @@
     {
       "name": "windows-x64",
       "displayName": "Windows x64 (MSVC, no vcpkg)",
-      "description": "Default config: builds without vcpkg. Optional deps (libsodium, etc.) are skipped; GoogleTest is fetched via FetchContent.",
-      "generator": "Visual Studio 17 2022",
+      "description": "Default config: no generator is pinned, so CMake picks the newest installed Visual Studio (2022 or 2026 both work). GoogleTest is fetched via FetchContent when not provided by vcpkg.",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
