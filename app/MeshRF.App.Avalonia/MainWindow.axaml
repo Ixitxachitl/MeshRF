@@ -635,21 +635,6 @@
                               GridLinesVisibility="Horizontal"
                               CanUserSortColumns="True" CanUserResizeColumns="True"
                               DoubleTapped="OnNodeDoubleTapped">
-                        <DataGrid.Styles>
-                            <!-- Ignored nodes read as red text instead of the old dedicated
-                                 icon column, mirroring MeshRF.App's row-highlight behavior.
-                                 The converter falls through to AvaloniaProperty.UnsetValue when
-                                 not ignored, so non-ignored rows keep the app's default text
-                                 color and icon columns (favorite star, key, shield, ...) keep
-                                 their own explicit colors since those are set directly on the
-                                 icon TextBlock rather than inherited from the cell. -->
-                            <Style Selector="DataGridRow" x:DataType="nodes:NodeRecord">
-                                <Setter Property="Foreground" Value="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
-                            </Style>
-                            <Style Selector="DataGridCell" x:DataType="nodes:NodeRecord">
-                                <Setter Property="Foreground" Value="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
-                            </Style>
-                        </DataGrid.Styles>
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Message"
@@ -711,17 +696,28 @@
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Width="Auto" CanUserSort="False">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="🔑" ToolTip.Tip="Public key on file (green = node ID derived from key, red = key mismatch)" />
+                                    <TextBlock Text="🔑" ToolTip.Tip="Public key on file (green dot = node ID derived from key, red dot = key mismatch)" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
+                                    <!-- 🔑 is a full-color emoji glyph: Skia's text renderer draws
+                                         color-emoji glyphs from the font's own embedded artwork and
+                                         ignores Foreground entirely, so a tinted 🔑 (as this used to
+                                         be) never actually changes color. A small plain-shape Ellipse
+                                         badge overlaid on the glyph is used instead, since ordinary
+                                         vector shapes do respect Fill. -->
                                     <DataTemplate x:DataType="nodes:NodeRecord">
-                                        <Panel>
-                                            <TextBlock Text="🔑" ToolTip.Tip="Public key on file"
-                                                       IsVisible="{Binding HasPublicKey}" />
-                                            <TextBlock Text="🔑" Foreground="#7BD88F" ToolTip.Tip="Public key matches this node's Meshtastic PKI-derived node number"
-                                                       IsVisible="{Binding HasDerivedNodeNumMatch}" />
-                                            <TextBlock Text="🔑" Foreground="#FF6B6B" ToolTip.Tip="Key mismatch — this node's key changed"
-                                                       IsVisible="{Binding HasKeyMismatch}" />
+                                        <Panel IsVisible="{Binding HasPublicKey}" ToolTip.Tip="Public key on file">
+                                            <TextBlock Text="🔑" />
+                                            <Ellipse Width="5" Height="5" Fill="#7BD88F"
+                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                     IsVisible="{Binding HasDerivedNodeNumMatch}"
+                                                     ToolTip.Tip="Public key matches this node's Meshtastic PKI-derived node number" />
+                                            <Ellipse Width="5" Height="5" Fill="#FF6B6B"
+                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                     IsVisible="{Binding HasKeyMismatch}"
+                                                     ToolTip.Tip="Key mismatch — this node's key changed" />
                                         </Panel>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
@@ -751,36 +747,123 @@
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Width="Auto" CanUserSort="False">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="📍" ToolTip.Tip="Position known (red = reported position is invalid)" />
+                                    <TextBlock Text="📍" ToolTip.Tip="Position known (red dot = reported position is invalid)" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <!-- Same color-emoji caveat as the key column: 📍 ignores
+                                         Foreground, so invalid position is a badge dot, not a tint. -->
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <Panel IsVisible="{Binding HasLocation}" ToolTip.Tip="Location known">
+                                            <TextBlock Text="📍" />
+                                            <Ellipse Width="5" Height="5" Fill="#FF6B6B"
+                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                     IsVisible="{Binding HasInvalidLocation}"
+                                                     ToolTip.Tip="Reported location is invalid" />
+                                        </Panel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="🌉" ToolTip.Tip="Last heard via MQTT rather than over the air" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
-                                        <Panel>
-                                            <TextBlock Text="📍" ToolTip.Tip="Location known"
-                                                       IsVisible="{Binding HasLocation}" />
-                                            <TextBlock Text="📍" Foreground="#FF6B6B" ToolTip.Tip="Reported location is invalid"
-                                                       IsVisible="{Binding HasInvalidLocation}" />
-                                        </Panel>
+                                        <TextBlock Text="🌉" ToolTip.Tip="Last heard via MQTT rather than over the air"
+                                                   IsVisible="{Binding IsSeenViaMqtt}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
                             <!-- SortMemberPath is spelled out because Avalonia only infers it
                                  from a classic Binding, not the compiled bindings this project
                                  uses by default. Without it every column reports an empty path,
-                                 so the saved node sort can be neither restored nor read back. -->
-                            <DataGridTextColumn Header="Short" Width="Auto" SortMemberPath="ShortName" Binding="{Binding ShortName, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
-                            <DataGridTextColumn Header="Node name" Width="*" SortMemberPath="LongName" Binding="{Binding LongName, DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="Status" Width="2*" SortMemberPath="NodeStatus" Binding="{Binding NodeStatus, DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="Role" Width="Auto" SortMemberPath="Role" Binding="{Binding Role, DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="Node ID" Width="Auto" SortMemberPath="DisplayId" Binding="{Binding DisplayId, DataType=nodes:NodeRecord}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
-                            <DataGridTextColumn Header="Last heard" Width="Auto" SortMemberPath="LastHeard" Binding="{Binding LastHeard, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}', DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="RSSI" Width="Auto" SortMemberPath="RssiDbm" Binding="{Binding RssiDbm, StringFormat='{}{0:F0} dBm', DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Header="SNR" Width="Auto" SortMemberPath="SnrDb" Binding="{Binding SnrDb, StringFormat='{}{0:F1}', DataType=nodes:NodeRecord}" />
-                            <DataGridTextColumn Width="Auto" Binding="{Binding HopsAway, DataType=nodes:NodeRecord}" >
-                                <DataGridTextColumn.Header>
+                                 so the saved node sort can be neither restored nor read back.
+
+                                 These are DataGridTemplateColumns rather than the plainer
+                                 DataGridTextColumn (which has no per-cell Foreground to bind)
+                                 specifically so ignored nodes can render in red text: a Style
+                                 targeting DataGridRow/DataGridCell was tried first, since that
+                                 would have applied to every column in one place, but it did not
+                                 reliably take effect. Binding Foreground directly on each cell's
+                                 own TextBlock is the same mechanism already used by the icon
+                                 columns above (HasPublicKey, IsXeddsaVerified, ...), so it is
+                                 known to work. -->
+                            <DataGridTemplateColumn Header="Short" Width="Auto" SortMemberPath="ShortName">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding ShortName}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Node name" Width="*" SortMemberPath="LongName">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding LongName}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Status" Width="2*" SortMemberPath="NodeStatus">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding NodeStatus}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Role" Width="Auto" SortMemberPath="Role">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding Role}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Node ID" Width="Auto" SortMemberPath="DisplayId">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding DisplayId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Last heard" Width="Auto" SortMemberPath="LastHeard">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding LastHeard, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="RSSI" Width="Auto" SortMemberPath="RssiDbm">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding RssiDbm, StringFormat='{}{0:F0} dBm'}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="SNR" Width="Auto" SortMemberPath="SnrDb">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding SnrDb, StringFormat='{}{0:F1}'}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="HopsAway">
+                                <DataGridTemplateColumn.Header>
                                     <TextBlock Text="🐇" ToolTip.Tip="Hops away" />
-                                </DataGridTextColumn.Header>
-                            </DataGridTextColumn>
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding HopsAway}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
 

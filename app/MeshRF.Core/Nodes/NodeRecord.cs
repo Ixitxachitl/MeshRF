@@ -98,6 +98,9 @@ public sealed class NodeRecord : INotifyPropertyChanged
     /// and leaves the stored value alone.</summary>
     public bool? SeenViaMqtt { get; set; }
 
+    /// <summary>Convenience flag for UI visibility bindings.</summary>
+    public bool IsSeenViaMqtt => SeenViaMqtt == true;
+
     public float? SnrDb       { get; set; }
     public float? RssiDbm     { get; set; }
     public byte?  HopsAway    { get; set; }
