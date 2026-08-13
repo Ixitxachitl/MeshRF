@@ -399,7 +399,7 @@ public partial class RadioViewModel
 
     private void UpdateAutoReportSummary()
     {
-        static string T(DateTime? utc) => utc is DateTime d ? d.ToLocalTime().ToString("h:mm:ss tt") : "never";
+        static string T(DateTime? utc) => utc is DateTime d ? UiFormats.Time(d.ToLocalTime()) : "never";
         AutoReportLastSentSummary =
             $"Auto last: NI {T(_lastNodeInfoUtc)} | POS {T(_lastPositionUtc)} | MET {T(_lastDeviceMetricsUtc)} " +
             $"| ENV {T(_lastEnvironmentMetricsUtc)} | AQ {T(_lastAirQualityMetricsUtc)} | ST {T(_lastNodeStatusUtc)}";

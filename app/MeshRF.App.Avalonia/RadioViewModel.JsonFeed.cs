@@ -106,7 +106,7 @@ public partial class RadioViewModel
                 return "\"" + sb + "\"";
             });
             string headerText =
-                $"[{DateTime.Now.ToString("M/d/yyyy h:mm:ss tt", CultureInfo.CurrentCulture)}] {summary.Trim()}";
+                $"[{UiFormats.Stamp(DateTime.Now)}] {summary.Trim()}";
 
             Dispatcher.UIThread.Post(() =>
             {

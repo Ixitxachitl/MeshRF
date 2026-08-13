@@ -603,7 +603,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     public void Log(string message)
     {
-        LogLines.Add(message);
+        // Stamped here, at the single funnel, so every line gets one — same as
+        // MeshRF.App's Log(). Uses the unit-system-aware convention.
+        LogLines.Add($"[{UiFormats.Stamp(DateTime.Now)}] {message}");
         while (LogLines.Count > 500) LogLines.RemoveAt(0);
     }
 

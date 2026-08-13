@@ -140,8 +140,8 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
                 Add("Position", $"{lat:0.#####}, {lon:0.#####}");
             if (n.AltitudeM is int altM) Add("Altitude", $"{altM} m");
             if (n.LastHeardEpoch > 0)
-                Add("Last heard", DateTimeOffset.FromUnixTimeSeconds(n.LastHeardEpoch).LocalDateTime
-                                    .ToString("M/d/yyyy h:mm:ss tt"));
+                Add("Last heard", UiFormats.Stamp(
+                    DateTimeOffset.FromUnixTimeSeconds(n.LastHeardEpoch).LocalDateTime));
         }
         OnPropertyChanged(nameof(HasTelemetry));
     }

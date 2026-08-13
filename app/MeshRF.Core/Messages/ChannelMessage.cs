@@ -8,8 +8,6 @@ namespace MeshRF;
 /// <summary>One rendered chat bubble in a channel or DM conversation view.</summary>
 public partial class ChannelMessage : ObservableObject
 {
-    private const string UiDateTimeFormat = "M/d/yyyy h:mm:ss tt";
-
     public DateTime Timestamp { get; init; } = DateTime.Now;
     [ObservableProperty]
     private string _fromId = string.Empty;
@@ -80,15 +78,15 @@ public partial class ChannelMessage : ObservableObject
         _ => string.Empty,
     };
 
-    /// <summary>Timestamp column rendered as local date + 12-hour time.</summary>
-    public string TimePrefix => $"[{Timestamp.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}]";
+    /// <summary>Timestamp column, in the unit-system-aware convention.</summary>
+    public string TimePrefix => $"[{UiFormats.Stamp(Timestamp)}]";
 
     /// <summary>Message body plus the delivery-status suffix, for the text column.</summary>
     public string TextWithStatus => $"{Text}{DeliverySuffix}";
 
     /// <summary>Single-line rendering used for clipboard copy.</summary>
     public string Display =>
-        $"[{Timestamp.ToString(UiDateTimeFormat, CultureInfo.CurrentCulture)}] {FromId,-12}  {Text}{DeliverySuffix}";
+        $"[{UiFormats.Stamp(Timestamp)}] {FromId,-12}  {Text}{DeliverySuffix}";
 
     /// <summary>Add or update one reaction for this message. A sender only
     /// counts once per emoji.</summary>

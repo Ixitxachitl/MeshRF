@@ -832,7 +832,7 @@
                             <DataGridTemplateColumn Header="Last heard" Width="Auto" SortMemberPath="LastHeard">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
-                                        <TextBlock Text="{Binding LastHeard, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}"
+                                        <TextBlock Text="{Binding LastHeard, Converter={x:Static local:UiStampConverter.Instance}}"
                                                    Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
@@ -897,8 +897,8 @@
                             <DataGridTextColumn Header="Lat" Width="88" Binding="{Binding Latitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                             <DataGridTextColumn Header="Lon" Width="88" Binding="{Binding Longitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                             <DataGridTextColumn Header="Status" Width="74" Binding="{Binding ExpiryStatus}" />
-                            <DataGridTextColumn Header="Expires" Width="132" Binding="{Binding ExpireTime, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
-                            <DataGridTextColumn Header="Heard" Width="156" Binding="{Binding RxTime, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                            <DataGridTextColumn Header="Expires" Width="132" Binding="{Binding ExpireTime, Converter={x:Static local:UiStampConverter.Instance}}" />
+                            <DataGridTextColumn Header="Heard" Width="156" Binding="{Binding RxTime, Converter={x:Static local:UiStampConverter.Instance}}" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>

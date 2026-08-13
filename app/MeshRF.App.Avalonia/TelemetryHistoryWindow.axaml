@@ -31,7 +31,7 @@
                       ItemsSource="{Binding DeviceTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, Converter={x:Static local:UiStampConverter.Instance}}" />
                     <DataGridTextColumn Header="Battery" Width="Auto" Binding="{Binding Battery}" />
                     <DataGridTextColumn Header="Voltage" Width="Auto" Binding="{Binding Voltage}" />
                     <DataGridTextColumn Header="Ch util" Width="Auto" Binding="{Binding ChannelUtil}" />
@@ -54,7 +54,7 @@
                       ItemsSource="{Binding EnvironmentalTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, Converter={x:Static local:UiStampConverter.Instance}}" />
                     <DataGridTextColumn Header="Temp" Width="Auto" Binding="{Binding Temperature}" />
                     <DataGridTextColumn Header="Humidity" Width="Auto" Binding="{Binding Humidity}" />
                     <DataGridTextColumn Header="Pressure" Width="Auto" Binding="{Binding Pressure}" />
@@ -68,7 +68,7 @@
                       ItemsSource="{Binding AirQualityTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, Converter={x:Static local:UiStampConverter.Instance}}" />
                     <DataGridTextColumn Header="PM2.5" Width="Auto" Binding="{Binding Pm25Std}" />
                     <DataGridTextColumn Header="PM10" Width="Auto" Binding="{Binding Pm100Std}" />
                     <DataGridTextColumn Header="PM1.0" Width="Auto" Binding="{Binding Pm10Std}" />
@@ -83,7 +83,7 @@
                       ItemsSource="{Binding PowerTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                    <DataGridTextColumn Header="Time" Width="*" Binding="{Binding TimestampLocal, Converter={x:Static local:UiStampConverter.Instance}}" />
                     <DataGridTextColumn Header="CH1 V" Width="Auto" Binding="{Binding Ch1Voltage}" />
                     <DataGridTextColumn Header="CH1 A" Width="Auto" Binding="{Binding Ch1Current}" />
                     <DataGridTextColumn Header="CH2 V" Width="Auto" Binding="{Binding Ch2Voltage}" />

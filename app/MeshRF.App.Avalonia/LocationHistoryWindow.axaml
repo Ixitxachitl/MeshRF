@@ -36,7 +36,7 @@
                       GridLinesVisibility="Horizontal" SelectionMode="Single">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Time" Width="*"
-                                        Binding="{Binding TimestampLocal, StringFormat='{}{0:M/d/yyyy h:mm:ss tt}'}" />
+                                        Binding="{Binding TimestampLocal, Converter={x:Static local:UiStampConverter.Instance}}" />
                     <DataGridTextColumn Header="Lat" Width="Auto" Binding="{Binding Latitude, StringFormat='{}{0:0.#####}'}" />
                     <DataGridTextColumn Header="Lon" Width="Auto" Binding="{Binding Longitude, StringFormat='{}{0:0.#####}'}" />
                     <DataGridTextColumn Header="Alt" Width="Auto" Binding="{Binding AltitudeDisplay}" />

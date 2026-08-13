@@ -619,6 +619,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         LoadAutoReportSettings();
         LoadMqttSettings(_settings);
 
+        // Explicit rather than relying on OnUnitSystemNameChanged, whose
+        // generated setter no-ops when the saved value equals the default —
+        // a saved "Metric" that matches the default would otherwise leave
+        // dates in US form until the user toggled units.
+        UiFormats.European = CurrentUnitSystem == UnitSystem.Metric;
+
         // Everything is loaded — from here on property changes may persist.
         _settingsLoaded = true;
         SaveSettings();
@@ -1058,6 +1064,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     partial void OnUnitSystemNameChanged(string value)
     {
+        // Metric mode uses European date/time conventions everywhere dates
+        // are rendered (grids, chat bubbles, log stamps, history windows).
+        UiFormats.European = CurrentUnitSystem == UnitSystem.Metric;
         OnPropertyChanged(nameof(CurrentUnitSystem));
         OnPropertyChanged(nameof(UseImperial));
         OnPropertyChanged(nameof(UseFahrenheit));
