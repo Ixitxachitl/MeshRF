@@ -377,19 +377,22 @@ public sealed class AppSettings
         }
     }
 
-    // DPAPI (CurrentUser scope) protection for secrets at rest — private key
-    // and MQTT password. Entropy is a fixed app-specific constant, not a
-    // secret; it just scopes the protected blob to this app. On non-Windows,
-    // ProtectedData isn't supported, so we fall back to storing as-is rather
-    // than throwing — same "best-effort" behavior as MeshRF.App's copy uses
-    // for any DPAPI failure.
+    // Secrets at rest — private key and MQTT password. Windows uses DPAPI
+    // (CurrentUser scope); entropy is a fixed app-specific constant, not a
+    // secret — it just scopes the protected blob to this app. Elsewhere,
+    // MachineBoundSecret provides AES-GCM under a machine/user-derived key:
+    // weaker than DPAPI (see its remarks) but no longer plaintext. Both paths
+    // treat unrecognized stored values as legacy plaintext, so existing
+    // settings files keep working and encrypt on the next save.
     private static readonly byte[] s_privateKeyEntropy = Encoding.UTF8.GetBytes("MeshRF.UserPrivateKey.v1");
     private static readonly byte[] s_mqttPasswordEntropy = Encoding.UTF8.GetBytes("MeshRF.MqttPassword.v1");
+
+    private static string SecretKeyDir => Path.GetDirectoryName(SettingsPath)!;
 
     private static string ProtectSecretText(string plain, byte[] entropy, bool base64)
     {
         if (string.IsNullOrEmpty(plain)) return string.Empty;
-        if (!OperatingSystem.IsWindows()) return plain;
+        if (!OperatingSystem.IsWindows()) return Security.MachineBoundSecret.Protect(plain, SecretKeyDir);
         try
         {
             var bytes = base64 ? Convert.FromBase64String(plain) : Encoding.UTF8.GetBytes(plain);
@@ -405,7 +408,7 @@ public sealed class AppSettings
     private static string UnprotectSecretText(string onDisk, byte[] entropy, bool base64)
     {
         if (string.IsNullOrEmpty(onDisk)) return string.Empty;
-        if (!OperatingSystem.IsWindows()) return onDisk;
+        if (!OperatingSystem.IsWindows()) return Security.MachineBoundSecret.Unprotect(onDisk, SecretKeyDir);
         try
         {
             var blob = Convert.FromBase64String(onDisk);
