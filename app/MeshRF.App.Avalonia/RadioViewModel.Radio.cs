@@ -148,6 +148,11 @@ public partial class RadioViewModel
     ///
     /// Anything else, and every repeat ack, goes out once and plain. A repeat
     /// in particular is capped at hop limit 0 (see <see cref="AckRequest"/>).
+    ///
+    /// A packet we could not decrypt is answered with a NAK instead. It always
+    /// goes out plain on the primary channel: we do not know which channel the
+    /// request used, and PKC is unavailable precisely because the missing key is
+    /// what we are complaining about.
     /// </summary>
     private void SendAck(AckRequest request)
     {
@@ -156,15 +161,16 @@ public partial class RadioViewModel
         if (header.IsBroadcast || header.To != _rxHost.MyNodeNum) return;
         if (!header.WantAck) return;
 
-        bool reliable = request.TextMessage && !request.Duplicate;
-        byte hopLimit = request.Duplicate ? (byte)0 : ResponseHopLimit(header);
+        bool nak = request.ErrorReason != RoutingError.None;
+        bool reliable = request.TextMessage && !request.Duplicate && !nak;
+        byte hopLimit = request.Duplicate ? (byte)0 : ResponseHopLimit(header, request.HasBitfield);
 
         try
         {
             uint packetId = NextPacketId();
             byte[]? frame = null;
 
-            if (request.Pkc)
+            if (request.Pkc && !nak)
             {
                 // A PKC message must be acked over PKC, sealed back to the
                 // sender with our private key and their public key.
@@ -173,19 +179,24 @@ public partial class RadioViewModel
                 if (myPriv.Length == 32 && peerPub.Length == 32)
                     frame = MeshEncoder.EncodePkcRouting(
                         _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
-                        myPriv, peerPub, errorReason: 0, hopLimit: hopLimit, wantAck: reliable);
+                        myPriv, peerPub, errorReason: request.ErrorReason,
+                        hopLimit: hopLimit, wantAck: reliable);
             }
             else
             {
-                var channel = _rxHost.FindChannelByName(request.ChannelName) ?? PrimaryChannel();
+                var channel = nak
+                    ? PrimaryChannel()
+                    : _rxHost.FindChannelByName(request.ChannelName) ?? PrimaryChannel();
                 if (channel is not null)
                     frame = MeshEncoder.EncodeRouting(
                         channel, _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
-                        errorReason: 0, hopLimit: hopLimit, wantAck: reliable);
+                        errorReason: request.ErrorReason, hopLimit: hopLimit, wantAck: reliable);
             }
 
             if (frame is null) return;
             TransmitBackground(frame);
+            if (nak)
+                _rxHost.Log($"  NAK (reason={request.ErrorReason}) to {header.FromId} for id {header.PacketId:x8}");
             if (reliable)
                 _ackRetransmits[packetId] = new AckRetransmit(
                     frame, DateTime.UtcNow + AckRetxInterval, AckRetxAttempts);
@@ -255,25 +266,10 @@ public partial class RadioViewModel
         }
     }
 
-    /// <summary>Hop limit for a reply, ported from firmware's
-    /// RoutingModule::getHopLimitForResponse. A reply sent at the full
-    /// configured limit is rebroadcast by every repeater in range regardless of
-    /// how close the requester actually was; this gives the return path only
-    /// the hops the request needed, plus a small margin.</summary>
-    private byte ResponseHopLimit(MeshHeader header)
-    {
-        byte configured = (byte)Math.Clamp(HopLimit, 0, 7);
-        int hopStart = header.HopStart;
-        // hop_start of 0 means the field isn't in use; hops used is unknown.
-        int hopsUsed = hopStart > 0 ? hopStart - header.HopLimit : -1;
-
-        if (hopsUsed >= 0)
-        {
-            if (hopsUsed > configured) return (byte)hopsUsed;
-            if (hopsUsed + 2 < configured) return (byte)(hopsUsed + 2);
-        }
-        return configured;
-    }
+    /// <summary>Hop limit for a reply to <paramref name="header"/>, against our
+    /// configured limit. See <see cref="ReplyHops"/> for the rules.</summary>
+    private byte ResponseHopLimit(MeshHeader header, bool hasBitfield)
+        => ReplyHops.ForResponse(header, hasBitfield, HopLimit);
 
     private static byte[] TryParseHex(string? hex)
     {

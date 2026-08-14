@@ -182,6 +182,9 @@ public sealed class MeshRxRouter : IDisposable
             if (!_host.RememberUndecodedPacket(header))
             {
                 _host.HandleDuplicateForRelay(frame, header, result, snrDb);
+                // Repeats get answered too: the sender only retransmits because
+                // it never heard our first reply.
+                _host.OnUndecodedPacket(header);
                 _host.Log($"  (dup) rx undecoded from {header.FromId} pkt {header.PacketId:x8} (chan hash {header.ChannelHash:X2})");
                 _host.MarkNodeDirty(header.From);
                 return;
@@ -189,6 +192,7 @@ public sealed class MeshRxRouter : IDisposable
 
             _host.RelayIfEligible(frame, header, result, snrDb);
             _host.UplinkIfEligible(frame, header, result, isFromUs: false, snrDb: snrDb, rssiDbm: packetRssiDbm);
+            _host.OnUndecodedPacket(header);
             _host.Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
             _host.MarkNodeDirty(header.From);
             return;

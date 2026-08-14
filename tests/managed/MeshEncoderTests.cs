@@ -91,6 +91,51 @@ public class MeshEncoderTests
         Assert.Equal(peer, result.Header.To);
     }
 
+    /// <summary>A packet addressed to us that we cannot decrypt still gets an
+    /// answer — a NAK naming why, on the primary channel, since the channel the
+    /// request used is exactly what we could not work out.</summary>
+    [Theory]
+    [InlineData(RoutingError.NoChannel)]
+    [InlineData(RoutingError.PkiUnknownPubkey)]
+    public void RoutingNakCarriesItsErrorReason(uint reason)
+    {
+        var channel = DefaultChannel();
+        var frame = MeshEncoder.EncodeRouting(channel, 0x11111111u, 0x22222222u,
+            packetId: 0x33333333u, requestId: 0x44444444u, errorReason: reason, hopLimit: 3);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.Routing, result!.Port);
+        Assert.Equal((int)reason, result.RoutingError);
+        Assert.Equal(0x44444444u, result.RequestId);
+        // A NAK is never sent reliably: it is already the end of the exchange.
+        Assert.True(MeshHeader.TryParse(frame, out var h));
+        Assert.False(h.WantAck);
+    }
+
+    /// <summary>
+    /// Data.bitfield presence has to survive decode, because it is what tells a
+    /// hop_start of 0 ("this sender wanted zero hops") apart from a sender too
+    /// old to populate the field at all.
+    /// </summary>
+    [Fact]
+    public void BitfieldPresenceSurvivesDecode()
+    {
+        var channel = DefaultChannel();
+
+        // EncodeTextMessage writes the bitfield (it carries ok_to_mqtt).
+        var withField = MeshEncoder.EncodeTextMessage(channel, 0x1u, 0x2u, "hi", okToMqtt: true);
+        var decodedWith = MeshDecoder.Decode(withField, new[] { channel });
+        Assert.NotNull(decodedWith);
+        Assert.True(decodedWith!.HasDataBitfield);
+
+        // A routing ack carries no bitfield at all.
+        var withoutField = MeshEncoder.EncodeRouting(channel, 0x1u, 0x2u, 0x3u, 0x4u);
+        var decodedWithout = MeshDecoder.Decode(withoutField, new[] { channel });
+        Assert.NotNull(decodedWithout);
+        Assert.False(decodedWithout!.HasDataBitfield);
+    }
+
     [Fact]
     public void EncryptedPayloadIsNotPlaintext()
     {

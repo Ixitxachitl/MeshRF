@@ -69,4 +69,14 @@ public interface IMeshRxHost
     /// MainViewModel) keep compiling unchanged.
     /// </summary>
     void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result) { }
+
+    /// <summary>
+    /// A frame no key we hold could decrypt. The plaintext header still says who
+    /// it was for and whether it wanted an acknowledgement, so a packet
+    /// addressed to us still deserves an answer — a NAK rather than silence.
+    /// Firmware does this in <c>ReliableRouter::sniffReceived</c>.
+    ///
+    /// Defaulted to a no-op, like <see cref="OnDuplicateDecoded"/>.
+    /// </summary>
+    void OnUndecodedPacket(MeshHeader header) { }
 }

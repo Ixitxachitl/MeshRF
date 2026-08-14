@@ -24,8 +24,18 @@ namespace MeshRF.AvaloniaApp;
 /// acked, meaning our first ack was lost. Firmware answers these at hop limit 0:
 /// the repeat exists only to stop the immediate relayer retrying, so it must not
 /// be flooded back across the mesh.</param>
+/// <param name="HasBitfield">The packet carried Data.bitfield, which is what
+/// makes its hop_start trustworthy when it reads zero. False for a packet we
+/// could not decrypt — the field lives inside the ciphertext.</param>
+/// <param name="ErrorReason">
+/// <see cref="RoutingError.None"/> for a real acknowledgement, or the reason
+/// this is a negative one. A NAK still answers the sender's want_ack, which is
+/// the point: staying silent because we could not read the packet just makes it
+/// retransmit and the mesh reflood.
+/// </param>
 public sealed record AckRequest(MeshHeader Header, string? ChannelName, bool Pkc,
-                                bool TextMessage, bool Duplicate);
+                                bool TextMessage, bool Duplicate, bool HasBitfield,
+                                uint ErrorReason = RoutingError.None);
 
 /// <summary>
 /// <see cref="IMeshRxHost"/> for the Avalonia app: decodes traffic on any
@@ -1025,7 +1035,40 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                result.ChannelName,
                string.Equals(result.ChannelName, "PKC", StringComparison.Ordinal),
                result.Port is PortNum.TextMessage or PortNum.TextMessageCompressed,
-               duplicate);
+               duplicate,
+               result.HasDataBitfield);
+
+    /// <summary>
+    /// A packet addressed to us that no key we hold could open. The addressing
+    /// is in the plaintext header, so we know it was meant for us and we know it
+    /// wanted an acknowledgement — we just cannot read it. Firmware answers
+    /// anyway, and so must we: silence is what makes the sender retransmit and
+    /// every repeater reflood, which is the exact cost the ack path exists to
+    /// avoid. The reply is a NAK naming why, which also lets the sender's client
+    /// react (a PKI_UNKNOWN_PUBKEY is answered with their NodeInfo).
+    /// </summary>
+    public void OnUndecodedPacket(MeshHeader header)
+    {
+        if (!header.WantAck) return;
+        if (MyNodeNum == 0 || header.IsBroadcast || header.To != MyNodeNum) return;
+
+        // Channel hash 0 marks a PKI frame. If we have never learned the
+        // sender's public key we could not have decrypted it whatever we did,
+        // and saying so is more use to them than a flat "no channel".
+        bool pkiShaped = header.ChannelHash == 0x00;
+        bool knowTheirKey = !string.IsNullOrEmpty(PublicKeyHexFor(header.From));
+        uint reason = pkiShaped && !knowTheirKey
+            ? RoutingError.PkiUnknownPubkey
+            : RoutingError.NoChannel;
+
+        AckRequested?.Invoke(new AckRequest(
+            header, ChannelName: null, Pkc: false, TextMessage: false,
+            // Undecodable packets are deduped separately and this fires for
+            // repeats too, but a NAK is cheap and already hop-limited; treating
+            // it as first-sight keeps the reply reaching as far as the request
+            // came from, which is what firmware sends.
+            Duplicate: false, HasBitfield: false, ErrorReason: reason));
+    }
 
     /// <summary>One-line log summary of a decoded packet, mirroring
     /// MeshRF.App's BuildDecodedPortSummary.</summary>

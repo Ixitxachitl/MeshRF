@@ -57,6 +57,13 @@ public sealed class MeshDecodeResult
     /// <summary>Data.bitfield raw numeric value (field 9).</summary>
     public uint DataBitfield { get; init; }
 
+    /// <summary>Whether Data.bitfield (field 9) was actually present, as
+    /// distinct from present-and-zero. Firmware treats the field's presence as
+    /// proof that the sender is new enough (2.5.0+) to populate hop_start, which
+    /// is what makes a hop_start of 0 mean "zero hops wanted" rather than "this
+    /// sender does not fill the field in" — see NodeDB's getHopsAway.</summary>
+    public bool HasDataBitfield { get; init; }
+
     /// <summary>
     /// Data.xeddsa_signature (field 10, bytes), used by newer Meshtastic
     /// builds for payload authentication metadata.
@@ -388,6 +395,7 @@ public static class MeshDecoder
                              out var emoji, out var okMqtt,
                              out var dataDest, out var dataSource,
                              out var dataBitfield,
+                             out var hasDataBitfield,
                              out var dataField10,
                              out var dataProtoJson,
                              out var appProtoJson) &&
@@ -395,7 +403,7 @@ public static class MeshDecoder
             {
                 return Build(header, ch.Name, port, appPayload, wantResp,
                              reqId, replyId, emoji, okMqtt,
-                             dataDest, dataSource, dataBitfield,
+                             dataDest, dataSource, dataBitfield, hasDataBitfield,
                              dataField10, dataProtoJson, appProtoJson);
             }
         }
@@ -437,6 +445,7 @@ public static class MeshDecoder
                          out var emoji, out var okMqtt,
                          out var dataDest, out var dataSource,
                          out var dataBitfield,
+                         out var hasDataBitfield,
                          out var dataField10,
                          out var dataProtoJson,
                          out var appProtoJson) &&
@@ -444,7 +453,7 @@ public static class MeshDecoder
         {
             return Build(header, "PKC", port, appPayload, wantResp,
                          reqId, replyId, emoji, okMqtt,
-                         dataDest, dataSource, dataBitfield,
+                         dataDest, dataSource, dataBitfield, hasDataBitfield,
                          dataField10, dataProtoJson, appProtoJson);
         }
         return null;
@@ -459,6 +468,7 @@ public static class MeshDecoder
                                      out uint dataDest,
                                      out uint dataSource,
                                      out uint dataBitfield,
+                                     out bool hasDataBitfield,
                                      out byte[] dataField10,
                                      out string? dataProtoJson,
                                      out string? appProtoJson)
@@ -473,6 +483,7 @@ public static class MeshDecoder
         dataDest = 0;
         dataSource = 0;
         dataBitfield = 0;
+        hasDataBitfield = false;
         dataField10 = Array.Empty<byte>();
         dataProtoJson = null;
         appProtoJson = null;
@@ -495,7 +506,8 @@ public static class MeshDecoder
         emoji = parsed.Emoji;
         dataDest = parsed.Dest;
         dataSource = parsed.Source;
-        dataBitfield = parsed.HasBitfield ? parsed.Bitfield : 0u;
+        hasDataBitfield = parsed.HasBitfield;
+        dataBitfield = hasDataBitfield ? parsed.Bitfield : 0u;
         okToMqtt = (dataBitfield & 0x01) != 0;
         wantResponse = wantResponse || (dataBitfield & 0x02) != 0;
         dataField10 = parsed.XeddsaSignature.ToByteArray();
@@ -557,6 +569,7 @@ public static class MeshDecoder
                                           uint dataDest = 0,
                                           uint dataSource = 0,
                                           uint dataBitfield = 0,
+                                          bool hasDataBitfield = false,
                                           byte[]? dataField10 = null,
                                           string? dataProtoJson = null,
                                           string? appProtoJson = null)
@@ -628,6 +641,7 @@ public static class MeshDecoder
             DataDest = dataDest,
             DataSource = dataSource,
             DataBitfield = dataBitfield,
+            HasDataBitfield = hasDataBitfield,
             DataField10 = dataField10 ?? Array.Empty<byte>(),
             DataProtoJson = dataProtoJson,
             AppProtoJson = appProtoJson,
