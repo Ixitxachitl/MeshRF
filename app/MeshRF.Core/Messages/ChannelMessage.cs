@@ -60,23 +60,34 @@ public partial class ChannelMessage : ObservableObject
     partial void OnDeliveryChanged(MessageDelivery value)
     {
         OnPropertyChanged(nameof(Display));
-        OnPropertyChanged(nameof(TextWithStatus));
+        OnPropertyChanged(nameof(DeliveryGlyph));
     }
 
     partial void OnFromIdChanged(string value) => OnPropertyChanged(nameof(Display));
 
     /// <summary>
-    /// Trailing delivery glyph. Sent renders nothing on purpose: every message
-    /// we transmit passes through that state, so labelling it said nothing and
-    /// put noise on every outgoing line. Only the two outcomes that carry
-    /// information get a mark — acknowledged, or gave up waiting.
+    /// Trailing delivery mark, on its own so the view can colour it. Sent
+    /// renders nothing on purpose: every message we transmit passes through
+    /// that state, so labelling it said nothing and put noise on every outgoing
+    /// line.
+    ///
+    /// The two delivery stages deliberately share one glyph. Reaching the mesh
+    /// and reaching the recipient are the same event to the reader — "it got
+    /// somewhere" — so the difference belongs in the colour, not in a second
+    /// symbol they'd have to learn.
     /// </summary>
-    private string DeliverySuffix => Delivery switch
+    public string DeliveryGlyph => Delivery switch
     {
-        MessageDelivery.Delivered => "  ✓",
-        MessageDelivery.Failed    => "  ✗",
+        MessageDelivery.DeliveredToMesh => "✓",
+        MessageDelivery.Delivered       => "✓",
+        MessageDelivery.Failed          => "✗",
         _ => string.Empty,
     };
+
+    /// <summary>The mark as plain text, for renderings that carry no colour
+    /// (clipboard copy). Both delivery stages collapse to the same check there,
+    /// which is the best a monochrome line can do.</summary>
+    private string DeliverySuffix => DeliveryGlyph.Length == 0 ? string.Empty : $"  {DeliveryGlyph}";
 
     /// <summary>Timestamp column, in the unit-system-aware convention.</summary>
     public string TimePrefix => $"[{UiFormats.Stamp(Timestamp)}]";
@@ -86,9 +97,6 @@ public partial class ChannelMessage : ObservableObject
     /// notification of their own, so the unit-system owner calls this to make
     /// already-rendered rows re-read them.</summary>
     public void NotifyDisplayChanged() => OnPropertyChanged(string.Empty);
-
-    /// <summary>Message body plus the delivery-status suffix, for the text column.</summary>
-    public string TextWithStatus => $"{Text}{DeliverySuffix}";
 
     /// <summary>Single-line rendering used for clipboard copy.</summary>
     public string Display =>
@@ -151,4 +159,17 @@ public enum MessageDelivery
     Sent,
     Delivered,
     Failed,
+
+    /// <summary>
+    /// A neighbour was heard rebroadcasting the message — Meshtastic's implicit
+    /// ACK. It proves the mesh picked the message up, not that the addressee
+    /// read it, so a DM sits here until the recipient's own ACK upgrades it to
+    /// <see cref="Delivered"/>.
+    ///
+    /// Appended rather than slotted in after <see cref="Sent"/>, where it
+    /// belongs logically: the numeric value is what the message store persists,
+    /// so inserting one in the middle would silently re-label every outgoing
+    /// message already on disk.
+    /// </summary>
+    DeliveredToMesh = 4,
 }

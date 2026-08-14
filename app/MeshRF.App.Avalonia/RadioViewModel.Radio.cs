@@ -138,22 +138,33 @@ public partial class RadioViewModel
     /// of airtime-consuming copies across the whole mesh. This app had no ack
     /// path at all, so every DM sent to it did exactly that.
     ///
-    /// The addressing lives in the plaintext header, so a packet we cannot
-    /// decrypt is still known to be for us and is still acked — which is the
-    /// case that matters here, since PKC direct messages aren't decodable yet.
+    /// Two shapes of ack, following firmware's ReliableRouter:
+    ///
+    /// A first-sight direct *text message* is acked reliably — want_ack set on
+    /// the ack itself, and retried until the peer confirms it. That ack is the
+    /// only thing that flips the sender's message from pending to delivered, so
+    /// losing it to one collision is a visible failure for a message we in fact
+    /// received and displayed.
+    ///
+    /// Anything else, and every repeat ack, goes out once and plain. A repeat
+    /// in particular is capped at hop limit 0 (see <see cref="AckRequest"/>).
     /// </summary>
-    private void SendAck(MeshHeader header, string? channelName, bool pkc)
+    private void SendAck(AckRequest request)
     {
+        var header = request.Header;
         if (!CanTransmit || _rxHost.MyNodeNum == 0) return;
         if (header.IsBroadcast || header.To != _rxHost.MyNodeNum) return;
         if (!header.WantAck) return;
+
+        bool reliable = request.TextMessage && !request.Duplicate;
+        byte hopLimit = request.Duplicate ? (byte)0 : ResponseHopLimit(header);
 
         try
         {
             uint packetId = NextPacketId();
             byte[]? frame = null;
 
-            if (pkc)
+            if (request.Pkc)
             {
                 // A PKC message must be acked over PKC, sealed back to the
                 // sender with our private key and their public key.
@@ -162,22 +173,85 @@ public partial class RadioViewModel
                 if (myPriv.Length == 32 && peerPub.Length == 32)
                     frame = MeshEncoder.EncodePkcRouting(
                         _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
-                        myPriv, peerPub, errorReason: 0, hopLimit: ResponseHopLimit(header));
+                        myPriv, peerPub, errorReason: 0, hopLimit: hopLimit, wantAck: reliable);
             }
             else
             {
-                var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+                var channel = _rxHost.FindChannelByName(request.ChannelName) ?? PrimaryChannel();
                 if (channel is not null)
                     frame = MeshEncoder.EncodeRouting(
                         channel, _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
-                        errorReason: 0, hopLimit: ResponseHopLimit(header));
+                        errorReason: 0, hopLimit: hopLimit, wantAck: reliable);
             }
 
-            if (frame is not null) TransmitBackground(frame);
+            if (frame is null) return;
+            TransmitBackground(frame);
+            if (reliable)
+                _ackRetransmits[packetId] = new AckRetransmit(
+                    frame, DateTime.UtcNow + AckRetxInterval, AckRetxAttempts);
         }
         catch (Exception ex)
         {
             StatusText = $"Ack failed: {ex.Message}";
+        }
+    }
+
+    // -- Reliable ack retransmission -----------------------------------------
+
+    /// <param name="NextTxUtc">When to send the next copy.</param>
+    /// <param name="Remaining">Copies left after the one already sent.</param>
+    private sealed record AckRetransmit(byte[] Frame, DateTime NextTxUtc, int Remaining);
+
+    /// <summary>Acks sent with want_ack that the peer hasn't confirmed yet,
+    /// keyed by the ack's own packet id.</summary>
+    private readonly Dictionary<uint, AckRetransmit> _ackRetransmits = new();
+
+    /// <summary>Firmware's NUM_RELIABLE_RETX is 3 total transmissions, so two
+    /// follow-ups after the original.</summary>
+    private const int AckRetxAttempts = 2;
+
+    /// <summary>Gap between copies. Firmware derives this from the packet's
+    /// airtime; a flat delay is enough here and stays clear of the peer's own
+    /// retry cadence, so the two don't collide repeatedly.</summary>
+    private static readonly TimeSpan AckRetxInterval = TimeSpan.FromSeconds(9);
+
+    /// <summary>The peer answered one of our packets. If it was a reliable ack
+    /// we're still repeating, it landed — stop sending it.</summary>
+    private void CancelAckRetransmit(uint packetId) => _ackRetransmits.Remove(packetId);
+
+    /// <summary>Send the next copy of any unconfirmed reliable ack that is due,
+    /// and retire the ones that have run out of copies. Driven by the poll tick
+    /// alongside <c>SweepPendingAcks</c>.</summary>
+    private void SweepAckRetransmits()
+    {
+        if (_ackRetransmits.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        List<uint>? due = null;
+        foreach (var kv in _ackRetransmits)
+        {
+            if (now < kv.Value.NextTxUtc) continue;
+            (due ??= []).Add(kv.Key);
+        }
+        if (due is null) return;
+
+        foreach (var id in due)
+        {
+            if (!_ackRetransmits.TryGetValue(id, out var retx)) continue;
+            // Out of copies, or we can no longer transmit at all: give up
+            // rather than hold the frame for a radio that may never come back.
+            if (retx.Remaining <= 0 || !CanTransmit)
+            {
+                _ackRetransmits.Remove(id);
+                continue;
+            }
+
+            _ackRetransmits[id] = retx with
+            {
+                NextTxUtc = now + AckRetxInterval,
+                Remaining = retx.Remaining - 1,
+            };
+            TransmitBackground(retx.Frame);
         }
     }
 

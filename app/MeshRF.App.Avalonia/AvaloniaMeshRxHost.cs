@@ -9,6 +9,25 @@ using MeshRF.Waypoints;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
+/// A routing ack we owe the sender of a unicast that set want_ack.
+/// </summary>
+/// <param name="Header">The packet being acked; supplies the sender, the id to
+/// reference as request_id, and the hop counts the reply's hop limit derives from.</param>
+/// <param name="ChannelName">Channel the packet decoded on, so the ack goes back
+/// the same way it arrived.</param>
+/// <param name="Pkc">The packet was public-key encrypted, so the ack must be too.</param>
+/// <param name="TextMessage">The packet was a direct text message. Firmware
+/// singles these out (<c>ReliableRouter::shouldSuccessAckWithWantAck</c>) and
+/// acks them reliably, because this ack is what turns the sender's message from
+/// pending into delivered.</param>
+/// <param name="Duplicate">The packet is a retransmission of one we already
+/// acked, meaning our first ack was lost. Firmware answers these at hop limit 0:
+/// the repeat exists only to stop the immediate relayer retrying, so it must not
+/// be flooded back across the mesh.</param>
+public sealed record AckRequest(MeshHeader Header, string? ChannelName, bool Pkc,
+                                bool TextMessage, bool Duplicate);
+
+/// <summary>
 /// <see cref="IMeshRxHost"/> for the Avalonia app: decodes traffic on any
 /// configured channel (persisted via <see cref="ChannelStore"/>, same
 /// %APPDATA%/config path the WPF app uses) into per-channel message tabs,
@@ -122,11 +141,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public Action<uint, string?, TelemetryVariants>? TelemetryReplyRequested { get; set; }
 
     /// <summary>Raised for a unicast addressed to us carrying want_ack, so the
-    /// owner can transmit the routing ack (header, channel name, whether it was
-    /// PKC). Raised even when the payload could not be decrypted: the
-    /// addressing is plaintext, and failing to ack is what makes senders
-    /// retransmit and the mesh reflood.</summary>
-    public Action<MeshHeader, string?, bool>? AckRequested { get; set; }
+    /// owner (which holds the transmitter) can send the routing ack. Failing to
+    /// ack is what makes senders retransmit and the mesh reflood.
+    ///
+    /// Only raised for a frame we could decrypt. A packet we can't decode is
+    /// still known to be addressed to us — firmware answers those with a
+    /// NO_CHANNEL or PKI_UNKNOWN_PUBKEY nak — but MeshRF has no nak path yet.</summary>
+    public Action<AckRequest>? AckRequested { get; set; }
+
+    /// <summary>Raised for any ROUTING_APP reply addressed to us, carrying the
+    /// packet id it answers, before it is matched against our outgoing
+    /// messages. Lets the owner retire a reliable ack it is still retrying.</summary>
+    public Action<uint>? RoutingReplyReceived { get; set; }
 
     /// <summary>Raised for every decoded packet so the owner can serialise it
     /// into the raw JSON feed.</summary>
@@ -734,9 +760,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     /// <summary>
-    /// Our own frame heard back off the air. If another node relayed it, that
-    /// is the only delivery confirmation a channel message can ever get, so it
-    /// settles the pending broadcast as delivered.
+    /// Our own frame heard back off the air — Meshtastic's implicit ACK.
+    ///
+    /// What it proves depends on who the message was for. A broadcast is never
+    /// acknowledged by anyone, so a neighbour relaying it is the only delivery
+    /// confirmation it can ever get, and it settles as delivered. A DM has a
+    /// real recipient who will answer for it, so the relay is only the first of
+    /// two stages: the mesh carried it. It stays pending, and the recipient's
+    /// ACK is what finishes the trip.
     ///
     /// hop_limit &lt; hop_start is what distinguishes a relay from simply hearing
     /// our own transmitter (a receive-only SDR alongside a separate transmit
@@ -755,11 +786,24 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             + (relayed ? ", relayed" : string.Empty) + ")");
 
         if (!relayed) return;
-        if (!_pendingAcks.TryGetValue(header.PacketId, out var pending) || !pending.Broadcast) return;
+        if (!_pendingAcks.TryGetValue(header.PacketId, out var pending)) return;
 
-        _pendingAcks.Remove(header.PacketId);
-        SettleDelivery(pending.Message, MessageDelivery.Delivered);
-        Log($"  relayed by {NodeDisplayName(header.From)} — channel message {header.PacketId:x8} reached the mesh");
+        if (pending.Broadcast)
+        {
+            _pendingAcks.Remove(header.PacketId);
+            SettleDelivery(pending.Message, MessageDelivery.Delivered);
+            Log($"  relayed by {NodeDisplayName(header.From)} — channel message {header.PacketId:x8} reached the mesh");
+            return;
+        }
+
+        // Only ever an upgrade from Sent. Several neighbours relay the same DM,
+        // and the recipient's ACK can beat the last of them back to us — without
+        // this guard a late relay would demote a delivered message.
+        if (pending.Message.Delivery != MessageDelivery.Sent) return;
+
+        SettleDelivery(pending.Message, MessageDelivery.DeliveredToMesh);
+        Log($"  relayed by {NodeDisplayName(header.From)} — direct message {header.PacketId:x8} reached the mesh, "
+            + "waiting on the recipient");
     }
 
     /// <summary>
@@ -770,6 +814,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     private void HandleRouting(MeshHeader header, MeshDecodeResult result)
     {
         if (MyNodeNum == 0 || header.To != MyNodeNum || result.RequestId == 0) return;
+
+        // Announce it before the _pendingAcks lookup: an ack we sent reliably is
+        // not a message bubble, so it will never be in that dictionary, and its
+        // confirmation would otherwise be dropped here.
+        RoutingReplyReceived?.Invoke(result.RequestId);
+
         if (!_pendingAcks.TryGetValue(result.RequestId, out var pending)) return;
 
         // A broadcast has no recipient to answer for it; anything claiming to
@@ -801,13 +851,16 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         foreach (var id in expired)
         {
             if (!_pendingAcks.Remove(id, out var pending)) continue;
-            if (pending.Message.Delivery != MessageDelivery.Sent) continue;
+            // DeliveredToMesh counts as still waiting: the mesh carried the DM
+            // but the recipient never answered for it, and a message nobody
+            // confirmed reading is a failed delivery however far it travelled.
+            if (pending.Message.Delivery is not (MessageDelivery.Sent or MessageDelivery.DeliveredToMesh)) continue;
             SettleDelivery(pending.Message, MessageDelivery.Failed);
         }
     }
 
-    /// <summary>Apply a final delivery state to the live bubble and persist it,
-    /// so the mark survives a restart.</summary>
+    /// <summary>Apply a delivery state to the live bubble and persist it, so the
+    /// mark survives a restart.</summary>
     private void SettleDelivery(ChannelMessage message, MessageDelivery delivery)
     {
         message.Delivery = delivery;
@@ -833,11 +886,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         Log(summary);
         DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary);
 
-        // Only reached for a packet that decoded and passed dedupe, so this is
-        // exactly one ack per unique message — matching MeshRF.App.
-        if (header.WantAck)
-            AckRequested?.Invoke(header, result.ChannelName,
-                                 string.Equals(result.ChannelName, "PKC", StringComparison.Ordinal));
+        // First sight of this packet, so this is the full-strength ack. A
+        // retransmission of it lands in OnDuplicateDecoded instead and gets the
+        // cheaper 0-hop repeat.
+        if (header.WantAck) AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: false));
 
         switch (result.Port)
         {
@@ -954,6 +1006,26 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
         }
     }
+
+    /// <summary>
+    /// The sender is repeating a packet we already handled. All the business
+    /// logic already ran, but if it wanted an ack, the repeat says our ack never
+    /// got there — so ack it again. Without this a single lost ack strands the
+    /// sender: it retries three times, we drop every retry as a duplicate, and
+    /// its message settles as failed even though we read it.
+    /// </summary>
+    public void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result)
+    {
+        if (!header.WantAck) return;
+        AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: true));
+    }
+
+    private static AckRequest BuildAckRequest(MeshHeader header, MeshDecodeResult result, bool duplicate)
+        => new(header,
+               result.ChannelName,
+               string.Equals(result.ChannelName, "PKC", StringComparison.Ordinal),
+               result.Port is PortNum.TextMessage or PortNum.TextMessageCompressed,
+               duplicate);
 
     /// <summary>One-line log summary of a decoded packet, mirroring
     /// MeshRF.App's BuildDecodedPortSummary.</summary>

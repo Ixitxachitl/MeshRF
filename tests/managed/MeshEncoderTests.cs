@@ -62,6 +62,35 @@ public class MeshEncoderTests
         Assert.Equal(0x44, frame[15]); // relay_node = from low byte
     }
 
+    /// <summary>Firmware acks a direct text message reliably — the ack itself
+    /// carries want_ack so it gets retried (ReliableRouter::
+    /// shouldSuccessAckWithWantAck). Every other ack, and every repeat of one,
+    /// goes out plain. The flag has to survive onto the wire either way.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RoutingAckCarriesRequestedWantAck(bool wantAck)
+    {
+        const uint us = 0x11111111u;
+        const uint peer = 0x22222222u;
+        const uint ackId = 0x33333333u;
+        const uint dmId = 0x44444444u;
+        var channel = DefaultChannel();
+
+        var frame = MeshEncoder.EncodeRouting(channel, us, peer, ackId, dmId,
+            errorReason: 0, hopLimit: 2, wantAck: wantAck);
+
+        Assert.True(MeshHeader.TryParse(frame, out var h));
+        Assert.Equal(wantAck, h.WantAck);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.Routing, result!.Port);
+        Assert.Equal(dmId, result.RequestId);
+        Assert.Equal(0, result.RoutingError);
+        Assert.Equal(peer, result.Header.To);
+    }
+
     [Fact]
     public void EncryptedPayloadIsNotPlaintext()
     {

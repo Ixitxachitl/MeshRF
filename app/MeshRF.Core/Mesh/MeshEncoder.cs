@@ -637,15 +637,19 @@ public static class MeshEncoder
     /// <param name="requestId">The packet id being acked.</param>
     /// <param name="errorReason">0 = ACK, non-zero = NAK reason.</param>
     /// <param name="hopLimit">Hops remaining (0..7).</param>
+    /// <param name="wantAck">Ask the recipient to acknowledge the ack itself.
+    /// Firmware sets this when acking a direct text message, so the delivery
+    /// confirmation the sender's UI waits on is sent reliably rather than once.</param>
     public static byte[] EncodeRouting(ChannelConfig channel,
                                        uint from,
                                        uint to,
                                        uint packetId,
                                        uint requestId,
                                        uint errorReason = 0,
-                                       byte hopLimit = 3)
+                                       byte hopLimit = 3,
+                                       bool wantAck = false)
         => Encode(channel, from, to, packetId, PortNum.Routing,
-                  BuildRouting(errorReason), hopLimit, wantAck: false,
+                  BuildRouting(errorReason), hopLimit, wantAck: wantAck,
                   wantResponse: false, requestId: requestId);
 
     /// <summary>Encode a PKC (public-key) ROUTING_APP ack/nak for a received PKC
@@ -657,10 +661,11 @@ public static class MeshEncoder
                                           byte[] myPrivateKey,
                                           byte[] peerPublicKey,
                                           uint errorReason = 0,
-                                          byte hopLimit = 3)
+                                          byte hopLimit = 3,
+                                          bool wantAck = false)
         => EncodePkc(from, to, packetId, PortNum.Routing,
                      BuildRouting(errorReason), myPrivateKey, peerPublicKey,
-                     hopLimit, wantAck: false, wantResponse: false,
+                     hopLimit, wantAck: wantAck, wantResponse: false,
                      requestId: requestId);
 
     // Routing protobuf: oneof variant { error_reason = 3 (varint) }. The ACK

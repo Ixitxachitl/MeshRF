@@ -25,23 +25,58 @@ public static class MarkdownText
     public static readonly AttachedProperty<string?> TextProperty =
         AvaloniaProperty.RegisterAttached<TextBlock, string?>("Text", typeof(MarkdownText));
 
+    /// <summary>Short trailing mark appended after the body in its own colour —
+    /// the delivery status. It rides in these inlines rather than a TextBlock of
+    /// its own so it stays glued to the last word of a wrapped message, which is
+    /// where it sat when it was part of the text.</summary>
+    public static readonly AttachedProperty<string?> SuffixProperty =
+        AvaloniaProperty.RegisterAttached<TextBlock, string?>("Suffix", typeof(MarkdownText));
+
+    /// <summary>Colour for <see cref="SuffixProperty"/>. Null leaves the mark in
+    /// the TextBlock's own foreground.</summary>
+    public static readonly AttachedProperty<IBrush?> SuffixBrushProperty =
+        AvaloniaProperty.RegisterAttached<TextBlock, IBrush?>("SuffixBrush", typeof(MarkdownText));
+
     public static void SetText(TextBlock target, string? value) => target.SetValue(TextProperty, value);
     public static string? GetText(TextBlock target) => target.GetValue(TextProperty);
 
+    public static void SetSuffix(TextBlock target, string? value) => target.SetValue(SuffixProperty, value);
+    public static string? GetSuffix(TextBlock target) => target.GetValue(SuffixProperty);
+
+    public static void SetSuffixBrush(TextBlock target, IBrush? value) => target.SetValue(SuffixBrushProperty, value);
+    public static IBrush? GetSuffixBrush(TextBlock target) => target.GetValue(SuffixBrushProperty);
+
     static MarkdownText()
     {
-        TextProperty.Changed.AddClassHandler<TextBlock>((tb, e) =>
-            Render(tb, e.NewValue as string));
+        // All three rebuild the same inline collection, so any of them changing
+        // re-renders from the current value of the other two. The suffix arrives
+        // after the body on a recycled row, and its colour after that.
+        TextProperty.Changed.AddClassHandler<TextBlock>((tb, _) => Render(tb));
+        SuffixProperty.Changed.AddClassHandler<TextBlock>((tb, _) => Render(tb));
+        SuffixBrushProperty.Changed.AddClassHandler<TextBlock>((tb, _) => Render(tb));
     }
 
-    private static void Render(TextBlock target, string? text)
+    private static void Render(TextBlock target)
     {
+        var text = GetText(target);
+        var suffix = GetSuffix(target);
+
         target.Inlines?.Clear();
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text) && string.IsNullOrEmpty(suffix)) return;
 
         target.Inlines ??= new InlineCollection();
-        foreach (var inline in Parse(text))
-            target.Inlines.Add(inline);
+        if (!string.IsNullOrEmpty(text))
+            foreach (var inline in Parse(text))
+                target.Inlines.Add(inline);
+
+        if (string.IsNullOrEmpty(suffix)) return;
+
+        // Leading spaces are part of the run so the gap can't be trimmed away
+        // or land on a line of its own when the body wraps tightly.
+        var run = new Run($"  {suffix}");
+        if (GetSuffixBrush(target) is { } brush)
+            run.Foreground = brush;
+        target.Inlines.Add(run);
     }
 
     // Walk the text and emit Runs, toggling bold/italic on the emphasis markers.

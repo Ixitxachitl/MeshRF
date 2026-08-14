@@ -227,6 +227,7 @@ public sealed class MeshRxRouter : IDisposable
         if (!isNew)
         {
             _host.HandleDuplicateForRelay(frame, header, result, snrDb);
+            _host.OnDuplicateDecoded(header, result);
             _host.MarkNodeDirty(header.From);
             _host.Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
             return;

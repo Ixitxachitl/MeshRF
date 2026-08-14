@@ -167,7 +167,9 @@
                                      reach the Grid, so it carries the menu itself —
                                      this is the part of the row people actually
                                      right-click. -->
-                                <SelectableTextBlock local:MarkdownText.Text="{Binding TextWithStatus}"
+                                <SelectableTextBlock local:MarkdownText.Text="{Binding Text}"
+                                                     local:MarkdownText.Suffix="{Binding DeliveryGlyph}"
+                                                     local:MarkdownText.SuffixBrush="{Binding Delivery, Converter={StaticResource DeliveryMarkForeground}}"
                                                      FontSize="12" TextWrapping="Wrap"
                                                      ContextMenu="{DynamicResource MessageContextMenu}" />
                                 <ItemsControl ItemsSource="{Binding Reactions}" Margin="0,3,0,0"

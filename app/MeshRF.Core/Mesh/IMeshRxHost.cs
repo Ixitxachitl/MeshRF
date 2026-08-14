@@ -57,4 +57,16 @@ public interface IMeshRxHost
     /// </summary>
     void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
                           long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway);
+
+    /// <summary>
+    /// A frame decoded successfully but is a dedup hit — the sender is
+    /// retransmitting something we already handled. Business logic must not run
+    /// twice, but a want_ack packet still has to be re-acked: the retransmission
+    /// is itself the evidence that our first ack never arrived. Firmware does
+    /// this in <c>NextHopRouter::shouldFilterReceived</c>.
+    ///
+    /// Defaulted to a no-op so hosts that predate the ack path (the frozen WPF
+    /// MainViewModel) keep compiling unchanged.
+    /// </summary>
+    void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result) { }
 }

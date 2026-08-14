@@ -522,6 +522,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
         _rxHost.TelemetryReplyRequested += HandleTelemetryReplyRequest;
         _rxHost.AckRequested += SendAck;
+        _rxHost.RoutingReplyReceived += CancelAckRetransmit;
         _rxHost.DecodedPacketForFeed += AppendDecodedPacketJson;
         _rxHost.SelectedTabProvider = () => SelectedTab;
         // Relaying is opt-in via the Routing checkbox; the scheduler is only
@@ -700,8 +701,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // it needs no TX-capable device at all.
         TickMapReport();
         // Also ahead of the running check: a message sent just before RX was
-        // stopped still deserves to stop saying nothing and settle as failed.
+        // stopped still deserves to stop saying nothing and settle as failed,
+        // and an ack we still owe a peer is dropped rather than left queued.
         _rxHost.SweepPendingAcks();
+        SweepAckRetransmits();
 
         if (_core is null) return;
 

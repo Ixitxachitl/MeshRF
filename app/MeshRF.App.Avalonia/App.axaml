@@ -9,6 +9,8 @@
         <local:RadioDeviceKindLabelConverter x:Key="DeviceKindLabel" />
         <!-- Red text for ignored nodes in the node list. -->
         <local:IgnoredNodeForegroundConverter x:Key="IgnoredForeground" />
+        <!-- Grey/green/red for the delivery mark on an outgoing message. -->
+        <local:DeliveryMarkForegroundConverter x:Key="DeliveryMarkForeground" />
         <!-- Mirrors MeshRF.App's Themes/Dark.xaml palette, so the two apps
              read as the same product. Light theme isn't ported yet. -->
         <SolidColorBrush x:Key="BrushAppBackground"      Color="#FF1E1E1E" />
