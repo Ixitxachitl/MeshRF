@@ -16,11 +16,11 @@
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Ixitxachitl/MeshRF</RepositoryUrl>
 
-    <VersionPrefix>2.0.1</VersionPrefix>
+    <VersionPrefix>2.0.2</VersionPrefix>
     <!-- AssemblyVersion is kept at major.minor.0.0 for binding stability;
          FileVersion and InformationalVersion carry the full build identity. -->
-    <AssemblyVersion>2.0.1.0</AssemblyVersion>
-    <FileVersion>2.0.1.0</FileVersion>
+    <AssemblyVersion>2.0.2.0</AssemblyVersion>
+    <FileVersion>2.0.2.0</FileVersion>
   </PropertyGroup>
 
   <!-- Append the short git commit hash to the informational version so the

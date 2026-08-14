@@ -234,7 +234,7 @@
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="RowBackground" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BrushPanelBorder}" />
             <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BrushPanelBorder}" />
@@ -242,13 +242,13 @@
         <Style Selector="DataGridRow">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="Height" Value="20" />
         </Style>
         <Style Selector="DataGridCell">
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="Padding" Value="6,0,0,0" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -264,13 +264,13 @@
              Padding then supplies the single left inset. Measured: x=12 before,
              x=6 (the cell padding) after. -->
         <Style Selector="DataGridCell TextBlock">
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0" />
         </Style>
         <Style Selector="DataGridColumnHeader">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Padding" Value="4,1,0,1" />
             <Setter Property="MinHeight" Value="0" />
@@ -314,7 +314,7 @@
             <Setter Property="Data" Value="M 0,0 L 8,0 L 4,5 Z" />
         </Style>
         <Style Selector="DataGridColumnHeader TextBlock">
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
         </Style>
     </Application.Styles>
 

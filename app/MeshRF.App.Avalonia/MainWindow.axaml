@@ -157,9 +157,9 @@
                                     <MenuItem Header="Copy message" Click="OnCopyMessage" />
                                 </ContextMenu>
                             </Grid.Resources>
-                            <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" FontSize="11"
+                            <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" FontSize="12"
                                        Foreground="{DynamicResource BrushSubtle}" />
-                            <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}" FontSize="11"
+                            <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}" FontSize="12"
                                        ToolTip.Tip="{Binding FromId}" />
                             <StackPanel Grid.Column="2" Margin="0,0,0,2">
                                 <!-- SelectableTextBlock handles its own pointer input
@@ -168,7 +168,7 @@
                                      this is the part of the row people actually
                                      right-click. -->
                                 <SelectableTextBlock local:MarkdownText.Text="{Binding TextWithStatus}"
-                                                     FontSize="11" TextWrapping="Wrap"
+                                                     FontSize="12" TextWrapping="Wrap"
                                                      ContextMenu="{DynamicResource MessageContextMenu}" />
                                 <ItemsControl ItemsSource="{Binding Reactions}" Margin="0,3,0,0"
                                               IsVisible="{Binding HasReactions}">
@@ -185,14 +185,14 @@
                                                  message, which the reaction itself doesn't
                                                  reference. -->
                                             <Button Classes="reactionChip" Margin="0,0,4,0" Padding="6,1"
-                                                    CornerRadius="8" FontSize="11"
+                                                    CornerRadius="8" FontSize="12"
                                                     Background="{DynamicResource BrushPanelBackground}"
                                                     BorderBrush="{DynamicResource BrushPanelBorder}"
                                                     BorderThickness="1"
                                                     Click="OnReactionChipTapped"
                                                     Tag="{Binding $parent[ListBoxItem].DataContext}"
                                                     ToolTip.Tip="{Binding Reactors}">
-                                                <TextBlock Text="{Binding Display}" FontSize="11" />
+                                                <TextBlock Text="{Binding Display}" FontSize="12" />
                                             </Button>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
@@ -694,10 +694,23 @@
                         <DataGrid.Columns>
                             <!-- Indicator columns, mirroring MeshRF.App's. That app
                                  uses Segoe MDL2 glyphs, which are Windows-only, so
-                                 these use plain Unicode symbols instead. -->
-                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                                 these use plain Unicode symbols instead.
+
+                                 Each sorts on the same bool its cell shows, spelled
+                                 out for the same reason as the text columns below:
+                                 compiled bindings leave SortMemberPath empty. Since
+                                 these are bools, the first header click (ascending)
+                                 puts the unflagged nodes first and the second click
+                                 brings the flagged ones to the top. -->
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="Favorite">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="★" ToolTip.Tip="Favorite" />
+                                    <!-- Foreground is set here as well as on the cell:
+                                         the header inherits BrushAppForeground from the
+                                         DataGridColumnHeader style, so an untinted ★
+                                         title came out plain grey while the cells were
+                                         gold. (Only works because ★ is a plain text
+                                         glyph — see the color-emoji note below.) -->
+                                    <TextBlock Text="★" Foreground="#FFD479" ToolTip.Tip="Favorite" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
@@ -706,7 +719,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="HasPublicKey">
                                 <DataGridTemplateColumn.Header>
                                     <TextBlock Text="🔑" ToolTip.Tip="Public key on file (green dot = node ID derived from key, red dot = key mismatch)" />
                                 </DataGridTemplateColumn.Header>
@@ -734,7 +747,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="IsXeddsaVerified">
                                 <DataGridTemplateColumn.Header>
                                     <TextBlock Text="🛡" ToolTip.Tip="Verified: a valid XEdDSA signature was confirmed from this node" />
                                 </DataGridTemplateColumn.Header>
@@ -746,7 +759,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="IsUnmessagableTrue">
                                 <DataGridTemplateColumn.Header>
                                     <TextBlock Text="🚫" ToolTip.Tip="Node is marked unmessagable" />
                                 </DataGridTemplateColumn.Header>
@@ -757,7 +770,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="HasLocation">
                                 <DataGridTemplateColumn.Header>
                                     <TextBlock Text="📍" ToolTip.Tip="Position known (red dot = reported position is invalid)" />
                                 </DataGridTemplateColumn.Header>
@@ -776,7 +789,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Width="Auto" CanUserSort="False">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="IsSeenViaMqtt">
                                 <DataGridTemplateColumn.Header>
                                     <TextBlock Text="🌉" ToolTip.Tip="Last heard via MQTT rather than over the air" />
                                 </DataGridTemplateColumn.Header>
