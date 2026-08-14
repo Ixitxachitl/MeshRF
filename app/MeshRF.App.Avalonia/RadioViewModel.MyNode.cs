@@ -165,7 +165,8 @@ public partial class RadioViewModel
                         MyLongName, MyShortName,
                         hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
                         publicKey: TryParseKeyBase64(MyPublicKey),
-                        to: to, hopLimit: (byte)HopLimit, wantResponse: false, okToMqtt: OkToMqtt);
+                        to: to, hopLimit: (byte)HopLimit, wantResponse: false, okToMqtt: OkToMqtt,
+                        isLicensed: MyIsLicensed, isUnmessagable: MyIsUnmessagable);
                     TransmitBackground(nodeInfo);
                     break;
 

@@ -101,8 +101,16 @@ public sealed class AppSettings
     public string UserShortName { get; set; } = string.Empty;
     public string UserNodeStatus { get; set; } = string.Empty;
 
-    /// <summary>Device role string (Client, Router, etc.) — display only.</summary>
+    /// <summary>Device role string (Client, Router, etc.). Drives the relay
+    /// policy and the broadcast schedules firmware's role defaults dictate.</summary>
     public string UserRole { get; set; } = "Client";
+
+    /// <summary>Firmware <c>User.is_licensed</c>: operate under amateur-radio
+    /// rules — plaintext only, no PKC, and no relaying for unlicensed nodes.</summary>
+    public bool UserIsLicensed { get; set; }
+
+    /// <summary>Firmware <c>User.is_unmessagable</c>. Advertised to peers only.</summary>
+    public bool UserIsUnmessagable { get; set; }
 
     /// <summary>Hardware model name (e.g. "HELTEC_V3"). Display / future TX use.</summary>
     public string UserHwModel { get; set; } = "UNSET";
@@ -287,6 +295,7 @@ public sealed class AppSettings
     public string NodeFilterLocation { get; set; } = "Any";
     public bool NodeFilterHideInvalidLocations { get; set; } = false;
     public string NodeFilterIgnored { get; set; } = "Show all";
+    public string NodeFilterFavorite { get; set; } = "Show all";
     public string NodeFilterMqtt { get; set; } = "Any";
     public string NodeFilterTemperature { get; set; } = "Any";
     public string NodeFilterHumidity { get; set; } = "Any";

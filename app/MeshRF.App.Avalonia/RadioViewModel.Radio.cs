@@ -123,7 +123,8 @@ public partial class RadioViewModel
             _rxHost.MyNodeNum,
             SelectedPreset,
             _nodeStore.Get,
-            _nodeStore.All);
+            _nodeStore.All,
+            MyIsLicensed);
     }
 
     // -- Acknowledgements ---------------------------------------------------

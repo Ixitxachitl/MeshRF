@@ -132,6 +132,7 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("key_mismatch", "INTEGER");
         AddColumnIfMissing("has_xeddsa_signed", "INTEGER");
         AddColumnIfMissing("is_unmessagable", "INTEGER");
+        AddColumnIfMissing("is_licensed", "INTEGER");
         AddColumnIfMissing("mute_rtttl", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("ignored", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
@@ -236,7 +237,7 @@ public sealed class NodeStore : IDisposable
                                    uptime_seconds, temperature_c,
                                        relative_humidity_pct, barometric_pressure_hpa,
                                        gas_resistance_mohm, iaq, public_key, key_mismatch,
-                                       is_unmessagable, has_xeddsa_signed,
+                                       is_unmessagable, is_licensed, has_xeddsa_signed,
                                        mute_rtttl, ignored, node_status,
                                        pm10_std, pm25_std, pm100_std,
                                        pm10_env, pm25_env, pm100_env,
@@ -252,7 +253,7 @@ public sealed class NodeStore : IDisposable
                         $uptime, $temp,
                         $hum, $pres,
                                     $gas, $iaq, $pubkey, $mismatch,
-                                    $isunmessagable, $xeddsasigned,
+                                    $isunmessagable, $islicensed, $xeddsasigned,
                                     $mute_rtttl, $ignored, $node_status,
                                     $pm10std, $pm25std, $pm100std,
                                     $pm10env, $pm25env, $pm100env,
@@ -284,6 +285,7 @@ public sealed class NodeStore : IDisposable
                     public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key),
                     key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch),
                     is_unmessagable  = COALESCE(excluded.is_unmessagable, is_unmessagable),
+                    is_licensed      = COALESCE(excluded.is_licensed, is_licensed),
                     has_xeddsa_signed = COALESCE(excluded.has_xeddsa_signed, has_xeddsa_signed),
                     node_status      = COALESCE(NULLIF(excluded.node_status, ''), node_status),
                     pm10_std         = COALESCE(excluded.pm10_std,  pm10_std),
@@ -333,6 +335,8 @@ public sealed class NodeStore : IDisposable
                 rec.KeyMismatch is bool km ? (km ? 1 : 0) : (object)DBNull.Value);
             cmd.Parameters.AddWithValue("$isunmessagable",
                 rec.IsUnmessagable is bool iu ? (iu ? 1 : 0) : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$islicensed",
+                rec.IsLicensed is bool il ? (il ? 1 : 0) : (object)DBNull.Value);
             cmd.Parameters.AddWithValue("$xeddsasigned",
                 rec.HasXeddsaSigned is bool xs ? (xs ? 1 : 0) : (object)DBNull.Value);
             cmd.Parameters.AddWithValue("$mute_rtttl", rec.MuteRtttl ? 1 : 0);
@@ -901,6 +905,7 @@ public sealed class NodeStore : IDisposable
             PublicKey             = ReadStringOrEmpty(r, "public_key"),
             KeyMismatch           = Nullable<bool>("key_mismatch"),
             IsUnmessagable        = Nullable<bool>("is_unmessagable"),
+            IsLicensed            = Nullable<bool>("is_licensed"),
             HasXeddsaSigned       = Nullable<bool>("has_xeddsa_signed"),
             MuteRtttl             = Nullable<bool>("mute_rtttl") == true,
             Ignored               = Nullable<bool>("ignored") == true,

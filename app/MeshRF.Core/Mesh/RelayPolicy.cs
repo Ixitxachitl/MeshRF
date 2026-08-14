@@ -13,7 +13,8 @@ public sealed record RelayContext(
     uint MyNodeNum,
     LoraPreset Preset,
     Func<uint, NodeRecord?> LookupNode,
-    Func<IEnumerable<NodeRecord>> AllNodes);
+    Func<IEnumerable<NodeRecord>> AllNodes,
+    bool IsLicensed = false);
 
 /// <summary>
 /// Whether and when to rebroadcast an overheard packet, mirroring Meshtastic
@@ -46,22 +47,43 @@ public static class RelayPolicy
         _ => false,
     };
 
-    /// <summary>Firmware's admin module coerces some role/mode combinations, so
-    /// the configured mode isn't always the one that applies.</summary>
-    public static string EffectiveRebroadcastMode(string? role, string? mode)
+    /// <summary>
+    /// Firmware's admin module coerces some role/mode combinations, so the
+    /// configured mode isn't always the one that applies. Licensed operation
+    /// coerces hardest of all.
+    /// </summary>
+    /// <param name="isLicensed">Amateur-radio operation. Firmware forces
+    /// LOCAL_ONLY here (NodeDB.cpp) so a licensed station never rebroadcasts
+    /// traffic it could not decrypt, which would be relaying encryption.</param>
+    public static string EffectiveRebroadcastMode(string? role, string? mode, bool isLicensed = false)
     {
-        string r = (role ?? string.Empty).Trim().ToUpperInvariant();
-        string m = (mode ?? "ALL").Trim().ToUpperInvariant();
+        string r = Canonical(role);
+        string m = Canonical(string.IsNullOrWhiteSpace(mode) ? "ALL" : mode);
 
+        if (isLicensed) return "LOCAL_ONLY";
         // NONE is not honoured for routers: they exist to relay.
         if (m == "NONE" && (r == "ROUTER" || r == "ROUTERLATE")) return "ALL";
         // ALL_SKIP_DECODING is repeater-only; other roles behave as ALL.
-        if (m == "ALL_SKIP_DECODING" && r != "REPEATER") return "ALL";
-        return m;
+        if (m == "ALLSKIPDECODING" && r != "REPEATER") return "ALL";
+
+        return m switch
+        {
+            "ALLSKIPDECODING" => "ALL_SKIP_DECODING",
+            "LOCALONLY" => "LOCAL_ONLY",
+            "KNOWNONLY" => "KNOWN_ONLY",
+            "COREPORTNUMSONLY" => "CORE_PORTNUMS_ONLY",
+            _ => m,
+        };
     }
 
+    /// <summary>Upper-cased with separators stripped, so the UI's "LocalOnly"
+    /// and firmware's "LOCAL_ONLY" compare equal. Without this every multi-word
+    /// mode silently fell through to the permissive default.</summary>
+    private static string Canonical(string? s) =>
+        (s ?? string.Empty).Trim().Replace("_", string.Empty).ToUpperInvariant();
+
     public static bool PassesRebroadcastPolicy(RelayContext ctx, MeshHeader header, MeshDecodeResult? result) =>
-        EffectiveRebroadcastMode(ctx.Role, ctx.RebroadcastMode) switch
+        EffectiveRebroadcastMode(ctx.Role, ctx.RebroadcastMode, ctx.IsLicensed) switch
         {
             "NONE" => false,
             "ALL" or "ALL_SKIP_DECODING" => true,
@@ -141,7 +163,23 @@ public static class RelayPolicy
         byte myRelayByte = (byte)(ctx.MyNodeNum & 0xFF);
         if (header.NextHop != 0 && header.NextHop != myRelayByte) return false;
 
+        if (ctx.IsLicensed && InvolvesKnownUnlicensedNode(ctx, header)) return false;
+
         return PassesRebroadcastPolicy(ctx, header, result);
+    }
+
+    /// <summary>
+    /// Firmware RoutingModule: a licensed station won't carry traffic for a node
+    /// it knows to be unlicensed, because relaying it would put that station's
+    /// call sign behind someone else's unlicensed transmission. A node that has
+    /// never advertised either way is not assumed unlicensed — firmware's
+    /// NotKnown passes the same test.
+    /// </summary>
+    public static bool InvolvesKnownUnlicensedNode(RelayContext ctx, MeshHeader header)
+    {
+        if (ctx.LookupNode(header.From)?.IsLicensed == false) return true;
+        if (!header.IsBroadcast && ctx.LookupNode(header.To)?.IsLicensed == false) return true;
+        return false;
     }
 
     /// <summary>Rewrites the frame for rebroadcast: new hop limit, next_hop
@@ -192,6 +230,32 @@ public static class RelayPolicy
             ? Random.Shared.Next(0, Math.Max(1, 2 * cwSize)) * slotMs
             : (2 * CwMax * slotMs) + Random.Shared.Next(0, 1 << cwSize) * slotMs;
         return (int)Math.Round(delayMs);
+    }
+
+    /// <summary>
+    /// Firmware getTxDelayMsecWeightedWorst(): the far end of the contention
+    /// window. Used to push a scheduled relay into the late window rather than
+    /// cancel it — see <see cref="ShouldClampToLateWindow"/>.
+    /// </summary>
+    public static int GetTxDelayMsecWeightedWorst(LoraPreset preset, float snrDb)
+    {
+        int cwSize = GetCwSize(snrDb);
+        double slotMs = ComputeSlotTimeMsec(preset);
+        return (int)Math.Round((2 * CwMax * slotMs) + (1 << cwSize) * slotMs);
+    }
+
+    /// <summary>
+    /// Firmware FloodingRouter::perhapsCancelDupe. A role that must not cancel
+    /// its rebroadcast still shouldn't transmit on top of the station we just
+    /// heard, so the pending relay slides to the end of the window instead:
+    /// ROUTER_LATE always, CLIENT_BASE for favourited traffic. ROUTER is absent
+    /// on purpose — it is the backbone and relays early by design.
+    /// </summary>
+    public static bool ShouldClampToLateWindow(RelayContext ctx, MeshHeader header)
+    {
+        string role = ctx.Role.Trim().ToUpperInvariant();
+        if (role == "ROUTERLATE") return true;
+        return role == "CLIENTBASE" && IsFromOrToFavoritedNode(ctx, header);
     }
 
     public static bool IsRouterRole(string? role) =>

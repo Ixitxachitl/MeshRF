@@ -16,6 +16,10 @@ public sealed class RelayScheduler : IDisposable
     {
         public required CancellationTokenSource Cts { get; init; }
 
+        /// <summary>The frame as it will go out, kept so a clamp can re-arm the
+        /// same rebroadcast at a later time.</summary>
+        public required byte[] RelayFrame { get; init; }
+
         /// <summary>hop_limit we will send at, i.e. already decremented.</summary>
         public required byte NextHopLimit { get; init; }
 
@@ -49,16 +53,48 @@ public sealed class RelayScheduler : IDisposable
     public void Schedule(MeshHeader header, byte[] relayFrame, byte nextHopLimit, int delayMs)
     {
         var key = Key(header.From, header.PacketId);
-        Pending entry;
-
         lock (_lock)
         {
             if (_disposed || _pending.ContainsKey(key)) return;
+        }
+        Arm(key, header, relayFrame, nextHopLimit, header.HopLimit, delayMs);
+    }
+
+    /// <summary>
+    /// Slides an already-scheduled rebroadcast to the end of the contention
+    /// window, mirroring firmware's clampToLateRebroadcastWindow. Used by roles
+    /// that must relay but shouldn't transmit over the station we just heard.
+    /// No-ops once the send is committed, or if there is nothing pending.
+    /// </summary>
+    public void ClampToLateWindow(MeshHeader header, int delayMs)
+    {
+        var key = Key(header.From, header.PacketId);
+        Pending? pending;
+        lock (_lock)
+        {
+            if (_disposed) return;
+            if (!_pending.TryGetValue(key, out pending) || pending.Transmitting) return;
+            _pending.Remove(key);
+        }
+
+        try { pending.Cts.Cancel(); } catch { /* already completed */ }
+        Arm(key, header, pending.RelayFrame, pending.NextHopLimit, pending.ReceivedHopLimit, delayMs);
+        Log?.Invoke($"  relay for packet {header.PacketId:x8} clamped to late window ({delayMs} ms)");
+    }
+
+    private void Arm(ulong key, MeshHeader header, byte[] relayFrame, byte nextHopLimit,
+                     byte receivedHopLimit, int delayMs)
+    {
+        Pending entry;
+        lock (_lock)
+        {
+            if (_disposed) return;
             entry = new Pending
             {
                 Cts = new CancellationTokenSource(),
+                RelayFrame = relayFrame,
                 NextHopLimit = nextHopLimit,
-                ReceivedHopLimit = header.HopLimit,
+                ReceivedHopLimit = receivedHopLimit,
             };
             _pending[key] = entry;
         }
@@ -110,7 +146,7 @@ public sealed class RelayScheduler : IDisposable
     /// </summary>
     /// <returns>True when the caller should re-run its relay decision with this
     /// copy (the upgrade case).</returns>
-    public bool HandleDuplicate(RelayContext ctx, MeshHeader header)
+    public bool HandleDuplicate(RelayContext ctx, MeshHeader header, float snrDb)
     {
         if (header.PacketId == 0) return false;
 
@@ -138,7 +174,15 @@ public sealed class RelayScheduler : IDisposable
             return true;
         }
 
-        if (!RelayPolicy.RoleAllowsCancelingScheduledRelay(ctx, header)) return false;
+        if (!RelayPolicy.RoleAllowsCancelingScheduledRelay(ctx, header))
+        {
+            // We still have to relay, but not on top of whoever just did: slide
+            // our copy to the back of the window instead of firing on schedule.
+            if (RelayPolicy.ShouldClampToLateWindow(ctx, header))
+                ClampToLateWindow(header, RelayPolicy.GetTxDelayMsecWeightedWorst(ctx.Preset, snrDb));
+            return false;
+        }
+
         if (hasPending) Cancel(key, pending!, log: true);
         return false;
     }

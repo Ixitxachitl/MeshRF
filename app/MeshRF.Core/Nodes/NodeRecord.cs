@@ -70,6 +70,7 @@ public sealed class NodeRecord : INotifyPropertyChanged
         PublicKey       = source.PublicKey;
         KeyMismatch     = source.KeyMismatch;
         IsUnmessagable  = source.IsUnmessagable;
+        IsLicensed      = source.IsLicensed;
         HasXeddsaSigned = source.HasXeddsaSigned;
         MuteRtttl       = source.MuteRtttl;
         Ignored         = source.Ignored;
@@ -163,6 +164,11 @@ public sealed class NodeRecord : INotifyPropertyChanged
     /// <summary>When true, the peer advertises that it should not be messaged.
     /// Null when unknown / not advertised.</summary>
     public bool? IsUnmessagable { get; set; }
+
+    /// <summary>The peer advertises amateur-radio operation (User.is_licensed).
+    /// Null when it has never said either way, which the licensed relay rules
+    /// treat differently from an explicit false.</summary>
+    public bool? IsLicensed { get; set; }
 
     /// <summary>Set once we've verified a valid XEdDSA signature on a
     /// broadcast from this node (mirrors firmware's per-node

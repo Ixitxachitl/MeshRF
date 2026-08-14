@@ -101,6 +101,11 @@ public sealed class MeshUser
     /// <summary>32-byte X25519 public key (field 8), empty if not advertised.</summary>
     public byte[] PublicKey { get; init; } = Array.Empty<byte>();
 
+    /// <summary>User.is_licensed (field 6), null if absent. Null is not "not
+    /// licensed" — firmware distinguishes NotKnown from NotLicensed, and the
+    /// licensed relay rules only act on a peer that said so either way.</summary>
+    public bool? IsLicensed { get; init; }
+
     /// <summary>User.is_unmessagable (field 9), null if absent.</summary>
     public bool? IsUnmessagable { get; init; }
 }
@@ -718,13 +723,15 @@ public static class MeshDecoder
     }
 
     // User: 1=id(string) 2=long_name(string) 3=short_name(string) 5=hw_model(varint)
-    //       7=role(varint) 8=public_key(bytes) 9=is_unmessagable(varint)
+    //       6=is_licensed(varint) 7=role(varint) 8=public_key(bytes)
+    //       9=is_unmessagable(varint)
     private static MeshUser ParseUser(byte[] data)
     {
         string id = "", ln = "", sn = "";
         int hw = 0;
         int role = -1;
         byte[] pub = Array.Empty<byte>();
+        bool? isLicensed = null;
         bool? isUnmessagable = null;
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
@@ -735,6 +742,7 @@ public static class MeshDecoder
                 case 2 when wt == ProtoReader.WireType.Len: ln = rdr.ReadString(); break;
                 case 3 when wt == ProtoReader.WireType.Len: sn = rdr.ReadString(); break;
                 case 5 when wt == ProtoReader.WireType.Varint: hw = (int)rdr.ReadVarint(); break;
+                case 6 when wt == ProtoReader.WireType.Varint: isLicensed = rdr.ReadVarint() != 0; break;
                 case 7 when wt == ProtoReader.WireType.Varint: role = (int)rdr.ReadVarint(); break;
                 case 8 when wt == ProtoReader.WireType.Len: pub = rdr.ReadLengthDelimited().ToArray(); break;
                 case 9 when wt == ProtoReader.WireType.Varint: isUnmessagable = rdr.ReadVarint() != 0; break;
@@ -749,6 +757,7 @@ public static class MeshDecoder
             HwModel = hw,
             Role = RoleName(role),
             PublicKey = pub,
+            IsLicensed = isLicensed,
             IsUnmessagable = isUnmessagable,
         };
     }

@@ -305,6 +305,16 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _myRole = "Client";
 
+    /// <summary>Firmware <c>User.is_licensed</c>: amateur-radio operation. The
+    /// long name doubles as the call sign, exactly as firmware stores it.</summary>
+    [ObservableProperty]
+    private bool _myIsLicensed;
+
+    /// <summary>Firmware <c>User.is_unmessagable</c>. Advertised only — it asks
+    /// peers not to open a conversation, and nothing here enforces it.</summary>
+    [ObservableProperty]
+    private bool _myIsUnmessagable;
+
     [ObservableProperty]
     private string _myHwModel = "UNSET";
 
@@ -443,6 +453,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedUserLongName = _settings.UserLongName;
         var savedUserShortName = _settings.UserShortName;
         var savedUserRole = _settings.UserRole;
+        var savedUserIsLicensed = _settings.UserIsLicensed;
+        var savedUserIsUnmessagable = _settings.UserIsUnmessagable;
         var savedUserHwModel = _settings.UserHwModel;
         var savedUserPublicKey = _settings.UserPublicKey;
         var savedUserPrivateKey = _settings.UserPrivateKey;
@@ -589,6 +601,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         MyLongName = string.IsNullOrEmpty(savedUserLongName) ? MyLongName : savedUserLongName;
         MyShortName = string.IsNullOrEmpty(savedUserShortName) ? MyShortName : savedUserShortName;
         MyRole = string.IsNullOrEmpty(savedUserRole) ? MyRole : savedUserRole;
+        MyIsLicensed = savedUserIsLicensed;
+        MyIsUnmessagable = savedUserIsUnmessagable;
         MyHwModel = string.IsNullOrEmpty(savedUserHwModel) ? MyHwModel : savedUserHwModel;
         MyPublicKey = savedUserPublicKey;
         MyPrivateKey = savedUserPrivateKey;
@@ -1024,8 +1038,49 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     // Identity edits have to reach the node store too, not just settings.json.
     partial void OnMyLongNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyShortNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
-    partial void OnMyRoleChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyRoleChanged(string value)
+    {
+        ApplyRoleDefaults(value);
+        SaveSettings();
+        RefreshSelfNode();
+    }
+
+    /// <summary>
+    /// Coerce the schedules and rebroadcast mode the way firmware's
+    /// <c>installRoleDefaults</c> does, so a role means the same thing on air
+    /// here as it does on a real node.
+    ///
+    /// Skipped while settings are still loading: the constructor assigns the
+    /// saved role, and applying defaults there would overwrite the intervals
+    /// the user tuned with the role's canned ones on every launch.
+    /// </summary>
+    private void ApplyRoleDefaults(string? role)
+    {
+        if (!_settingsLoaded) return;
+
+        var d = RoleDefaults.For(role);
+        if (d.NodeInfoEnabled is bool ni) AutoReportNodeInfoEnabled = ni;
+        if (d.NodeInfoSeconds is int nis) AutoReportNodeInfoSeconds = nis;
+        if (d.PositionEnabled is bool p) AutoReportPositionEnabled = p;
+        if (d.PositionSeconds is int ps) AutoReportPositionSeconds = ps;
+        if (d.DeviceMetricsEnabled is bool dm) AutoReportDeviceMetricsEnabled = dm;
+        if (d.DeviceMetricsSeconds is int dms) AutoReportDeviceMetricsSeconds = dms;
+        if (d.EnvironmentMetricsEnabled is bool em) AutoReportEnvironmentMetricsEnabled = em;
+        if (d.EnvironmentMetricsSeconds is int ems) AutoReportEnvironmentMetricsSeconds = ems;
+        if (d.AirQualityMetricsEnabled is bool aq) AutoReportAirQualityMetricsEnabled = aq;
+        if (d.NodeStatusEnabled is bool st) AutoReportNodeStatusEnabled = st;
+        if (d.IsUnmessagable is bool um) MyIsUnmessagable = um;
+        if (d.RebroadcastMode is string rb && RebroadcastModeOptions.Contains(rb)) RebroadcastMode = rb;
+    }
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyIsLicensedChanged(bool value)
+    {
+        SaveSettings();
+        RefreshSelfNode();
+        OnPropertyChanged(nameof(LicensedEncryptedChannelWarning));
+        OnPropertyChanged(nameof(HasLicensedEncryptedChannelWarning));
+    }
+    partial void OnMyIsUnmessagableChanged(bool value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyPublicKeyChanged(string value) => SaveSettings();
     partial void OnMyPrivateKeyChanged(string value) => SaveSettings();
     partial void OnMyNodeStatusChanged(string value) { SaveSettings(); RefreshSelfNode(); }
@@ -1209,6 +1264,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.UserLongName = MyLongName;
         _settings.UserShortName = MyShortName;
         _settings.UserRole = MyRole;
+        _settings.UserIsLicensed = MyIsLicensed;
+        _settings.UserIsUnmessagable = MyIsUnmessagable;
         _settings.UserHwModel = MyHwModel;
         _settings.UserPublicKey = MyPublicKey;
         _settings.UserPrivateKey = MyPrivateKey;
@@ -1256,6 +1313,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task<bool> TransmitFrameAsync(byte[] frame)
     {
         if (_core is null) return false;
+        if (LicensedChannelBlocking(frame) is { } blockedChannel)
+        {
+            StatusText = $"Licensed mode: \"{blockedChannel}\" still has a PSK — encryption isn't permitted on amateur bands. Clear its key to transmit.";
+            return false;
+        }
         var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
         var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
 
@@ -1310,7 +1372,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 to = convoTab.NodeNum;
                 myPriv = TryParseKeyBase64(MyPrivateKey);
                 peerPub = TryParseHex(_rxHost.PublicKeyHexFor(convoTab.NodeNum));
-                usePkc = myPriv.Length == 32 && peerPub.Length == 32;
+                // Licensed operation rules PKC out entirely (firmware
+                // wouldEncryptWithPKC), so a DM falls back to the plaintext
+                // legacy form — which is the only lawful one on ham bands.
+                usePkc = !MyIsLicensed && myPriv.Length == 32 && peerPub.Length == 32;
                 // The channel is only needed for the legacy fallback.
                 channel = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault()?.Config;
                 if (!usePkc && channel is null) return;
@@ -1502,6 +1567,37 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         (Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
          ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault())?.Config;
 
+    private IEnumerable<ChannelConfig> AllChannelConfigs() =>
+        Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config);
+
+    /// <summary>Channels that would still transmit ciphertext under ham rules.
+    /// Ham mode deliberately doesn't clear anyone's keys, so this is how the
+    /// conflict surfaces instead.</summary>
+    private IEnumerable<ChannelConfig> EncryptedChannels() =>
+        AllChannelConfigs().Where(c => c.EffectiveKey.Length > 0);
+
+    public bool HasLicensedEncryptedChannelWarning => MyIsLicensed && EncryptedChannels().Any();
+
+    public string LicensedEncryptedChannelWarning =>
+        HasLicensedEncryptedChannelWarning
+            ? $"Transmit is blocked on {string.Join(", ", EncryptedChannels().Select(c => c.Name))} — those channels still have a PSK, and encryption isn't permitted on amateur allocations. Clear the key in each channel's Settings."
+            : string.Empty;
+
+    /// <summary>
+    /// The channel a frame would go out on, if licensed mode forbids it. The
+    /// frame's channel-hash byte identifies the channel; a hash matching none of
+    /// ours is foreign traffic, which the LOCAL_ONLY coercion in RelayPolicy has
+    /// already excluded from relaying.
+    /// </summary>
+    private string? LicensedChannelBlocking(byte[] frame)
+    {
+        if (!MyIsLicensed || frame.Length < MeshHeader.Size) return null;
+        byte hash = frame[13];
+        foreach (var c in AllChannelConfigs())
+            if (c.Hash == hash && c.EffectiveKey.Length > 0) return c.Name;
+        return null;
+    }
+
     private bool IsSelf(NodeRecord? node) => node is null || (_rxHost.MyNodeNum != 0 && node.NodeNum == _rxHost.MyNodeNum);
 
     [RelayCommand]
@@ -1624,7 +1720,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
             publicKey: TryParseKeyBase64(MyPublicKey),
             to: to ?? 0xFFFFFFFFu,
-            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            isLicensed: MyIsLicensed, isUnmessagable: MyIsUnmessagable);
         StatusText = await TransmitFrameAsync(frame) ? "Sent NodeInfo." : "Transmit failed.";
     }
 

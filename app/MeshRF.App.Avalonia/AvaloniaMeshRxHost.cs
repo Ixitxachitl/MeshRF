@@ -666,7 +666,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (RelayScheduler is null || RelayContextProvider?.Invoke() is not { } ctx) return;
         // True means this copy arrived with more hops left than the one we had
         // queued, so it's worth relaying instead.
-        if (RelayScheduler.HandleDuplicate(ctx, header))
+        if (RelayScheduler.HandleDuplicate(ctx, header, snrDb ?? 0f))
             RelayIfEligible(frame, header, result, snrDb);
     }
 
@@ -863,6 +863,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     ShortName = result.User.ShortName,
                     Role = string.IsNullOrEmpty(result.User.Role) ? "Client" : result.User.Role,
                     PublicKey = result.User.PublicKey.Length == 32 ? Convert.ToHexString(result.User.PublicKey) : string.Empty,
+                    IsUnmessagable = result.User.IsUnmessagable,
+                    // is_licensed is a plain proto3 bool, so an unlicensed node
+                    // simply omits it. Resolving absent to false here is what
+                    // lets a node that leaves ham mode stop looking licensed —
+                    // a null would COALESCE the stale true back in.
+                    IsLicensed = result.User.IsLicensed ?? false,
                     LastHeardEpoch = rxEpoch,
                     SeenViaMqtt = header.ViaMqtt,
                     RssiDbm = packetRssiDbm,

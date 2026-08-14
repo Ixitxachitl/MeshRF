@@ -302,6 +302,74 @@ public class MeshDecoderTests
         Assert.Equal("Test Router", result.User.LongName);
     }
 
+    [Fact]
+    public void NodeInfoRoundTripsLicensedAndUnmessagableFlags()
+    {
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "LongFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+
+        var frame = MeshEncoder.EncodeNodeInfo(channel, 0x1A2B3C4Du, 1,
+            longName: "W1AW", shortName: "W1AW",
+            isLicensed: true, isUnmessagable: true);
+
+        var user = MeshDecoder.Decode(frame, new[] { channel })!.User;
+
+        Assert.True(user!.IsLicensed);
+        Assert.True(user.IsUnmessagable);
+    }
+
+    // proto3 omits false, so an unlicensed peer sends no field 6 at all. Null
+    // rather than false is what lets the relay rules tell "said no" from
+    // "never said" — firmware draws the same distinction.
+    [Fact]
+    public void NodeInfoOmitsLicensedFlagWhenUnlicensed()
+    {
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "LongFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+
+        var frame = MeshEncoder.EncodeNodeInfo(channel, 0x1A2B3C4Du, 1,
+            longName: "Plain", shortName: "PLN");
+
+        var user = MeshDecoder.Decode(frame, new[] { channel })!.User;
+
+        Assert.Null(user!.IsLicensed);
+        Assert.Null(user.IsUnmessagable);
+    }
+
+    // A licensed node must not advertise a key, or peers would PKC it — which
+    // is exactly the encryption ham operation forbids.
+    [Fact]
+    public void LicensedNodeInfoCarriesNoPublicKey()
+    {
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "LongFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+        var publicKey = new byte[32];
+        for (int i = 0; i < publicKey.Length; i++) publicKey[i] = (byte)(i + 1);
+
+        var licensed = MeshEncoder.EncodeNodeInfo(channel, 0x1A2B3C4Du, 1,
+            longName: "W1AW", shortName: "W1AW", publicKey: publicKey, isLicensed: true);
+        var normal = MeshEncoder.EncodeNodeInfo(channel, 0x1A2B3C4Du, 1,
+            longName: "W1AW", shortName: "W1AW", publicKey: publicKey);
+
+        Assert.Empty(MeshDecoder.Decode(licensed, new[] { channel })!.User!.PublicKey);
+        Assert.Equal(publicKey, MeshDecoder.Decode(normal, new[] { channel })!.User!.PublicKey);
+    }
+
     // ---- Malformed / truncated input (untrusted radio data boundary) ----
 
     [Fact]

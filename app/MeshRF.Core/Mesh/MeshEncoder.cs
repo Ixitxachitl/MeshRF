@@ -38,10 +38,13 @@ public static class MeshEncoder
     /// uplink this packet to the public MQTT broker.</param>
     /// <param name="xeddsaPrivateKey">Our 32-byte Ed25519 signing private key
     /// (from <see cref="MeshCrypto.DeriveXeddsaKeys"/>), or null to send
-    /// unsigned. Only used when <paramref name="to"/> is the broadcast address
-    /// (0xFFFFFFFF) — mirrors firmware, which only XEdDSA-signs broadcasts.</param>
+    /// unsigned. Used for broadcasts, and — when <paramref name="isLicensed"/>
+    /// is set — for unicasts too, mirroring firmware's perhapsEncode.</param>
     /// <param name="xeddsaPublicKey">Our 32-byte Ed25519 public key paired with
     /// <paramref name="xeddsaPrivateKey"/>.</param>
+    /// <param name="isLicensed">We are operating under amateur-radio rules. The
+    /// traffic is plaintext, so firmware signs unicasts as well as broadcasts —
+    /// a signature is the only thing left attesting who sent it.</param>
     public static byte[] Encode(ChannelConfig channel,
                                 uint from,
                                 uint to,
@@ -56,7 +59,8 @@ public static class MeshEncoder
                                 uint emoji = 0,
                                 bool okToMqtt = false,
                                 byte[]? xeddsaPrivateKey = null,
-                                byte[]? xeddsaPublicKey = null)
+                                byte[]? xeddsaPublicKey = null,
+                                bool isLicensed = false)
     {
         ArgumentNullException.ThrowIfNull(channel);
 
@@ -80,12 +84,14 @@ public static class MeshEncoder
         if (bitfield != 0)
             data.WriteVarintField(9, bitfield);
 
-        // field 10 = xeddsa_signature. Broadcasts only (mirrors firmware
-        // Router::perhapsEncode, which signs broadcast Data packets so peers
-        // can mark us as a verified signer). Skipped if the signed frame
+        // field 10 = xeddsa_signature. Broadcasts, plus every packet when
+        // licensed (mirrors firmware Router::perhapsEncode, which signs
+        // broadcast Data packets so peers can mark us as a verified signer, and
+        // widens that to unicasts under ham rules because nothing else
+        // authenticates plaintext traffic). Skipped if the signed frame
         // wouldn't fit the LoRa payload budget (mirrors signedDataFits) — an
         // unsigned send is still better than failing outright.
-        if (to == 0xFFFFFFFFu && xeddsaPrivateKey is { Length: 32 } && xeddsaPublicKey is { Length: 32 })
+        if ((to == 0xFFFFFFFFu || isLicensed) && xeddsaPrivateKey is { Length: 32 } && xeddsaPublicKey is { Length: 32 })
         {
             const int SigFieldOverhead = 2; // tag byte + 1-byte length varint (sig is always 64 bytes).
             if (MeshHeader.Size + data.Length + SigFieldOverhead + MeshCrypto.XeddsaSignatureSize <= 255)
@@ -261,7 +267,9 @@ public static class MeshEncoder
                                         bool wantResponse = false,
                                         bool okToMqtt = false,
                                         byte[]? xeddsaPrivateKey = null,
-                                        byte[]? xeddsaPublicKey = null)
+                                        byte[]? xeddsaPublicKey = null,
+                                        bool isLicensed = false,
+                                        bool isUnmessagable = false)
     {
         var user = new ProtoWriter();
         user.WriteStringField(1, $"!{from:x8}");          // id
@@ -269,15 +277,23 @@ public static class MeshEncoder
         user.WriteStringField(3, shortName ?? string.Empty);// short_name
         if (hwModel != 0)
             user.WriteVarintField(5, hwModel);              // hw_model
+        if (isLicensed)
+            user.WriteVarintField(6, 1);                    // is_licensed
         if (role != 0)
             user.WriteVarintField(7, role);                 // role
-        if (!publicKey.IsEmpty)
+        // A licensed node advertises no public key, so peers never PKC it —
+        // firmware reaches the same end by having ensurePkiKeys() bail out
+        // before User.public_key is ever populated (CryptoEngine.cpp).
+        if (!publicKey.IsEmpty && !isLicensed)
             user.WriteBytesField(8, publicKey);             // public_key
+        if (isUnmessagable)
+            user.WriteVarintField(9, 1);                    // is_unmessagable
 
         return Encode(channel, from, to, packetId, PortNum.NodeInfo,
                       user.ToArray(), hopLimit, wantAck: false,
                       wantResponse: wantResponse, okToMqtt: okToMqtt,
-                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey,
+                      isLicensed: isLicensed);
     }
 
     /// <summary>

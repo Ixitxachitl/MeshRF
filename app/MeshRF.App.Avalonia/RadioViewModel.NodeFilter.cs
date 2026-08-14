@@ -22,6 +22,7 @@ public partial class RadioViewModel
     public IReadOnlyList<string> NodeSignedFilterOptions { get; } = ["Show all", "Signed", "Unsigned"];
     public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "No position"];
     public IReadOnlyList<string> NodeIgnoredFilterOptions { get; } = ["Show all", "Hide ignored", "Only ignored"];
+    public IReadOnlyList<string> NodeFavoriteFilterOptions { get; } = ["Show all", "Only favorites", "Hide favorites"];
     public IReadOnlyList<string> NodeMqttFilterOptions { get; } = ["Any", "Hide via MQTT", "Only via MQTT"];
     public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
 
@@ -42,6 +43,7 @@ public partial class RadioViewModel
     [ObservableProperty] private string _nodeLocationFilter = "Any";
     [ObservableProperty] private bool _nodeHideInvalidLocations;
     [ObservableProperty] private string _nodeIgnoredFilter = "Show all";
+    [ObservableProperty] private string _nodeFavoriteFilter = "Show all";
     [ObservableProperty] private string _nodeMqttFilter = "Any";
     [ObservableProperty] private string _nodeMaxAgeMinutesText = string.Empty;
     [ObservableProperty] private string _nodeDistanceKmText = string.Empty;
@@ -106,6 +108,7 @@ public partial class RadioViewModel
     partial void OnNodeLocationFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeHideInvalidLocationsChanged(bool value) => OnFilterChanged();
     partial void OnNodeIgnoredFilterChanged(string value) => OnFilterChanged();
+    partial void OnNodeFavoriteFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeMqttFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeMaxAgeMinutesTextChanged(string value) => OnFilterChanged();
     partial void OnNodeDistanceKmTextChanged(string value) => OnFilterChanged();
@@ -143,6 +146,7 @@ public partial class RadioViewModel
         NodeLocationFilter = "Any";
         NodeHideInvalidLocations = false;
         NodeIgnoredFilter = "Show all";
+        NodeFavoriteFilter = "Show all";
         NodeMqttFilter = "Any";
         NodeMaxAgeMinutesText = string.Empty;
         NodeDistanceKmText = string.Empty;
@@ -219,6 +223,12 @@ public partial class RadioViewModel
         {
             case "Hide ignored" when n.Ignored: return false;
             case "Only ignored" when !n.Ignored: return false;
+        }
+
+        switch (NodeFavoriteFilter)
+        {
+            case "Only favorites" when !n.Favorite: return false;
+            case "Hide favorites" when n.Favorite: return false;
         }
 
         switch (NodeMqttFilter)
@@ -303,6 +313,7 @@ public partial class RadioViewModel
         if (NodeLocationFilterOptions.Contains(s.NodeFilterLocation)) NodeLocationFilter = s.NodeFilterLocation;
         NodeHideInvalidLocations = s.NodeFilterHideInvalidLocations;
         if (NodeIgnoredFilterOptions.Contains(s.NodeFilterIgnored)) NodeIgnoredFilter = s.NodeFilterIgnored;
+        if (NodeFavoriteFilterOptions.Contains(s.NodeFilterFavorite)) NodeFavoriteFilter = s.NodeFilterFavorite;
         if (NodeMqttFilterOptions.Contains(s.NodeFilterMqtt)) NodeMqttFilter = s.NodeFilterMqtt;
         // Stored as raw text (same as MeshRF.App) so a partially-typed value round-trips.
         NodeMaxAgeMinutesText = s.NodeFilterMaxAgeMinutes ?? string.Empty;
@@ -338,6 +349,7 @@ public partial class RadioViewModel
         s.NodeFilterLocation = NodeLocationFilter;
         s.NodeFilterHideInvalidLocations = NodeHideInvalidLocations;
         s.NodeFilterIgnored = NodeIgnoredFilter;
+        s.NodeFilterFavorite = NodeFavoriteFilter;
         s.NodeFilterMqtt = NodeMqttFilter;
         s.NodeFilterMaxAgeMinutes = NodeMaxAgeMinutesText;
         s.NodeFilterDistanceKm = NodeDistanceKmText;
