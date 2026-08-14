@@ -1065,7 +1065,7 @@
                                         <DockPanel>
                                             <Button DockPanel.Dock="Right" Content="Clear" Padding="6,1"
                                                     VerticalAlignment="Center" Margin="4,0,0,0"
-                                                    Command="{Binding ClearMessagesCommand}"
+                                                    Click="OnClearConversationMessages"
                                                     ToolTip.Tip="Clear this conversation from the view" />
                                             <ToggleButton DockPanel.Dock="Right" Content="Mute Ringtone"
                                                           Padding="6,1" VerticalAlignment="Center"

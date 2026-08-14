@@ -708,8 +708,29 @@ public partial class MainWindow : Window
         if (clipboard is not null) await clipboard.SetTextAsync(text);
     }
 
-    private void OnClearMessages(object? sender, RoutedEventArgs e) =>
-        _viewModel.SelectedTab?.Messages.Clear();
+    private async void OnClearMessages(object? sender, RoutedEventArgs e)
+    {
+        var tab = _viewModel.SelectedTab;
+        if (tab is null || tab.Messages.Count == 0) return;
+        if (!await ConfirmDialog.ConfirmAsync(this, "Clear messages",
+                $"Clear {tab.Messages.Count} message{(tab.Messages.Count == 1 ? "" : "s")} from {tab.TabHeader}? This cannot be undone.",
+                confirmText: "Clear"))
+            return;
+        tab.Messages.Clear();
+    }
+
+    /// <summary>Clear button on a DM tab. Confirmation lives here rather than
+    /// in the view model command because a dialog needs an owning window.</summary>
+    private async void OnClearConversationMessages(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ConversationTabViewModel convo }) return;
+        if (convo.Messages.Count == 0) return;
+        if (!await ConfirmDialog.ConfirmAsync(this, "Clear conversation",
+                $"Clear {convo.Messages.Count} message{(convo.Messages.Count == 1 ? "" : "s")} from the conversation with {convo.PeerName}? This cannot be undone.",
+                confirmText: "Clear"))
+            return;
+        convo.ClearMessagesCommand.Execute(null);
+    }
 
     private async void OnCopyLog(object? sender, RoutedEventArgs e)
     {
@@ -718,7 +739,15 @@ public partial class MainWindow : Window
         if (clipboard is not null) await clipboard.SetTextAsync(text);
     }
 
-    private void OnClearLog(object? sender, RoutedEventArgs e) => _viewModel.LogLines.Clear();
+    private async void OnClearLog(object? sender, RoutedEventArgs e)
+    {
+        int count = _viewModel.LogLines.Count;
+        if (count == 0) return;
+        if (!await ConfirmDialog.ConfirmAsync(this, "Clear log",
+                $"Clear {count} log line{(count == 1 ? "" : "s")}?", confirmText: "Clear"))
+            return;
+        _viewModel.LogLines.Clear();
+    }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow().ShowDialog(this);
 

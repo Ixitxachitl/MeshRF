@@ -15,6 +15,18 @@ public partial class TelemetryHistoryWindow : Window
         InitializeComponent();
     }
 
+    private async void OnClear(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not ConversationTabViewModel convo) return;
+        int count = convo.TelemetryHistory.Count;
+        if (count == 0) return;
+        if (!await ConfirmDialog.ConfirmAsync(this, "Clear telemetry history",
+                $"Delete {count} recorded telemetry snapshot{(count == 1 ? "" : "s")} for {convo.PeerName}? This removes the stored history and cannot be undone.",
+                confirmText: "Clear"))
+            return;
+        convo.ClearTelemetryHistoryCommand.Execute(null);
+    }
+
     /// <summary>Opens the window for a peer, or focuses the one already open —
     /// mirrors MeshRF.App, which keeps one history window per conversation.</summary>
     public static void Show(Window owner, ConversationTabViewModel conversation)

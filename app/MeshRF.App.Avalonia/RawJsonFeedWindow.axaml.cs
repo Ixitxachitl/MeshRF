@@ -22,6 +22,18 @@ public partial class RawJsonFeedWindow : Window
         InitializeComponent();
     }
 
+    private async void OnClear(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null) return;
+        int count = _viewModel.DecodedPacketJsonEntries.Count;
+        if (count == 0) return;
+        if (!await ConfirmDialog.ConfirmAsync(this, "Clear feed",
+                $"Clear {count} decoded packet{(count == 1 ? "" : "s")} from the feed? This cannot be undone.",
+                confirmText: "Clear"))
+            return;
+        _viewModel.ClearDecodedPacketJsonFeedCommand.Execute(null);
+    }
+
     public static void Show(Window owner, RadioViewModel viewModel)
     {
         var w = new RawJsonFeedWindow { DataContext = viewModel, _viewModel = viewModel };

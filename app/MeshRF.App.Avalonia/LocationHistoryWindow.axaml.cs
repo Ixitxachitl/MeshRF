@@ -16,6 +16,18 @@ public partial class LocationHistoryWindow : Window
         InitializeComponent();
     }
 
+    private async void OnClear(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_conversation is null) return;
+        int count = _conversation.LocationHistory.Count;
+        if (count == 0) return;
+        if (!await ConfirmDialog.ConfirmAsync(this, "Clear location history",
+                $"Delete {count} recorded position{(count == 1 ? "" : "s")} for {_conversation.PeerName}? This removes the stored history and cannot be undone.",
+                confirmText: "Clear"))
+            return;
+        _conversation.ClearLocationHistoryCommand.Execute(null);
+    }
+
     public static void Show(Window owner, ConversationTabViewModel conversation)
     {
         conversation.EnsureHistoryLoaded();

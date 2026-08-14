@@ -11,7 +11,7 @@
 
         <DockPanel Grid.Row="0" Margin="0,0,0,4">
             <Button DockPanel.Dock="Right" Content="Clear" Padding="8,2" Margin="4,0,0,0"
-                    Command="{Binding ClearDecodedPacketJsonFeedCommand}" />
+                    Click="OnClear" />
             <Button DockPanel.Dock="Right" Content="Export…" Padding="8,2" Margin="4,0,0,0"
                     Click="OnExport" ToolTip.Tip="Save the whole feed to a .json file" />
             <Button DockPanel.Dock="Right" Content="Copy" Padding="8,2"
