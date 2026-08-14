@@ -45,8 +45,16 @@
              the text. The visible box now comes from a Border inside the item
              template (see TabControl.ItemTemplate), which does not depend on
              the theme's internal part names. -->
+        <!-- Horizontal Padding is 0, not the 6px this used to carry: the item
+             template's Border (see TabControl.ItemTemplate) already insets its
+             own content by 8px via its own Padding, so TabItem's Padding was
+             adding a second, outer margin around that border rather than
+             padding the text. Since the border doesn't stretch to fill it,
+             each tab's outer padding stacked with its neighbour's, showing up
+             as a visible gap between adjacent tab boxes rather than breathing
+             room inside them. Vertical Padding stays for header height. -->
         <Style Selector="TabItem">
-            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Padding" Value="0,2" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="FontSize" Value="12" />
         </Style>
@@ -1043,15 +1051,19 @@
                         <TabControl.DataTemplates>
                             <DataTemplate DataType="local:ChannelTabViewModel">
                                 <DockPanel>
-                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal"
-                                                HorizontalAlignment="Right" Spacing="4" Margin="0,0,0,4">
-                                        <Button Content="Settings" Padding="6,1" Click="OnOpenChannelSettings"
-                                                ToolTip.Tip="Configure channel name, role, PSK and location sharing" />
-                                        <Button Content="Copy" Padding="6,1" Click="OnCopyMessages"
-                                                ToolTip.Tip="Copy this channel's messages to the clipboard" />
-                                        <Button Content="Clear" Padding="6,1" Click="OnClearMessages"
-                                                ToolTip.Tip="Clear this channel's messages (cannot be undone)" />
-                                    </StackPanel>
+                                    <Border DockPanel.Dock="Top" Padding="6,4" Margin="0,0,0,4"
+                                            Background="{DynamicResource BrushPanelBackground}"
+                                            BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                                        <StackPanel Orientation="Horizontal"
+                                                    HorizontalAlignment="Right" Spacing="4">
+                                            <Button Content="Settings" Padding="6,1" Click="OnOpenChannelSettings"
+                                                    ToolTip.Tip="Configure channel name, role, PSK and location sharing" />
+                                            <Button Content="Copy" Padding="6,1" Click="OnCopyMessages"
+                                                    ToolTip.Tip="Copy this channel's messages to the clipboard" />
+                                            <Button Content="Clear" Padding="6,1" Click="OnClearMessages"
+                                                    ToolTip.Tip="Clear this channel's messages (cannot be undone)" />
+                                        </StackPanel>
+                                    </Border>
                                     <ContentControl DockPanel.Dock="Bottom" Content="{Binding}" ContentTemplate="{StaticResource MessageListTemplate}" />
                                 </DockPanel>
                             </DataTemplate>
