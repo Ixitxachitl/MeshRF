@@ -43,6 +43,18 @@
     <AvaloniaResource Include="Assets\icon.png" />
   </ItemGroup>
 
+  <!-- SkiaSharp's and HarfBuzzSharp's Windows packages ship native debug
+       symbols (libSkiaSharp.pdb ~80 MB, libHarfBuzzSharp.pdb ~20 MB) that are
+       only useful for stepping through their C++ — they roughly doubled the
+       published zip. Dropped at publish only; local builds keep everything,
+       and our own MeshRF*.pdb still ship for crash diagnostics. -->
+  <Target Name="PruneThirdPartyNativeSymbols" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+          Condition="'%(Extension)' == '.pdb' And ('%(Filename)' == 'libSkiaSharp' Or '%(Filename)' == 'libHarfBuzzSharp')" />
+    </ItemGroup>
+  </Target>
+
   <!-- Copy the native bridge library produced by CMake into the output dir so
        P/Invoke can find it at runtime. Mirrors MeshRF.App.csproj's
        CopyNativeBridge target; see that file for the RelWithDebInfo rationale.
