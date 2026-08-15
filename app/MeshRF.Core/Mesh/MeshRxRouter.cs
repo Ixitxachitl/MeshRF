@@ -62,6 +62,18 @@ public sealed class MeshRxRouter : IDisposable
             return;
         }
 
+        // Our own rebroadcast heard back. The check above cannot catch it: a
+        // relayed frame still names the *original* sender, not us. Dropping it
+        // here rather than letting it fall through to the dedup path is what
+        // keeps it out of RecordSighting below — otherwise every relay we make
+        // records that sender at our own transmitter's signal strength, one hop
+        // further away than they are, and with a refreshed last-heard time.
+        if (_host.WasRelayedByUs(header))
+        {
+            _host.Log($"  (own relay) heard our rebroadcast of {header.FromId} pkt {header.PacketId:x8}");
+            return;
+        }
+
         var rxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         byte hopsAway = (byte)(header.HopStart >= header.HopLimit
             ? header.HopStart - header.HopLimit

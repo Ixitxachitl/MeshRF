@@ -697,6 +697,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// until the owner wires it up, which leaves relaying off.</summary>
     public RelayScheduler? RelayScheduler { get; set; }
 
+    /// <summary>
+    /// Both halves have to agree before we call a frame our own echo: relay_node
+    /// says the last station to transmit it was us, and the scheduler confirms we
+    /// really did put this packet on the air. relay_node alone is only the low
+    /// byte of a node number, so on its own it would silently swallow 1 in 256 of
+    /// other stations' rebroadcasts.
+    /// </summary>
+    public bool WasRelayedByUs(MeshHeader header) =>
+        MyNodeNum != 0 &&
+        header.RelayNode == (byte)(MyNodeNum & 0xFF) &&
+        RelayScheduler?.WasRelayedByUs(header.From, header.PacketId) == true;
+
     public void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
     {
         if (RelayScheduler is null || RelayContextProvider?.Invoke() is not { } ctx) return;

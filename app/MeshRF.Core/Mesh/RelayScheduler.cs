@@ -35,8 +35,15 @@ public sealed class RelayScheduler : IDisposable
         public bool Transmitting;
     }
 
+    /// <summary>How many of our own rebroadcasts to remember. Only has to cover
+    /// the flight time of a frame we are transmitting right now, so this is
+    /// generous.</summary>
+    private const int RecentRelayLimit = 128;
+
     private readonly object _lock = new();
     private readonly Dictionary<ulong, Pending> _pending = new();
+    private readonly HashSet<ulong> _recentRelayKeys = new();
+    private readonly Queue<ulong> _recentRelayOrder = new();
     private bool _disposed;
 
     /// <summary>Transmits the prepared frame. Runs off the caller's thread after
@@ -112,6 +119,10 @@ public sealed class RelayScheduler : IDisposable
                 // (pointless — the frame is already committed) or, worse, drop
                 // the entry and let a second relay of the same packet be queued.
                 lock (_lock) entry.Transmitting = true;
+                // Remember it before the send, not after: a receive SDR running
+                // alongside the transmitter hears the frame while Transmit is
+                // still awaiting, so the record has to already be in place.
+                RememberRelayed(key);
                 await Transmit(relayFrame).ConfigureAwait(false);
                 Log?.Invoke($"  relayed packet {header.PacketId:x8} ({header.HopLimit}->{nextHopLimit}) after {delayMs} ms");
             }
@@ -185,6 +196,33 @@ public sealed class RelayScheduler : IDisposable
 
         if (hasPending) Cancel(key, pending!, log: true);
         return false;
+    }
+
+    /// <summary>
+    /// Whether we put this exact packet on the air ourselves, recently enough
+    /// that hearing it now is our own echo rather than someone else's copy.
+    ///
+    /// A rebroadcast keeps the original sender in its header, so the isFromUs
+    /// test that catches packets we *originated* never fires for one we merely
+    /// relayed. With a separate receive SDR we hear every relay we transmit, and
+    /// without this the echo counts as a fresh sighting of the original sender —
+    /// at our own transmitter's signal strength and one hop too far away.
+    /// </summary>
+    public bool WasRelayedByUs(uint from, uint packetId)
+    {
+        if (packetId == 0) return false;
+        lock (_lock) return _recentRelayKeys.Contains(Key(from, packetId));
+    }
+
+    private void RememberRelayed(ulong key)
+    {
+        lock (_lock)
+        {
+            if (!_recentRelayKeys.Add(key)) return;
+            _recentRelayOrder.Enqueue(key);
+            while (_recentRelayOrder.Count > RecentRelayLimit)
+                _recentRelayKeys.Remove(_recentRelayOrder.Dequeue());
+        }
     }
 
     private void Cancel(ulong key, Pending pending, bool log)

@@ -41,6 +41,18 @@ public interface IMeshRxHost
     /// <summary>We heard our own transmission relayed back (Meshtastic isFromUs).</summary>
     void OnOwnPacketHeard(MeshHeader header, MeshDecodeResult? ownDecode);
 
+    /// <summary>
+    /// This frame is a rebroadcast we transmitted ourselves, heard back off the
+    /// air. Distinct from <see cref="OnOwnPacketHeard"/>: that one covers packets
+    /// we *originated*, which name us in the header. A relay keeps the original
+    /// sender's node number, so only the host — which knows what it put on the
+    /// air — can recognise it.
+    ///
+    /// Defaulted to false so hosts that do not relay (and the frozen WPF
+    /// MainViewModel) keep compiling unchanged.
+    /// </summary>
+    bool WasRelayedByUs(MeshHeader header) => false;
+
     /// <summary>Dedup gate for frames that failed to decode. Returns false if this
     /// exact undecoded packet was already seen recently.</summary>
     bool RememberUndecodedPacket(MeshHeader header);
