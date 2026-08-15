@@ -50,7 +50,9 @@
             <Button DockPanel.Dock="Right" Content="Help" Padding="10,3" Margin="4,0,0,0"
                     Click="OnHelp"
                     ToolTip.Tip="Script reference: triggers, conditions, actions and placeholders" />
-            <Button DockPanel.Dock="Right" Content="Credentials" Padding="10,3" Margin="0,0,4,0"
+            <!-- Left margin sets this group apart from Reload/Open folder,
+                 which act on the files, where these two do not. -->
+            <Button DockPanel.Dock="Right" Content="Credentials" Padding="10,3" Margin="14,0,0,0"
                     IsVisible="{Binding HasRuntime}" Click="OnCredentials"
                     ToolTip.Tip="API keys that a script's http: action can authenticate with" />
             <Button DockPanel.Dock="Right" Content="Open folder" Padding="10,3"
