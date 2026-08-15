@@ -4,6 +4,7 @@ using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
+using MeshRF.Scripting;
 using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
@@ -167,6 +168,53 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// <summary>Raised for every decoded packet so the owner can serialise it
     /// into the raw JSON feed.</summary>
     public Action<MeshHeader, MeshDecodeResult, long, float?, float?, byte, string>? DecodedPacketForFeed { get; set; }
+
+    /// <summary>
+    /// Raised for anything an automation script could be triggered by: a text
+    /// message, a tapback, or a node heard for the first time.
+    /// </summary>
+    /// <remarks>
+    /// Raised only for traffic that reached here through the decode path, which
+    /// has already dropped our own transmissions — so a script can never be
+    /// triggered by a message a script sent. The owner holds the engine and the
+    /// transmitter; left null, nothing is automated.
+    /// </remarks>
+    public Action<ScriptEvent>? ScriptEventObserved { get; set; }
+
+    /// <summary>Fills in the parts of a script event only the owner knows — our
+    /// own name and battery. Null when no engine is attached.</summary>
+    public Func<ScriptSelf>? ScriptSelfProvider { get; set; }
+
+    /// <summary>Builds the flat snapshot the engine matches against. Everything
+    /// a condition or placeholder could want is copied in here, so evaluation
+    /// never reaches back into the stores.</summary>
+    private ScriptEvent BuildScriptEvent(
+        ScriptEventKind kind, MeshHeader header, MessageRecord record, MeshDecodeResult result,
+        bool isDirect, byte hopsAway, string emoji = "")
+    {
+        var node = _nodeStore.Get(header.From);
+        return new ScriptEvent
+        {
+            Kind = kind,
+            Text = record.Text,
+            FromNode = header.From,
+            FromShort = node?.ShortName ?? string.Empty,
+            // Falls back to the display name rather than the raw id, so a
+            // {from.long} in a greeting reads as a name either way.
+            FromLong = string.IsNullOrEmpty(node?.LongName) ? NodeDisplayName(header.From) : node!.LongName,
+            Channel = result.ChannelName ?? string.Empty,
+            IsDirect = isDirect,
+            SnrDb = record.SnrDb,
+            RssiDbm = record.RssiDbfs,
+            Hops = hopsAway,
+            SenderIsFavorite = node?.Favorite == true,
+            SenderHasKey = !string.IsNullOrEmpty(node?.PublicKey),
+            PacketId = header.PacketId,
+            Emoji = emoji,
+            Self = ScriptSelfProvider?.Invoke() ?? ScriptSelf.Unknown,
+            At = DateTimeOffset.Now,
+        };
+    }
 
     /// <summary>Appends a telemetry history point, skipping a payload that
     /// repeats the previous one for the same metric groups — nodes re-send
@@ -893,8 +941,52 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     public void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt)
     {
+        // Checked before the upsert, since the upsert is what creates the row:
+        // no record yet means this node number has never been heard on this
+        // install. Nothing else in the app distinguishes a first sighting, and
+        // a node that was forgotten and heard again counts as new — which is
+        // what a user who forgot it would expect.
+        bool firstSighting = IsFirstSighting(fromNode);
+
         _nodeStore.RecordSighting(fromNode, rssiDbm: rssiDbm, snrDb: snrDb, hopsAway: hopsAway, seenViaMqtt: viaMqtt);
         MarkNodeDirty(fromNode);
+
+        if (firstSighting) RaiseNewNode(fromNode, snrDb, rssiDbm, hopsAway);
+    }
+
+    /// <summary>True when this node number has no record yet, so the packet
+    /// being handled is the first time it has ever been heard. Must be called
+    /// before the upsert that creates the row.</summary>
+    private bool IsFirstSighting(uint nodeNum) =>
+        ScriptEventObserved is not null && nodeNum != 0 && nodeNum != MyNodeNum && _nodeStore.Get(nodeNum) is null;
+
+    /// <summary>
+    /// Raises the new_node trigger. Called after the node's row exists, so a
+    /// script reading the sender's name or key sees whatever this packet
+    /// carried.
+    /// </summary>
+    /// <remarks>
+    /// When the first packet is not a NodeInfo the name has not arrived yet and
+    /// {from.long} falls back to the id, which is why a greeting script wants a
+    /// delay: in front of it. The help window says so.
+    /// </remarks>
+    private void RaiseNewNode(uint nodeNum, float? snrDb, float? rssiDbm, byte hopsAway)
+    {
+        var node = _nodeStore.Get(nodeNum);
+        ScriptEventObserved?.Invoke(new ScriptEvent
+        {
+            Kind = ScriptEventKind.NewNode,
+            FromNode = nodeNum,
+            FromShort = node?.ShortName ?? string.Empty,
+            FromLong = string.IsNullOrEmpty(node?.LongName) ? NodeDisplayName(nodeNum) : node!.LongName,
+            SnrDb = snrDb,
+            RssiDbm = rssiDbm,
+            Hops = hopsAway,
+            SenderIsFavorite = node?.Favorite == true,
+            SenderHasKey = !string.IsNullOrEmpty(node?.PublicKey),
+            Self = ScriptSelfProvider?.Invoke() ?? ScriptSelf.Unknown,
+            At = DateTimeOffset.Now,
+        });
     }
 
     public void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
@@ -916,7 +1008,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         switch (result.Port)
         {
             case PortNum.TextMessage:
-                HandleTextMessage(header, record, result);
+                HandleTextMessage(header, record, result, hopsAway);
                 break;
 
             case PortNum.NodeInfo when result.User is not null:
@@ -929,6 +1021,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     if (IsDirectedRequest(header, result)) AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName);
                     break;
                 }
+                // The router skips RecordSighting for a NodeInfo record (its own
+                // upsert folds those fields in), so this is the only place a
+                // node whose very first packet is a NodeInfo can be noticed as
+                // new — and it is a common way to first hear one.
+                bool firstNodeInfo = IsFirstSighting(header.From);
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
@@ -950,6 +1047,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     HopsAway = hopsAway,
                 });
                 MarkNodeDirty(header.From);
+                // Raised after the upsert, so a greeting script sees the name
+                // and key this packet carried rather than a bare node id.
+                if (firstNodeInfo) RaiseNewNode(header.From, snrDb, packetRssiDbm, hopsAway);
                 // An advertisement may still ask us to reply with ours.
                 if (IsDirectedRequest(header, result)) AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName);
                 break;
@@ -1117,7 +1217,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         };
     }
 
-    private void HandleTextMessage(MeshHeader header, MessageRecord record, MeshDecodeResult result)
+    private void HandleTextMessage(MeshHeader header, MessageRecord record, MeshDecodeResult result, byte hopsAway)
     {
         uint reactionTargetId = ResolveReactionTargetId(result);
         bool isReaction = reactionTargetId != 0 && result.Emoji != 0;
@@ -1183,6 +1283,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // which also rings for channel reactions (unlike the DM path above).
             if (!chanTab2.MuteRtttl && !IsNodeIgnored(header.From) && !IsNodeRtttlMuted(header.From))
                 IncomingChannelMessage?.Invoke();
+        }
+
+        // Last, so a script can never delay the message appearing or the alert
+        // sounding. An ignored sender is ignored here too: muting somebody
+        // should not leave the app still answering them automatically.
+        if (ScriptEventObserved is { } observer && !IsNodeIgnored(header.From))
+        {
+            observer(BuildScriptEvent(
+                isReaction ? ScriptEventKind.Reaction : ScriptEventKind.Text,
+                header, record, result, isDirectToUs, hopsAway,
+                emoji: isReaction ? ResolveReactionGlyph(result.Text, result.Emoji) : string.Empty));
         }
     }
 

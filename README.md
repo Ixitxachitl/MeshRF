@@ -8,13 +8,13 @@ and performs LoRa demodulation/modulation in software on the host CPU. It
 decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-Current release line: **v2.0.0**
+Current release line: **v2.0.3**
 
 ### Two apps, for one release
 
 | App | Version | Platforms | Status |
 | --- | --- | --- | --- |
-| `MeshRF.App.Avalonia` | 2.0.0 | Windows, Linux, macOS | The app MeshRF ships |
+| `MeshRF.App.Avalonia` | 2.0.3 | Windows, Linux, macOS | The app MeshRF ships |
 | `MeshRF.App` (WPF) | 1.0.9 | Windows only | Final release — no longer maintained |
 
 Both read the same `settings.json` and the same SQLite databases, so you can
@@ -98,6 +98,78 @@ everything below describes it.
 - Emoji picker built from the colour emoji font's actual glyph coverage, so it
   offers every emoji the system can draw and nothing it can't.
 - Raw decoded-packet JSON feed with export, for analysis and replay.
+
+### Automation Scripts
+
+MeshRF can answer messages and transmit on a schedule, driven by YAML scripts
+in `%APPDATA%\MeshRF\scripts` (one file per script). The shape follows Home
+Assistant's automations — a list of triggers, conditions that all have to hold,
+and a sequence of actions — with a closed vocabulary and no expression
+language.
+
+```yaml
+enabled: true
+alias: Answer !ping with a signal report
+
+trigger:
+  - command: ping
+
+condition:
+  - scope: direct
+  - snr_above: -12
+
+action:
+  - reply: "pong — {snr} dB over {hops} hops"
+
+limits:
+  cooldown: 60s
+  max_per_hour: 6
+```
+
+- **Triggers**: `command`, `text` (regex), `new_node`, `reaction`, `every`, `at`.
+- **Conditions**: `scope`, `channel`, `from` / `not_from`, `snr_above`,
+  `hops_below`, `between`, `favorite`, `has_key`.
+- **Actions**: `reply`, `send`, `react`, `position`, `nodeinfo`, `traceroute`,
+  `http`, `delay`, `log`.
+
+A script can call a REST API and broadcast the answer. Fetching and sending are
+two steps, so the result can be shaped into a sentence, combined from more than
+one endpoint, or sent somewhere other than back to the asker:
+
+```yaml
+trigger:
+  - command: wx
+
+action:
+  - http:
+      url: "https://api.example.com/v1/current?q={args}"
+      credential: weather      # names a key stored in the app, not here
+      json: current.temp_c     # dotted path into the JSON response
+      save_as: temp            # becomes {http.temp}
+  - reply: "{args}: {http.temp}°C"
+```
+
+API keys are optional, and are stored under the Scripts window's **Credentials**
+button rather than in the script — protected at rest, attachable as a bearer
+token, a named header or a query parameter. A script names a credential and can
+never read its value, so it cannot broadcast it, and keys are never written to
+the log. Placeholders inside a `url:` are percent-encoded and inside a JSON
+`body:` are JSON-escaped, so a received message cannot rewrite the request.
+Responses are capped, flattened to one line and clamped to the payload size. A
+failed fetch skips the rest of the script rather than broadcasting a
+half-formed sentence. Dry run still performs `GET` (a read changes nothing) but
+skips `POST`/`PUT`.
+- **Scripts window** (the *Scripts* button): lists every script in execution
+  order with an enable toggle, and an embedded editor that refuses to save a
+  script it cannot parse, reporting the line and column and suggesting the key
+  you probably meant. Help documents the full vocabulary.
+
+Airtime is shared, so the safety rails are on by default and are not all
+settable from a script file: scripts never answer your own node or an ignored
+one, a message a script sent can never trigger another script, each script has
+a cooldown and an hourly cap, and a global budget of 30 transmissions/hour
+applies across every script together. The master switch is off until you turn
+it on, and **Dry run** evaluates and logs everything without transmitting.
 
 ## Architecture
 

@@ -794,6 +794,19 @@ public partial class MainWindow : Window
         _mqttWindow.Show(this);
     }
 
+    private ScriptsWindow? _scriptsWindow;
+
+    private void OnOpenScripts(object? sender, RoutedEventArgs e)
+    {
+        if (_scriptsWindow is not null) { _scriptsWindow.Activate(); return; }
+        // The view model goes in as IScriptRuntime, not as a DataContext: the
+        // window binds to its own model for everything on disk, and needs the
+        // radio only for the master switch and the reload-on-edit.
+        _scriptsWindow = new ScriptsWindow(_viewModel);
+        _scriptsWindow.Closed += (_, _) => _scriptsWindow = null;
+        _scriptsWindow.Show(this);
+    }
+
     // -- Tab drag-to-reorder --------------------------------------------------
 
     /// <summary>In-process drag payload: the dragged tab's view model itself,

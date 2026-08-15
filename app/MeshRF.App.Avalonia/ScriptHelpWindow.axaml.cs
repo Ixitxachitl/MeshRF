@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+using Avalonia.Controls;
+using MeshRF.Scripting;
+
+namespace MeshRF.AvaloniaApp;
+
+/// <summary>One row of the reference tables: the syntax on the left, what it
+/// does on the right.</summary>
+/// <param name="Name">The key as it is written in a script.</param>
+/// <param name="Description">What it means.</param>
+public sealed record HelpRow(string Name, string Description);
+
+/// <summary>
+/// The script reference, opened from the Scripts window's Help button.
+/// </summary>
+/// <remarks>
+/// The tables are built here rather than written out in the XAML so the ones
+/// with a single source of truth stay honest: the placeholder list is read
+/// straight from <see cref="ScriptPlaceholders"/>, and the default limits are
+/// read from <see cref="ScriptLimits"/>, so neither can drift from what the
+/// parser actually accepts.
+/// </remarks>
+public partial class ScriptHelpWindow : Window
+{
+    public ScriptHelpWindow()
+    {
+        InitializeComponent();
+        DataContext = this;
+    }
+
+    public string ScriptsFolder => ScriptLibrary.DefaultDirectory;
+
+    public string ExampleScript =>
+        """
+        enabled: true
+        alias: Answer !ping with a signal report
+
+        trigger:
+          - command: ping
+
+        condition:
+          - scope: direct
+          - snr_above: -12
+
+        action:
+          - reply: "pong — {snr} dB over {hops} hops"
+
+        limits:
+          cooldown: 60s
+          max_per_hour: 6
+        """;
+
+    public IReadOnlyList<HelpRow> Triggers { get; } =
+    [
+        new("command: ping", "Message starts with !ping. The rest becomes {args}."),
+        new("text: \"^!wx\\\\b\"", "Message matches this regular expression. Capture groups become {cap1}, {cap2}, …"),
+        new("  ignore_case: false", "Option on a text: trigger. Matching ignores case unless you turn this off."),
+        new("new_node: true", "A node MeshRF has never heard before is decoded for the first time."),
+        new("reaction: 👍", "An emoji tapback lands on one of your messages. Use 'any' for any emoji."),
+        new("every: 4h", "Fires on a fixed interval. Minimum 1m."),
+        new("at: \"08:00\"", "Fires once a day at this local time."),
+    ];
+
+    public IReadOnlyList<HelpRow> Conditions { get; } =
+    [
+        new("scope: direct", "Only direct messages. Also: channel, any."),
+        new("channel: [LongFast]", "Only these channels. One name or a list."),
+        new("from: [\"!a1b2c3d4\"]", "Only these senders."),
+        new("not_from: [\"!deadbeef\"]", "Never these senders."),
+        new("snr_above: -12", "Only packets heard at better than this signal-to-noise ratio, in dB."),
+        new("hops_below: 3", "Only packets that travelled fewer than this many hops. 0–7."),
+        new("between: \"08:00-22:00\"", "Only inside this local-time window. A window may wrap past midnight."),
+        new("favorite: true", "Only senders marked favourite in the Nodes table."),
+        new("has_key: true", "Only senders whose public key is known, so a reply can be PKC-sealed."),
+    ];
+
+    public IReadOnlyList<HelpRow> Actions { get; } =
+    [
+        new("reply: \"text\"", "Answer in the conversation the trigger arrived on, threaded under the message."),
+        new("send:", "Send somewhere specific. Takes the indented keys below."),
+        new("  to: \"{from.id}\"", "Destination node. A node id, or a placeholder that becomes one."),
+        new("  channel: LongFast", "Destination channel instead of a node. Use one of to:/channel:, not both."),
+        new("  text: \"…\"", "The message body. Required."),
+        new("  reply_link: true", "Thread the message under the one that triggered it."),
+        new("http:", "Call a REST endpoint and keep the answer for a later action. Takes the indented keys below."),
+        new("  url: \"https://…\"", "The endpoint. Placeholders in it are percent-encoded, so a message containing & or a space cannot rewrite the request. Required, and must be https:// or http://."),
+        new("  method: GET", "GET (default), POST or PUT."),
+        new("  credential: weather", "Authenticate using a key stored under Credentials. The value never appears in the script."),
+        new("  json: current.temp_c", "Pull one value out of a JSON response. Supports a.b and lists[0].c. Omit to use the whole body."),
+        new("  save_as: temp", "Name the result is stored under, so it becomes {http.temp}. Defaults to body → {http.body}."),
+        new("  timeout: 10s", "How long to wait. Default 10s, maximum 30s."),
+        new("  body: '{\"q\":\"{args}\"}'", "Request body for POST/PUT. Placeholders are JSON-escaped, so a quote in a message cannot break the field."),
+        new("  content_type: …", "Defaults to application/json."),
+        new("react: 👍", "Emoji tapback on the triggering message."),
+        new("position: true", "Send this node's position."),
+        new("nodeinfo: true", "Send this node's name, hardware and public key."),
+        new("traceroute: true", "Request the route to the triggering node."),
+        new("delay: 30s", "Wait before the next action. Maximum 1h."),
+        new("log: \"text\"", "Write a line to the MeshRF log. Transmits nothing — useful while testing."),
+    ];
+
+    public IReadOnlyList<HelpRow> Placeholders { get; } =
+        ScriptPlaceholders.All.Select(p => new HelpRow($"{{{p.Token}}}", p.Description)).ToList();
+
+    public IReadOnlyList<HelpRow> Limits { get; } = BuildLimits();
+
+    private static IReadOnlyList<HelpRow> BuildLimits()
+    {
+        var d = new ScriptLimits();
+        return
+        [
+            new("cooldown: 60s", $"Minimum gap between firings. Default {Describe(d.Cooldown)}."),
+            new("per_node: true", $"Apply the cooldown separately per sending node, so one chatty node cannot mute the script for everyone. Default {(d.PerNode ? "true" : "false")}."),
+            new("max_per_hour: 6", $"Hard ceiling on firings per rolling hour. Default {d.MaxPerHour}."),
+            new("(global budget)", "30 transmissions per hour across every script together. Not settable from a script file — it is the ceiling a mistaken pattern cannot raise."),
+        ];
+    }
+
+    public string HttpExample =>
+        """
+        enabled: true
+        alias: Answer !wx with the temperature
+
+        trigger:
+          - command: wx
+
+        action:
+          - http:
+              url: "https://api.example.com/v1/current?q={args}"
+              credential: weather
+              json: current.temp_c
+              save_as: temp
+          - reply: "{args}: {http.temp}°C"
+        """;
+
+    public IReadOnlyList<HelpRow> Http { get; } =
+    [
+        new("Two steps, not one", "http: fetches and stores; reply:/send: says it. That is what lets a script shape the answer, call more than one endpoint, or send the result somewhere other than back to the asker."),
+        new("{http.<name>}", "The stored result. {http.status} always holds the response code."),
+        new("If the fetch fails", "The rest of the script is skipped and the reason is logged. Broadcasting \"It's °C in London\" would be worse than saying nothing."),
+        new("Credentials", "Stored under the Credentials button, protected at rest. A script names one; it can never read the value, so it can never broadcast it. Keys are never written to the log."),
+        new("Dry run", "Still performs GET — seeing the real answer is most of what dry run is for, and a read changes nothing. POST and PUT are skipped, since those alter state on somebody else's server."),
+        new("Responses", "Capped at 64 KB, stripped of control characters, collapsed onto one line, then clamped to the payload size. A response is somebody else's data about to go out on a shared channel."),
+        new("Airtime", "A fetch transmits nothing, so it does not count against the global budget. The reply that follows it does."),
+    ];
+
+    public IReadOnlyList<HelpRow> Running { get; } =
+    [
+        new("Run scripts", "Master switch, off by default. Until it is on, nothing fires however many scripts are enabled."),
+        new("Dry run", "Everything is evaluated and logged, but nothing is transmitted. Limits are still consumed, so the log shows exactly what would have happened."),
+        new("The log", "Every firing, every skipped action and every refusal is written to the main window's log, prefixed \"scripts:\"."),
+        new("Reloading", "Saving, enabling, reordering or deleting a script reloads the engine straight away. Reloading also clears every cooldown, so an edited script can be tested at once."),
+        new("every: on startup", "A scheduled trigger first fires one interval after scripts load, never the instant they do — otherwise every enabled beacon would transmit at once."),
+        new("Scheduled triggers", "A timer event has no sender, so conditions asking about one (scope, from, snr_above, hops_below, favorite, has_key) never hold, and reply:/react: are skipped. Only between: is useful on a schedule."),
+        new("new_node: timing", "A first sighting arrives before the node's name does. A greeting using {from.long} wants a delay: of 30s or so in front of it."),
+    ];
+
+    private static string Describe(TimeSpan span) =>
+        span.TotalHours >= 1 ? $"{span.TotalHours:0.#}h"
+        : span.TotalMinutes >= 1 ? $"{span.TotalMinutes:0.#}m"
+        : $"{span.TotalSeconds:0.#}s";
+
+    public IReadOnlyList<HelpRow> Values { get; } =
+    [
+        new("30s  5m  4h  1d", "Durations. A bare number means seconds."),
+        new("\"08:00\"", "Times are 24-hour and local. Always quote them."),
+        new("!a1b2c3d4", "Node ids, as shown in the Nodes table."),
+        new("mode: single", "What a re-trigger does while a delay: is in flight. Also: restart, queued."),
+        new("alias: My script", "Name shown in the list. Defaults to the file name."),
+    ];
+
+    public IReadOnlyList<HelpRow> EditorTips { get; } =
+    [
+        new("Enter", "Keeps your indentation, indents after a 'key:', and starts the next '- ' in a list."),
+        new("Tab / Shift+Tab", "Indents or outdents by two spaces. YAML forbids tab characters, so pasted tabs are converted."),
+        new("Save", "Blocked while the script has errors — an unparseable file would be a script that silently never runs."),
+        new("Click a problem", "Selects the line it came from."),
+        new("Warnings", "Do not block saving. They flag things that parse but probably are not what you meant."),
+    ];
+}

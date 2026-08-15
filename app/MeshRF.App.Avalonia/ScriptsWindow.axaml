@@ -1,0 +1,213 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.ScriptsWindow"
+        x:DataType="app:ScriptsViewModel"
+        Title="Scripts"
+        Width="980" Height="680"
+        MinWidth="720" MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+
+    <Window.Styles>
+        <!-- The validation strip reads as a traffic light: the summary text is
+             the same control in all three states, only recoloured. -->
+        <Style Selector="TextBlock.validation">
+            <Setter Property="Foreground" Value="#6FCF6F" />
+        </Style>
+        <Style Selector="TextBlock.validation.warning">
+            <Setter Property="Foreground" Value="#E0B040" />
+        </Style>
+        <Style Selector="TextBlock.validation.error">
+            <Setter Property="Foreground" Value="#FF6B6B" />
+        </Style>
+        <Style Selector="TextBlock.status-error">
+            <Setter Property="Foreground" Value="#FF6B6B" />
+        </Style>
+        <Style Selector="TextBlock.status-warning">
+            <Setter Property="Foreground" Value="#E0B040" />
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,Auto,*">
+
+        <!-- Toolbar -->
+        <DockPanel Grid.Row="0" Margin="8,8,8,4" LastChildFill="False">
+            <Button DockPanel.Dock="Left" Content="New" Padding="10,3" Margin="0,0,4,0"
+                    Click="OnNew"
+                    ToolTip.Tip="Create a new script from the starter template" />
+            <Button DockPanel.Dock="Left" Content="Delete" Padding="10,3" Margin="0,0,10,0"
+                    IsEnabled="{Binding CanDelete}" Click="OnDelete"
+                    ToolTip.Tip="Delete the selected script (asks first)" />
+            <Button DockPanel.Dock="Left" Content="▲" Padding="10,3" Margin="0,0,4,0"
+                    IsEnabled="{Binding CanMoveUp}" Click="OnMoveUp"
+                    ToolTip.Tip="Run this script earlier when several are triggered at once" />
+            <Button DockPanel.Dock="Left" Content="▼" Padding="10,3"
+                    IsEnabled="{Binding CanMoveDown}" Click="OnMoveDown"
+                    ToolTip.Tip="Run this script later when several are triggered at once" />
+
+            <Button DockPanel.Dock="Right" Content="Help" Padding="10,3" Margin="4,0,0,0"
+                    Click="OnHelp"
+                    ToolTip.Tip="Script reference: triggers, conditions, actions and placeholders" />
+            <Button DockPanel.Dock="Right" Content="Credentials" Padding="10,3" Margin="0,0,4,0"
+                    IsVisible="{Binding HasRuntime}" Click="OnCredentials"
+                    ToolTip.Tip="API keys that a script's http: action can authenticate with" />
+            <Button DockPanel.Dock="Right" Content="Open folder" Padding="10,3"
+                    Click="OnOpenFolder"
+                    ToolTip.Tip="Open the scripts folder in the file manager" />
+            <Button DockPanel.Dock="Right" Content="Reload" Padding="10,3" Margin="0,0,4,0"
+                    Click="OnReload"
+                    ToolTip.Tip="Re-read every script from disk, picking up edits made outside MeshRF" />
+        </DockPanel>
+
+        <!-- Runtime strip. Hidden when the window is opened without a radio
+             session, since there is then no engine to switch on. -->
+        <Border Grid.Row="1" Margin="8,4,8,0" Padding="10,6" CornerRadius="3"
+                IsVisible="{Binding HasRuntime}"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                Background="{DynamicResource BrushPanelBackground}">
+            <DockPanel LastChildFill="True">
+                <CheckBox DockPanel.Dock="Left" Margin="0,0,16,0"
+                          Content="Run scripts"
+                          IsChecked="{Binding RuntimeEnabled, Mode=TwoWay}"
+                          ToolTip.Tip="Master switch. Off by default — turning it on lets MeshRF transmit unattended." />
+                <CheckBox DockPanel.Dock="Left" Margin="0,0,16,0"
+                          Content="Dry run"
+                          IsChecked="{Binding RuntimeDryRun, Mode=TwoWay}"
+                          ToolTip.Tip="Evaluate scripts and log what they would do, transmitting nothing. The way to test a script safely." />
+                <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource BrushSubtle}"
+                           Text="{Binding RuntimeStatus}" />
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="2" Margin="8,4,8,8" ColumnDefinitions="260,4,*">
+
+            <!-- Script list -->
+            <Border Grid.Column="0" BorderThickness="1" CornerRadius="3"
+                    BorderBrush="{DynamicResource BrushPanelBorder}"
+                    Background="{DynamicResource BrushPanelBackground}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Margin="8,6,8,6" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource BrushSubtle}"
+                               Text="Runs top to bottom. Double-click to edit." />
+                    <ListBox Name="ScriptList"
+                             Background="Transparent"
+                             ItemsSource="{Binding Scripts}"
+                             SelectedItem="{Binding SelectedScript, Mode=TwoWay}"
+                             DoubleTapped="OnListDoubleTapped">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="app:ScriptListItem">
+                                <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,1">
+                                    <CheckBox Grid.Column="0" Margin="0,0,6,0" MinWidth="0"
+                                              IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                              ToolTip.Tip="Enable or disable this script" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding FileName}" FontSize="10" FontFamily="Consolas"
+                                                   Foreground="{DynamicResource BrushSubtle}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" VerticalAlignment="Center"
+                                               Margin="4,0,2,0" FontWeight="Bold"
+                                               Text="{Binding StatusGlyph}"
+                                               ToolTip.Tip="{Binding StatusTip}"
+                                               Classes.status-error="{Binding HasError}"
+                                               Classes.status-warning="{Binding HasWarning}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource BrushSplitter}" />
+
+            <!-- Placeholder shown until a script is opened -->
+            <Border Grid.Column="2" BorderThickness="1" CornerRadius="3"
+                    IsVisible="{Binding IsEditorClosed}"
+                    BorderBrush="{DynamicResource BrushPanelBorder}"
+                    Background="{DynamicResource BrushPanelBackground}">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6">
+                    <TextBlock HorizontalAlignment="Center" Foreground="{DynamicResource BrushSubtle}"
+                               Text="Double-click a script to edit it." />
+                    <TextBlock HorizontalAlignment="Center" Foreground="{DynamicResource BrushSubtle}"
+                               FontSize="11" Text="New creates one from a commented template." />
+                </StackPanel>
+            </Border>
+
+            <!-- Editor -->
+            <Grid Grid.Column="2" IsVisible="{Binding IsEditorOpen}"
+                  RowDefinitions="Auto,*,Auto,Auto,Auto">
+
+                <DockPanel Grid.Row="0" Margin="0,0,0,4" LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center"
+                               FontFamily="Consolas" Text="{Binding EditorTitle}" />
+                    <Button DockPanel.Dock="Right" Content="Close" Padding="10,3" Click="OnCloseEditor" />
+                </DockPanel>
+
+                <Border Grid.Row="1" BorderThickness="1" CornerRadius="3"
+                        BorderBrush="{DynamicResource BrushPanelBorder}">
+                    <TextBox Name="Editor"
+                             AcceptsReturn="True"
+                             AcceptsTab="False"
+                             FontFamily="Consolas"
+                             TextWrapping="NoWrap"
+                             VerticalAlignment="Stretch"
+                             VerticalContentAlignment="Top"
+                             Background="{DynamicResource BrushPanelBackground}"
+                             BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             TextChanged="OnEditorTextChanged"
+                             KeyDown="OnEditorKeyDown" />
+                </Border>
+
+                <!-- Validation strip -->
+                <TextBlock Grid.Row="2" Margin="2,6,2,2" TextWrapping="Wrap"
+                           Classes="validation"
+                           Classes.warning="{Binding IsValidationWarning}"
+                           Classes.error="{Binding IsValidationError}"
+                           Text="{Binding ValidationSummary}" />
+
+                <!-- Problem list. Clicking a row puts the caret on the line. -->
+                <Border Grid.Row="3" Margin="0,4,0,0" MaxHeight="150"
+                        BorderThickness="1" CornerRadius="3"
+                        IsVisible="{Binding HasProblems}"
+                        BorderBrush="{DynamicResource BrushPanelBorder}"
+                        Background="{DynamicResource BrushPanelBackground}">
+                    <ListBox Name="ProblemList" Background="Transparent"
+                             ItemsSource="{Binding Problems}"
+                             SelectionChanged="OnProblemSelected">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="app:ScriptProblemItem">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <TextBlock Grid.Column="0" Margin="0,0,6,0" FontWeight="Bold"
+                                               Text="{Binding Glyph}"
+                                               Classes.status-error="{Binding IsError}"
+                                               Classes.status-warning="{Binding !IsError}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+
+                <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,8,0,0" Spacing="6"
+                            HorizontalAlignment="Right">
+                    <TextBlock VerticalAlignment="Center" FontSize="11" Margin="0,0,8,0"
+                               Foreground="{DynamicResource BrushSubtle}"
+                               IsVisible="{Binding HasErrors}"
+                               Text="Fix the problems above to save." />
+                    <Button Content="Revert" Padding="12,4"
+                            IsEnabled="{Binding CanRevert}" Click="OnRevert"
+                            ToolTip.Tip="Discard changes and reload this script from disk" />
+                    <Button Content="Save" Padding="12,4" IsDefault="True"
+                            IsEnabled="{Binding CanSave}" Click="OnSave" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

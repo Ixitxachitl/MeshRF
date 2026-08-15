@@ -633,6 +633,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // back as "off".
         LoadAutoReportSettings();
         LoadMqttSettings(_settings);
+        // Before the _settingsLoaded gate below, for the same reason as the
+        // auto-report load: the SaveSettings() there writes every field, so a
+        // later load would persist the defaults over the saved values.
+        ScriptsEnabled = _settings.ScriptsEnabled;
+        ScriptsDryRun = _settings.ScriptsDryRun;
 
         // Explicit rather than relying on OnUnitSystemNameChanged, whose
         // generated setter no-ops when the saved value equals the default —
@@ -651,6 +656,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RefreshMqttBridge();
 
         HookNodeFilter();
+        // After the settings gate: the engine's armed set depends on nothing
+        // saved here, but ScriptsEnabled does, and arming before it was loaded
+        // would leave the master switch reading as off on the first tick.
+        InitScripting();
         RefreshSelfNode(); // our own row, so the configured name resolves from the first frame
         InitTelemetrySources();
         InitGps();
@@ -700,6 +709,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // is published straight to the broker and never goes over the air, so
         // it needs no TX-capable device at all.
         TickMapReport();
+        // Scheduled script triggers (every:/at:), for the same reason the
+        // auto-report tick is up here: they need a transmitter, not a receiver.
+        TickScripts();
         // Also ahead of the running check: a message sent just before RX was
         // stopped still deserves to stop saying nothing and settle as failed,
         // and an ack we still owe a peer is dropped rather than left queued.
@@ -1257,6 +1269,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
         _settings.MapNodeLabelMode = MapNodeLabelMode;
         StoreAutoReportSettings();
+        _settings.ScriptsEnabled = ScriptsEnabled;
+        _settings.ScriptsDryRun = ScriptsDryRun;
         _settings.UnitSystem = UnitSystemName;
         _settings.UseFahrenheit = UseFahrenheit;
         _settings.UseMiles = UseMiles;
@@ -1357,12 +1371,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         ObservableCollection<ChannelMessage>? messages;
         ChannelConfig? channel;
         uint to = 0xFFFFFFFFu;
-        // A direct message must be PKC-sealed. Firmware rejects a text message
-        // addressed to it that decrypted with the channel PSK outright
-        // ("Rejecting legacy DM", Router.cpp) unless the node is licensed, so a
-        // legacy unicast DM is silently dropped by the peer.
-        byte[] myPriv = Array.Empty<byte>(), peerPub = Array.Empty<byte>();
-        bool usePkc = false;
 
         switch (SelectedTab)
         {
@@ -1373,24 +1381,68 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             case ConversationTabViewModel convoTab:
                 messages = convoTab.Messages;
                 to = convoTab.NodeNum;
-                myPriv = TryParseKeyBase64(MyPrivateKey);
-                peerPub = TryParseHex(_rxHost.PublicKeyHexFor(convoTab.NodeNum));
-                // Licensed operation rules PKC out entirely (firmware
-                // wouldEncryptWithPKC), so a DM falls back to the plaintext
-                // legacy form — which is the only lawful one on ham bands.
-                usePkc = !MyIsLicensed && myPriv.Length == 32 && peerPub.Length == 32;
                 // The channel is only needed for the legacy fallback.
                 channel = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault()?.Config;
-                if (!usePkc && channel is null) return;
                 break;
             default:
                 return;
         }
 
-        var text = MessageText.Trim();
+        if (await SendTextAsync(channel, to, MessageText.Trim(),
+                                PendingReplyPacketId, PendingReplyContext, messages) is false)
+            return;
+
+        MessageText = string.Empty;
+        CancelReply();
+    }
+
+    /// <summary>
+    /// Sends one text message and records it, independently of what the UI has
+    /// selected.
+    /// </summary>
+    /// <remarks>
+    /// Extracted from <see cref="SendMessageAsync"/> so automation scripts send
+    /// through exactly the same path the compose box does — duty-cycle gating,
+    /// licensed-mode blocking, MQTT uplink, delivery tracking and history
+    /// persistence all come along, rather than being reimplemented (and
+    /// eventually diverging) on a second send path.
+    /// </remarks>
+    /// <param name="channel">Channel to send on, or the fallback channel for a
+    /// legacy DM. May be null only when the message is PKC-sealed.</param>
+    /// <param name="to">Destination node, or 0xFFFFFFFF to broadcast.</param>
+    /// <param name="replyId">Packet to thread under, or 0.</param>
+    /// <param name="replyContext">Quote line shown above the echoed bubble.</param>
+    /// <param name="messages">Bubble list to echo into, or null to send without
+    /// a visible conversation (a script answering a channel it has no tab for).</param>
+    private async Task<bool> SendTextAsync(
+        ChannelConfig? channel,
+        uint to,
+        string text,
+        uint replyId,
+        string replyContext,
+        ObservableCollection<ChannelMessage>? messages)
+    {
+        if (_core is null || text.Length == 0) return false;
+
+        // A direct message must be PKC-sealed. Firmware rejects a text message
+        // addressed to it that decrypted with the channel PSK outright
+        // ("Rejecting legacy DM", Router.cpp) unless the node is licensed, so a
+        // legacy unicast DM is silently dropped by the peer.
+        byte[] myPriv = Array.Empty<byte>(), peerPub = Array.Empty<byte>();
+        bool usePkc = false;
+
+        if (to != 0xFFFFFFFFu)
+        {
+            myPriv = TryParseKeyBase64(MyPrivateKey);
+            peerPub = TryParseHex(_rxHost.PublicKeyHexFor(to));
+            // Licensed operation rules PKC out entirely (firmware
+            // wouldEncryptWithPKC), so a DM falls back to the plaintext
+            // legacy form — which is the only lawful one on ham bands.
+            usePkc = !MyIsLicensed && myPriv.Length == 32 && peerPub.Length == 32;
+        }
+        if (!usePkc && channel is null) return false;
+
         var packetId = NextPacketId();
-        uint replyId = PendingReplyPacketId;
-        var replyContext = PendingReplyContext;
 
         var frame = usePkc
             ? MeshEncoder.EncodePkcTextMessage(
@@ -1405,7 +1457,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!ok)
         {
             StatusText = "Failed to transmit (no TX-capable device selected?).";
-            return;
+            return false;
         }
 
         // Echo locally — we won't decode our own transmission back off the
@@ -1425,7 +1477,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             ReplyToPacketId = replyId,
             Delivery = MessageDelivery.Sent,
         };
-        messages.Add(sent);
+        messages?.Add(sent);
         // Both kinds are tracked, but they settle on different evidence — a DM
         // on the recipient's ROUTING reply, a channel message on hearing a
         // neighbour relay it. See AvaloniaMeshRxHost.PendingAck.
@@ -1436,8 +1488,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // history reloads classify these the same way received ones are.
         _rxHost.PersistOutgoingText(to, packetId, text,
                                     usePkc ? "PKC" : channel!.Name, replyId);
-        MessageText = string.Empty;
-        CancelReply();
+        return true;
     }
 
     private bool CanSendMessage() =>

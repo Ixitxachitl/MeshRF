@@ -205,6 +205,27 @@ public sealed class AppSettings
     public bool AutoReportAirQualityMetricsEnabled { get; set; } = false;
     public int AutoReportAirQualityMetricsSeconds { get; set; } = 3600;
 
+    // -- Automation scripts -------------------------------------------------
+
+    /// <summary>Master switch for the script engine. Off by default: turning it
+    /// on is a decision to let the app transmit unattended.</summary>
+    public bool ScriptsEnabled { get; set; } = false;
+
+    /// <summary>Evaluate scripts and log what they would do, without
+    /// transmitting. How a script is developed without keying up.</summary>
+    public bool ScriptsDryRun { get; set; } = false;
+
+    /// <summary>
+    /// API keys a script's <c>http:</c> action can authenticate with, by name.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in the script files because scripts are plain text that
+    /// gets copied between machines and pasted into chat when asking for help.
+    /// Each value is protected at rest the same way the MQTT password is, and
+    /// is never exposed to a script as a placeholder.
+    /// </remarks>
+    public List<Scripting.ScriptCredential> ScriptCredentials { get; set; } = new();
+
     /// <summary>Base64 X25519 public key for PKI direct messages (TX).</summary>
     public string UserPublicKey  { get; set; } = string.Empty;
 
@@ -357,6 +378,8 @@ public sealed class AppSettings
             settings.NormalizeUnitSystem();
             settings.UserPrivateKey = UnprotectSecretText(settings.UserPrivateKeyOnDisk, s_privateKeyEntropy, base64: true);
             settings.MqttPassword = UnprotectSecretText(settings.MqttPasswordOnDisk, s_mqttPasswordEntropy, base64: false);
+            foreach (var credential in settings.ScriptCredentials)
+                credential.Value = UnprotectSecretText(credential.ValueOnDisk, s_scriptCredentialEntropy, base64: false);
             return settings;
         }
         catch
@@ -373,6 +396,8 @@ public sealed class AppSettings
             NormalizeUnitSystem();
             UserPrivateKeyOnDisk = ProtectSecretText(UserPrivateKey, s_privateKeyEntropy, base64: true);
             MqttPasswordOnDisk = ProtectSecretText(MqttPassword, s_mqttPasswordEntropy, base64: false);
+            foreach (var credential in ScriptCredentials)
+                credential.ValueOnDisk = ProtectSecretText(credential.Value, s_scriptCredentialEntropy, base64: false);
             var json = JsonSerializer.Serialize(this, s_opts);
             _ = Task.Run(() =>
             {
@@ -395,6 +420,7 @@ public sealed class AppSettings
     // settings files keep working and encrypt on the next save.
     private static readonly byte[] s_privateKeyEntropy = Encoding.UTF8.GetBytes("MeshRF.UserPrivateKey.v1");
     private static readonly byte[] s_mqttPasswordEntropy = Encoding.UTF8.GetBytes("MeshRF.MqttPassword.v1");
+    private static readonly byte[] s_scriptCredentialEntropy = Encoding.UTF8.GetBytes("MeshRF.ScriptCredential.v1");
 
     private static string SecretKeyDir => Path.GetDirectoryName(SettingsPath)!;
 

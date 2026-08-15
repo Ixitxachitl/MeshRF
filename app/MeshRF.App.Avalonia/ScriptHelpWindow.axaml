@@ -1,0 +1,202 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.ScriptHelpWindow"
+        x:DataType="app:ScriptHelpWindow"
+        Title="Script Reference"
+        Width="720" Height="760"
+        MinWidth="520" MinHeight="400"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+
+    <Window.Styles>
+        <Style Selector="TextBlock.h">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="0,18,0,6" />
+        </Style>
+        <Style Selector="TextBlock.p">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+        </Style>
+        <!-- :is(), not a bare type selector: the code spans are
+             SelectableTextBlock (so the syntax can be copied out), and an
+             Avalonia type selector matches the exact type only. -->
+        <Style Selector=":is(TextBlock).code">
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+        </Style>
+        <Style Selector="Border.block">
+            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+    </Window.Styles>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="16">
+
+            <TextBlock FontSize="17" FontWeight="Bold" Text="MeshRF automation scripts" />
+            <TextBlock Classes="p" Margin="0,6,0,6"
+                       Text="Each script is one YAML file. A script says what wakes it up (trigger), what has to be true for it to go ahead (condition), and what to do (action). Scripts run top to bottom in the order shown in the list, and only when their enable box is ticked." />
+
+            <Border Classes="block">
+                <StackPanel Spacing="2">
+                    <TextBlock Classes="code" FontSize="11" Text="Scripts folder" Foreground="{DynamicResource BrushSubtle}" />
+                    <SelectableTextBlock Classes="code" FontSize="11" Text="{Binding ScriptsFolder}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Classes="h" Text="A complete script" />
+            <Border Classes="block">
+                <SelectableTextBlock Classes="code" FontSize="12" Text="{Binding ExampleScript}" />
+            </Border>
+            <TextBlock Classes="p"
+                       Text="Only trigger: and action: are required. Everything after # is a comment and is preserved when you save — the enable box edits just the enabled: line and leaves the rest of your file alone." />
+
+            <TextBlock Classes="h" Text="Triggers — what wakes the script up" />
+            <TextBlock Classes="p" Text="Any one trigger firing runs the script." />
+            <ItemsControl ItemsSource="{Binding Triggers}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="h" Text="Conditions — what has to be true" />
+            <TextBlock Classes="p" Text="Every condition listed has to hold, or the actions are skipped. Omit the whole block to act on anything the trigger matched." />
+            <ItemsControl ItemsSource="{Binding Conditions}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="h" Text="Actions — what to do" />
+            <TextBlock Classes="p" Text="Actions run top to bottom." />
+            <ItemsControl ItemsSource="{Binding Actions}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="h" Text="Calling a REST API" />
+            <TextBlock Classes="p" Text="An http: action fetches a value; a later reply: or send: broadcasts it." />
+            <Border Classes="block">
+                <SelectableTextBlock Classes="code" FontSize="12" Text="{Binding HttpExample}" />
+            </Border>
+            <ItemsControl ItemsSource="{Binding Http}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="h" Text="Placeholders" />
+            <TextBlock Classes="p" Text="Any of these may appear inside message text and are replaced when the script fires. Anything else in braces is sent as literal text, and the editor warns about it." />
+            <ItemsControl ItemsSource="{Binding Placeholders}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="h" Text="Limits, and why they are on by default" />
+            <TextBlock Classes="p"
+                       Text="Airtime is shared with every other node in range, so a script that answers too eagerly is antisocial rather than merely noisy. Every script gets a cooldown (60s by default, applied per sending node) and an hourly ceiling (6 by default), and the engine applies its own budget across all scripts on top of those." />
+            <ItemsControl ItemsSource="{Binding Limits}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Classes="p" Margin="0,6,0,0"
+                       Text="Scripts never answer your own node, never answer a node you have ignored, and a message a script sent can never trigger another script — one hop of automation, always. Scripted messages go out through the same path as ones you type, so they observe the duty cycle, the licensed-mode block on encrypted channels, and MQTT uplink exactly the same way." />
+
+            <TextBlock Classes="h" Text="Running scripts" />
+            <ItemsControl ItemsSource="{Binding Running}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="h" Text="Values" />
+            <ItemsControl ItemsSource="{Binding Values}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="h" Text="In the editor" />
+            <ItemsControl ItemsSource="{Binding EditorTips}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+        </StackPanel>
+    </ScrollViewer>
+</Window>

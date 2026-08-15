@@ -34,6 +34,11 @@
          in either app. -->
     <PackageReference Include="System.IO.Ports" Version="9.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
+    <!-- Automation scripts are hand-edited YAML files under
+         %APPDATA%\MeshRF\scripts. Only the representation model is used (see
+         ScriptParser) — never the reflection-based serializer — so every
+         parse error keeps the line/column the user needs to fix it. -->
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
   <ItemGroup>

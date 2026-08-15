@@ -454,6 +454,9 @@
                             <Button DockPanel.Dock="Right" Content="MQTT" Padding="8,2" Margin="0,0,4,0"
                                     Click="OnOpenMqttSettings"
                                     ToolTip.Tip="Open the MQTT bridge settings (uplink/downlink to a broker)" />
+                            <Button DockPanel.Dock="Right" Content="Scripts" Padding="8,2" Margin="0,0,4,0"
+                                    Click="OnOpenScripts"
+                                    ToolTip.Tip="Automation scripts: reply to messages and send on a schedule" />
                             <!-- Our own recorded history, the counterpart of the
                                  per-node entries in the node grid's menu. -->
                             <Button DockPanel.Dock="Right" Content="Location" Padding="8,2" Margin="0,0,4,0"
