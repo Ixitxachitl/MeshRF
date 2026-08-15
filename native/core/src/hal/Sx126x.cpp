@@ -15,7 +15,11 @@ namespace {
 // --- Command opcodes (datasheet table 11-1) ----------------------------
 enum : std::uint8_t {
     kCmdSetStandby            = 0x80,
+    kCmdSetRx                 = 0x82,
     kCmdSetTx                 = 0x83,
+    kCmdGetRxBufferStatus     = 0x13,
+    kCmdGetPacketStatus       = 0x14,
+    kCmdReadBuffer            = 0x1E,
     kCmdSetRfFrequency        = 0x86,
     kCmdSetPacketType         = 0x8A,
     kCmdSetModulationParams   = 0x8B,
@@ -48,9 +52,15 @@ enum : std::uint16_t {
 
 // --- IRQ bits ----------------------------------------------------------
 enum : std::uint16_t {
-    kIrqTxDone  = 0x0001,
-    kIrqTimeout = 0x0200,
+    kIrqTxDone    = 0x0001,
+    kIrqRxDone    = 0x0002,
+    kIrqHeaderErr = 0x0020,
+    kIrqCrcErr    = 0x0040,
+    kIrqTimeout   = 0x0200,
 };
+
+// SetRx timeout value meaning "stay in receive until told otherwise".
+constexpr std::uint32_t kRxContinuous = 0xFFFFFFu;
 
 enum : std::uint8_t {
     kPacketTypeLora = 0x01,
@@ -268,6 +278,26 @@ bool Sx126xRadio::write_buffer(std::uint8_t offset, std::span<const std::uint8_t
     return command(kCmdWriteBuffer, params, error);
 }
 
+bool Sx126xRadio::read_buffer(std::uint8_t offset, std::span<std::uint8_t> out,
+                              std::string& error) {
+    if (!wait_busy(100, error)) return false;
+    // opcode, offset, one NOP that clocks out the status byte, then one NOP
+    // per byte read.
+    const std::size_t total = out.size() + 3;
+    std::vector<std::uint8_t> tx(total, kNop);
+    std::vector<std::uint8_t> rx(total, 0);
+    tx[0] = kCmdReadBuffer;
+    tx[1] = offset;
+
+    if (!bus_.write_pin(kCh341PinCs, false)) { error = "CH341: CS assert failed"; return false; }
+    const bool ok = bus_.transfer(tx, rx);
+    if (!bus_.write_pin(kCh341PinCs, true)) { error = "CH341: CS release failed"; return false; }
+    if (!ok) { error = "CH341: buffer read failed"; return false; }
+
+    std::copy(rx.begin() + 3, rx.end(), out.begin());
+    return true;
+}
+
 bool Sx126xRadio::modify_register(std::uint16_t addr, std::uint8_t clear_mask,
                                   std::uint8_t set_mask, std::string& error) {
     std::uint8_t value = 0;
@@ -422,12 +452,8 @@ bool Sx126xRadio::begin(std::string& error) {
     return modify_register(kRegTxClampConfig, 0x00, 0x1E, error);
 }
 
-bool Sx126xRadio::transmit(const PacketTxConfig& cfg,
-                           std::span<const std::uint8_t> payload,
-                           std::string& error) {
-    if (payload.empty()) { error = "empty payload"; return false; }
-    if (payload.size() > 255) { error = "payload exceeds the 255-byte LoRa limit"; return false; }
-
+bool Sx126xRadio::configure_phy(const PacketRadioConfig& cfg, std::uint8_t payload_len,
+                                bool for_transmit, std::string& error) {
     if (!set_standby(error)) return false;
 
     // 1. Frequency, then image calibration for its band.
@@ -446,21 +472,18 @@ bool Sx126xRadio::transmit(const PacketTxConfig& cfg,
         if (!command(kCmdSetRfFrequency, p, error)) return false;
     }
 
-    // 2. PA configuration. The +22 dBm setting is used at every power level
-    //    and the output is trimmed with SetTxParams, which the datasheet
-    //    permits; OCP has to be restored afterwards because SetPaConfig
-    //    resets it.
-    {
+    // 2/3. PA and output power — transmit only. The +22 dBm PA setting is used
+    //      at every power level and the output is trimmed with SetTxParams,
+    //      which the datasheet permits; OCP has to be restored afterwards
+    //      because SetPaConfig resets it. The power itself is converted from
+    //      antenna dBm by subtracting the module's PA gain and clamping to
+    //      what the SX1262 can actually be asked for.
+    if (for_transmit) {
         const std::uint8_t pa[] = {0x04, 0x07, 0x00, 0x01};
         if (!command(kCmdSetPaConfig, pa, error)) return false;
         const std::uint8_t ocp[] = {kOcp140Ma};
         if (!write_register(kRegOcpConfig, ocp, error)) return false;
-    }
 
-    // 3. Output power. The UI works in antenna dBm; subtract the module's PA
-    //    gain to get the value the chip should produce, then clamp to what
-    //    the SX1262 can actually be asked for.
-    {
         const std::uint8_t p[] = {
             static_cast<std::uint8_t>(sx126x_chip_power_dbm(profile_, cfg.power_dbm)),
             kPaRamp200Us,
@@ -491,7 +514,7 @@ bool Sx126xRadio::transmit(const PacketTxConfig& cfg,
             static_cast<std::uint8_t>((cfg.params.preamble_symbols >> 8) & 0xFF),
             static_cast<std::uint8_t>(cfg.params.preamble_symbols & 0xFF),
             static_cast<std::uint8_t>(cfg.params.explicit_header ? 0x00 : 0x01),
-            static_cast<std::uint8_t>(payload.size()),
+            payload_len,
             static_cast<std::uint8_t>(cfg.params.crc_enabled ? 0x01 : 0x00),
             0x00, // standard IQ; Meshtastic does not invert
         };
@@ -506,10 +529,21 @@ bool Sx126xRadio::transmit(const PacketTxConfig& cfg,
         if (!write_register(kRegSyncWordMsb, p, error)) return false;
     }
 
+    const std::uint8_t base[] = {0x00, 0x00};
+    return command(kCmdSetBufferBaseAddress, base, error);
+}
+
+bool Sx126xRadio::transmit(const PacketRadioConfig& cfg,
+                           std::span<const std::uint8_t> payload,
+                           std::string& error) {
+    if (payload.empty()) { error = "empty payload"; return false; }
+    if (payload.size() > 255) { error = "payload exceeds the 255-byte LoRa limit"; return false; }
+
+    if (!configure_phy(cfg, static_cast<std::uint8_t>(payload.size()), true, error))
+        return false;
+
     // 7. Payload.
     {
-        const std::uint8_t base[] = {0x00, 0x00};
-        if (!command(kCmdSetBufferBaseAddress, base, error)) return false;
         if (!write_buffer(0x00, payload, error)) return false;
     }
 
@@ -582,6 +616,86 @@ bool Sx126xRadio::transmit(const PacketTxConfig& cfg,
 
     if (sent && !check_device_errors(error)) return false;
     return sent;
+}
+
+bool Sx126xRadio::idle(std::string& error) {
+    const bool ok = set_standby(error);
+    if (profile_.has_rxen) bus_.write_pin(kCh341PinRxen, false);
+    return ok;
+}
+
+bool Sx126xRadio::enter_rx(const PacketRadioConfig& cfg, std::string& error) {
+    // 255 rather than a real length: in explicit-header mode the received size
+    // comes from the header, and this field is only the implicit-mode fixed
+    // length. Passing the maximum keeps any legal frame acceptable.
+    if (!configure_phy(cfg, 255, false, error)) return false;
+
+    {
+        constexpr std::uint16_t kWanted = kIrqRxDone | kIrqCrcErr | kIrqHeaderErr;
+        const std::uint8_t p[] = {
+            0xFF, 0xFF, // everything visible in the status register
+            static_cast<std::uint8_t>(kWanted >> 8), static_cast<std::uint8_t>(kWanted & 0xFF),
+            0x00, 0x00,
+            0x00, 0x00,
+        };
+        if (!command(kCmdSetDioIrqParams, p, error)) return false;
+    }
+    if (!clear_irq_status(error)) return false;
+
+    // RF switch the other way round from transmit: the receive path has to be
+    // enabled, and DIO2 drops the transmit side by itself.
+    if (profile_.has_rxen && !bus_.write_pin(kCh341PinRxen, true)) {
+        error = "CH341: could not drive RXen high for receive";
+        return false;
+    }
+
+    const std::uint8_t p[] = {
+        static_cast<std::uint8_t>((kRxContinuous >> 16) & 0xFF),
+        static_cast<std::uint8_t>((kRxContinuous >> 8) & 0xFF),
+        static_cast<std::uint8_t>(kRxContinuous & 0xFF),
+    };
+    return command(kCmdSetRx, p, error);
+}
+
+bool Sx126xRadio::poll_rx(ReceivedPacket& out, bool& got, std::string& error) {
+    got = false;
+
+    std::uint16_t irq = 0;
+    if (!get_irq_status(irq, error)) return false;
+    if (!(irq & (kIrqRxDone | kIrqCrcErr | kIrqHeaderErr))) return true; // nothing yet
+
+    // A bad CRC or header means the radio already knows the frame is corrupt.
+    // There is nothing to hand up — unlike the software demodulator, which can
+    // still show the raw bytes — so drop it and keep receiving.
+    if (irq & (kIrqCrcErr | kIrqHeaderErr)) {
+        clear_irq_status(error);
+        return true;
+    }
+
+    std::array<std::uint8_t, 2> status{};
+    if (!command_read(kCmdGetRxBufferStatus, status, error)) return false;
+    const std::uint8_t length = status[0];
+    const std::uint8_t offset = status[1];
+
+    if (length == 0) {
+        clear_irq_status(error);
+        return true;
+    }
+
+    out.payload.assign(length, 0);
+    if (!read_buffer(offset, out.payload, error)) return false;
+
+    // Real numbers from the radio, not estimates off an IQ stream: RSSI is in
+    // half-dBm steps and SNR in quarter-dB steps, both negated per the
+    // datasheet's packet-status encoding.
+    std::array<std::uint8_t, 3> pkt{};
+    if (!command_read(kCmdGetPacketStatus, pkt, error)) return false;
+    out.rssi_dbm = -static_cast<float>(pkt[0]) / 2.0f;
+    out.snr_db   = static_cast<float>(static_cast<std::int8_t>(pkt[1])) / 4.0f;
+
+    if (!clear_irq_status(error)) return false;
+    got = true;
+    return true;
 }
 
 } // namespace mrf::hal

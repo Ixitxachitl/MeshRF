@@ -15,7 +15,7 @@
 #pragma once
 
 #include "Ch341Transport.h"
-#include "mrf/hal/PacketTxDevice.h"
+#include "mrf/hal/PacketRadio.h"
 
 #include <cstdint>
 #include <span>
@@ -78,9 +78,25 @@ public:
     // Configure the PHY for this burst, load the payload and key the
     // transmitter, blocking until TX_DONE. Returns false with `error` set on
     // any SPI failure, device error, or timeout.
-    bool transmit(const PacketTxConfig& cfg,
+    bool transmit(const PacketRadioConfig& cfg,
                   std::span<const std::uint8_t> payload,
                   std::string& error);
+
+    // Put the radio into continuous receive on `cfg`. Call poll_rx() to drain
+    // it. Separate from poll_rx() so the caller owns the thread and can drop
+    // out of receive to transmit.
+    bool enter_rx(const PacketRadioConfig& cfg, std::string& error);
+
+    // Check for a completed frame. Returns true and fills `out` when one
+    // arrived, false when nothing is ready (in which case `error` is empty) or
+    // on failure (`error` set). Frames failing the hardware CRC are dropped
+    // and reported as "nothing ready" — the radio has already told us they are
+    // corrupt, and there is nothing useful to hand up.
+    bool poll_rx(ReceivedPacket& out, bool& got, std::string& error);
+
+    // Drop out of receive or transmit into standby and park the RF switch.
+    // Safe to call when the radio is already idle.
+    bool idle(std::string& error);
 
 private:
     // --- transport helpers ---------------------------------------------
@@ -95,8 +111,17 @@ private:
                        std::string& error);
     bool write_buffer(std::uint8_t offset, std::span<const std::uint8_t> data,
                       std::string& error);
+    bool read_buffer(std::uint8_t offset, std::span<std::uint8_t> out,
+                     std::string& error);
     bool modify_register(std::uint16_t addr, std::uint8_t clear_mask,
                          std::uint8_t set_mask, std::string& error);
+
+    // Applies frequency, PA, modulation, packet layout and sync word. Shared
+    // by transmit() and enter_rx() so the two directions can never drift apart
+    // on the PHY — a receiver configured even slightly differently from the
+    // transmitter simply hears nothing, with no error to explain it.
+    bool configure_phy(const PacketRadioConfig& cfg, std::uint8_t payload_len,
+                       bool for_transmit, std::string& error);
 
     // --- radio helpers -------------------------------------------------
     bool reset(std::string& error);

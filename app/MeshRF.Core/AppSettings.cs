@@ -67,6 +67,10 @@ public sealed class AppSettings
     /// transmitter stays shut until the user picks.</summary>
     public string Sx1262Board { get; set; } = "Unspecified";
 
+    /// <summary>EEPROM serial of the SX1262 stick to use when several are
+    /// attached. Empty takes the first that answers.</summary>
+    public string Sx1262Serial { get; set; } = "";
+
     /// <summary>SX1262 transmit power at the antenna port, in dBm. Clamped by
     /// the native side to the selected board's range (MeshStick -9..22,
     /// MeshToad -1..30). Defaults to the MeshStick maximum, which is also a

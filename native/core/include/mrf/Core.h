@@ -2,7 +2,7 @@
 #pragma once
 
 #include "mrf/Export.h"
-#include "mrf/hal/PacketTxDevice.h"
+#include "mrf/hal/PacketRadio.h"
 #include "mrf/hal/RadioDevice.h"
 #include "mrf/modem/Preset.h"
 #include "mrf/router/FloodingRouter.h"
@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace mrf {
 
@@ -90,6 +92,17 @@ public:
     // than the UI reports.
     void set_sx1262_board(hal::Sx126xBoard board);
     [[nodiscard]] hal::Sx126xBoard sx1262_board() const noexcept;
+
+    // Which stick to use when several are attached, by EEPROM serial — the
+    // only thing that distinguishes them. Empty takes the first that answers.
+    // Ignored while RX is running; stop first to switch sticks.
+    void set_sx1262_serial(std::string_view serial);
+    [[nodiscard]] std::string sx1262_serial() const;
+
+    // Serials of the attached sticks, for a device picker. While a radio is
+    // open this returns just that radio's serial, because enumeration has to
+    // claim each device in turn and cannot run against one already in use.
+    [[nodiscard]] std::vector<std::string> list_sx1262_serials() const;
 
     // Transmit power at the antenna port, in dBm, for packet TX devices. The
     // backend subtracts any external PA gain and clamps to the board's range,

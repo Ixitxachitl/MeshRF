@@ -69,6 +69,19 @@ MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
 MRF_API int32_t MRF_CALL mrf_core_set_sx1262_board(mrf_core_t* core, int32_t board);
 MRF_API int32_t MRF_CALL mrf_core_get_sx1262_board(const mrf_core_t* core);
 
+// Which stick to use when several are attached, by EEPROM serial — the only
+// thing that distinguishes them, since they share VID/PID and report no
+// product string. Empty or NULL takes the first that answers. Ignored while RX
+// is running. mrf_core_list_sx1262_serials fills `buf` with the attached
+// serials separated by '\n' and returns the byte count written (excluding the
+// NUL); while a radio is open it reports only that radio's serial, because
+// enumeration has to claim each device in turn.
+MRF_API int32_t  MRF_CALL mrf_core_set_sx1262_serial(mrf_core_t* core, const char* serial);
+MRF_API uint32_t MRF_CALL mrf_core_get_sx1262_serial(const mrf_core_t* core,
+                                                     char* buf, uint32_t capacity);
+MRF_API uint32_t MRF_CALL mrf_core_list_sx1262_serials(const mrf_core_t* core,
+                                                       char* buf, uint32_t capacity);
+
 // Transmit power at the antenna port, in dBm, for the SX1262 path. Clamped to
 // the selected board's range. The HackRF path is unaffected and keeps using
 // the txvga_gain_db argument to mrf_core_transmit.

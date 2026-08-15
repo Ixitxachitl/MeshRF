@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Text;
 using MeshRF.Interop;
 
 namespace MeshRF;
@@ -46,8 +47,10 @@ public enum RadioDeviceKind
     HackRf = 1,
     RtlSdr = 2,
     Null = 3,
-    /// <summary>CH341+SX1262 USB stick. Transmit only — it is a hardware LoRa
-    /// modem, not an SDR, so it can never be selected as an RX device.</summary>
+    /// <summary>CH341+SX1262 USB stick: a hardware LoRa modem rather than an
+    /// SDR. Selectable for RX, TX or both — one stick serves both directions
+    /// half-duplex — but it produces no IQ, so the spectrum, waterfall, packet
+    /// spectrogram and IQ capture are all unavailable while it is receiving.</summary>
     Sx1262 = 4,
 }
 
@@ -94,7 +97,7 @@ public sealed class MeshtasticCore : IDisposable
     /// step with the native side whenever an entry point is added that the
     /// managed layer calls unconditionally.
     /// </summary>
-    private const uint RequiredAbiVersion = 8;
+    private const uint RequiredAbiVersion = 9;
 
     public MeshtasticCore()
     {
@@ -218,6 +221,64 @@ public sealed class MeshtasticCore : IDisposable
             }
             finally { _lock.ExitReadLock(); }
         }
+    }
+
+    /// <summary>
+    /// Which stick to use when several are attached, by EEPROM serial — the
+    /// only thing that distinguishes them. Empty takes the first that answers.
+    /// Ignored while RX is running.
+    /// </summary>
+    public string Sx1262Serial
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (_disposed) return string.Empty;
+                unsafe
+                {
+                    const int cap = 128;
+                    byte* buf = stackalloc byte[cap];
+                    var n = NativeMethods.CoreGetSx1262Serial(_handle, buf, cap);
+                    return n == 0 ? string.Empty : Encoding.UTF8.GetString(buf, (int)n);
+                }
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+        set
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (!_disposed) NativeMethods.CoreSetSx1262Serial(_handle, value ?? string.Empty);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
+
+    /// <summary>
+    /// Serials of the attached SX1262 sticks, for a device picker. While a
+    /// radio is open this reports only that radio's serial — enumeration has to
+    /// claim each device in turn and cannot run against one already in use.
+    /// </summary>
+    public IReadOnlyList<string> ListSx1262Serials()
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return Array.Empty<string>();
+            unsafe
+            {
+                const int cap = 1024;
+                byte* buf = stackalloc byte[cap];
+                var n = NativeMethods.CoreListSx1262Serials(_handle, buf, cap);
+                if (n == 0) return Array.Empty<string>();
+                return Encoding.UTF8.GetString(buf, (int)n)
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            }
+        }
+        finally { _lock.ExitReadLock(); }
     }
 
     /// <summary>

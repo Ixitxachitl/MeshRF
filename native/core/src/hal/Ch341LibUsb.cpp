@@ -77,8 +77,10 @@ static_assert(reverse_bits(0xA8) == 0x15, "bit reversal");
 
 class Ch341LibUsbTransport final : public Ch341Transport {
 public:
-    Ch341LibUsbTransport(libusb_context* ctx, libusb_device_handle* h, std::string name)
-        : ctx_(ctx), handle_(h), name_(std::move(name)), data_(kDataIdle) {}
+    Ch341LibUsbTransport(libusb_context* ctx, libusb_device_handle* h, std::string name,
+                         std::string serial)
+        : ctx_(ctx), handle_(h), name_(std::move(name)),
+          serial_(std::move(serial)), data_(kDataIdle) {}
 
     ~Ch341LibUsbTransport() override {
         // Park the radio: CS released, held in reset, RF switch off.
@@ -99,6 +101,7 @@ public:
     }
 
     std::string describe() const override { return name_; }
+    std::string serial() const override { return serial_; }
 
     bool write_pin(std::uint8_t pin, bool high) override {
         if (pin > 5) return false;
@@ -178,6 +181,7 @@ private:
     libusb_context*           ctx_;
     libusb_device_handle*     handle_;
     std::string               name_;
+    std::string               serial_;
     std::uint8_t              data_;
     std::vector<std::uint8_t> packet_;
     std::vector<std::uint8_t> in_;
@@ -185,51 +189,115 @@ private:
 
 } // namespace
 
-std::unique_ptr<Ch341Transport> open_ch341(std::string& status) {
+namespace {
+
+// Reads the EEPROM serial each stick carries. It is the only thing that
+// distinguishes two otherwise identical CH341 devices, so it is what the
+// device picker selects on.
+std::string read_serial(libusb_device_handle* h) {
+    libusb_device_descriptor desc{};
+    if (libusb_get_device_descriptor(libusb_get_device(h), &desc) != 0) return {};
+    if (desc.iSerialNumber == 0) return {};
+    unsigned char buf[64] = {};
+    if (libusb_get_string_descriptor_ascii(h, desc.iSerialNumber, buf, sizeof(buf)) <= 0)
+        return {};
+    return reinterpret_cast<const char*>(buf);
+}
+
+} // namespace
+
+std::unique_ptr<Ch341Transport> open_ch341(const std::string& serial, std::string& status) {
     libusb_context* ctx = nullptr;
     if (libusb_init(&ctx) != 0) {
         status = "libusb_init failed";
         return nullptr;
     }
 
-    libusb_device_handle* h =
-        libusb_open_device_with_vid_pid(ctx, kVid, kPid);
-    if (!h) {
+    libusb_device** list = nullptr;
+    const ssize_t count = libusb_get_device_list(ctx, &list);
+    if (count < 0) {
         libusb_exit(ctx);
-        status = "no CH341 device found (1a86:5512)";
+        status = "libusb could not enumerate devices";
         return nullptr;
     }
 
-    // On Linux the ch341 usb-serial module usually grabs the device first.
-    libusb_set_auto_detach_kernel_driver(h, 1);
-    if (const int rc = libusb_claim_interface(h, 0); rc != 0) {
-        libusb_close(h);
+    libusb_device_handle* chosen = nullptr;
+    std::string chosen_serial;
+    std::string claim_error;
+
+    for (ssize_t i = 0; i < count && !chosen; ++i) {
+        libusb_device_descriptor desc{};
+        if (libusb_get_device_descriptor(list[i], &desc) != 0) continue;
+        if (desc.idVendor != kVid || desc.idProduct != kPid) continue;
+
+        libusb_device_handle* h = nullptr;
+        if (libusb_open(list[i], &h) != 0 || !h) continue;
+
+        const std::string found = read_serial(h);
+        if (!serial.empty() && found != serial) {
+            libusb_close(h); // someone else's stick
+            continue;
+        }
+
+        // On Linux the ch341 usb-serial module usually grabs the device first.
+        libusb_set_auto_detach_kernel_driver(h, 1);
+        if (const int rc = libusb_claim_interface(h, 0); rc != 0) {
+            claim_error = std::string("could not claim CH341 interface: ") +
+                          libusb_error_name(rc) +
+                          " (blacklist the ch341 kernel module, or check udev permissions)";
+            libusb_close(h);
+            continue;
+        }
+        chosen = h;
+        chosen_serial = found;
+    }
+
+    libusb_free_device_list(list, 1);
+
+    if (!chosen) {
         libusb_exit(ctx);
-        status = std::string("could not claim CH341 interface: ") +
-                 libusb_error_name(rc) +
-                 " (blacklist the ch341 kernel module, or check udev permissions)";
+        status = !claim_error.empty() ? claim_error
+               : serial.empty()       ? "no CH341 device found (1a86:5512)"
+                                      : "CH341 with serial " + serial + " is not connected";
         return nullptr;
     }
 
     std::string name = "CH341 (1a86:5512)";
-    libusb_device_descriptor desc{};
-    if (libusb_get_device_descriptor(libusb_get_device(h), &desc) == 0 &&
-        desc.iSerialNumber != 0) {
-        unsigned char serial[64] = {};
-        if (libusb_get_string_descriptor_ascii(h, desc.iSerialNumber, serial,
-                                               sizeof(serial)) > 0) {
-            name += " serial ";
-            name += reinterpret_cast<const char*>(serial);
-        }
-    }
+    if (!chosen_serial.empty()) name += " serial " + chosen_serial;
 
-    auto dev = std::make_unique<Ch341LibUsbTransport>(ctx, h, std::move(name));
+    auto dev = std::make_unique<Ch341LibUsbTransport>(ctx, chosen, std::move(name),
+                                                     chosen_serial);
     if (!dev->configure()) {
         status = "CH341 claimed but SPI setup failed";
         return nullptr; // destructor releases and closes
     }
     status = dev->describe();
     return dev;
+}
+
+std::vector<std::string> list_ch341_serials() {
+    std::vector<std::string> out;
+    libusb_context* ctx = nullptr;
+    if (libusb_init(&ctx) != 0) return out;
+
+    libusb_device** list = nullptr;
+    const ssize_t count = libusb_get_device_list(ctx, &list);
+    for (ssize_t i = 0; i < count; ++i) {
+        libusb_device_descriptor desc{};
+        if (libusb_get_device_descriptor(list[i], &desc) != 0) continue;
+        if (desc.idVendor != kVid || desc.idProduct != kPid) continue;
+
+        libusb_device_handle* h = nullptr;
+        if (libusb_open(list[i], &h) != 0 || !h) continue;
+        std::string serial = read_serial(h);
+        libusb_close(h);
+        // A stick with a blank EEPROM cannot be addressed by serial; listing it
+        // would produce an entry that then fails to open.
+        if (!serial.empty()) out.push_back(std::move(serial));
+    }
+    if (count >= 0) libusb_free_device_list(list, 1);
+    libusb_exit(ctx);
+    return out;
 }
 
 bool ch341_backend_available() {
@@ -247,10 +315,12 @@ bool ch341_backend_available() {
 
 namespace mrf::hal {
 
-std::unique_ptr<Ch341Transport> open_ch341(std::string& status) {
+std::unique_ptr<Ch341Transport> open_ch341(const std::string&, std::string& status) {
     status = "built without libusb; SX1262 USB sticks are unavailable";
     return nullptr;
 }
+
+std::vector<std::string> list_ch341_serials() { return {}; }
 
 bool ch341_backend_available() { return false; }
 

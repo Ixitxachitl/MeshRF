@@ -21,11 +21,12 @@ enum class DeviceKind : int {
     HackRf = 1,
     RtlSdr = 2,
     Null   = 3, // no device selected
-    // CH341+SX1262 USB stick (MeshStick / MeshToad). TX only, and not an
-    // IRadioDevice at all: it takes framed bytes rather than IQ, so it is
-    // opened through open_packet_tx_device() in PacketTxDevice.h. It appears
-    // in this enum because RX/TX device selection, persistence and the C ABI
-    // are all keyed on DeviceKind.
+    // CH341+SX1262 USB stick (MeshStick / MeshToad). Not an IRadioDevice at
+    // all: it takes and returns framed bytes rather than IQ, so it is opened
+    // through open_packet_radio() in PacketRadio.h. Selectable for RX, TX or
+    // both — one stick serves both directions half-duplex. It appears in this
+    // enum because RX/TX device selection, persistence and the C ABI are all
+    // keyed on DeviceKind.
     Sx1262 = 4,
 };
 

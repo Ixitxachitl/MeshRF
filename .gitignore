@@ -84,3 +84,7 @@ scripts/replay_out.txt
 # OS
 Thumbs.db
 .DS_Store
+
+# MSBuild generates these next to the WPF project during a build; one was
+# committed by accident in 8752482.
+*_wpftmp.csproj

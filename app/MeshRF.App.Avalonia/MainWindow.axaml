@@ -235,8 +235,20 @@
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
-                <TextBlock Text="Rate" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <!-- Only shown with more than one stick attached: the EEPROM serial
+                     is the only thing that tells two identical CH341 devices apart. -->
+                <TextBlock Text="Stick" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2"
+                           IsVisible="{Binding ShowSx1262SerialPicker}" />
+                <ComboBox ItemsSource="{Binding Sx1262Serials}"
+                          SelectedItem="{Binding SelectedSx1262Serial}"
+                          IsEnabled="{Binding !IsRunning}"
+                          IsVisible="{Binding ShowSx1262SerialPicker}"
+                          FontSize="11" Width="110" Height="26" Margin="0,0,8,2"
+                          ToolTip.Tip="Which SX1262 stick to use, by EEPROM serial number" />
+                <TextBlock Text="Rate" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2"
+                           IsVisible="{Binding HasSpectrum}" />
                 <ComboBox ItemsSource="{Binding SampleRateOptions}"
+                          IsVisible="{Binding HasSpectrum}"
                           SelectedItem="{Binding SelectedRxSampleRate}"
                           IsEnabled="{Binding CanSelectRxSampleRate}"
                           FontSize="11" Width="110" Height="26" Margin="0,0,8,2"
@@ -992,7 +1004,20 @@
                 <Border Grid.Row="0" Margin="3,0,0,3"
                         Background="{DynamicResource BrushSpectrumBackground}"
                         BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-                    <Grid x:Name="SpectrumLayoutGrid" RowDefinitions="1*,5,2*">
+                    <Grid>
+                    <!-- Receiving through the SX1262 leaves nothing to draw here: a
+                         hardware modem hands up decoded frames, never IQ. The whole
+                         spectrum stack is replaced by an explanation rather than
+                         left as a dead black rectangle the user has to interpret. -->
+                    <TextBlock IsVisible="{Binding !HasSpectrum}"
+                               Text="{Binding NoSpectrumMessage}"
+                               TextWrapping="Wrap" TextAlignment="Center"
+                               MaxWidth="560" Margin="24"
+                               FontSize="12" LineHeight="19"
+                               Foreground="{DynamicResource BrushSubtle}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Grid x:Name="SpectrumLayoutGrid" RowDefinitions="1*,5,2*"
+                          IsVisible="{Binding HasSpectrum}">
                         <local:SpectrumView x:Name="Spectrum" Grid.Row="0"
                                             FloorDb="{Binding WaterfallFloorDb}"
                                             CeilDb="{Binding WaterfallCeilDb}" />
@@ -1045,6 +1070,7 @@
                                 </DockPanel>
                             </Border>
                         </Grid>
+                    </Grid>
                     </Grid>
                 </Border>
 

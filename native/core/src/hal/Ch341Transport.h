@@ -37,6 +37,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace mrf::hal {
 
@@ -53,8 +54,12 @@ class Ch341Transport {
 public:
     virtual ~Ch341Transport() = default;
 
-    // Human-readable identity, e.g. "CH341 #0 (serial 00439056)".
+    // Human-readable identity, e.g. "CH341 #0 serial 00439056".
     virtual std::string describe() const = 0;
+
+    // The bare EEPROM serial, for matching and for the device picker. Empty
+    // when the stick has no serial programmed.
+    virtual std::string serial() const = 0;
 
     // Drive one of the free D-pins (D0/D1/D2 only — D4 and D6 are inputs).
     virtual bool write_pin(std::uint8_t pin, bool high) = 0;
@@ -78,10 +83,19 @@ public:
 // writes to the SX1262 for meshtasticd (meshtastic/firmware#3799).
 inline constexpr std::size_t kCh341SpiChunk = 28;
 
-// Open the first CH341 bridge that answers. Returns nullptr when none can be
-// claimed; `status` is filled with a human-readable reason either way.
-// Implemented once per platform (Ch341Windows.cpp / Ch341LibUsb.cpp).
-std::unique_ptr<Ch341Transport> open_ch341(std::string& status);
+// Open a CH341 bridge. `serial` selects a specific stick when several are
+// attached; empty takes the first that answers. Returns nullptr when none can
+// be claimed or the requested serial is absent; `status` is filled with a
+// human-readable reason either way. Implemented once per platform
+// (Ch341Windows.cpp / Ch341LibUsb.cpp).
+std::unique_ptr<Ch341Transport> open_ch341(const std::string& serial, std::string& status);
+
+// Serial numbers of every attached CH341, for a device picker. These come from
+// the 24C02 EEPROM each stick carries — the only thing that distinguishes one
+// from another, since they all share VID 0x1A86 / PID 0x5512 and report no
+// product string. Claims and releases each device in turn, so do not call this
+// while a radio is open.
+std::vector<std::string> list_ch341_serials();
 
 // True when this platform's CH341 backend can be loaded at all, without
 // requiring hardware to be plugged in.

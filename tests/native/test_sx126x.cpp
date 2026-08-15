@@ -129,7 +129,7 @@ TEST(Sx126xProfiles, UnspecifiedCannotTransmitAndIsTheSafeFallback) {
     EXPECT_EQ(bogus.board, Sx126xBoard::Unspecified);
 
     std::int8_t lo = 0, hi = 0;
-    hal::packet_tx_power_range(static_cast<Sx126xBoard>(99), lo, hi);
+    hal::packet_radio_power_range(static_cast<Sx126xBoard>(99), lo, hi);
     EXPECT_EQ(lo, 0);
     EXPECT_EQ(hi, 0);
 }

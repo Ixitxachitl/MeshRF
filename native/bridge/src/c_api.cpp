@@ -3,6 +3,9 @@
 #include "mrf/Core.h"
 
 #include <algorithm>
+#include <cstring>
+#include <string>
+#include <string_view>
 #include <new>
 #include <span>
 
@@ -110,6 +113,41 @@ MRF_API int32_t MRF_CALL mrf_core_set_sx1262_board(mrf_core_t* core, int32_t boa
 MRF_API int32_t MRF_CALL mrf_core_get_sx1262_board(const mrf_core_t* core) {
     if (!core) return 0;
     return static_cast<int32_t>(core->core.sx1262_board());
+}
+
+MRF_API int32_t MRF_CALL mrf_core_set_sx1262_serial(mrf_core_t* core, const char* serial) {
+    if (!core) return -2;
+    core->core.set_sx1262_serial(serial ? std::string_view(serial) : std::string_view{});
+    return 0;
+}
+
+MRF_API uint32_t MRF_CALL mrf_core_get_sx1262_serial(const mrf_core_t* core,
+                                                     char* buf, uint32_t capacity) {
+    if (!core || !buf || capacity == 0) return 0;
+    const std::string s = core->core.sx1262_serial();
+    const uint32_t n = static_cast<uint32_t>(
+        std::min<std::size_t>(s.size(), capacity - 1));
+    std::memcpy(buf, s.data(), n);
+    buf[n] = '\0';
+    return n;
+}
+
+MRF_API uint32_t MRF_CALL mrf_core_list_sx1262_serials(const mrf_core_t* core,
+                                                       char* buf, uint32_t capacity) {
+    if (!core || !buf || capacity == 0) return 0;
+    // Newline-separated rather than an array of pointers: the list is a handful
+    // of short strings and this keeps the ABI to one call with no ownership
+    // question on either side.
+    std::string joined;
+    for (const auto& s : core->core.list_sx1262_serials()) {
+        if (!joined.empty()) joined += '\n';
+        joined += s;
+    }
+    const uint32_t n = static_cast<uint32_t>(
+        std::min<std::size_t>(joined.size(), capacity - 1));
+    std::memcpy(buf, joined.data(), n);
+    buf[n] = '\0';
+    return n;
 }
 
 MRF_API void MRF_CALL mrf_core_set_tx_power_dbm(mrf_core_t* core, int32_t dbm) {
@@ -342,7 +380,8 @@ MRF_API int32_t MRF_CALL mrf_core_transmit_params(mrf_core_t* core,
     }
 }
 
-// 8: added the SX1262 packet transmitter (board selection, dBm power control).
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 8u; }
+// 8: SX1262 packet transmitter (board selection, dBm power control).
+// 9: SX1262 receive path and serial-based stick selection.
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 9u; }
 
 } // extern "C"

@@ -117,13 +117,21 @@ struct Core::Impl {
     // polls device names and kinds through it). transmit() takes a reference
     // under the lock and then works through its own copy, so a concurrent
     // set_tx_device() can release the member without freeing a device that is
-    // mid-burst. packet_tx_mu separately serializes the bursts themselves:
+    // mid-burst. packet_radio_mu separately serializes the bursts themselves:
     // Sx126xRadio drives one SPI conversation at a time and is not reentrant.
-    std::shared_ptr<hal::IPacketTxDevice> packet_tx;
-    std::mutex packet_tx_mu;
+    std::shared_ptr<hal::IPacketRadio> packet_radio;
+    std::mutex packet_radio_mu;
     // No board until the user says so — see Sx126xBoard::Unspecified.
     hal::Sx126xBoard sx1262_board{hal::Sx126xBoard::Unspecified};
+    // Which stick, when several are attached. Empty takes the first that
+    // answers. The EEPROM serial is the only thing that distinguishes them.
+    std::string      sx1262_serial;
     std::int8_t      tx_power_dbm{22};
+    // Signal quality from the last packet the stick received. Real numbers off
+    // the radio rather than estimates off an IQ stream, and the only source of
+    // either when no SDR is running.
+    std::atomic<float> packet_rssi_dbm{0.0f};
+    std::atomic<bool>  have_packet_rssi{false};
     hal::DeviceKind rx_requested_kind{hal::DeviceKind::Null};
     hal::DeviceKind tx_requested_kind{hal::DeviceKind::HackRf};
     std::string rx_device_name{"(none)"};
@@ -172,12 +180,45 @@ struct Core::Impl {
     std::mutex events_mu;
     std::deque<std::string> events; // produced by modem callback
 
-    // Queue a line for the UI log. Used by the packet-TX path, which has no
+    // Queue a line for the UI log. Used by the packet-radio path, which has no
     // modem callback to route its diagnostics through.
     void push_event(std::string msg) {
         std::lock_guard<std::mutex> lk(events_mu);
         if (events.size() >= kMaxQueuedEvents) events.pop_front();
         events.push_back(std::move(msg));
+    }
+
+    // Open or release the SX1262 stick to match the current RX/TX selections.
+    // One stick backs both directions — it is a half-duplex transceiver, and
+    // the single-stick, no-SDR setup is the whole point of the receive path —
+    // so the radio is opened once when either role asks for it and released
+    // only when neither does. Caller must hold start_mu.
+    void sync_packet_radio() {
+        const bool wanted = rx_requested_kind == hal::DeviceKind::Sx1262 ||
+                            tx_requested_kind == hal::DeviceKind::Sx1262;
+        // Wait for any burst still on the air before swapping the device out.
+        // transmit() keeps its own reference so nothing is freed underneath it,
+        // but the old transport would still hold the CH341 handle, and
+        // reopening the same index against an exclusive claim fails.
+        std::lock_guard<std::mutex> burst(packet_radio_mu);
+        if (!wanted) {
+            // Releasing it hands the stick back to meshtasticd or another tool
+            // without restarting MeshRF.
+            packet_radio.reset();
+            return;
+        }
+        if (packet_radio) return; // already open on the right board
+        packet_radio = hal::open_packet_radio(sx1262_board, sx1262_serial);
+        push_event(std::string("SX1262: ") + hal::packet_radio_status());
+    }
+
+    // Name to show for whichever role the stick is filling. Separates "you have
+    // not said which stick this is" from "no hardware found" — they need
+    // completely different actions from the user.
+    std::string packet_radio_name() const {
+        if (packet_radio) return packet_radio->info().board_name;
+        if (sx1262_board == hal::Sx126xBoard::Unspecified) return "SX1262 (select a board)";
+        return "(none)";
     }
 };
 
@@ -201,6 +242,69 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
     // Remember the active RX config so transmit() can resume it after a burst.
     impl_->last_rx_params = params;
     impl_->last_rx_center = center_freq_hz;
+
+    // Hardware modem path. None of the pipeline below exists here: there is no
+    // IQ, so no resampler, no spectrum, no waterfall, no packet spectrogram and
+    // no IQ capture. The radio hands up whole frames, which are turned into the
+    // same event lines the software demodulator emits so every layer above —
+    // decrypt, protobuf, routing, MQTT, UI — is unchanged.
+    if (impl_->rx_requested_kind == hal::DeviceKind::Sx1262) {
+        impl_->sync_packet_radio();
+        if (!impl_->packet_radio) {
+            impl_->push_event(std::string("SX1262: ") + hal::packet_radio_status());
+            throw std::runtime_error("No RX device selected or available");
+        }
+
+        hal::PacketRadioConfig cfg{};
+        cfg.center_freq_hz = center_freq_hz;
+        cfg.params         = params;
+        cfg.power_dbm      = impl_->tx_power_dbm;
+
+        auto radio = impl_->packet_radio;
+        std::string error;
+        if (!radio->start_rx(cfg, [this](const hal::ReceivedPacket& p) {
+                impl_->packet_rssi_dbm.store(p.rssi_dbm, std::memory_order_relaxed);
+                impl_->have_packet_rssi.store(true, std::memory_order_relaxed);
+
+                // Two lines, in the order the software demodulator produces
+                // them, because the app parses that stream rather than a
+                // structured callback. The preamble line carries the SNR the
+                // payload is attributed to; here it is the radio's own
+                // measurement instead of a peak-above-noise estimate.
+                char head[128];
+                std::snprintf(head, sizeof(head),
+                              "preamble: SF%u BW%uk hardware peak=%.1fdB",
+                              static_cast<unsigned>(impl_->last_rx_params.spreading_factor),
+                              static_cast<unsigned>(impl_->last_rx_params.bandwidth_hz / 1000u),
+                              p.snr_db);
+                impl_->push_event(head);
+
+                std::string hex;
+                hex.reserve(p.payload.size() * 2);
+                char byte_hex[3];
+                for (const auto b : p.payload) {
+                    std::snprintf(byte_hex, sizeof(byte_hex), "%02X", b);
+                    hex += byte_hex;
+                }
+                // The radio checked the CRC before handing this up, so it is
+                // OK by construction; the received/computed pair is echoed as
+                // matching because the hardware does not report the values.
+                char line[96];
+                std::snprintf(line, sizeof(line), "payload[OK] len=%zu crc=0000/0000 ",
+                              p.payload.size());
+                impl_->push_event(std::string(line) + hex);
+            }, error)) {
+            impl_->push_event("SX1262: could not start receive \xE2\x80\x94 " + error);
+            throw std::runtime_error("SX1262 receive failed to start: " + error);
+        }
+
+        impl_->modem_rate = 0;
+        impl_->device_rate = 0;
+        impl_->running = true;
+        impl_->push_event("SX1262: receiving \xE2\x80\x94 no spectrum or waterfall "
+                          "from a hardware modem");
+        return;
+    }
 
     impl_->modem = modem::make_modem(params);
     impl_->modem->set_frame_callback([this](const modem::DecodedFrame& frame) {
@@ -335,6 +439,9 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
 void Core::stop() {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (!impl_->running) return;
+    // The packet radio owns a receive thread; stopping it joins that thread and
+    // parks the RF switch. Safe when it was never started.
+    if (impl_->packet_radio) impl_->packet_radio->stop_rx();
     if (impl_->rx_radio) impl_->rx_radio->stop_rx();
     // The RX callback has now stopped; safe to close any capture.
     stop_capture();
@@ -347,7 +454,7 @@ bool Core::can_transmit() const noexcept {
     // taking it here cannot deadlock.
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (impl_->tx_requested_kind == hal::DeviceKind::Sx1262)
-        return impl_->packet_tx != nullptr;
+        return impl_->packet_radio != nullptr;
     const hal::IRadioDevice* tx =
         (!impl_->tx_radio && impl_->rx_radio &&
          impl_->rx_radio->kind() == impl_->tx_requested_kind)
@@ -374,13 +481,13 @@ bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_h
     // lock before the burst: a slow preset takes seconds, and the UI polls
     // device names and kinds through that same mutex.
     bool                                  use_packet_tx = false;
-    std::shared_ptr<hal::IPacketTxDevice> packet_device;
-    hal::PacketTxConfig                   packet_cfg{};
+    std::shared_ptr<hal::IPacketRadio> packet_device;
+    hal::PacketRadioConfig                   packet_cfg{};
     {
         std::lock_guard<std::mutex> lk(impl_->start_mu);
         use_packet_tx = impl_->tx_requested_kind == hal::DeviceKind::Sx1262;
         if (use_packet_tx) {
-            packet_device = impl_->packet_tx;
+            packet_device = impl_->packet_radio;
             packet_cfg.center_freq_hz = center_freq_hz;
             packet_cfg.params         = params;
             packet_cfg.power_dbm      = impl_->tx_power_dbm;
@@ -393,7 +500,7 @@ bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_h
         }
         if (payload.empty()) return false;
 
-        std::lock_guard<std::mutex> burst(impl_->packet_tx_mu);
+        std::lock_guard<std::mutex> burst(impl_->packet_radio_mu);
         std::string error;
         if (!packet_device->transmit(packet_cfg, payload, error)) {
             impl_->push_event("SX1262 transmit failed: " + error);
@@ -961,11 +1068,23 @@ bool Core::set_rx_device(hal::DeviceKind kind) {
     // clean re-open even when re-selecting the same HackRF.
     if (impl_->tx_requested_kind == kind) impl_->tx_radio.reset();
     impl_->rx_radio.reset();
+
+    if (kind == hal::DeviceKind::Sx1262) {
+        // A hardware modem, not an SDR: no IQ device to open, and none of the
+        // spectrum pipeline will run. sync_packet_radio() opens the stick (or
+        // reuses the one TX already has).
+        impl_->sync_packet_radio();
+        impl_->rx_device_name = impl_->packet_radio_name();
+        return true;
+    }
+
     impl_->rx_radio = hal::open_device(kind);
     impl_->rx_device_name = impl_->rx_radio ? impl_->rx_radio->info().board_name : "(none)";
+    // Releases the stick if TX is not using it either.
+    impl_->sync_packet_radio();
 
     // The SX1262 stick is on its own USB device and shares nothing with the
-    // SDR, so an RX change must leave it alone — reopening it here would push
+    // SDR, so an RX change must leave TX alone — reopening it here would push
     // it through hal::open_device(), which has no IQ device to return.
     if (impl_->tx_requested_kind == hal::DeviceKind::Sx1262) return true;
 
@@ -984,31 +1103,15 @@ bool Core::set_tx_device(hal::DeviceKind kind) {
     if (impl_->running) return false;
     impl_->tx_requested_kind = kind;
 
-    // Wait for any burst still on the air before swapping the device out.
-    // transmit() keeps its own reference so nothing is freed underneath it,
-    // but the old transport would still hold the CH341 handle, and reopening
-    // the same index against an exclusive claim fails.
-    std::lock_guard<std::mutex> burst(impl_->packet_tx_mu);
-
-    // Selecting anything else releases the USB stick, so it can be handed
-    // back to meshtasticd or another tool without restarting MeshRF.
-    impl_->packet_tx.reset();
-
     if (kind == hal::DeviceKind::Sx1262) {
         impl_->tx_radio.reset();
-        impl_->packet_tx = hal::open_packet_tx_device(impl_->sx1262_board);
-        impl_->tx_device_name =
-            impl_->packet_tx ? impl_->packet_tx->info().board_name
-            // Distinguish "you have not told us which stick this is" from
-            // "no hardware found" — they need completely different actions.
-            : impl_->sx1262_board == hal::Sx126xBoard::Unspecified
-                ? "SX1262 (select a board)"
-                : "(none)";
-        // The open path is the one place a user learns their driver, wiring or
-        // board selection is wrong, so surface its diagnostic either way.
-        impl_->push_event(std::string("SX1262: ") + hal::packet_tx_status());
+        impl_->sync_packet_radio();
+        impl_->tx_device_name = impl_->packet_radio_name();
         return true;
     }
+
+    // Releases the stick unless RX is still using it.
+    impl_->sync_packet_radio();
 
     if (impl_->rx_radio && impl_->rx_radio->kind() == impl_->tx_requested_kind) {
         impl_->tx_radio.reset();
@@ -1030,7 +1133,7 @@ void Core::set_sx1262_board(hal::Sx126xBoard board) {
     // over from settings was never clamped.
     {
         std::int8_t lo = 0, hi = 0;
-        hal::packet_tx_power_range(board, lo, hi);
+        hal::packet_radio_power_range(board, lo, hi);
         if (board != hal::Sx126xBoard::Unspecified)
             impl_->tx_power_dbm = std::clamp(impl_->tx_power_dbm, lo, hi);
     }
@@ -1040,16 +1143,57 @@ void Core::set_sx1262_board(hal::Sx126xBoard board) {
     // streaming, and the stick is a separate USB device with nothing to do
     // with it. Gating here would leave an open transmitter on the old profile
     // — off by the MeshToad's 8 dB of PA gain — whenever RX happened to be up.
-    if (impl_->tx_requested_kind == hal::DeviceKind::Sx1262) {
-        std::lock_guard<std::mutex> burst(impl_->packet_tx_mu);
-        impl_->packet_tx.reset();
-        impl_->packet_tx = hal::open_packet_tx_device(board);
-        impl_->tx_device_name =
-            impl_->packet_tx ? impl_->packet_tx->info().board_name
-            : board == hal::Sx126xBoard::Unspecified ? "SX1262 (select a board)"
-                                                     : "(none)";
-        impl_->push_event(std::string("SX1262: ") + hal::packet_tx_status());
+    if (impl_->rx_requested_kind == hal::DeviceKind::Sx1262 ||
+        impl_->tx_requested_kind == hal::DeviceKind::Sx1262) {
+        {
+            std::lock_guard<std::mutex> burst(impl_->packet_radio_mu);
+            impl_->packet_radio.reset(); // force a re-open on the new profile
+        }
+        impl_->sync_packet_radio();
+        const std::string name = impl_->packet_radio_name();
+        if (impl_->tx_requested_kind == hal::DeviceKind::Sx1262) impl_->tx_device_name = name;
+        if (impl_->rx_requested_kind == hal::DeviceKind::Sx1262) impl_->rx_device_name = name;
     }
+}
+
+void Core::set_sx1262_serial(std::string_view serial) {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    if (impl_->sx1262_serial == serial) return;
+    if (impl_->running) return; // switching sticks mid-stream is not supported
+    impl_->sx1262_serial.assign(serial);
+    if (impl_->rx_requested_kind == hal::DeviceKind::Sx1262 ||
+        impl_->tx_requested_kind == hal::DeviceKind::Sx1262) {
+        {
+            std::lock_guard<std::mutex> burst(impl_->packet_radio_mu);
+            impl_->packet_radio.reset();
+        }
+        impl_->sync_packet_radio();
+        const std::string name = impl_->packet_radio_name();
+        if (impl_->tx_requested_kind == hal::DeviceKind::Sx1262) impl_->tx_device_name = name;
+        if (impl_->rx_requested_kind == hal::DeviceKind::Sx1262) impl_->rx_device_name = name;
+    }
+}
+
+std::string Core::sx1262_serial() const {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    return impl_->sx1262_serial;
+}
+
+std::vector<std::string> Core::list_sx1262_serials() const {
+    // Enumeration claims each device in turn, so it cannot run while we hold
+    // one open. Returning the connected stick's own serial keeps the picker
+    // showing a valid selection instead of going empty mid-session.
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    if (impl_->packet_radio) {
+        // The device's own serial, not the requested preference: with no
+        // preference set the preference is empty, and returning that would
+        // leave the picker blank while a stick is plainly connected.
+        std::vector<std::string> only;
+        const std::string serial = impl_->packet_radio->info().serial;
+        if (!serial.empty()) only.push_back(serial);
+        return only;
+    }
+    return hal::list_packet_radio_serials();
 }
 
 hal::Sx126xBoard Core::sx1262_board() const noexcept {
@@ -1068,7 +1212,7 @@ void Core::set_tx_power_dbm(std::int8_t dbm) {
         return;
     }
     std::int8_t lo = 0, hi = 0;
-    hal::packet_tx_power_range(impl_->sx1262_board, lo, hi);
+    hal::packet_radio_power_range(impl_->sx1262_board, lo, hi);
     impl_->tx_power_dbm = std::clamp(dbm, lo, hi);
 }
 
@@ -1079,7 +1223,7 @@ std::int8_t Core::tx_power_dbm() const noexcept {
 
 void Core::tx_power_range_dbm(std::int8_t& min_dbm, std::int8_t& max_dbm) const noexcept {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
-    hal::packet_tx_power_range(impl_->sx1262_board, min_dbm, max_dbm);
+    hal::packet_radio_power_range(impl_->sx1262_board, min_dbm, max_dbm);
 }
 
 hal::DeviceKind Core::rx_device_kind() const noexcept {
@@ -1087,12 +1231,16 @@ hal::DeviceKind Core::rx_device_kind() const noexcept {
     // set_rx_device()/set_tx_device()/start_rx(); take the same lock here so
     // a concurrent reconfiguration can't be observed mid-update.
     std::lock_guard<std::mutex> lk(impl_->start_mu);
+    // The packet radio is not an IRadioDevice, so it never appears in
+    // rx_radio; without this the UI sees "None" while the stick is receiving.
+    if (impl_->rx_requested_kind == hal::DeviceKind::Sx1262 && impl_->packet_radio)
+        return hal::DeviceKind::Sx1262;
     return impl_->rx_radio ? impl_->rx_radio->kind() : hal::DeviceKind::Null;
 }
 
 hal::DeviceKind Core::tx_device_kind() const noexcept {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
-    if (impl_->packet_tx) return impl_->packet_tx->kind();
+    if (impl_->packet_radio) return impl_->packet_radio->kind();
     const hal::IRadioDevice* tx =
         (!impl_->tx_radio && impl_->rx_radio &&
          impl_->rx_radio->kind() == impl_->tx_requested_kind)
@@ -1142,6 +1290,14 @@ std::size_t Core::pull_event(std::span<char> out) noexcept {
 }
 
 CoreSignalStats Core::signal_stats() const noexcept {
+    // On the hardware-modem path there is no IQ to take statistics from, so
+    // report the radio's own per-packet RSSI instead. It is in dBm rather than
+    // dBFS, which is what the app already treats this field as when attributing
+    // a packet's signal strength.
+    if (impl_->have_packet_rssi.load(std::memory_order_relaxed)) {
+        const float rssi = impl_->packet_rssi_dbm.load(std::memory_order_relaxed);
+        return CoreSignalStats{rssi, rssi, 0.0f, 0.0f, 0};
+    }
     const auto s = impl_->stats.snapshot();
     return CoreSignalStats{
         s.rssi_dbfs,

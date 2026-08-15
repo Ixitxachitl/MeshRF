@@ -8,13 +8,13 @@ and performs LoRa demodulation/modulation in software on the host CPU. It
 decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-Current release line: **v2.0.3**
+Current release line: **v2.0.4**
 
 ### Two apps, for one release
 
 | App | Version | Platforms | Status |
 | --- | --- | --- | --- |
-| `MeshRF.App.Avalonia` | 2.0.3 | Windows, Linux, macOS | The app MeshRF ships |
+| `MeshRF.App.Avalonia` | 2.0.4 | Windows, Linux, macOS | The app MeshRF ships |
 | `MeshRF.App` (WPF) | 1.0.9 | Windows only | Final release — no longer maintained |
 
 Both read the same `settings.json` and the same SQLite databases, so you can
@@ -52,18 +52,27 @@ everything below describes it.
 
 ### Hardware transmit (SX1262 USB sticks)
 
-MeshRF normally modulates LoRa in software and keys a HackRF. It can instead
-hand the framed bytes to a CH341+SX1262 USB stick, which does preamble, sync,
-FEC and chirping itself.
+MeshRF normally modulates and demodulates LoRa in software using an SDR. It can
+instead hand framed bytes to a CH341+SX1262 USB stick, which does preamble,
+sync, FEC and chirping itself. The stick is selectable for **RX, TX or both**.
 
-This is transmit only, and deliberately so. The point of MeshRF is software
-demodulation with a live spectrum, and an SX1262 receiver would darken the
-waterfall, the packet spectrogram and the IQ capture. Pairing an SDR receiver
-with a hardware transmitter keeps all of that while fixing the weak leg: HackRF
-TX is ~10 dBm of unfiltered wideband output, where these sticks put out 22 or
-30 dBm through a matched front end. Because the stick is a separate USB device,
-**RX is never paused for a burst** — the waterfall stays live throughout, and
-the receiver will hear the transmission.
+The intended setup is **SDR receive + SX1262 transmit**. It keeps everything
+that makes MeshRF worth using — the spectrum, waterfall, packet spectrogram and
+IQ capture — while fixing the weak leg: HackRF TX is ~10 dBm of unfiltered
+wideband output, where these sticks put out 22 or 30 dBm through a matched
+front end. Because the stick is a separate USB device, **RX is never paused for
+a burst**; the waterfall stays live throughout, and the receiver hears the
+transmission.
+
+**Receiving** on the stick as well makes MeshRF a complete node for someone who
+owns a LoRa stick and no SDR — one stick serves both directions half-duplex,
+the way real Meshtastic hardware does. The cost is everything an SDR gives you:
+a hardware modem produces decoded frames, never IQ, so the spectrum, waterfall,
+packet snapshot and IQ capture all go away and the display says so. In exchange
+the RSSI and SNR are the radio's own measurements rather than estimates off an
+IQ stream, sensitivity is ~20 dB better, and the CPU is idle. Every layer above
+the PHY — decrypt, protobuf, routing, MQTT, the whole UI — is unchanged, because
+the hardware path emits the same frame events the software demodulator does.
 
 Supported boards, selected in the TX toolbar next to the power control:
 
@@ -98,7 +107,12 @@ Driver requirements:
   udev permissions.
 
 Only one process can own a stick at a time, so MeshRF and a local `meshtasticd`
-cannot share one. Selecting any other TX device releases it immediately.
+cannot share one. Selecting any other RX/TX device releases it immediately.
+
+With more than one stick attached, a **Stick** picker appears offering each
+one's EEPROM serial — the only thing that distinguishes them, since they all
+share `1a86:5512` and report no product string. With a single stick the picker
+stays hidden and the first device found is used.
 
 ### Meshtastic Protocol Support
 

@@ -104,6 +104,34 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     public bool IsHackRf => SelectedDevice == RadioDeviceKind.HackRf;
     public bool IsRtlSdr => SelectedDevice == RadioDeviceKind.RtlSdr;
+
+    /// <summary>Receiving through the hardware modem. There is no IQ on this
+    /// path, so everything downstream of the SDR pipeline is unavailable.</summary>
+    public bool IsRxSx1262 => SelectedDevice == RadioDeviceKind.Sx1262;
+
+    /// <summary>The spectrum, waterfall, packet spectrogram and IQ capture all
+    /// need IQ that a hardware modem cannot produce.</summary>
+    public bool HasSpectrum => !IsRxSx1262;
+
+    /// <summary>Shown over the spectrum area in place of the display.</summary>
+    public string NoSpectrumMessage =>
+        "No spectrum — the SX1262 is a hardware LoRa modem, not an SDR.\n" +
+        "It reports decoded packets with real RSSI and SNR, but produces no IQ, " +
+        "so the waterfall, packet snapshot and IQ capture are unavailable.\n" +
+        "Select a HackRF or RTL-SDR as the receiver to get them back.";
+
+    /// <summary>Serials of the attached SX1262 sticks. Only meaningful when
+    /// more than one is plugged in, which is the only case where MeshRF has to
+    /// be told which to use.</summary>
+    [ObservableProperty]
+    private IReadOnlyList<string> _sx1262Serials = Array.Empty<string>();
+
+    [ObservableProperty]
+    private string _selectedSx1262Serial = string.Empty;
+
+    /// <summary>Only worth showing when there is an actual choice to make.</summary>
+    public bool ShowSx1262SerialPicker =>
+        (IsRxSx1262 || IsTxSx1262) && Sx1262Serials.Count > 1;
     public bool IsTxHackRf => SelectedTxDevice == RadioDeviceKind.HackRf;
     public bool IsTxSx1262 => SelectedTxDevice == RadioDeviceKind.Sx1262;
 
@@ -286,7 +314,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// "pick a device for me" is not offered in the UI — you choose the radio
     /// you actually have. Ordered to match <see cref="AvailableTxDevices"/>.</summary>
     public RadioDeviceKind[] AvailableDevices { get; } =
-        { RadioDeviceKind.Null, RadioDeviceKind.HackRf, RadioDeviceKind.RtlSdr };
+        { RadioDeviceKind.Null, RadioDeviceKind.HackRf, RadioDeviceKind.RtlSdr,
+          RadioDeviceKind.Sx1262 };
 
     public string ToggleButtonText => IsRunning ? "Stop RX" : "Start RX";
 
@@ -476,6 +505,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedTxGainDb = _settings.TxGainDb;
         var savedTxAmpEnable = _settings.TxAmpEnable;
         var savedSx1262Board = _settings.Sx1262Board;
+        var savedSx1262Serial = _settings.Sx1262Serial;
         var savedSx1262TxPowerDbm = _settings.Sx1262TxPowerDbm;
         var savedDcBlockEnable = _settings.DcBlockEnable;
         var savedWaterfallFloorDb = _settings.WaterfallFloorDb;
@@ -604,6 +634,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Sx1262 opens the stick against whichever profile is current, and
         // opening it as a MeshStick when it is really a MeshToad would put the
         // power model 8 dB out until the user touched the picker.
+        SelectedSx1262Serial = savedSx1262Serial ?? string.Empty;
         if (Enum.TryParse<Sx1262Board>(savedSx1262Board, out var sxBoard) &&
             AvailableSx1262Boards.Contains(sxBoard))
             SelectedSx1262Board = sxBoard;
@@ -724,8 +755,29 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         {
             _core = new MeshtasticCore();
             StatusText = $"Native bridge loaded ({Environment.OSVersion.Platform}).";
+            // Push the SX1262 settings BEFORE selecting the devices. The
+            // property change handlers that normally do this all guard on
+            // `_core is not null`, and they ran during the settings load above
+            // — while the core did not yet exist — so without this the core
+            // still holds its defaults. Board in particular defaults to
+            // Unspecified, which makes the stick refuse to open, and the device
+            // selections below are what trigger that open.
+            _core.Sx1262Board = SelectedSx1262Board;
+            _core.Sx1262Serial = SelectedSx1262Serial;
+            _core.TxPowerDbm = (sbyte)Math.Clamp(Sx1262TxPowerDbm, -128, 127);
             _core.SetRxDevice(SelectedDevice);
             _core.SetTxDevice(SelectedTxDevice);
+            if (SelectedDevice == RadioDeviceKind.Sx1262 ||
+                SelectedTxDevice == RadioDeviceKind.Sx1262)
+            {
+                RefreshSx1262Serials();
+                var (min, max) = _core.TxPowerRangeDbm;
+                Sx1262MinPowerDbm = min;
+                Sx1262MaxPowerDbm = max;
+                // Read back what the core actually accepted, so the slider
+                // shows the clamped value rather than the request.
+                Sx1262TxPowerDbm = _core.TxPowerDbm;
+            }
             ApplyGains();
             ApplyTxAncillary();
             RefreshSampleRateSelection(SelectedDevice, GetSavedRxSampleRateHz(SelectedDevice));
@@ -913,9 +965,35 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         {
             _core.SetRxDevice(value);
             RefreshSampleRateSelection(value, GetSavedRxSampleRateHz(value));
+            if (value == RadioDeviceKind.Sx1262) RefreshSx1262Serials();
         }
         OnPropertyChanged(nameof(IsHackRf));
         OnPropertyChanged(nameof(IsRtlSdr));
+        OnPropertyChanged(nameof(IsRxSx1262));
+        OnPropertyChanged(nameof(HasSpectrum));
+        OnPropertyChanged(nameof(ShowSx1262SerialPicker));
+        // Receiving through the stick makes Send available too, since the same
+        // radio transmits.
+        SendMessageCommand.NotifyCanExecuteChanged();
+        SaveSettings();
+    }
+
+    /// <summary>Re-reads the attached sticks. Only called when an SX1262 is
+    /// selected, since enumeration claims each CH341 in turn.</summary>
+    private void RefreshSx1262Serials()
+    {
+        if (_core is null) return;
+        Sx1262Serials = _core.ListSx1262Serials();
+        // Drop a saved selection for a stick that is no longer plugged in,
+        // rather than failing to open it every time.
+        if (SelectedSx1262Serial.Length > 0 && !Sx1262Serials.Contains(SelectedSx1262Serial))
+            SelectedSx1262Serial = string.Empty;
+        OnPropertyChanged(nameof(ShowSx1262SerialPicker));
+    }
+
+    partial void OnSelectedSx1262SerialChanged(string value)
+    {
+        if (_core is not null) _core.Sx1262Serial = value ?? string.Empty;
         SaveSettings();
     }
     partial void OnSelectedTxDeviceChanged(RadioDeviceKind value)
@@ -924,9 +1002,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Push the power through on every switch to Sx1262: the native side
         // only clamps on assignment, so a board changed while another TX
         // device was selected would otherwise leave a stale value.
-        if (value == RadioDeviceKind.Sx1262) ApplySx1262Power();
+        if (value == RadioDeviceKind.Sx1262)
+        {
+            ApplySx1262Power();
+            RefreshSx1262Serials();
+        }
         OnPropertyChanged(nameof(IsTxHackRf));
         OnPropertyChanged(nameof(IsTxSx1262));
+        OnPropertyChanged(nameof(ShowSx1262SerialPicker));
         OnPropertyChanged(nameof(ShowSx1262BoardPrompt));
         OnPropertyChanged(nameof(ShowSx1262PowerWarning));
         // Send is gated on CanTransmit, which this switch can flip in either
@@ -1354,6 +1437,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.TxGainDb = TxGainDb;
         _settings.TxAmpEnable = TxAmpEnable;
         _settings.Sx1262Board = SelectedSx1262Board.ToString();
+        _settings.Sx1262Serial = SelectedSx1262Serial;
         _settings.Sx1262TxPowerDbm = (sbyte)Math.Clamp(Sx1262TxPowerDbm, -128, 127);
         _settings.DcBlockEnable = DcBlockEnable;
         _settings.WaterfallColormap = WaterfallColormap.ToString();

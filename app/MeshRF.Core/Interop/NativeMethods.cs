@@ -56,6 +56,15 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_get_sx1262_board")]
     public static partial int CoreGetSx1262Board(nint core);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_sx1262_serial", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int CoreSetSx1262Serial(nint core, string serial);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_sx1262_serial")]
+    public static unsafe partial uint CoreGetSx1262Serial(nint core, byte* buf, uint capacity);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_list_sx1262_serials")]
+    public static unsafe partial uint CoreListSx1262Serials(nint core, byte* buf, uint capacity);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_set_tx_power_dbm")]
     public static partial void CoreSetTxPowerDbm(nint core, int dbm);
 

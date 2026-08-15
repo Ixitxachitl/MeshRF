@@ -8,7 +8,7 @@ add_library(mrf_core STATIC
     src/hal/Ch341Windows.cpp
     src/hal/Ch341LibUsb.cpp
     src/hal/Sx126x.cpp
-    src/hal/Sx1262TxDevice.cpp
+    src/hal/Sx1262Radio.cpp
     src/dsp/Fir.cpp
     src/dsp/Fft.cpp
     src/dsp/SignalStats.cpp
