@@ -29,7 +29,8 @@ everything below describes it.
 - Receive path is operational end-to-end: SDR IQ -> DSP -> LoRa demod ->
   Meshtastic frame decode -> decrypt -> parse -> UI.
 - Transmit path is operational for channel broadcast, direct messages, and
-  control/management packets.
+  control/management packets, either modulated in software onto a HackRF or
+  handed to an SX1262 USB stick.
 - The app is actively maintained with frequent updates focused on map scale,
   messaging UX, telemetry/routing controls, and observability.
 - Windows, Linux and macOS all build the native core and the app from source.
@@ -42,9 +43,62 @@ everything below describes it.
 
 - Runtime-selectable SDR backend: HackRF One or RTL-SDR.
 - Independent RX and TX device selection.
+- Optional hardware transmitter: a CH341+SX1262 USB stick can be selected as
+  the TX device while an SDR keeps receiving. See
+  [Hardware transmit](#hardware-transmit-sx1262-usb-sticks).
 - Software LoRa demod/mod with Meshtastic-oriented preset support.
 - Optional receive conditioning features (including DC blocking).
 - Live spectrum and waterfall with packet-linked snapshot support.
+
+### Hardware transmit (SX1262 USB sticks)
+
+MeshRF normally modulates LoRa in software and keys a HackRF. It can instead
+hand the framed bytes to a CH341+SX1262 USB stick, which does preamble, sync,
+FEC and chirping itself.
+
+This is transmit only, and deliberately so. The point of MeshRF is software
+demodulation with a live spectrum, and an SX1262 receiver would darken the
+waterfall, the packet spectrogram and the IQ capture. Pairing an SDR receiver
+with a hardware transmitter keeps all of that while fixing the weak leg: HackRF
+TX is ~10 dBm of unfiltered wideband output, where these sticks put out 22 or
+30 dBm through a matched front end. Because the stick is a separate USB device,
+**RX is never paused for a burst** — the waterfall stays live throughout, and
+the receiver will hear the transmission.
+
+Supported boards, selected in the TX toolbar next to the power control:
+
+| Board | Radio | Antenna-port power |
+| --- | --- | --- |
+| Elecrow MeshStick | bare SX1262 | -9 .. 22 dBm |
+| NullHop / muzi MeshToad V3 | SX1262 + E22P-915M30S | -1 .. 30 dBm |
+
+Both enumerate as `1a86:5512` with an identical pin map, and neither reports a
+USB product string to tell them apart, so **the board picker starts empty and
+nothing will transmit until you choose**. That gate exists because a wrong
+guess is silent in the worse direction: a MeshToad driven as a MeshStick
+radiates about 8 dB more than the UI reports, with no warning about the current
+draw. The reverse — a MeshStick set to MeshToad — is harmless, because the
+requested power is clamped to the SX1262's own +22 dBm ceiling either way. No
+board selection can overdrive the radio; the risk is purely mislabelling.
+
+The choice only selects the power model: the MeshToad's external PA adds
+roughly 8 dB, so the dBm shown in the UI is what leaves the antenna, not what
+is programmed into the chip. Above 22 dBm a MeshToad can draw ~900 mA, more
+than a USB 2.0 port is obliged to supply; the UI warns, and a powered hub is
+the fix.
+
+Driver requirements:
+
+- **Windows** — install the [WCH CH341PAR](https://www.wch-ic.com/downloads/CH341PAR_EXE.html)
+  package. MeshRF loads `CH341DLLA64.DLL` at runtime, the same way it loads
+  `hackrf.dll`, so it works against the driver binding meshtasticd users
+  already have. No Zadig re-bind, and nothing to configure.
+- **Linux / macOS** — libusb, the same path meshtasticd uses. On Linux the
+  `ch341` kernel module has to be blacklisted or detached, and the device needs
+  udev permissions.
+
+Only one process can own a stick at a time, so MeshRF and a local `meshtasticd`
+cannot share one. Selecting any other TX device releases it immediately.
 
 ### Meshtastic Protocol Support
 
@@ -200,6 +254,8 @@ Common to every platform:
 - CMake 3.25+
 - .NET 8 SDK
 - SDR hardware: HackRF One, or an RTL-SDR dongle
+- Optionally, a CH341+SX1262 USB stick for hardware transmit (see
+  [Hardware transmit](#hardware-transmit-sx1262-usb-sticks))
 
 **Windows 10/11 x64**
 
@@ -207,6 +263,7 @@ Common to every platform:
   desktop development". The `windows-x64` preset pins no generator, so CMake
   uses the newest Visual Studio it finds.
 - SDR drivers as needed (typically via Zadig/WinUSB).
+- For an SX1262 USB stick, the WCH CH341PAR driver package (not Zadig).
 
 **Linux x64**
 

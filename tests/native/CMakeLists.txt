@@ -26,6 +26,7 @@ add_executable(mrf_core_tests
     test_lora_decoder.cpp
     test_meshtastic_rx_frame.cpp
     test_lora_tx.cpp
+    test_sx126x.cpp
 )
 
 target_link_libraries(mrf_core_tests

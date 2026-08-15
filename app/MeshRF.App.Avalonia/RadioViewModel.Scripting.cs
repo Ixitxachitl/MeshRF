@@ -46,16 +46,43 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     {
         SaveSettings();
         RaiseScriptsStatusChanged();
-        _rxHost.Log(value
-            ? $"scripts enabled — {_scriptEngine.ArmedCount} armed{(ScriptsDryRun ? ", dry run (nothing is transmitted)" : "")}"
-            : "scripts disabled");
+        // Same gate SaveSettings() uses, and for the same reason. The settings
+        // load assigns this property before InitScripting() has handed the
+        // engine its scripts, so logging here during load always reported
+        // "0 armed" no matter how many were sitting in the folder.
+        // InitScripting() logs the real state once it has them.
+        if (!_settingsLoaded) return;
+        LogScriptsState();
     }
 
     partial void OnScriptsDryRunChanged(bool value)
     {
         SaveSettings();
         RaiseScriptsStatusChanged();
+        if (!_settingsLoaded) return; // boot state is covered by LogScriptsState()
         if (ScriptsEnabled) _rxHost.Log(value ? "scripts: dry run on, nothing will be transmitted" : "scripts: dry run off");
+    }
+
+    /// <summary>
+    /// One log line describing the master switch and how many scripts sit
+    /// behind it. Shared between the toggle handler and startup so the two
+    /// cannot drift, and so neither can report a count the engine has not
+    /// actually loaded yet.
+    /// </summary>
+    private void LogScriptsState()
+    {
+        if (ScriptsEnabled)
+        {
+            _rxHost.Log($"scripts enabled — {_scriptEngine.ArmedCount} armed" +
+                        (ScriptsDryRun ? ", dry run (nothing is transmitted)" : ""));
+            return;
+        }
+        // Worth naming the count even when switched off: armed scripts waiting
+        // behind a disabled master switch is a different situation from having
+        // none, and the old line could not tell them apart.
+        _rxHost.Log(_scriptEngine.ArmedCount == 0
+            ? "scripts disabled"
+            : $"scripts disabled — {_scriptEngine.ArmedCount} armed, not running");
     }
 
     public string ScriptsStatus
@@ -95,6 +122,10 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         _rxHost.ScriptEventObserved = OnScriptEvent;
         _scriptHttp.Credentials = this;
         ReloadScripts();
+        // Now that the engine actually has its scripts, report the state the
+        // settings load could not. Silent only when there is genuinely nothing
+        // to say, so a user who never wrote a script gets no boot noise.
+        if (ScriptsEnabled || _scriptEngine.ArmedCount > 0) LogScriptsState();
     }
 
     /// <summary>

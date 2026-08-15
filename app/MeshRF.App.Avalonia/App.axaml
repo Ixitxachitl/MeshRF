@@ -7,6 +7,8 @@
     <Application.Resources>
         <!-- Relabels RadioDeviceKind.Null as "None" in the RX/TX pickers. -->
         <local:RadioDeviceKindLabelConverter x:Key="DeviceKindLabel" />
+        <!-- Adds each SX1262 stick's output power to its name in the board picker. -->
+        <local:Sx1262BoardLabelConverter x:Key="Sx1262BoardLabel" />
         <!-- Red text for ignored nodes in the node list. -->
         <local:IgnoredNodeForegroundConverter x:Key="IgnoredForeground" />
         <!-- Grey/green/red for the delivery mark on an outgoing message. -->

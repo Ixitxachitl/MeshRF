@@ -73,8 +73,17 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private RadioDeviceKind _selectedTxDevice = RadioDeviceKind.HackRf;
 
-    /// <summary>TX can't run on RTL-SDR (receive-only hardware).</summary>
-    public RadioDeviceKind[] AvailableTxDevices { get; } = { RadioDeviceKind.Null, RadioDeviceKind.HackRf };
+    /// <summary>TX can't run on RTL-SDR (receive-only hardware). The SX1262
+    /// stick is transmit-only and so appears here but never in
+    /// <see cref="AvailableDevices"/>.</summary>
+    public RadioDeviceKind[] AvailableTxDevices { get; } =
+        { RadioDeviceKind.Null, RadioDeviceKind.HackRf, RadioDeviceKind.Sx1262 };
+
+    /// <summary>The CH341+SX126x sticks MeshRF knows how to drive. Unspecified
+    /// is offered so the picker can start on it: nothing transmits until a real
+    /// board is chosen, because the two cannot be told apart at runtime.</summary>
+    public Sx1262Board[] AvailableSx1262Boards { get; } =
+        { Sx1262Board.Unspecified, Sx1262Board.MeshStick, Sx1262Board.MeshToad };
 
     private static readonly uint[] HackRfSampleRatesHz =
         [2_000_000, 2_400_000, 4_000_000, 8_000_000, 10_000_000, 12_500_000, 16_000_000, 20_000_000];
@@ -96,6 +105,21 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public bool IsHackRf => SelectedDevice == RadioDeviceKind.HackRf;
     public bool IsRtlSdr => SelectedDevice == RadioDeviceKind.RtlSdr;
     public bool IsTxHackRf => SelectedTxDevice == RadioDeviceKind.HackRf;
+    public bool IsTxSx1262 => SelectedTxDevice == RadioDeviceKind.Sx1262;
+
+    /// <summary>True once a real board is chosen. The power control is
+    /// meaningless before that, and nothing can transmit.</summary>
+    public bool IsSx1262BoardChosen => SelectedSx1262Board != Sx1262Board.Unspecified;
+
+    /// <summary>Prompt shown while the SX1262 is selected but no board is.
+    /// This is the only thing standing between a MeshToad owner and
+    /// transmitting 8 dB hotter than the UI says.</summary>
+    public bool ShowSx1262BoardPrompt => IsTxSx1262 && !IsSx1262BoardChosen;
+
+    /// <summary>Shown only for the MeshToad, whose PA can pull ~900 mA on
+    /// transmit — more than a USB 2.0 port is obliged to supply.</summary>
+    public bool ShowSx1262PowerWarning =>
+        IsTxSx1262 && SelectedSx1262Board == Sx1262Board.MeshToad && Sx1262TxPowerDbm > 22;
 
     // 906.875 MHz = US LongFast slot 20, same default MeshRF.App's
     // MainViewModel starts from.
@@ -162,6 +186,22 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _txAmpEnable;
+
+    [ObservableProperty]
+    private Sx1262Board _selectedSx1262Board = Sx1262Board.Unspecified;
+
+    /// <summary>Antenna-port transmit power in dBm for the SX1262 stick. Unlike
+    /// <see cref="TxGainDb"/> (a HackRF VGA setting) this is real radiated
+    /// power, so it is bounded by the selected board rather than a fixed
+    /// range.</summary>
+    [ObservableProperty]
+    private int _sx1262TxPowerDbm = 22;
+
+    [ObservableProperty]
+    private int _sx1262MinPowerDbm = -9;
+
+    [ObservableProperty]
+    private int _sx1262MaxPowerDbm = 22;
 
     [ObservableProperty]
     private bool _dcBlockEnable = true;
@@ -435,6 +475,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedBiasTee = _settings.BiasTee;
         var savedTxGainDb = _settings.TxGainDb;
         var savedTxAmpEnable = _settings.TxAmpEnable;
+        var savedSx1262Board = _settings.Sx1262Board;
+        var savedSx1262TxPowerDbm = _settings.Sx1262TxPowerDbm;
         var savedDcBlockEnable = _settings.DcBlockEnable;
         var savedWaterfallFloorDb = _settings.WaterfallFloorDb;
         var savedWaterfallCeilDb = _settings.WaterfallCeilDb;
@@ -558,6 +600,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // picker can't show, which would blank the ComboBox.
         if (Enum.TryParse<RadioDeviceKind>(savedRxDeviceKind, out var device) && AvailableDevices.Contains(device))
             SelectedDevice = device;
+        // The board has to be restored before the TX device is: selecting
+        // Sx1262 opens the stick against whichever profile is current, and
+        // opening it as a MeshStick when it is really a MeshToad would put the
+        // power model 8 dB out until the user touched the picker.
+        if (Enum.TryParse<Sx1262Board>(savedSx1262Board, out var sxBoard) &&
+            AvailableSx1262Boards.Contains(sxBoard))
+            SelectedSx1262Board = sxBoard;
         if (Enum.TryParse<RadioDeviceKind>(savedTxDeviceKind, out var txDevice) && AvailableTxDevices.Contains(txDevice))
             SelectedTxDevice = txDevice;
         if (Enum.TryParse<Region>(savedRegion, out var region))
@@ -588,6 +637,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         BiasTee = savedBiasTee;
         TxGainDb = savedTxGainDb;
         TxAmpEnable = savedTxAmpEnable;
+        Sx1262TxPowerDbm = savedSx1262TxPowerDbm;
         DcBlockEnable = savedDcBlockEnable;
         WaterfallFloorDb = savedWaterfallFloorDb;
         WaterfallCeilDb = savedWaterfallCeilDb;
@@ -871,8 +921,63 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnSelectedTxDeviceChanged(RadioDeviceKind value)
     {
         _core?.SetTxDevice(value);
+        // Push the power through on every switch to Sx1262: the native side
+        // only clamps on assignment, so a board changed while another TX
+        // device was selected would otherwise leave a stale value.
+        if (value == RadioDeviceKind.Sx1262) ApplySx1262Power();
         OnPropertyChanged(nameof(IsTxHackRf));
+        OnPropertyChanged(nameof(IsTxSx1262));
+        OnPropertyChanged(nameof(ShowSx1262BoardPrompt));
+        OnPropertyChanged(nameof(ShowSx1262PowerWarning));
+        // Send is gated on CanTransmit, which this switch can flip in either
+        // direction — an SX1262 that opened makes it true where a bare TX
+        // selection change previously left the button stale.
+        SendMessageCommand.NotifyCanExecuteChanged();
         SaveSettings();
+    }
+
+    partial void OnSelectedSx1262BoardChanged(Sx1262Board value)
+    {
+        if (_core is not null)
+        {
+            _core.Sx1262Board = value;
+            // Choosing a board is what opens the transmitter, so this is also
+            // where Send becomes available.
+            if (value != Sx1262Board.Unspecified)
+            {
+                var (min, max) = _core.TxPowerRangeDbm;
+                Sx1262MinPowerDbm = min;
+                Sx1262MaxPowerDbm = max;
+                // Moving from a MeshToad to a MeshStick has to pull an
+                // out-of-range 30 dBm back down, or the slider would sit past
+                // its own maximum.
+                Sx1262TxPowerDbm = Math.Clamp(Sx1262TxPowerDbm, min, max);
+                ApplySx1262Power();
+            }
+            SendMessageCommand.NotifyCanExecuteChanged();
+        }
+        OnPropertyChanged(nameof(IsSx1262BoardChosen));
+        OnPropertyChanged(nameof(ShowSx1262BoardPrompt));
+        OnPropertyChanged(nameof(ShowSx1262PowerWarning));
+        SaveSettings();
+    }
+
+    partial void OnSx1262TxPowerDbmChanged(int value)
+    {
+        ApplySx1262Power();
+        OnPropertyChanged(nameof(ShowSx1262PowerWarning));
+        SaveSettings();
+    }
+
+    /// <summary>Writes the requested antenna-port power to the core and reads
+    /// back what it actually accepted, so the UI shows the clamped value rather
+    /// than the request.</summary>
+    private void ApplySx1262Power()
+    {
+        if (_core is null) return;
+        _core.TxPowerDbm = (sbyte)Math.Clamp(Sx1262TxPowerDbm, -128, 127);
+        var applied = _core.TxPowerDbm;
+        if (applied != Sx1262TxPowerDbm) Sx1262TxPowerDbm = applied;
     }
 
     partial void OnSelectedRxSampleRateChanged(SampleRateOption? value)
@@ -1248,6 +1353,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.BiasTee = BiasTee;
         _settings.TxGainDb = TxGainDb;
         _settings.TxAmpEnable = TxAmpEnable;
+        _settings.Sx1262Board = SelectedSx1262Board.ToString();
+        _settings.Sx1262TxPowerDbm = (sbyte)Math.Clamp(Sx1262TxPowerDbm, -128, 127);
         _settings.DcBlockEnable = DcBlockEnable;
         _settings.WaterfallColormap = WaterfallColormap.ToString();
         _settings.WaterfallFloorDb = WaterfallFloorDb;

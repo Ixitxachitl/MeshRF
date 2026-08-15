@@ -333,6 +333,50 @@
                     <ToggleButton Content="AMP (+14 dB)" IsChecked="{Binding TxAmpEnable}" FontSize="11" Margin="0,0,8,2"
                                   ToolTip.Tip="Enable the HackRF RF amplifier for transmit output" />
                 </StackPanel>
+
+                <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" IsVisible="{Binding IsTxSx1262}" />
+
+                <!-- SX1262 USB stick. Unlike the HackRF row above this is real
+                     antenna-port power, not a VGA setting, so the slider bounds
+                     come from the selected board rather than being fixed. -->
+                <StackPanel Orientation="Horizontal" IsVisible="{Binding IsTxSx1262}">
+                    <TextBlock Text="TX" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,2" />
+                    <TextBlock Text="Board" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                    <ComboBox ItemsSource="{Binding AvailableSx1262Boards}"
+                              SelectedItem="{Binding SelectedSx1262Board}"
+                              IsEnabled="{Binding !IsRunning}"
+                              FontSize="11" Width="165" Height="26" Margin="0,0,8,2"
+                              ToolTip.Tip="Both sticks share USB IDs and wiring, so MeshRF cannot tell them apart — pick the one you have. This sets the power model only.">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="mesh:Sx1262Board">
+                                <TextBlock Text="{Binding ., Converter={StaticResource Sx1262BoardLabel}}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <!-- Power is meaningless until the board is known: the same
+                         dBm means two different things 8 dB apart. Hidden
+                         rather than disabled so there is no number to misread. -->
+                    <TextBlock Text="Power" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2"
+                               IsVisible="{Binding IsSx1262BoardChosen}" ToolTip.Tip="Transmit power at the antenna port" />
+                    <Slider Width="120" Minimum="{Binding Sx1262MinPowerDbm}" Maximum="{Binding Sx1262MaxPowerDbm}"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            SmallChange="1" LargeChange="4" Value="{Binding Sx1262TxPowerDbm}"
+                            IsVisible="{Binding IsSx1262BoardChosen}"
+                            VerticalAlignment="Center" Margin="0,0,4,2" />
+                    <TextBlock Width="48" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                               IsVisible="{Binding IsSx1262BoardChosen}"
+                               Text="{Binding Sx1262TxPowerDbm, StringFormat='{}{0} dBm'}" />
+                    <TextBlock FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                               Foreground="#FFE0A030"
+                               IsVisible="{Binding ShowSx1262BoardPrompt}"
+                               Text="⚠ pick your board before transmitting — the two look identical over USB"
+                               ToolTip.Tip="MeshStick and MeshToad share USB IDs and report no distinguishing product string, so MeshRF cannot detect which is plugged in. Guessing wrong misreports transmit power by about 8 dB, so transmit stays disabled until you choose." />
+                    <TextBlock FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                               Foreground="#FFE0A030"
+                               IsVisible="{Binding ShowSx1262PowerWarning}"
+                               Text="⚠ over 22 dBm can exceed USB current — use a powered hub"
+                               ToolTip.Tip="The MeshToad's PA draws up to ~900 mA on transmit, more than a USB 2.0 port is required to supply. Brownouts show up as failed transmits." />
+                </StackPanel>
             </WrapPanel>
         </Border>
 

@@ -3,6 +3,7 @@
 // HackRF One implementation of IRadioDevice. Loads libhackrf at runtime via
 // HackRfDynLoad, with no build-time dependency on hackrf.h or hackrf.lib.
 #include "mrf/hal/RadioDevice.h"
+#include "mrf/hal/PacketTxDevice.h"
 #include "HackRfDynLoad.h"
 
 #include <algorithm>
@@ -380,6 +381,14 @@ std::unique_ptr<IRadioDevice> open_device(DeviceKind kind) {
             g_open_status = "No device selected";
             return nullptr;
         }
+        case DeviceKind::Sx1262: {
+            // Not an IQ device. Core opens it via open_packet_tx_device() and
+            // never routes it through here; returning nullptr keeps any
+            // accidental caller from getting a half-working IRadioDevice.
+            std::lock_guard<std::mutex> lk(g_open_status_mu);
+            g_open_status = "SX1262 is a packet transmitter, not an SDR";
+            return nullptr;
+        }
         case DeviceKind::Auto:
         default: {
             std::lock_guard<std::mutex> lk(g_open_status_mu);
@@ -401,6 +410,8 @@ bool device_available(DeviceKind kind) {
         }
         case DeviceKind::RtlSdr:
             return rtlsdr_backend_available();
+        case DeviceKind::Sx1262:
+            return packet_tx_available();
         case DeviceKind::Null:
             return true;
         case DeviceKind::Auto:

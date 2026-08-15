@@ -50,6 +50,21 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_device_available")]
     public static partial int CoreDeviceAvailable(nint core, int kind);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_sx1262_board")]
+    public static partial int CoreSetSx1262Board(nint core, int board);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_sx1262_board")]
+    public static partial int CoreGetSx1262Board(nint core);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_tx_power_dbm")]
+    public static partial void CoreSetTxPowerDbm(nint core, int dbm);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_tx_power_dbm")]
+    public static partial int CoreGetTxPowerDbm(nint core);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_tx_power_range")]
+    public static unsafe partial void CoreTxPowerRange(nint core, int* minDbm, int* maxDbm);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_set_gains")]
     public static partial void CoreSetGains(nint core, byte lnaDb, byte vgaDb, int ampEnable);
 

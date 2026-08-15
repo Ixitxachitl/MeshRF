@@ -49,7 +49,8 @@ public sealed class AppSettings
     /// <summary>Requested RTL-SDR RX device sample rate in Hz.</summary>
     public uint RtlSdrRxSampleRateHz { get; set; } = 2_400_000;
 
-    /// <summary>Selected TX radio backend. HackRF can transmit; RTL-SDR cannot.</summary>
+    /// <summary>Selected TX radio backend: "HackRf", "Sx1262" or "Null".
+    /// RTL-SDR cannot transmit.</summary>
     public string TxDeviceKind { get; set; } = "HackRf";
 
     /// <summary>HackRF TX VGA gain in dB (0..47).</summary>
@@ -57,6 +58,20 @@ public sealed class AppSettings
 
     /// <summary>Enable the HackRF RF amplifier during TX.</summary>
     public bool TxAmpEnable { get; set; } = false;
+
+    /// <summary>Which CH341+SX126x USB stick is attached: "MeshStick",
+    /// "MeshToad", or "Unspecified". Matches <see cref="MeshRF.Sx1262Board"/>.
+    /// The two boards share USB IDs and wiring, so this selects the power model
+    /// only — but it cannot be detected, and the wrong answer misreports
+    /// radiated power by ~8 dB, so it defaults to Unspecified and the
+    /// transmitter stays shut until the user picks.</summary>
+    public string Sx1262Board { get; set; } = "Unspecified";
+
+    /// <summary>SX1262 transmit power at the antenna port, in dBm. Clamped by
+    /// the native side to the selected board's range (MeshStick -9..22,
+    /// MeshToad -1..30). Defaults to the MeshStick maximum, which is also a
+    /// safe starting point on a MeshToad.</summary>
+    public sbyte Sx1262TxPowerDbm { get; set; } = 22;
 
     /// <summary>RTL-SDR manual tuner gain in dB (0..49).</summary>
     public byte RtlGainDb { get; set; } = 30;

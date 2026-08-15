@@ -4,6 +4,11 @@ add_library(mrf_core STATIC
     src/hal/HackRfDynLoad.cpp
     src/hal/RtlSdrDevice.cpp
     src/hal/RtlSdrDynLoad.cpp
+    src/hal/Ch341DynLoad.cpp
+    src/hal/Ch341Windows.cpp
+    src/hal/Ch341LibUsb.cpp
+    src/hal/Sx126x.cpp
+    src/hal/Sx1262TxDevice.cpp
     src/dsp/Fir.cpp
     src/dsp/Fft.cpp
     src/dsp/SignalStats.cpp
@@ -60,6 +65,27 @@ endif()
 
 # Radio backends are loaded at runtime via LoadLibrary (see hal/*DynLoad.cpp).
 # Runtime DLL staging is handled by native/bridge/CMakeLists.txt.
+
+# CH341 USB-SPI bridge for the SX1262 transmit sticks. On Windows this goes
+# through WCH's CH341DLL, loaded at runtime like the other radio backends, so
+# there is nothing to link. Everywhere else it speaks the bridge's vendor
+# protocol over libusb; without libusb the backend still compiles but reports
+# itself unavailable, so a missing dependency costs the SX1262 device rather
+# than the whole build.
+if(NOT WIN32)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(MRF_LIBUSB QUIET libusb-1.0)
+    endif()
+    if(MRF_LIBUSB_FOUND)
+        target_include_directories(mrf_core PRIVATE ${MRF_LIBUSB_INCLUDE_DIRS})
+        target_link_libraries(mrf_core PUBLIC ${MRF_LIBUSB_LINK_LIBRARIES})
+        target_compile_definitions(mrf_core PRIVATE MRF_HAVE_LIBUSB=1)
+    else()
+        message(STATUS
+            "mrf_core: libusb-1.0 not found; SX1262 USB transmit sticks will be unavailable")
+    endif()
+endif()
 
 set_target_properties(mrf_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON

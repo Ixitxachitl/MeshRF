@@ -37,7 +37,8 @@ MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core);
 MRF_API int  MRF_CALL mrf_core_is_running(const mrf_core_t* core);
 
 // Radio backend selection. `kind` mirrors mrf::hal::DeviceKind:
-//   0 = legacy Auto (disabled), 1 = HackRF, 2 = RTL-SDR, 3 = None.
+//   0 = legacy Auto (disabled), 1 = HackRF, 2 = RTL-SDR, 3 = None,
+//   4 = SX1262 USB stick (transmit only; invalid as an RX selection).
 // mrf_core_set_device is a back-compat alias for mrf_core_set_rx_device.
 // Reopens the selected device immediately when RX is stopped so the names/status
 // reflect the choices. Returns 0 on success, -1 if RX is running, -2 on null.
@@ -55,6 +56,30 @@ MRF_API int32_t MRF_CALL mrf_core_get_tx_device_kind(const mrf_core_t* core);
 // 1 if the given backend's runtime library can be loaded (selectable), else 0.
 MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
                                                    int32_t kind);
+
+// --- SX1262 packet transmitter -------------------------------------------
+// Which CH341+SX126x stick is attached, mirroring mrf::hal::Sx126xBoard:
+//   0 = MeshStick (bare SX1262, 22 dBm), 1 = MeshToad V3 (+PA, 30 dBm),
+//   2 = Unspecified (the default: the transmitter will not open).
+// The two boards are electrically identical, share USB IDs and report no
+// distinguishing product string, so this is a user choice, not a detection.
+// It only changes the power model — but getting it wrong misreports radiated
+// power by ~8 dB, so nothing transmits until a real board is selected.
+// Returns 0 on success, -1 on an unknown board, -2 on null.
+MRF_API int32_t MRF_CALL mrf_core_set_sx1262_board(mrf_core_t* core, int32_t board);
+MRF_API int32_t MRF_CALL mrf_core_get_sx1262_board(const mrf_core_t* core);
+
+// Transmit power at the antenna port, in dBm, for the SX1262 path. Clamped to
+// the selected board's range. The HackRF path is unaffected and keeps using
+// the txvga_gain_db argument to mrf_core_transmit.
+MRF_API void    MRF_CALL mrf_core_set_tx_power_dbm(mrf_core_t* core, int32_t dbm);
+MRF_API int32_t MRF_CALL mrf_core_get_tx_power_dbm(const mrf_core_t* core);
+
+// Selectable dBm range for the currently selected board. Either pointer may
+// be NULL. Valid before any device is connected.
+MRF_API void MRF_CALL mrf_core_tx_power_range(const mrf_core_t* core,
+                                              int32_t* min_dbm,
+                                              int32_t* max_dbm);
 
 // IQ capture: dump the decimated modem-input stream (interleaved float32
 // I/Q, ".cf32") to `path`. Safe to toggle while RX runs. Capped to ~60 s.

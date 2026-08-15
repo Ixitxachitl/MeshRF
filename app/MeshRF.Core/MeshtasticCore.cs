@@ -46,6 +46,32 @@ public enum RadioDeviceKind
     HackRf = 1,
     RtlSdr = 2,
     Null = 3,
+    /// <summary>CH341+SX1262 USB stick. Transmit only — it is a hardware LoRa
+    /// modem, not an SDR, so it can never be selected as an RX device.</summary>
+    Sx1262 = 4,
+}
+
+/// <summary>
+/// Which CH341+SX126x stick is plugged in. Both enumerate as VID 0x1A86 /
+/// PID 0x5512 with an identical pin map, so this is a user choice rather than
+/// a detection; it selects the power model only. Mirrors
+/// <c>mrf::hal::Sx126xBoard</c> and is part of the C ABI.
+/// </summary>
+public enum Sx1262Board
+{
+    /// <summary>Elecrow MeshStick: bare SX1262, up to 22 dBm.</summary>
+    MeshStick = 0,
+    /// <summary>NullHop/muzi MeshToad V3: SX1262 driving an E22P-915M30S,
+    /// up to 30 dBm. Draws up to ~900 mA on transmit at full power.</summary>
+    MeshToad = 1,
+    /// <summary>
+    /// No board chosen. The default, and the transmitter will not open in this
+    /// state. The boards report nothing that distinguishes them at runtime, and
+    /// a guess is silently wrong in the dangerous direction — a MeshToad driven
+    /// as a MeshStick radiates ~8 dB more than the UI shows — so the user picks
+    /// once before anything can transmit.
+    /// </summary>
+    Unspecified = 2,
 }
 
 /// <summary>
@@ -63,8 +89,39 @@ public sealed class MeshtasticCore : IDisposable
     private nint _handle;
     private bool _disposed;
 
+    /// <summary>
+    /// Lowest <c>mrf_abi_version()</c> this assembly can talk to. Raise it in
+    /// step with the native side whenever an entry point is added that the
+    /// managed layer calls unconditionally.
+    /// </summary>
+    private const uint RequiredAbiVersion = 8;
+
     public MeshtasticCore()
     {
+        // Checked before anything else touches the library. Without this, a
+        // MeshRF.Native.dll left over from an older build fails at the first
+        // call to a newly added entry point, and .NET reports it as a bare
+        // EntryPointNotFoundException naming a function the user has never
+        // heard of — with no hint that the fix is to rebuild the native side.
+        // Only older is rejected: the native ABI is additive, so a newer
+        // library still satisfies everything this assembly calls.
+        uint abi;
+        try
+        {
+            abi = NativeMethods.AbiVersion();
+        }
+        catch (EntryPointNotFoundException ex)
+        {
+            throw new InvalidOperationException(
+                "MeshRF.Native.dll is too old to report its ABI version. " +
+                "Rebuild the native core (cmake --build build/windows-x64 --config RelWithDebInfo).", ex);
+        }
+        if (abi < RequiredAbiVersion)
+            throw new InvalidOperationException(
+                $"MeshRF.Native.dll is ABI {abi}, but this build needs {RequiredAbiVersion} or newer. " +
+                "Rebuild the native core (cmake --build build/windows-x64 --config RelWithDebInfo) " +
+                "— the app stages the RelWithDebInfo output, not Debug.");
+
         _handle = NativeMethods.CoreCreate();
         if (_handle == 0)
             throw new InvalidOperationException("Failed to create native core");
@@ -119,7 +176,12 @@ public sealed class MeshtasticCore : IDisposable
         finally { _lock.ExitReadLock(); }
     }
 
-    /// <summary>Select the TX radio backend. HackRF can transmit; RTL-SDR cannot.</summary>
+    /// <summary>
+    /// Select the TX radio backend. HackRF and the SX1262 USB stick can
+    /// transmit; RTL-SDR cannot. Selecting anything other than
+    /// <see cref="RadioDeviceKind.Sx1262"/> releases the USB stick, so it can
+    /// be handed back to meshtasticd without restarting MeshRF.
+    /// </summary>
     public bool SetTxDevice(RadioDeviceKind kind)
     {
         _lock.EnterReadLock();
@@ -129,6 +191,84 @@ public sealed class MeshtasticCore : IDisposable
             return NativeMethods.CoreSetTxDevice(_handle, (int)kind) == 0;
         }
         finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>
+    /// Which CH341+SX126x stick is attached. Changing this re-opens the device
+    /// when it is already selected, so the power model follows immediately.
+    /// </summary>
+    public Sx1262Board Sx1262Board
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                return _disposed ? Sx1262Board.MeshStick
+                                 : (Sx1262Board)NativeMethods.CoreGetSx1262Board(_handle);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+        set
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (!_disposed) NativeMethods.CoreSetSx1262Board(_handle, (int)value);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
+
+    /// <summary>
+    /// Transmit power at the antenna port in dBm, used by the SX1262 path.
+    /// The native side subtracts any external PA gain and clamps to the
+    /// board's range, so reading this back may return a different value than
+    /// was written. The HackRF path ignores it and uses its VGA gain instead.
+    /// </summary>
+    public sbyte TxPowerDbm
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                return _disposed ? (sbyte)0 : (sbyte)NativeMethods.CoreGetTxPowerDbm(_handle);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+        set
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (!_disposed) NativeMethods.CoreSetTxPowerDbm(_handle, value);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
+
+    /// <summary>
+    /// Selectable dBm range for the currently selected SX1262 board. Valid
+    /// before any hardware is connected, so the UI can bound its control.
+    /// </summary>
+    public (sbyte Min, sbyte Max) TxPowerRangeDbm
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (_disposed) return (0, 0);
+                unsafe
+                {
+                    int min = 0, max = 0;
+                    NativeMethods.CoreTxPowerRange(_handle, &min, &max);
+                    return ((sbyte)min, (sbyte)max);
+                }
+            }
+            finally { _lock.ExitReadLock(); }
+        }
     }
 
     /// <summary>The RX backend that actually opened (may differ from the request).</summary>
@@ -282,7 +422,8 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
-    /// True if the selected TX radio backend can transmit (HackRF only).
+    /// True if the selected TX radio backend can transmit — a HackRF, or an
+    /// SX1262 stick that opened successfully.
     /// </summary>
     public bool CanTransmit
     {
@@ -298,10 +439,16 @@ public sealed class MeshtasticCore : IDisposable
     /// Transmit a LoRa burst carrying <paramref name="payload"/> (the fully
     /// framed/encrypted on-air bytes from <c>MeshEncoder</c>) for the given
     /// <paramref name="preset"/>, centered on <paramref name="centerFreqHz"/>.
-    /// HackRF only. If TX shares the RX HackRF, RX is paused for the burst and
-    /// resumed afterwards; separate RX/TX devices can run full duplex. Blocks
-    /// until the burst has been streamed. Returns true on success, false if
-    /// the device cannot transmit or modulation failed.
+    /// If TX shares the RX HackRF, RX is paused for the burst and resumed
+    /// afterwards; separate RX/TX devices can run full duplex. Blocks until the
+    /// burst has been streamed. Returns true on success, false if the device
+    /// cannot transmit or modulation failed.
+    /// <para>
+    /// On the SX1262 path <paramref name="txvgaGainDb"/> and
+    /// <paramref name="ampEnable"/> are ignored — that radio is driven by
+    /// <see cref="TxPowerDbm"/> — and RX is never paused, because the stick is
+    /// a separate USB device from the SDR.
+    /// </para>
     /// </summary>
     public bool Transmit(LoraPreset preset, ulong centerFreqHz,
                          ReadOnlySpan<byte> payload,

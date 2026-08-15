@@ -2,6 +2,7 @@
 #include "mrf/c_api.h"
 #include "mrf/Core.h"
 
+#include <algorithm>
 #include <new>
 #include <span>
 
@@ -96,6 +97,42 @@ MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
     if (!core) return 0;
     return core->core.is_device_available(
                static_cast<mrf::hal::DeviceKind>(kind)) ? 1 : 0;
+}
+
+MRF_API int32_t MRF_CALL mrf_core_set_sx1262_board(mrf_core_t* core, int32_t board) {
+    if (!core) return -2;
+    if (board < 0 || board > static_cast<int32_t>(mrf::hal::Sx126xBoard::Unspecified))
+        return -1;
+    core->core.set_sx1262_board(static_cast<mrf::hal::Sx126xBoard>(board));
+    return 0;
+}
+
+MRF_API int32_t MRF_CALL mrf_core_get_sx1262_board(const mrf_core_t* core) {
+    if (!core) return 0;
+    return static_cast<int32_t>(core->core.sx1262_board());
+}
+
+MRF_API void MRF_CALL mrf_core_set_tx_power_dbm(mrf_core_t* core, int32_t dbm) {
+    if (!core) return;
+    // Clamped to the selected board's range inside Core; the int32 here is
+    // only to keep the ABI free of signed-char marshalling questions.
+    core->core.set_tx_power_dbm(static_cast<std::int8_t>(
+        std::clamp(dbm, -128, 127)));
+}
+
+MRF_API int32_t MRF_CALL mrf_core_get_tx_power_dbm(const mrf_core_t* core) {
+    if (!core) return 0;
+    return core->core.tx_power_dbm();
+}
+
+MRF_API void MRF_CALL mrf_core_tx_power_range(const mrf_core_t* core,
+                                              int32_t* min_dbm,
+                                              int32_t* max_dbm) {
+    if (!core) return;
+    std::int8_t lo = 0, hi = 0;
+    core->core.tx_power_range_dbm(lo, hi);
+    if (min_dbm) *min_dbm = lo;
+    if (max_dbm) *max_dbm = hi;
 }
 
 MRF_API void MRF_CALL mrf_core_set_gains(mrf_core_t* core,
@@ -305,6 +342,7 @@ MRF_API int32_t MRF_CALL mrf_core_transmit_params(mrf_core_t* core,
     }
 }
 
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 7u; }
+// 8: added the SX1262 packet transmitter (board selection, dBm power control).
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 8u; }
 
 } // extern "C"

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "mrf/Export.h"
+#include "mrf/hal/PacketTxDevice.h"
 #include "mrf/hal/RadioDevice.h"
 #include "mrf/modem/Preset.h"
 #include "mrf/router/FloodingRouter.h"
@@ -41,11 +42,17 @@ public:
     // (16-byte L1 header + encrypted Data payload) produced by the managed
     // MeshEncoder; this modulates it into a full LoRa frame (preamble + sync +
     // SFD + FEC + chirps), upsamples to the radio rate, offset-mixes, and keys
-    // the transmitter. TX is HackRF-only. If TX uses the same HackRF that is
-    // currently receiving, RX is paused for the burst and resumed afterward;
-    // when RX is on a separate device, RX continues during TX. Blocks until
-    // the burst has been streamed. Returns false if the selected TX device
-    // cannot transmit or the payload is empty/invalid.
+    // the transmitter. If TX uses the same HackRF that is currently receiving,
+    // RX is paused for the burst and resumed afterward; when RX is on a
+    // separate device, RX continues during TX. Blocks until the burst has been
+    // streamed. Returns false if the selected TX device cannot transmit or the
+    // payload is empty/invalid.
+    //
+    // When the TX device is the SX1262 stick, none of the software modulation
+    // above happens: the payload is handed to the radio, which does preamble,
+    // sync, FEC and chirping itself, at the power set by set_tx_power_dbm().
+    // RX is never paused in that case — the stick is a separate USB device, so
+    // the SDR keeps receiving (and will hear the burst) throughout.
     bool transmit(modem::Preset preset, std::uint64_t center_freq_hz,
                   std::span<const std::uint8_t> payload,
                   std::uint8_t txvga_gain_db = 30, bool amp_enable = false);
@@ -65,9 +72,35 @@ public:
     // Back-compat alias for set_rx_device().
     bool set_device(hal::DeviceKind kind) { return set_rx_device(kind); }
 
-    // Select the TX radio backend. HackRF can transmit; RTL-SDR and Null cannot.
-    // Like RX selection, this is only allowed while RX is stopped.
+    // Select the TX radio backend. HackRF and the SX1262 USB stick can
+    // transmit; RTL-SDR and Null cannot. Like RX selection, this is only
+    // allowed while RX is stopped.
     bool set_tx_device(hal::DeviceKind kind);
+
+    // Which CH341+SX126x stick is plugged in. The two supported boards are
+    // electrically identical, enumerate with the same USB IDs and report no
+    // distinguishing product string, so they cannot be told apart
+    // automatically; this only changes the power model (the MeshToad's
+    // external PA adds ~8 dB), never the wiring. Takes effect on the next
+    // set_tx_device(Sx1262), and re-opens the device if one is already open.
+    //
+    // Defaults to Sx126xBoard::Unspecified, in which state the transmitter
+    // refuses to open at all: a guess here is silently wrong in the dangerous
+    // direction, since a MeshToad driven as a MeshStick radiates ~8 dB more
+    // than the UI reports.
+    void set_sx1262_board(hal::Sx126xBoard board);
+    [[nodiscard]] hal::Sx126xBoard sx1262_board() const noexcept;
+
+    // Transmit power at the antenna port, in dBm, for packet TX devices. The
+    // backend subtracts any external PA gain and clamps to the board's range,
+    // so this is the number the user actually radiates. Ignored by the HackRF
+    // path, which uses the txvga_gain_db argument to transmit() instead.
+    void set_tx_power_dbm(std::int8_t dbm);
+    [[nodiscard]] std::int8_t tx_power_dbm() const noexcept;
+
+    // Selectable antenna-port power range for the current SX1262 board, so
+    // the UI can bound its control before a device is connected.
+    void tx_power_range_dbm(std::int8_t& min_dbm, std::int8_t& max_dbm) const noexcept;
 
     // The RX backend that actually opened (may differ from the requested kind
     // when Auto probes, or when the requested device was unavailable).
