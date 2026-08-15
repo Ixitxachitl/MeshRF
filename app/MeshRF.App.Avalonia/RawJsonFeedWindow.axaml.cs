@@ -44,6 +44,12 @@ public partial class RawJsonFeedWindow : Window
         {
             if (e.Action != NotifyCollectionChangedAction.Add) return;
             if (w.AutoScrollToggle.IsChecked != true) return;
+            // Measured before the new row lays out, so this is where the reader
+            // was: parked at the bottom means tail, anywhere else means they're
+            // reading an expanded packet and shouldn't be dragged away from it.
+            if (w.JsonList.Scroll is { } scroll &&
+                scroll.Extent.Height - scroll.Viewport.Height - scroll.Offset.Y > 8)
+                return;
             Dispatcher.UIThread.Post(() =>
             {
                 if (w.JsonList.ItemCount > 0) w.JsonList.ScrollIntoView(w.JsonList.ItemCount - 1);

@@ -22,14 +22,21 @@
             <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Decoded Packet JSON Feed" />
         </DockPanel>
 
+        <!-- Selection never scrolls: clicking a header should expand that row
+             where it sits, not drag the list to centre the row on it. -->
         <ListBox x:Name="JsonList" Grid.Row="1"
                  ItemsSource="{Binding DecodedPacketJsonEntries}"
+                 AutoScrollToSelectedItem="False"
                  HorizontalAlignment="Stretch">
             <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="local:DecodedPacketJsonEntry">
                     <!-- Collapsed by default: the feed is scanned by header, and
-                         each body is a full packet dump. -->
-                    <Expander Margin="0,0,0,4">
+                         each body is a full packet dump. IsExpanded is bound so
+                         the open state rides on the entry — the list recycles
+                         rows, so state left on the Expander would show up on
+                         whatever packet scrolls into that row next. -->
+                    <Expander Margin="0,0,0,4" IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                              HorizontalAlignment="Stretch">
                         <Expander.Header>
                             <TextBlock FontFamily="Consolas" TextWrapping="Wrap" Text="{Binding Header}" />
                         </Expander.Header>

@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.Mesh;
 
@@ -13,7 +14,28 @@ namespace MeshRF.AvaloniaApp;
 /// <summary>One decoded packet in the raw feed: a one-line header for the
 /// collapsed row, the exact JSON (what gets copied or exported), and a
 /// display variant that wraps long hex.</summary>
-public sealed record DecodedPacketJsonEntry(string Header, string Json, string DisplayJson);
+public sealed partial class DecodedPacketJsonEntry : ObservableObject
+{
+    public DecodedPacketJsonEntry(string header, string json, string displayJson)
+    {
+        Header = header;
+        Json = json;
+        DisplayJson = displayJson;
+    }
+
+    public string Header { get; }
+
+    public string Json { get; }
+
+    public string DisplayJson { get; }
+
+    /// <summary>Expansion belongs to the entry, not the row. The list recycles
+    /// its containers, so an Expander left open would hand its open state to
+    /// whichever packet scrolls into that row next — every row then looks
+    /// expanded, and the first click only closes what was never open.</summary>
+    [ObservableProperty]
+    private bool _isExpanded;
+}
 
 /// <summary>
 /// The raw decoded-packet JSON feed, ported from MeshRF.App. Every packet that
