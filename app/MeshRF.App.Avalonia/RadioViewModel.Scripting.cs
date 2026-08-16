@@ -415,7 +415,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                     _rxHost.Log("scripts: nothing sent — the message came out empty once filled in");
                     return;
                 }
-                await SendTextAsync(channel, to, text, action.ReplyId, replyContext: string.Empty, messages);
+                await SendTextAsync(channel, to, text, action.ReplyId,
+                                    ReplyContextFor(run, action.ReplyId), messages);
                 break;
             }
 
@@ -526,6 +527,29 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
 
         if (!await TransmitFrameAsync(frame))
             _rxHost.Log("scripts: waypoint transmit failed");
+    }
+
+    /// <summary>
+    /// The quote line shown above a scripted reply's own bubble, built the same
+    /// way <c>ReplyToMessage</c> builds it for one the user sent.
+    /// </summary>
+    /// <remarks>
+    /// Without this a scripted reply echoed as reply-linked but with no quote,
+    /// so the bubble opened with a blank line where "replying to …" belongs and
+    /// looked unlike every other reply in the conversation. Only the local echo
+    /// is affected — the frame on the air carries reply_id either way.
+    /// </remarks>
+    private string ReplyContextFor(ScriptRun run, uint replyId)
+    {
+        if (replyId == 0) return string.Empty;
+
+        var evt = run.Expansion.Event;
+        if (evt.FromNode == 0) return string.Empty;
+
+        var preview = evt.Text.Replace("\r", " ").Replace("\n", " ").Trim();
+        if (preview.Length > 80) preview = preview[..80] + "...";
+        if (preview.Length == 0) preview = "(empty)";
+        return $"replying to {_rxHost.NodeDisplayName(evt.FromNode)}: \"{preview}\"";
     }
 
     private static bool TryCoordinate(string text, double limit, out double value) =>
