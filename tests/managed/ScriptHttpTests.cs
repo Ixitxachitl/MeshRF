@@ -192,6 +192,27 @@ public class ScriptHttpTests
         Assert.Equal(expected, JsonValuePath.Read(json, path, out _));
     }
 
+    [Fact]
+    public void A_Path_Can_Start_At_A_Bare_Array()
+    {
+        // Not every API paginates. Watch Duty's geo_events answers with the
+        // list itself, so a path has to be able to open with an index rather
+        // than a member name.
+        const string json =
+            """
+            [{"id":1,"is_active":true,"name":"Bear Fire","lat":39.31,"lng":-120.84,
+              "data":{"acreage":1200,"containment":35}},
+             {"id":2,"is_active":false,"name":"Old Fire"}]
+            """;
+
+        Assert.True(JsonValuePath.IsValid("[0].data.acreage", out _));
+        Assert.Equal("Bear Fire", JsonValuePath.Read(json, "[0].name", out _));
+        Assert.Equal("true", JsonValuePath.Read(json, "[0].is_active", out _));
+        Assert.Equal("-120.84", JsonValuePath.Read(json, "[0].lng", out _));
+        Assert.Equal("1200", JsonValuePath.Read(json, "[0].data.acreage", out _));
+        Assert.Equal("Old Fire", JsonValuePath.Read(json, "[1].name", out _));
+    }
+
     [Theory]
     [InlineData("current.missing", "no \"missing\"")]
     [InlineData("days[9].name", "does not exist")]

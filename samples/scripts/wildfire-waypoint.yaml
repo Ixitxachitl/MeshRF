@@ -3,18 +3,19 @@
 # No credential needed — the API is open.
 #
 # ---------------------------------------------------------------------------
-# The field names below come from a working Home Assistant integration against
-# the same endpoint, so they are not guesses: lat and lng are top level, while
-# acreage and containment live under data. The one thing still unconfirmed is
-# whether the list arrives wrapped in results[] — the sibling /reports/ endpoint
-# is paginated that way, and this one is filtered the same, so it almost
-# certainly is. If nothing ever fires, delete the json: block, turn Dry run on,
-# and the log prints the whole response as {http.body}; the wrapper will be
-# obvious.
+# Everything here follows a working Home Assistant integration against the same
+# endpoint, rather than a guess at the shape:
 #
-# The endpoint returns every incident, active or not, with no way to narrow by
-# distance — the Home Assistant integration measures each one locally, and the
-# within: test below does the same thing here.
+#   * The reply is a bare array, not a paginated object — its coordinator
+#     returns resp.json() untouched and iterates it directly. Hence [0] rather
+#     than results[0], unlike the sibling /reports/ endpoint.
+#   * lat and lng are top level; acreage and containment are under data.
+#   * Closed incidents come back too, so is_active has to be checked.
+#   * There is no way to narrow by distance, which is why the integration
+#     measures each incident locally. The within: test below does the same.
+#
+# The headers are the ones that integration sends. A bare request is answered
+# with 406 Not Acceptable, so they are not optional.
 # ---------------------------------------------------------------------------
 
 enabled: false
@@ -36,18 +37,17 @@ action:
       url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
       optional: true
       timeout: 20s
-      # Uncomment if the request comes back 406: some edge filters reject an
-      # unfamiliar client, and this presents a browser's instead.
-      # headers:
-      #   User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-      #   Accept: "application/json"
+      # Not optional: without these the endpoint answers 406 Not Acceptable.
+      headers:
+        Accept: "application/json, text/plain, */*"
+        User-Agent: "MeshRF/2 (https://github.com/Ixitxachitl/MeshRF)"
       json:
-        active: results[0].is_active
-        name: results[0].name
-        lat: results[0].lat
-        lon: results[0].lng
-        acreage: results[0].data.acreage
-        containment: results[0].data.containment
+        active: "[0].is_active"
+        name: "[0].name"
+        lat: "[0].lat"
+        lon: "[0].lng"
+        acreage: "[0].data.acreage"
+        containment: "[0].data.containment"
 
   # The endpoint returns closed incidents too, and the integration skips
   # anything without is_active. So does this.
