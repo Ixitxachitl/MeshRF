@@ -1462,6 +1462,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         StoreAutoReportSettings();
         _settings.ScriptsEnabled = ScriptsEnabled;
         _settings.ScriptsDryRun = ScriptsDryRun;
+        // Must be here, not merely mutated in place: SaveSettings writes a copy
+        // freshly loaded from the file, so anything not applied here is silently
+        // replaced by whatever was on disk. Credentials edited in the dialog
+        // looked fine all session and vanished on restart without this line.
+        _settings.ScriptCredentials = ScriptCredentials;
         _settings.UnitSystem = UnitSystemName;
         _settings.UseFahrenheit = UseFahrenheit;
         _settings.UseMiles = UseMiles;
