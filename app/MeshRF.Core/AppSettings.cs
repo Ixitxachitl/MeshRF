@@ -398,7 +398,10 @@ public sealed class AppSettings
             settings.UserPrivateKey = UnprotectSecretText(settings.UserPrivateKeyOnDisk, s_privateKeyEntropy, base64: true);
             settings.MqttPassword = UnprotectSecretText(settings.MqttPasswordOnDisk, s_mqttPasswordEntropy, base64: false);
             foreach (var credential in settings.ScriptCredentials)
+            {
                 credential.Value = UnprotectSecretText(credential.ValueOnDisk, s_scriptCredentialEntropy, base64: false);
+                credential.Value2 = UnprotectSecretText(credential.Value2OnDisk, s_scriptCredentialEntropy, base64: false);
+            }
             return settings;
         }
         catch
@@ -416,7 +419,10 @@ public sealed class AppSettings
             UserPrivateKeyOnDisk = ProtectSecretText(UserPrivateKey, s_privateKeyEntropy, base64: true);
             MqttPasswordOnDisk = ProtectSecretText(MqttPassword, s_mqttPasswordEntropy, base64: false);
             foreach (var credential in ScriptCredentials)
+            {
                 credential.ValueOnDisk = ProtectSecretText(credential.Value, s_scriptCredentialEntropy, base64: false);
+                credential.Value2OnDisk = ProtectSecretText(credential.Value2, s_scriptCredentialEntropy, base64: false);
+            }
             var json = JsonSerializer.Serialize(this, s_opts);
             _ = Task.Run(() =>
             {

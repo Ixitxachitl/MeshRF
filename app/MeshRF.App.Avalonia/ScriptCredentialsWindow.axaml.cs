@@ -67,14 +67,44 @@ public sealed partial class ScriptCredentialItem : ObservableObject
         }
     }
 
+    public string Parameter2
+    {
+        get => _credential.Parameter2;
+        set
+        {
+            if (_credential.Parameter2 == value) return;
+            _credential.Parameter2 = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Summary));
+        }
+    }
+
+    public string Value2
+    {
+        get => _credential.Value2;
+        set
+        {
+            if (_credential.Value2 == value) return;
+            _credential.Value2 = value;
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>A bearer token goes in a fixed header, so there is nothing to
-    /// name for it.</summary>
+    /// name for it — and nothing to pair it with.</summary>
     public bool NeedsParameter => _credential.Placement != ScriptCredentialPlacement.Bearer;
 
     public string ParameterHint => _credential.Placement switch
     {
         ScriptCredentialPlacement.Header => "X-API-Key",
-        ScriptCredentialPlacement.Query => "appid",
+        ScriptCredentialPlacement.Query => "client_id",
+        _ => string.Empty,
+    };
+
+    public string Parameter2Hint => _credential.Placement switch
+    {
+        ScriptCredentialPlacement.Header => "(optional)",
+        ScriptCredentialPlacement.Query => "client_secret (optional)",
         _ => string.Empty,
     };
 
@@ -104,10 +134,13 @@ public sealed partial class ScriptCredentialsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasSelection))]
     [NotifyPropertyChangedFor(nameof(HasNoSelection))]
     [NotifyPropertyChangedFor(nameof(UsageExample))]
-    [NotifyPropertyChangedFor(nameof(HasUsage))]
     private ScriptCredentialItem? _selected;
 
     [ObservableProperty] private bool _isValueRevealed;
+
+    public bool IsValueHidden => !IsValueRevealed;
+
+    partial void OnIsValueRevealedChanged(bool value) => OnPropertyChanged(nameof(IsValueHidden));
 
     public bool HasSelection => Selected is not null;
     public bool HasNoSelection => Selected is null;
@@ -118,54 +151,25 @@ public sealed partial class ScriptCredentialsViewModel : ObservableObject
 
     public bool HasError => Error.Length > 0;
 
-    /// <summary>
-    /// The credential: line a script needs, ready to copy. Lists every row when
-    /// nothing is selected, so an id/secret pair can be taken in one go without
-    /// retyping either name.
-    /// </summary>
-    public string UsageExample
+    /// <summary>Shows the two lines a script needs to use this credential, so
+    /// the name does not have to be remembered or retyped from memory.</summary>
+    public string UsageExample =>
+        Selected is null
+            ? string.Empty
+            : $"""
+               - http:
+                   url: "https://example.com/api"
+                   credential: {Selected.Name}
+               """;
+
+    public void Add()
     {
-        get
-        {
-            var named = Credentials.Where(c => c.Name.Trim().Length > 0).Select(c => c.Name.Trim()).ToList();
-            if (named.Count == 0) return string.Empty;
-
-            if (Selected is { Name.Length: > 0 } one && named.Count > 1)
-                return $"credential: {one.Name.Trim()}      (all: credential: [{string.Join(", ", named)}])";
-
-            return named.Count == 1
-                ? $"credential: {named[0]}"
-                : $"credential: [{string.Join(", ", named)}]";
-        }
-    }
-
-    public bool HasUsage => UsageExample.Length > 0;
-
-    public ScriptCredentialItem Add(
-        string name = "", ScriptCredentialPlacement placement = ScriptCredentialPlacement.Bearer,
-        string parameter = "")
-    {
-        var credential = new ScriptCredential
-        {
-            Name = name.Length > 0 ? UniqueName(name) : UniqueName(),
-            Placement = placement,
-            Parameter = parameter,
-        };
+        var credential = new ScriptCredential { Name = UniqueName(), Placement = ScriptCredentialPlacement.Bearer };
         _store.Add(credential);
         var item = new ScriptCredentialItem(credential);
         Credentials.Add(item);
         Selected = item;
         Commit();
-        return item;
-    }
-
-    /// <summary>Adds the two rows an id/secret API needs, pre-filled with the
-    /// parameter names those APIs almost always use.</summary>
-    public void AddPair()
-    {
-        Add("client-id", ScriptCredentialPlacement.Query, "client_id");
-        var secret = Add("client-secret", ScriptCredentialPlacement.Query, "client_secret");
-        Selected = secret;
     }
 
     public void Remove(ScriptCredentialItem item)
@@ -196,6 +200,14 @@ public sealed partial class ScriptCredentialsViewModel : ObservableObject
         {
             Error = "A header or query credential needs the header/parameter name filling in.";
         }
+        else if (Credentials.Any(c => c.Parameter2.Trim().Length > 0 &&
+                                      string.Equals(c.Parameter2.Trim(), c.Parameter.Trim(),
+                                                    StringComparison.OrdinalIgnoreCase)))
+        {
+            // Both halves would target the same parameter, and the second would
+            // simply overwrite the first.
+            Error = "The two parameter names are the same — the second would replace the first.";
+        }
         else
         {
             Error = string.Empty;
@@ -207,8 +219,9 @@ public sealed partial class ScriptCredentialsViewModel : ObservableObject
         _save();
     }
 
-    private string UniqueName(string basis = "new-credential")
+    private string UniqueName()
     {
+        const string basis = "new-credential";
         if (Credentials.All(c => !string.Equals(c.Name, basis, StringComparison.OrdinalIgnoreCase))) return basis;
         for (int i = 2; ; i++)
         {
@@ -242,14 +255,10 @@ public partial class ScriptCredentialsWindow : Window
         Closing += (_, _) => _model.Commit();
     }
 
-    private void OnAdd(object? sender, RoutedEventArgs e) => AddAndShow(() => _model.Add());
-
-    private void OnAddPair(object? sender, RoutedEventArgs e) => AddAndShow(_model.AddPair);
-
-    private void AddAndShow(Action add)
+    private void OnAdd(object? sender, RoutedEventArgs e)
     {
-        add();
-        if (_model.Selected is { } added) CredentialGrid.ScrollIntoView(added, null);
+        _model.Add();
+        if (_model.Selected is { } added) CredentialList.ScrollIntoView(added);
     }
 
     private async void OnRemove(object? sender, RoutedEventArgs e)
@@ -260,6 +269,9 @@ public partial class ScriptCredentialsWindow : Window
             return;
         _model.Remove(item);
     }
+
+    private void OnToggleReveal(object? sender, RoutedEventArgs e) =>
+        _model.IsValueRevealed = !_model.IsValueRevealed;
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 }

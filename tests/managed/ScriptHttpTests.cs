@@ -401,6 +401,47 @@ public class ScriptHttpTests
     }
 
     [Fact]
+    public async Task A_Paired_Credential_Attaches_Both_Halves_From_One_Entry()
+    {
+        var (client, handler) = Stub("ok");
+        using var __ = client;
+        client.Credentials = new Credentials(new ScriptCredential
+        {
+            Name = "xweather",
+            Placement = ScriptCredentialPlacement.Query,
+            Parameter = "client_id", Value = "the-id",
+            Parameter2 = "client_secret", Value2 = "the-secret",
+        });
+
+        await client.SendAsync(
+            new ScriptHttpRequest { Url = "https://api.test/v1?q={args}", CredentialNames = ["xweather"] },
+            Expansion("!wx london"));
+
+        Assert.Equal("https://api.test/v1?q=london&client_id=the-id&client_secret=the-secret",
+                     handler.Last!.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task A_Paired_Header_Credential_Sends_Both_Headers()
+    {
+        var (client, handler) = Stub("ok");
+        using var __ = client;
+        client.Credentials = new Credentials(new ScriptCredential
+        {
+            Name = "two",
+            Placement = ScriptCredentialPlacement.Header,
+            Parameter = "X-Id", Value = "id-value",
+            Parameter2 = "X-Secret", Value2 = "secret-value",
+        });
+
+        await client.SendAsync(
+            new ScriptHttpRequest { Url = "https://api.test/", CredentialNames = ["two"] }, Expansion());
+
+        Assert.Equal("id-value", handler.Last!.Headers.GetValues("X-Id").Single());
+        Assert.Equal("secret-value", handler.Last.Headers.GetValues("X-Secret").Single());
+    }
+
+    [Fact]
     public async Task A_Missing_Credential_Fails_With_A_Usable_Reason()
     {
         var (client, _) = Stub("ok");

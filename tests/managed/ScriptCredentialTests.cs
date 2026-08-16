@@ -88,4 +88,50 @@ public class ScriptCredentialTests
         Assert.Equal(expected, summary);
         Assert.DoesNotContain("sk-super-secret", summary);
     }
+
+    [Fact]
+    public void A_Pair_Is_One_Credential_And_Neither_Half_Is_Serialized_Plainly()
+    {
+        // A client id and secret are issued and rotated together and are
+        // useless apart, so they are one entry rather than two kept in step.
+        var credential = new ScriptCredential
+        {
+            Name = "xweather",
+            Placement = ScriptCredentialPlacement.Query,
+            Parameter = "client_id",
+            Value = "the-id",
+            Parameter2 = "client_secret",
+            Value2 = "the-secret",
+            ValueOnDisk = "blob-1",
+            Value2OnDisk = "blob-2",
+        };
+
+        Assert.True(credential.IsPair);
+        Assert.Equal("?client_id=…&client_secret=…", credential.Describe());
+        Assert.DoesNotContain("the-id", credential.Describe());
+        Assert.DoesNotContain("the-secret", credential.Describe());
+
+        var json = JsonSerializer.Serialize(credential);
+        Assert.DoesNotContain("the-id", json);
+        Assert.DoesNotContain("the-secret", json);
+        Assert.Contains("\"Value\":\"blob-1\"", json);
+        Assert.Contains("\"Value2\":\"blob-2\"", json);
+
+        var restored = JsonSerializer.Deserialize<ScriptCredential>(json)!;
+        Assert.Equal("client_secret", restored.Parameter2);
+        Assert.Equal("blob-2", restored.Value2OnDisk);
+        Assert.Equal(string.Empty, restored.Value2);
+    }
+
+    [Fact]
+    public void A_Single_Secret_Credential_Is_Not_A_Pair()
+    {
+        var credential = new ScriptCredential
+        {
+            Name = "openai", Placement = ScriptCredentialPlacement.Bearer, Value = "sk-x",
+        };
+
+        Assert.False(credential.IsPair);
+        Assert.Equal("Authorization: Bearer …", credential.Describe());
+    }
 }

@@ -130,13 +130,38 @@ public sealed class ScriptCredential
     [System.Text.Json.Serialization.JsonPropertyName("Value")]
     public string ValueOnDisk { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Second parameter name, for an API that authenticates with a pair.
+    /// Empty when the credential is a single secret.
+    /// </summary>
+    /// <remarks>
+    /// A client id and client secret are one credential in every sense that
+    /// matters — issued together, rotated together, useless apart — so they are
+    /// one entry rather than two that have to be kept in step by hand. Both
+    /// halves attach the same way, since an API splitting its credential across
+    /// a header and a query string is vanishingly rare.
+    /// </remarks>
+    public string Parameter2 { get; set; } = string.Empty;
+
+    /// <summary>Second secret, in memory. Routed through
+    /// <see cref="Value2OnDisk"/> so the stored copy is protected.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Value2 { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("Value2")]
+    public string Value2OnDisk { get; set; } = string.Empty;
+
+    /// <summary>Whether this credential carries a second half.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsPair => Parameter2.Trim().Length > 0;
+
     /// <summary>How the credential attaches, for the management dialog's list.
-    /// Never includes the value.</summary>
+    /// Never includes either value.</summary>
     public string Describe() => Placement switch
     {
         ScriptCredentialPlacement.Bearer => "Authorization: Bearer …",
-        ScriptCredentialPlacement.Header => $"{Parameter}: …",
-        _ => $"?{Parameter}=…",
+        ScriptCredentialPlacement.Header => IsPair ? $"{Parameter}: …  {Parameter2}: …" : $"{Parameter}: …",
+        _ => IsPair ? $"?{Parameter}=…&{Parameter2}=…" : $"?{Parameter}=…",
     };
 }
 

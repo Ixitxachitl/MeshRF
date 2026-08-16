@@ -77,7 +77,10 @@ public sealed class ScriptHttpClient : IDisposable
             // Query credentials go on before the request is built, since the
             // URI is fixed once the message exists.
             if (credential.Placement == ScriptCredentialPlacement.Query)
+            {
                 uri = AppendQuery(uri, credential.Parameter, credential.Value);
+                if (credential.IsPair) uri = AppendQuery(uri, credential.Parameter2, credential.Value2);
+            }
         }
 
         using var message = new HttpRequestMessage(MethodOf(request.Method), uri);
@@ -91,6 +94,8 @@ public sealed class ScriptHttpClient : IDisposable
                     break;
                 case ScriptCredentialPlacement.Header:
                     message.Headers.TryAddWithoutValidation(credential.Parameter, credential.Value);
+                    if (credential.IsPair)
+                        message.Headers.TryAddWithoutValidation(credential.Parameter2, credential.Value2);
                     break;
             }
         }
