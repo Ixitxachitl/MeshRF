@@ -935,7 +935,8 @@ public static class ScriptParser
         else
         {
             problems.Add(ScriptProblem.Warning(line, column,
-                "waypoint: has no expires:, so this marker stays on everyone's map until it is cleared by hand"));
+                "waypoint: has no expires:, so this marker stays on everyone's map until it is cleared by hand. " +
+                "Set lock_to_me: false if you want them to be able to."));
         }
 
         bool notifyEnter = ReadBool(map, "notify_on_enter", problems) ?? false;

@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using MeshRF.Channels;
 using MeshRF.Mesh;
 using MeshRF.Scripting;
+using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -504,12 +505,14 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         }
 
         var packetId = NextPacketId();
-        // Expiry is relative in a script and absolute on the wire. A marker a
-        // script drops unattended really wants one, which is why the parser
-        // warns when it is missing.
+        // Expiry is relative in a script and absolute on the wire. "No expiry"
+        // is NeverExpiresEpoch rather than 0: firmware's OLED only draws a
+        // waypoint while expire > now, so a 0 reads as already-expired and the
+        // marker is never shown. The phone clients use the same sentinel, and
+        // so does the map's own send.
         uint expireEpoch = waypoint.Expires > TimeSpan.Zero
             ? (uint)DateTimeOffset.UtcNow.Add(waypoint.Expires).ToUnixTimeSeconds()
-            : 0;
+            : WaypointRecord.NeverExpiresEpoch;
 
         var frame = MeshEncoder.EncodeWaypoint(
             channel, _rxHost.MyNodeNum, packetId, waypointId: packetId, lat, lon,

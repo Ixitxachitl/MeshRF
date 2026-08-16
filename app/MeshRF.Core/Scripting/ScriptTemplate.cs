@@ -34,13 +34,14 @@ public static class ScriptTemplate
         IReadOnlyList<string>? args = null,
         IReadOnlyList<string>? captures = null,
         IReadOnlyDictionary<string, string>? httpResults = null,
-        Func<string, string>? escape = null)
+        Func<string, string>? escape = null,
+        string? item = null)
     {
         if (template.Length == 0 || !template.Contains('{')) return template;
 
         return s_token.Replace(template, match =>
         {
-            var value = Resolve(match.Groups[1].Value, evt, args, captures, httpResults);
+            var value = Resolve(match.Groups[1].Value, evt, args, captures, httpResults, item);
             if (value is null) return match.Value;
             return escape is null ? value : escape(value);
         });
@@ -48,8 +49,19 @@ public static class ScriptTemplate
 
     private static string? Resolve(
         string token, ScriptEvent evt, IReadOnlyList<string>? args, IReadOnlyList<string>? captures,
-        IReadOnlyDictionary<string, string>? httpResults)
+        IReadOnlyDictionary<string, string>? httpResults,
+        string? item)
     {
+        // {item.<path>} reads the feed record currently being mirrored. Empty
+        // rather than literal when the path is absent, for the same reason
+        // {http.*} is: a field this record happens to lack should leave a gap
+        // in the sentence, not print its own name into a waypoint.
+        if (token.StartsWith("item.", StringComparison.Ordinal))
+        {
+            if (item is null) return string.Empty;
+            return JsonValuePath.Read(item, token["item.".Length..], out _) ?? string.Empty;
+        }
+
         // {http.*} comes from an http: action earlier in the same sequence. An
         // unfilled one resolves to empty rather than staying literal: reaching
         // it means the fetch was skipped, and broadcasting "{http.temp}" would

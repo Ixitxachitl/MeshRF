@@ -38,10 +38,22 @@ public sealed class ScriptExpansion
 
     public IReadOnlyDictionary<string, string> HttpResults => _http;
 
+    /// <summary>
+    /// The feed record currently being mirrored, as raw JSON, so a name or
+    /// description can read any of its fields with {item.some.path}.
+    /// </summary>
+    /// <remarks>
+    /// Held as text and read by path rather than flattened up front: a record
+    /// carries dozens of fields and a template usually wants two, so resolving
+    /// on demand costs less than copying them all — and it means a template can
+    /// reach a field nobody thought to list.
+    /// </remarks>
+    public string? Item { get; set; }
+
     /// <summary>Fills in placeholders. Used for log lines and anywhere the
     /// result is not going over the air.</summary>
     public string Expand(string template) =>
-        ScriptTemplate.Expand(template, Event, Args, Captures, _http);
+        ScriptTemplate.Expand(template, Event, Args, Captures, _http, item: Item);
 
     /// <summary>Fills in placeholders for something about to be transmitted, so
     /// the result is clamped to what a Meshtastic text payload carries.</summary>
