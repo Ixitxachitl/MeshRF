@@ -1,0 +1,64 @@
+# Mirrors recent lightning strikes within 30 miles as point waypoints.
+#
+# CREDENTIAL
+#   Name           xweather-pair
+#   Attach as      Query
+#   Parameter      client_id        Value      your Xweather client id
+#   2nd parameter  client_secret    2nd value  your Xweather client secret
+#
+# Each strike is a single point — no geofence, because a strike is a place
+# something happened rather than an area to be warned about entering.
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE ENABLING. A storm produces strikes continuously, and every
+# one inside the window becomes a waypoint on everyone's map. Four markers is
+# fine; forty is a nuisance and a lot of airtime even spaced out.
+#
+# limit= and from= below are what keep that in hand — they cap how many strikes
+# can be in play at once and how far back it looks. Start with Dry run on during
+# actual weather and see how many it reports before letting it transmit.
+#
+# The response shape here is unconfirmed. If nothing appears, the log will carry
+# the start of the response alongside the items: path it could not follow, which
+# is enough to correct the paths below.
+# ---------------------------------------------------------------------------
+
+enabled: false
+
+alias: Lightning strikes nearby
+
+sync:
+  # Shorter than the window below, so a strike is seen before it ages out.
+  every: 5m
+
+  # from=-15minutes is the window; strikes older than that drop out of the feed
+  # and their markers are retired automatically. limit caps a busy storm.
+  url: "https://data.api.xweather.com/lightning/closest?p={my.lat},{my.lon}&radius=30mi&limit=10&from=-15minutes&format=json"
+  credential: xweather-pair
+  timeout: 20s
+
+  items: response
+  id: id
+  lat: loc.lat
+  lon: loc.long
+
+  # The URL already asks for a radius; this catches the case where it is
+  # ignored, and says out loud what the script is for.
+  within: 30mi
+
+  # Empty on purpose: a strike is a moment, not a thing that changes. Without
+  # the key at all the editor would warn that nothing can ever update.
+  watch: []
+
+  waypoint:
+    name: "Lightning"
+    # No description. Anything here has to come from the record: {time} would
+    # re-render every poll, making every strike look changed and resending the
+    # lot. The editor warns if you try.
+    icon: "⚡"
+    # No radius, so this is a bare point.
+    #
+    # An hour, unlike the fire sync's markers: a strike leaves the feed within
+    # fifteen minutes and is retired then, so this only matters if the sync
+    # stops running — in which case an hour-old strike is not worth keeping.
+    expires: 1h

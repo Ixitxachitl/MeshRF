@@ -134,8 +134,14 @@ public sealed class FeedSyncEngine
         {
             if (!TryItems(document.RootElement, sync.ItemsPath, out var items))
             {
+                // With an excerpt: a sync has no equivalent of dropping the
+                // json: block from a script to see what actually came back, so
+                // the one message about a wrong items: has to carry enough of
+                // the response to find the right path from.
+                var excerpt = responseJson.Length > 200 ? responseJson[..200] + "…" : responseJson;
                 Diagnostic?.Invoke(
-                    $"{fileName}: {(sync.ItemsPath.Length == 0 ? "the response" : sync.ItemsPath)} is not a list");
+                    $"{fileName}: {(sync.ItemsPath.Length == 0 ? "the response" : sync.ItemsPath)} is not a list. " +
+                    $"The response starts: {excerpt}");
                 return [];
             }
 

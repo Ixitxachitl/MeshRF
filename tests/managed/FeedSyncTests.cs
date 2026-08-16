@@ -104,6 +104,64 @@ public class FeedSyncTests
     }
 
     [Fact]
+    public void An_Explicit_Empty_Watch_Is_Not_Warned_About()
+    {
+        // A feed of immutable records — a lightning strike never changes — says
+        // so with watch: [], which is different from not having thought about it.
+        var parse = ScriptParser.Parse(Yaml.Replace(
+            "  watch:\n    - data.acreage\n    - data.containment\n", "  watch: []\n"));
+
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        Assert.DoesNotContain(parse.Problems, p => p.Message.Contains("never updated"));
+    }
+
+    [Theory]
+    [InlineData("{time}")]
+    [InlineData("{date}")]
+    [InlineData("{node.battery}")]
+    public void Text_That_Changes_On_Its_Own_Is_Warned_About(string token)
+    {
+        // One of these re-renders every poll, so every record looks changed and
+        // the whole set goes back on the air each time — the thing watch:
+        // exists to prevent, arriving by the other door.
+        var parse = ScriptParser.Parse(Yaml.Replace(
+            "description: \"{item.data.acreage} acres, {item.data.containment}% contained\"",
+            $"description: \"seen at {token}\""));
+
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        Assert.Contains(parse.Problems, p => p.Message.Contains("changes on its own"));
+    }
+
+    [Fact]
+    public void An_Unchanged_Record_Is_Not_Resent()
+    {
+        // The regression the warning above guards: with record-derived text
+        // only, a poll that brings back the same data says nothing at all.
+        var engine = Armed();
+        engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon);
+
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(15)));
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(30)));
+    }
+
+    [Fact]
+    public void A_Wrong_Items_Path_Reports_What_Came_Back()
+    {
+        // A sync has no equivalent of dropping a script's json: block to see the
+        // response, so the one message has to carry enough to correct the path.
+        var parse = ScriptParser.Parse(Yaml.Replace("items: \"\"", "items: results"));
+        var engine = new FeedSyncEngine();
+        engine.Load([new ScriptFile(FileName, FileName, "x", Enabled: true, parse)], Noon);
+
+        string? diagnostic = null;
+        engine.Diagnostic += d => diagnostic = d;
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+
+        Assert.Contains("results is not a list", diagnostic);
+        Assert.Contains("Bear Fire", diagnostic);   // the excerpt
+    }
+
+    [Fact]
     public void A_Sync_Needs_A_Waypoint_And_A_Position()
     {
         Assert.False(ScriptParser.Parse(

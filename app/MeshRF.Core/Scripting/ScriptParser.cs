@@ -289,7 +289,8 @@ public static class ScriptParser
         }
 
         var watch = new List<string>();
-        if (TryGet(sync, "watch", out var watchKey, out var watchValue))
+        bool watchGiven = TryGet(sync, "watch", out var watchKey, out var watchValue);
+        if (watchGiven)
         {
             watch = AsStringList(watchValue, problems, "watch",
                 (int)watchKey.Start.Line, (int)watchKey.Start.Column);
@@ -301,15 +302,19 @@ public static class ScriptParser
                 return new ScriptParseResult(null, problems);
             }
         }
-        if (watch.Count == 0)
+        // Only when the key is absent. An explicit empty list is how a feed of
+        // immutable records — a lightning strike never changes — says it meant
+        // to have nothing to watch.
+        if (!watchGiven)
         {
             problems.Add(ScriptProblem.Warning(line, column,
                 "sync: has no watch:, so a marker is only ever placed and retired, never updated. " +
-                "List the fields whose changes are worth resending for."));
+                "List the fields whose changes are worth resending for, or watch: [] if there are none."));
         }
 
         var waypoint = ParseSyncWaypoint(sync, line, column, problems);
         if (waypoint is null) return new ScriptParseResult(null, problems);
+        WarnAboutMovingTargets(waypoint, line, column, problems);
 
         if (problems.Any(p => p.Severity == ScriptProblemSeverity.Error))
             return new ScriptParseResult(null, problems);
@@ -337,6 +342,31 @@ public static class ScriptParser
             Waypoint = waypoint,
             Expires = waypoint.Expires,
         });
+    }
+
+    /// <summary>
+    /// Placeholders that change on their own, independent of the record.
+    /// </summary>
+    /// <remarks>
+    /// One of these in a mirrored marker's text re-renders on every poll, so
+    /// every record looks changed and the whole set goes back on the air each
+    /// time — the exact thing watch: exists to prevent, arriving by the other
+    /// door. Only text derived from the record itself can be stable.
+    /// </remarks>
+    private static readonly string[] MovingPlaceholders = ["{time}", "{date}", "{node.battery}"];
+
+    private static void WarnAboutMovingTargets(
+        ScriptWaypoint waypoint, int line, int column, List<ScriptProblem> problems)
+    {
+        foreach (var token in MovingPlaceholders)
+        {
+            if (!waypoint.Name.Contains(token, StringComparison.Ordinal) &&
+                !waypoint.Description.Contains(token, StringComparison.Ordinal)) continue;
+
+            problems.Add(ScriptProblem.Warning(line, column,
+                $"sync: waypoint: {token} changes on its own, so every record will look different on every " +
+                "poll and the whole set will be resent each time. Use a field of the record instead."));
+        }
     }
 
     private static ScriptWaypoint? ParseSyncWaypoint(
