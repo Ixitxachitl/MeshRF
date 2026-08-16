@@ -10,6 +10,25 @@ namespace MeshRF.Tests;
 /// </summary>
 public class ReplyHopsTests
 {
+    /// <summary>
+    /// The test AvaloniaMeshRxHost.OnDuplicateDecoded applies before re-acking,
+    /// mirroring NextHopRouter::shouldFilterReceived's
+    /// <c>bool isRepeated = getHopsAway(*p) == 0</c>. A relayed copy arrives
+    /// with hops consumed and must not be answered, or one transmission
+    /// collects an ack from us per repeater that carried it. An undeterminable
+    /// count is Unknown, which fails the same test — firmware's -1 default does
+    /// too, so silence is the shared answer.
+    /// </summary>
+    [Theory]
+    [InlineData(3, 3, true, true)]    // straight from the sender: a real repeat
+    [InlineData(7, 7, true, true)]
+    [InlineData(2, 3, true, false)]   // one hop consumed: a relayed copy
+    [InlineData(4, 7, true, false)]   // three hops
+    [InlineData(0, 0, false, false)]  // hop_start absent and no bitfield
+    public void OnlyAZeroHopDuplicateIsWorthAcking(
+        byte hopLimit, byte hopStart, bool hasBitfield, bool shouldAck)
+        => Assert.Equal(shouldAck, ReplyHops.HopsUsed(Header(hopLimit, hopStart), hasBitfield) == 0);
+
     private static MeshHeader Header(byte hopLimit, byte hopStart) => new()
     {
         From = 0x11223344u,

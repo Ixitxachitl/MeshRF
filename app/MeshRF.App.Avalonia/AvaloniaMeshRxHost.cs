@@ -1139,6 +1139,21 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result)
     {
         if (!header.WantAck) return;
+
+        // Only a copy that arrived straight from the original sender is a
+        // retransmission worth answering: it means our first ack never got
+        // there. A copy that reached us through a repeater is the mesh
+        // flooding one transmission, and acking each arrival adds our own
+        // traffic to a storm the sender never asked for.
+        //
+        // Firmware draws exactly this line in NextHopRouter::shouldFilterReceived:
+        //   bool isRepeated = getHopsAway(*p) == 0;
+        // and does nothing but perhapsCancelDupe() otherwise. HopsUsed is the
+        // port of getHopsAway, Unknown included — firmware defaults that to -1,
+        // which fails the same == 0 test, so an undeterminable hop count also
+        // means no ack.
+        if (ReplyHops.HopsUsed(header, result.HasDataBitfield) != 0) return;
+
         AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: true));
     }
 

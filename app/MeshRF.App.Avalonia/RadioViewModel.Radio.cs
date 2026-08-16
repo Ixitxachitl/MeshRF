@@ -165,6 +165,22 @@ public partial class RadioViewModel
         bool reliable = request.TextMessage && !request.Duplicate && !nak;
         byte hopLimit = request.Duplicate ? (byte)0 : ResponseHopLimit(header, request.HasBitfield);
 
+        // Firmware guards the repeat ack with !findInTxQueue(p->from, p->id):
+        // no second ack while the first is still waiting to go out. MeshRF has
+        // no queue keyed that way — TransmitFrameAsync serialises on a
+        // semaphore and waits for a clear channel — so the equivalent is to
+        // remember what we just acked. A sender repeating faster than our
+        // transmitter drains would otherwise collect an ack per repeat.
+        if (request.Duplicate)
+        {
+            var now = DateTime.UtcNow;
+            if (_recentAcks.TryGetValue((header.From, header.PacketId), out var last) &&
+                now - last < RepeatAckSuppression)
+                return;
+            _recentAcks[(header.From, header.PacketId)] = now;
+            PruneRecentAcks(now);
+        }
+
         try
         {
             uint packetId = NextPacketId();
@@ -205,6 +221,24 @@ public partial class RadioViewModel
         {
             StatusText = $"Ack failed: {ex.Message}";
         }
+    }
+
+    /// <summary>How long one repeat ack suppresses the next for the same
+    /// packet. Long enough to cover a queued transmission and the airtime it
+    /// waits for, short enough that a sender still genuinely unheard after it
+    /// gets answered again.</summary>
+    private static readonly TimeSpan RepeatAckSuppression = TimeSpan.FromSeconds(10);
+
+    /// <summary>When each (sender, packet) was last repeat-acked. Stands in for
+    /// firmware's findInTxQueue; see SendAck.</summary>
+    private readonly Dictionary<(uint From, uint PacketId), DateTime> _recentAcks = new();
+
+    private void PruneRecentAcks(DateTime now)
+    {
+        if (_recentAcks.Count < 64) return;
+        foreach (var key in _recentAcks.Where(kv => now - kv.Value >= RepeatAckSuppression)
+                                       .Select(kv => kv.Key).ToList())
+            _recentAcks.Remove(key);
     }
 
     // -- Reliable ack retransmission -----------------------------------------
