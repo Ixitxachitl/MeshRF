@@ -1,0 +1,63 @@
+# Answers !ask <question> using the OpenAI chat completions API.
+#
+# CREDENTIAL
+#   Name        openai
+#   Attach as   Bearer
+#   Value       your sk-... key
+#
+# Every firing costs money as well as airtime, so this starts disabled, is
+# restricted to direct messages, and is throttled harder than a local script
+# needs to be. Turn Dry run on and send yourself "!ask why is the sky blue" to
+# see the real answer in the log without transmitting.
+
+enabled: false
+
+alias: Ask ChatGPT
+
+trigger:
+  # The regex form rather than command:, so a bare "!ask" with no question does
+  # not fire — and does not spend a request finding out it had nothing to ask.
+  - text: '^!ask\s+(.+)'
+
+condition:
+  - scope: direct
+
+action:
+  - http:
+      url: "https://api.openai.com/v1/chat/completions"
+      method: POST
+      credential: openai
+      timeout: 20s
+      json: choices[0].message.content
+      save_as: answer
+      # The system prompt is what actually keeps the answer short. A token cap
+      # on its own just stops the model mid-sentence, because it never knows it
+      # is being cut off; stating the limit up front gets a complete short
+      # answer instead. max_tokens is only a backstop against a runaway reply —
+      # 80 tokens is roughly 320 characters, so a compliant answer finishes well
+      # inside it. The 180 leaves headroom under the 200-byte payload clamp,
+      # since an em dash or an accent costs more than one byte.
+      #
+      # {cap1} is the question, JSON-escaped on the way in, so someone asking
+      # !ask what does "foo" mean? cannot break the request.
+      body: |
+        {
+          "model": "gpt-4o-mini",
+          "max_tokens": 80,
+          "messages": [
+            {
+              "role": "system",
+              "content": "You answer over a LoRa mesh radio with a hard 180 character limit. Reply in one or two short sentences of plain text. No markdown, no lists, no preamble, no sign-off. If the answer cannot fit, give the single most useful fact instead of a partial explanation."
+            },
+            {
+              "role": "user",
+              "content": "{cap1}"
+            }
+          ]
+        }
+  - reply: "{http.answer}"
+
+limits:
+  cooldown: 30s
+  per_node: true
+  max_per_hour: 10

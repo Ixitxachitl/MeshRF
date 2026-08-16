@@ -13,6 +13,10 @@ public enum ScriptHttpMethod
 /// <param name="JsonPath">Dotted path, e.g. <c>report[0].loc.lat</c>.</param>
 public readonly record struct ScriptHttpExtraction(string SaveAs, string JsonPath);
 
+/// <summary>One extra request header. The value is a template, so it may carry
+/// placeholders.</summary>
+public readonly record struct ScriptHttpHeader(string Name, string Value);
+
 /// <summary>
 /// An <c>http:</c> action: call a REST endpoint and keep part of the answer for
 /// a later <c>reply:</c> or <c>send:</c> to say.
@@ -67,6 +71,20 @@ public sealed class ScriptHttpRequest
     /// <c>require:</c> on the value to decide what to do about it.
     /// </remarks>
     public bool Optional { get; init; }
+
+    /// <summary>
+    /// Extra request headers, by name.
+    /// </summary>
+    /// <remarks>
+    /// Mostly for APIs that expect a particular User-Agent, or a client header
+    /// their own app sends — some edge filters answer an unrecognised client
+    /// with a flat rejection, and without this there is no way to look like
+    /// whatever they will accept. Secrets belong in a credential rather than
+    /// here: a header value is written in the script file, which is the thing
+    /// credentials exist to keep them out of.
+    /// </remarks>
+    public IReadOnlyList<ScriptHttpHeader> Headers { get; init; } =
+        Array.Empty<ScriptHttpHeader>();
 
     /// <summary>Placeholder name the whole body is stored under when no
     /// extraction is given, so <c>save_as: temp</c> makes it

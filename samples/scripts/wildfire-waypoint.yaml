@@ -1,0 +1,79 @@
+# Drops a waypoint on an active wildfire reported by Watch Duty.
+#
+# ---------------------------------------------------------------------------
+# UNVERIFIED. No credential is needed — the API is open — but unlike the other
+# samples this one has not been run against it. Every path, including the API
+# root and with "Accept: */*", was refused with 406 Not Acceptable from where it
+# was written, which is an edge filter rejecting an unrecognised client rather
+# than anything about the request. It should be fine from a normal machine.
+#
+# Two things to confirm on first run:
+#
+#   1. THAT IT ANSWERS AT ALL. If you get 406, the filter dislikes MeshRF's
+#      User-Agent. The headers: block below is commented out for that case —
+#      uncomment it to present a browser's instead.
+#
+#   2. THE JSON PATHS. The ones below are a guess at a Django REST Framework
+#      shape (count/next/previous/results). To see the real thing: delete the
+#      whole json: block, turn Dry run on, and the log prints the response as
+#      {http.body}. Read the field names off it and put the paths back.
+#
+# There is also no radius filter here, because none was confirmed. This marks
+# the first event the endpoint returns, which is not necessarily the closest
+# one. If the API accepts a location or bounding-box parameter, add it to the
+# url: — that is the right place to narrow it, since the script language has no
+# distance arithmetic.
+# ---------------------------------------------------------------------------
+
+enabled: false
+
+alias: Wildfire waypoint (Watch Duty)
+
+trigger:
+  # Fires move slowly compared with lightning, and the reports are human-filed,
+  # so there is nothing to gain from looking more often than this.
+  - every: 30m
+
+action:
+  - require:
+      value: "{my.lat}"
+      not_empty: true
+
+  - http:
+      url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
+      optional: true
+      timeout: 20s
+      # Uncomment if the request comes back 406 — see the note at the top.
+      # headers:
+      #   User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      #   Accept: "application/json"
+      json:
+        name: results[0].name
+        lat: results[0].lat
+        lon: results[0].lng
+        acreage: results[0].acreage
+
+  # Nothing reported, or the paths above do not match the real response: either
+  # way there is nothing to place, so stop quietly rather than dropping a
+  # marker at a blank position.
+  - require:
+      value: "{http.lat}"
+      not_empty: true
+
+  - waypoint:
+      lat: "{http.lat}"
+      lon: "{http.lon}"
+      name: "Fire: {http.name}"
+      description: "{http.acreage} acres, reported {time}"
+      icon: "🔥"
+      radius: 10mi
+      expires: 6h
+      notify_on_enter: true
+
+  - log: "wildfire {http.name} at {http.lat},{http.lon} ({http.acreage} acres)"
+
+limits:
+  # Six hours, matching the waypoint's own life: a fire burns for days, and a
+  # fresh marker every half hour would be noise on everyone's map.
+  cooldown: 6h
+  max_per_hour: 1

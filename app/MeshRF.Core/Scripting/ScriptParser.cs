@@ -47,7 +47,7 @@ public static class ScriptParser
     private static readonly string[] SendKeys = ["to", "channel", "text", "reply_link"];
 
     private static readonly string[] HttpKeys =
-        ["url", "method", "credential", "json", "save_as", "timeout", "body", "content_type", "optional"];
+        ["url", "method", "credential", "json", "save_as", "timeout", "body", "content_type", "optional", "headers"];
 
     /// <summary>Longest a script may wait on one request. Long enough for a slow
     /// API, short enough that a hung endpoint cannot pin a script's run open.</summary>
@@ -792,6 +792,34 @@ public static class ScriptParser
             timeout = parsed.Value;
         }
 
+        // Extra headers, for an API expecting a particular client. Values are
+        // templates; names are not, since a placeholder deciding a header name
+        // is a way to confuse a request rather than a use.
+        var headers = new List<ScriptHttpHeader>();
+        if (TryGet(http, "headers", out var headersKey, out var headersValue))
+        {
+            if (headersValue is not YamlMappingNode headerMap)
+            {
+                problems.Add(ScriptProblem.Error(headersKey.Start.Line, headersKey.Start.Column,
+                    "http: headers: needs indented name: value entries under it"));
+                return null;
+            }
+            foreach (var entry in headerMap.Children)
+            {
+                var headerName = Key(entry.Key);
+                if (headerName.Length == 0 || headerName.Any(c => char.IsWhiteSpace(c) || c == ':'))
+                {
+                    problems.Add(ScriptProblem.Error(entry.Key.Start.Line, entry.Key.Start.Column,
+                        $"http: headers: \"{headerName}\" is not a header name"));
+                    return null;
+                }
+                var headerValue = AsScalar(entry.Value, problems, headerName);
+                if (headerValue is null) return null;
+                WarnUnknownPlaceholders(headerValue, line, column, problems);
+                headers.Add(new ScriptHttpHeader(headerName, headerValue));
+            }
+        }
+
         // One name or a list: an id/secret pair is two separate credentials,
         // each knowing where it attaches.
         var credentialNames = new List<string>();
@@ -830,6 +858,7 @@ public static class ScriptParser
                 Body = body,
                 ContentType = (ReadString(http, "content_type", problems) ?? "application/json").Trim(),
                 Optional = ReadBool(http, "optional", problems) ?? false,
+                Headers = headers,
             },
         };
     }

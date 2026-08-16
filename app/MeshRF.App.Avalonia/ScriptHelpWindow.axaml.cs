@@ -91,6 +91,7 @@ public partial class ScriptHelpWindow : Window
         new("  json:", "Or a set of name: path entries, to take several values from one response — a latitude and longitude are useless apart."),
         new("  save_as: temp", "Name the result is stored under, so it becomes {http.temp}. Defaults to body → {http.body}."),
         new("  optional: true", "Treat a path that is not in the response as empty rather than a failure. For APIs where an empty answer is normal; pair with require:."),
+        new("  headers:", "Extra request headers as name: value entries, for an API expecting a particular client. Naming User-Agent replaces MeshRF's. Secrets belong in a credential, not here."),
         new("  timeout: 10s", "How long to wait. Default 10s, maximum 30s."),
         new("  body: '{\"q\":\"{args}\"}'", "Request body for POST/PUT. Placeholders are JSON-escaped, so a quote in a message cannot break the field."),
         new("  content_type: …", "Defaults to application/json."),
@@ -195,5 +196,6 @@ public partial class ScriptHelpWindow : Window
         new("Save", "Blocked while the script has errors — an unparseable file would be a script that silently never runs."),
         new("Click a problem", "Selects the line it came from."),
         new("Warnings", "Do not block saving. They flag things that parse but probably are not what you meant."),
+        new("Samples", "samples/scripts in the MeshRF repository holds working starting points — a signal report, a ChatGPT bridge, a lightning waypoint and a wildfire waypoint. All ship disabled."),
     ];
 }

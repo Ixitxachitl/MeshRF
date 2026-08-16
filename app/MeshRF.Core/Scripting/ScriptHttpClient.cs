@@ -85,6 +85,14 @@ public sealed class ScriptHttpClient : IDisposable
 
         using var message = new HttpRequestMessage(MethodOf(request.Method), uri);
 
+        // Before the credentials, so a script cannot shadow the header a
+        // credential is about to set. A header named here also replaces the
+        // client-wide default rather than adding to it, since HttpClient only
+        // applies a default header the message does not already carry — which
+        // is what lets a script choose its own User-Agent.
+        foreach (var header in request.Headers)
+            message.Headers.TryAddWithoutValidation(header.Name, expansion.Expand(header.Value));
+
         foreach (var credential in resolved)
         {
             switch (credential.Placement)

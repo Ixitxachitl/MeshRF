@@ -1,0 +1,28 @@
+# Answers !ping with a signal report.
+#
+# The simplest useful script, and the one to start from: no credential, no
+# network, nothing to configure. Send yourself "!ping" and it answers with how
+# well it heard you.
+
+enabled: false
+
+alias: Answer !ping with a signal report
+
+trigger:
+  # Matches "!ping" at the start of a message. The rest, if any, is ignored.
+  - command: ping
+
+condition:
+  # Direct messages only. Change to "any" to answer on channels too — but read
+  # the limits below first, because a busy channel will exercise them.
+  - scope: direct
+
+action:
+  - reply: "pong — {snr} dB over {hops} hops"
+
+limits:
+  # A minute between answers to the same node. Someone leaning on !ping gets
+  # one reply, not a stream of them.
+  cooldown: 60s
+  per_node: true
+  max_per_hour: 6

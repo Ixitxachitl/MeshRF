@@ -237,6 +237,11 @@ action:
 `{my.lat}` and `{my.lon}` carry this node's home location, so a script asking a
 location-shaped question needs no coordinates pasted into it.
 
+Working starting points live in [samples/scripts/](samples/scripts/) — a signal
+report, a ChatGPT bridge, a lightning waypoint and a wildfire waypoint. All ship
+disabled; copy one into the scripts folder, fill in the credential it names, and
+turn it on.
+
 A script can call a REST API and broadcast the answer. Fetching and sending are
 two steps, so the result can be shaped into a sentence, combined from more than
 one endpoint, or sent somewhere other than back to the asker:

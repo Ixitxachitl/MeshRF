@@ -401,6 +401,44 @@ public class ScriptHttpTests
     }
 
     [Fact]
+    public async Task Extra_Headers_Are_Sent_And_Can_Replace_The_User_Agent()
+    {
+        var (client, handler) = Stub("ok");
+        using var __ = client;
+
+        await client.SendAsync(
+            new ScriptHttpRequest
+            {
+                Url = "https://api.test/",
+                Headers =
+                [
+                    new ScriptHttpHeader("User-Agent", "Mozilla/5.0 (compatible)"),
+                    new ScriptHttpHeader("X-Client", "meshrf-{my.short}"),
+                ],
+            },
+            Expansion());
+
+        // Replaces rather than appends: HttpClient only applies a default
+        // header the message does not already carry, so an API filtering on
+        // User-Agent sees exactly what the script asked for.
+        Assert.Equal("Mozilla/5.0 (compatible)", handler.Last!.Headers.UserAgent.ToString());
+        Assert.Equal("meshrf-ME", handler.Last.Headers.GetValues("X-Client").Single());
+    }
+
+    [Fact]
+    public void A_Header_Block_Parses_And_A_Bad_Name_Is_Rejected()
+    {
+        var ok = Parse(
+            "  - http:\n      url: \"https://x.test/\"\n      headers:\n        User-Agent: \"Mozilla/5.0\"\n        X-Client: mesh\n");
+        Assert.True(ok.IsValid, ok.FirstError?.ToString());
+        Assert.Equal(2, ok.Script!.Actions[0].Http!.Headers.Count);
+
+        var bad = Parse("  - http:\n      url: \"https://x.test/\"\n      headers:\n        \"bad name\": x\n");
+        Assert.False(bad.IsValid);
+        Assert.Contains("is not a header name", bad.FirstError!.Value.Message);
+    }
+
+    [Fact]
     public async Task A_Paired_Credential_Attaches_Both_Halves_From_One_Entry()
     {
         var (client, handler) = Stub("ok");

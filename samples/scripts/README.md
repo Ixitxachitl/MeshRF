@@ -1,0 +1,72 @@
+# Sample scripts
+
+Working starting points for MeshRF's automation scripts. Copy any of these into
+your scripts folder, fill in the credential it names, and turn it on.
+
+```
+%APPDATA%\MeshRF\scripts          Windows
+~/.config/MeshRF/scripts          Linux
+~/Library/Application Support/MeshRF/scripts    macOS
+```
+
+The Scripts window's **Open folder** button takes you there, and **Reload**
+picks up anything dropped in. Every sample ships `enabled: false`, so nothing
+starts transmitting because you copied it.
+
+| Script | Needs | What it does |
+| --- | --- | --- |
+| [ping.yaml](ping.yaml) | nothing | Answers `!ping` with a signal report. |
+| [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
+| [lightning-waypoint.yaml](lightning-waypoint.yaml) | Xweather id + secret | Drops a waypoint on the nearest lightning strike within 30 miles. |
+| [wildfire-waypoint.yaml](wildfire-waypoint.yaml) | nothing | Drops a waypoint on an active Watch Duty fire. **Unverified** — read the header. |
+
+Start with `ping.yaml`. It needs no account and no network, so if it answers,
+the engine is armed and working and anything that goes wrong afterwards is the
+script or the API rather than the setup.
+
+## Before you enable anything
+
+**Turn on Dry run.** Scripts are evaluated and logged in full but nothing is
+transmitted, so you can watch a script fire, see the request it made and the
+values it read, and correct it without putting a single frame on the air. It is
+the difference between debugging a script and debugging a script in public.
+
+Dry run still performs `GET` requests — a read changes nothing, and seeing the
+real answer is the point — but skips `POST` and `PUT`.
+
+## Working out an API's JSON paths
+
+The paths in these samples are the fiddliest thing to get right, and the fastest
+way to get them right is to look:
+
+1. Delete the `json:` block from the `http:` action.
+2. With Dry run on, trigger the script.
+3. The log prints the whole response as `{http.body}`.
+4. Read the field names off it, and put the paths back.
+
+`json:` takes a single dotted path, or a set of `name: path` entries to pull
+several values out of one response — which is what you want when the values
+belong together, like a latitude and a longitude.
+
+## Credentials
+
+Keys never live in a script file. A script names a credential; the value is
+stored under the Scripts window's **Credentials** button, protected at rest
+alongside the MQTT password, and is never readable as a placeholder or written
+to the log — so a script cannot broadcast its own key.
+
+An API issuing an id *and* a secret is one credential, not two: fill in the
+second parameter and value on the same entry.
+
+## Airtime
+
+These samples are throttled harder than they strictly need to be, because a
+script that answers too eagerly is antisocial rather than merely noisy — the
+channel is shared with everyone in range.
+
+Beyond each script's own `cooldown` and `max_per_hour`, the engine applies a
+global budget of 30 transmissions an hour across every script together, which a
+script file cannot raise. Scripts also never answer your own node or one you
+have ignored, and a message a script sent can never trigger another script.
+
+Press **Help** in the Scripts window for the full vocabulary.
