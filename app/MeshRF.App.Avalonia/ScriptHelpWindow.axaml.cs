@@ -164,6 +164,59 @@ public partial class ScriptHelpWindow : Window
         new("Airtime", "A fetch transmits nothing, so it does not count against the global budget. The reply that follows it does."),
     ];
 
+    public string SyncExample =>
+        """
+        enabled: true
+        alias: Watch Duty fires
+
+        sync:
+          every: 15m
+          url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
+          headers:
+            Accept: "application/json, text/plain, */*"
+
+          items: ""            # the response is the array itself
+          id: id               # identity, so a resend replaces
+          active: is_active    # what "still here" means
+          lat: lat
+          lon: lng
+          within: 30mi
+
+          watch:               # resend only when one of these moves
+            - data.acreage
+            - data.containment
+
+          waypoint:
+            name: "Fire: {item.name}"
+            description: "{item.data.acreage} acres"
+            icon: "🔥"
+            radius: 10mi
+        """;
+
+    public IReadOnlyList<HelpRow> Sync { get; } =
+    [
+        new("every: 15m", "How often the feed is re-read. Minimum 1m. It reads once as soon as it is enabled, rather than waiting an interval."),
+        new("url:, headers:", "As for http:, including credential: — the same request machinery."),
+        new("items: results", "Path to the array of records. Leave empty when the response is the array itself."),
+        new("id: id", "Path to each record's identity. This is what makes a resend replace a marker instead of adding another, so it must be stable for the record's life."),
+        new("active: is_active", "Path to the flag saying a record is still live. One that goes false is retired exactly like one that stops being returned. Omit if every record returned counts."),
+        new("lat: / lon:", "Paths to the position within each record."),
+        new("within: 30mi", "Only mirror records this close to home. Omit to mirror the lot."),
+        new("watch: [a, b]", "Paths whose changes are worth resending for. Without it a marker is only ever placed and retired; with the wrong fields in it, a feed that restamps every record rebroadcasts everything on every poll."),
+        new("waypoint:", "The marker. Same keys as a script's, minus lat/lon — those come from the paths above — and its name and description are templates over {item.*}."),
+        new("  expires:", "Usually omitted. A mirrored marker is retired when its record goes, not on a clock, so it does not need one."),
+        new("  lock_to_me:", "Off by default here, unlike a script's waypoint. These are placed unattended and may outlive this node's interest, so whoever receives one should be able to clear it."),
+    ];
+
+    public IReadOnlyList<HelpRow> SyncNotes { get; } =
+    [
+        new("Why not a script", "A record leaving a feed is not an event — nothing happens when something stops being in a list. Only something holding the previous list can notice, which is why this has its own engine rather than being a trigger."),
+        new("What it sends", "A marker for each record it has not seen, a resend for one whose watched fields changed, and an expiry in the past for one that has gone. There is no delete on the wire; a past expiry is how a waypoint is retired."),
+        new("After a restart", "The first poll re-places what is still there, over the top of itself, because a marker's id comes from the record's id rather than being random. Nothing accumulates."),
+        new("Airtime", "A feed sends only what actually changed, so it is not charged against the script budget. watch: is what keeps that true."),
+        new("Dry run", "Applies here too: every place, update and removal is logged and nothing is transmitted."),
+    ];
+
     public IReadOnlyList<HelpRow> Running { get; } =
     [
         new("Run scripts", "Master switch, off by default. Until it is on, nothing fires however many scripts are enabled."),

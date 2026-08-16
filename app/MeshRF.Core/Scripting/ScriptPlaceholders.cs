@@ -36,6 +36,7 @@ public static class ScriptPlaceholders
         ("node.battery", "This node's battery level, percent."),
         ("http.body",    "Result of the preceding http: action (the default save_as name)."),
         ("http.status",  "HTTP status code of the last http: action."),
+        ("item.name",    "In a feed sync, any field of the record being mirrored — {item.data.acreage} works too."),
     ];
 
     private static readonly HashSet<string> s_known =
@@ -62,6 +63,12 @@ public static class ScriptPlaceholders
             var name = token["http.".Length..];
             return name.Length > 0 && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
         }
+
+        // {item.<path>} reaches any field of a feed record, so the path is
+        // whatever that feed happens to carry. Nothing here can tell a real
+        // field from a typo, and guessing would flag correct scripts.
+        if (token.StartsWith("item.", StringComparison.Ordinal))
+            return token.Length > "item.".Length;
 
         foreach (var prefix in new[] { "arg", "cap" })
         {

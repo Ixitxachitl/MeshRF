@@ -43,7 +43,7 @@
 
             <TextBlock FontSize="17" FontWeight="Bold" Text="MeshRF automation scripts" />
             <TextBlock Classes="p" Margin="0,6,0,6"
-                       Text="Each script is one YAML file. A script says what wakes it up (trigger), what has to be true for it to go ahead (condition), and what to do (action). Scripts run top to bottom in the order shown in the list, and only when their enable box is ticked." />
+                       Text="Each file in the scripts folder is one of two things. A script says what wakes it up (trigger), what has to be true for it to go ahead (condition), and what to do (action). A feed sync — a file whose top level is sync: — instead keeps waypoints in step with a list from an API; see Mirroring a feed, below. Both are listed together, run in the order shown, and only when their enable box is ticked." />
 
             <Border Classes="block">
                 <StackPanel Spacing="2">
@@ -154,6 +154,37 @@
             </ItemsControl>
             <TextBlock Classes="p" Margin="0,6,0,0"
                        Text="Scripts never answer your own node, never answer a node you have ignored, and a message a script sent can never trigger another script — one hop of automation, always. Scripted messages go out through the same path as ones you type, so they observe the duty cycle, the licensed-mode block on encrypted channels, and MQTT uplink exactly the same way." />
+
+            <TextBlock Classes="h" Text="Mirroring a feed" />
+            <TextBlock Classes="p"
+                       Text="A file whose top level is sync: is not a script. Instead of answering something that happened, it keeps a set of waypoints in step with a list of records: placing a marker for each one it has not seen, resending one whose watched fields changed, and retiring one that has gone." />
+            <Border Classes="block">
+                <SelectableTextBlock Classes="code" FontSize="12" Text="{Binding SyncExample}" />
+            </Border>
+            <ItemsControl ItemsSource="{Binding Sync}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ItemsControl ItemsSource="{Binding SyncNotes}" Margin="0,8,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
 
             <TextBlock Classes="h" Text="Running scripts" />
             <ItemsControl ItemsSource="{Binding Running}">
