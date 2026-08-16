@@ -170,6 +170,63 @@ public class ScriptWaypointTests
         Assert.Equal(expected, result.Script!.Actions[0].Require!.Holds(Expansion(("code", value)), out _));
     }
 
+    // ----- within: the distance filter an API may not offer ---------------------
+
+    private static ScriptExpansion Located(double lat, double lon, params (string, string)[] http)
+    {
+        var expansion = new ScriptExpansion(new ScriptEvent
+        {
+            Self = new ScriptSelf(1, "ME", "My Node", 101, Latitude: lat, Longitude: lon),
+        });
+        foreach (var (name, value) in http) expansion.SetHttpResult(name, value);
+        return expansion;
+    }
+
+    [Theory]
+    // San Francisco to Oakland, about 13 km.
+    [InlineData("37.8044,-122.2712", "30mi", true)]
+    [InlineData("37.8044,-122.2712", "5mi", false)]
+    // San Francisco to Sacramento, about 120 km.
+    [InlineData("38.5816,-121.4944", "30mi", false)]
+    [InlineData("38.5816,-121.4944", "100mi", true)]
+    public void Within_Measures_From_This_Nodes_Home(string position, string range, bool expected)
+    {
+        var result = Parse($"  - require:\n      value: \"{{http.pos}}\"\n      within: {range}\n");
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+
+        var holds = result.Script!.Actions[0].Require!
+            .Holds(Located(37.7749, -122.4194, ("pos", position)), out var detail);
+
+        Assert.Equal(expected, holds);
+        Assert.Contains("km away", detail);
+    }
+
+    [Fact]
+    public void Within_Fails_Closed_Without_A_Home_Location_Or_A_Position()
+    {
+        var requirement = Parse("  - require:\n      value: \"{http.pos}\"\n      within: 30mi\n")
+            .Script!.Actions[0].Require!;
+
+        // Nothing to measure from.
+        var noHome = new ScriptExpansion(new ScriptEvent { Self = Self });
+        noHome.SetHttpResult("pos", "37.8,-122.3");
+        Assert.False(requirement.Holds(noHome, out var why));
+        Assert.Contains("no home location", why);
+
+        // Nothing to measure to — an unfilled or malformed value must not pass.
+        Assert.False(requirement.Holds(Located(37.7749, -122.4194, ("pos", "")), out _));
+        Assert.False(requirement.Holds(Located(37.7749, -122.4194, ("pos", "not a position")), out _));
+    }
+
+    [Fact]
+    public void A_Nonsense_Within_Distance_Is_Rejected()
+    {
+        var result = Parse("  - require:\n      value: \"{http.pos}\"\n      within: soon\n");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("30mi, 50km or 500m", result.FirstError!.Value.Message);
+    }
+
     [Fact]
     public void A_Non_Numeric_Value_Fails_Rather_Than_Throwing()
     {

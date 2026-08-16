@@ -17,6 +17,9 @@ public enum ScriptComparison
     Matches,
     IsEmpty,
     NotEmpty,
+    /// <summary>A "lat,lon" value is no further than a given distance from this
+    /// node's home location.</summary>
+    Within,
 }
 
 /// <summary>
@@ -83,6 +86,9 @@ public sealed class ScriptRequirement
                 // A pattern that goes quadratic on an API response should stop
                 // the script, not stall it.
                 catch (RegexMatchTimeoutException) { return false; }
+
+            case ScriptComparison.Within:
+                return WithinRange(value, expansion.Event.Self, out detail);
         }
 
         var operand = expansion.Expand(Operand);
@@ -142,6 +148,55 @@ public sealed class ScriptRequirement
         }
     }
 
+    /// <summary>Metres, for <see cref="ScriptComparison.Within"/>. Parsed at
+    /// load so a malformed distance is a red line in the editor.</summary>
+    public double RangeMetres { get; init; }
+
+    /// <summary>
+    /// Whether a "lat,lon" value is inside <see cref="RangeMetres"/> of this
+    /// node's home location.
+    /// </summary>
+    /// <remarks>
+    /// Needed because not every API can narrow by distance itself. Watch Duty's
+    /// returns every active incident and leaves the filtering to the caller —
+    /// its Home Assistant integration runs the same haversine against each
+    /// zone. Without this a script could only mark whichever fire happened to
+    /// come back first, wherever it was.
+    /// </remarks>
+    private bool WithinRange(string value, ScriptSelf self, out string detail)
+    {
+        if (!self.HasLocation)
+        {
+            detail = "this node has no home location to measure from";
+            return false;
+        }
+
+        var parts = value.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || !TryNumber(parts[0], out var lat) || !TryNumber(parts[1], out var lon))
+        {
+            detail = $"\"{value}\" is not a \"lat,lon\" position";
+            return false;
+        }
+
+        double metres = HaversineMetres(self.Latitude!.Value, self.Longitude!.Value, lat, lon);
+        detail = $"{metres / 1000.0:0.#} km away, limit {RangeMetres / 1000.0:0.#} km";
+        return metres <= RangeMetres;
+    }
+
+    /// <summary>Great-circle distance in metres. The same spherical
+    /// approximation the node-distance filter uses; at mesh ranges the error
+    /// against a true ellipsoid is far smaller than the positions' own.</summary>
+    internal static double HaversineMetres(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double earthRadiusM = 6_371_000.0;
+        double dLat = (lat2 - lat1) * Math.PI / 180.0;
+        double dLon = (lon2 - lon1) * Math.PI / 180.0;
+        double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
+                 + Math.Cos(lat1 * Math.PI / 180.0) * Math.Cos(lat2 * Math.PI / 180.0)
+                   * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return earthRadiusM * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+    }
+
     private static bool TryNumber(string text, out double value) =>
         double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
 
@@ -151,6 +206,7 @@ public sealed class ScriptRequirement
         ScriptComparison.IsEmpty => $"{Value} is empty",
         ScriptComparison.NotEmpty => $"{Value} is not empty",
         ScriptComparison.Between => $"{Value} between {Operand} and {Operand2}",
+        ScriptComparison.Within => $"{Value} within {RangeMetres / 1000.0:0.#} km of home",
         _ => $"{Value} {Comparison.ToString().ToLowerInvariant()} {Operand}",
     };
 }

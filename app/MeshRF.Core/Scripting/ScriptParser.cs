@@ -39,7 +39,7 @@ public static class ScriptParser
     /// <summary>Comparators a require: may use. Exactly one per entry.</summary>
     private static readonly string[] RequireComparisons =
         ["equals", "not_equals", "above", "below", "at_least", "at_most", "between",
-         "contains", "matches", "is_empty", "not_empty"];
+         "contains", "matches", "is_empty", "not_empty", "within"];
 
     private static readonly string[] RequireKeys =
         [.. RequireComparisons, "value", "ignore_case"];
@@ -1021,10 +1021,12 @@ public static class ScriptParser
             "contains" => ScriptComparison.Contains,
             "matches" => ScriptComparison.Matches,
             "is_empty" => ScriptComparison.IsEmpty,
+            "within" => ScriptComparison.Within,
             _ => ScriptComparison.NotEmpty,
         };
 
         string operand = string.Empty, operand2 = string.Empty;
+        double rangeMetres = 0;
         Regex? pattern = null;
 
         switch (comparison)
@@ -1047,6 +1049,21 @@ public static class ScriptParser
                 }
                 operand = bounds[0];
                 operand2 = bounds[1];
+                break;
+            }
+
+            case ScriptComparison.Within:
+            {
+                var text = AsScalar(comparisonValue, problems, "within");
+                if (text is null) return null;
+                var metres = ParseDistanceMetres(text);
+                if (metres is null)
+                {
+                    problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
+                        $"require: within: has to be a distance like 30mi, 50km or 500m, not '{text}'"));
+                    return null;
+                }
+                rangeMetres = metres.Value;
                 break;
             }
 
@@ -1091,6 +1108,7 @@ public static class ScriptParser
                 Operand2 = operand2,
                 IgnoreCase = ignoreCase,
                 Pattern = pattern,
+                RangeMetres = rangeMetres,
             },
         };
     }

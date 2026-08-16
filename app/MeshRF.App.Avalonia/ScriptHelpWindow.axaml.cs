@@ -98,6 +98,7 @@ public partial class ScriptHelpWindow : Window
         new("require:", "Stop the sequence unless something holds. The only way to act on what an http: returned, since conditions are settled before any action runs."),
         new("  value: \"{http.n}\"", "The value under test. Required."),
         new("  above: 30", "One comparison per require:. Also: below, at_least, at_most, between: [a, b], equals, not_equals, contains, matches, is_empty, not_empty."),
+        new("  within: 30mi", "The value is a \"lat,lon\" no further than this from your home location. For an API that returns everything and leaves the filtering to you."),
         new("  ignore_case: false", "Text comparisons ignore case unless you turn this off."),
         new("waypoint:", "Drop a marker on the map. Takes the indented keys below."),
         new("  lat: \"{http.lat}\"", "Latitude, usually from an http: result. Or lat: home to use this node's home location, with no lon: needed."),

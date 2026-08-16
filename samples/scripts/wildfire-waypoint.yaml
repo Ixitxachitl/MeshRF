@@ -1,40 +1,33 @@
-# Drops a waypoint on an active wildfire reported by Watch Duty.
+# Drops a waypoint on an active Watch Duty wildfire within 30 miles.
+#
+# No credential needed — the API is open.
 #
 # ---------------------------------------------------------------------------
-# UNVERIFIED. No credential is needed — the API is open — but unlike the other
-# samples this one has not been run against it. Every path, including the API
-# root and with "Accept: */*", was refused with 406 Not Acceptable from where it
-# was written, which is an edge filter rejecting an unrecognised client rather
-# than anything about the request. It should be fine from a normal machine.
+# The field names below come from a working Home Assistant integration against
+# the same endpoint, so they are not guesses: lat and lng are top level, while
+# acreage and containment live under data. The one thing still unconfirmed is
+# whether the list arrives wrapped in results[] — the sibling /reports/ endpoint
+# is paginated that way, and this one is filtered the same, so it almost
+# certainly is. If nothing ever fires, delete the json: block, turn Dry run on,
+# and the log prints the whole response as {http.body}; the wrapper will be
+# obvious.
 #
-# Two things to confirm on first run:
-#
-#   1. THAT IT ANSWERS AT ALL. If you get 406, the filter dislikes MeshRF's
-#      User-Agent. The headers: block below is commented out for that case —
-#      uncomment it to present a browser's instead.
-#
-#   2. THE JSON PATHS. The ones below are a guess at a Django REST Framework
-#      shape (count/next/previous/results). To see the real thing: delete the
-#      whole json: block, turn Dry run on, and the log prints the response as
-#      {http.body}. Read the field names off it and put the paths back.
-#
-# There is also no radius filter here, because none was confirmed. This marks
-# the first event the endpoint returns, which is not necessarily the closest
-# one. If the API accepts a location or bounding-box parameter, add it to the
-# url: — that is the right place to narrow it, since the script language has no
-# distance arithmetic.
+# The endpoint returns every incident, active or not, with no way to narrow by
+# distance — the Home Assistant integration measures each one locally, and the
+# within: test below does the same thing here.
 # ---------------------------------------------------------------------------
 
 enabled: false
 
-alias: Wildfire waypoint (Watch Duty)
+alias: Wildfire within 30 miles
 
 trigger:
-  # Fires move slowly compared with lightning, and the reports are human-filed,
-  # so there is nothing to gain from looking more often than this.
+  # Fires move slowly compared with lightning and the reports are human-filed,
+  # so there is nothing to gain from looking more often.
   - every: 30m
 
 action:
+  # Nothing to measure distance from without a home location.
   - require:
       value: "{my.lat}"
       not_empty: true
@@ -43,34 +36,42 @@ action:
       url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
       optional: true
       timeout: 20s
-      # Uncomment if the request comes back 406 — see the note at the top.
+      # Uncomment if the request comes back 406: some edge filters reject an
+      # unfamiliar client, and this presents a browser's instead.
       # headers:
       #   User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
       #   Accept: "application/json"
       json:
+        active: results[0].is_active
         name: results[0].name
         lat: results[0].lat
         lon: results[0].lng
-        acreage: results[0].acreage
+        acreage: results[0].data.acreage
+        containment: results[0].data.containment
 
-  # Nothing reported, or the paths above do not match the real response: either
-  # way there is nothing to place, so stop quietly rather than dropping a
-  # marker at a blank position.
+  # The endpoint returns closed incidents too, and the integration skips
+  # anything without is_active. So does this.
   - require:
-      value: "{http.lat}"
-      not_empty: true
+      value: "{http.active}"
+      equals: "true"
+
+  # The distance filter the API does not offer. Without it this would mark
+  # whichever fire came back first, anywhere in the state.
+  - require:
+      value: "{http.lat},{http.lon}"
+      within: 30mi
 
   - waypoint:
       lat: "{http.lat}"
       lon: "{http.lon}"
       name: "Fire: {http.name}"
-      description: "{http.acreage} acres, reported {time}"
+      description: "{http.acreage} acres, {http.containment}% contained"
       icon: "🔥"
       radius: 10mi
       expires: 6h
       notify_on_enter: true
 
-  - log: "wildfire {http.name} at {http.lat},{http.lon} ({http.acreage} acres)"
+  - log: "wildfire {http.name} at {http.lat},{http.lon} — {http.acreage} acres, {http.containment}% contained"
 
 limits:
   # Six hours, matching the waypoint's own life: a fire burns for days, and a
