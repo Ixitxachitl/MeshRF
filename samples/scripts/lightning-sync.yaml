@@ -18,9 +18,10 @@
 # can be in play at once and how far back it looks. Start with Dry run on during
 # actual weather and see how many it reports before letting it transmit.
 #
-# The response shape here is unconfirmed. If nothing appears, the log will carry
-# the start of the response alongside the items: path it could not follow, which
-# is enough to correct the paths below.
+# The items: path below is confirmed against a live response. The paths within
+# each record are not, for want of a storm to produce one — if markers never
+# appear during weather, the log carries the start of the response alongside the
+# path it could not follow, which is enough to correct them.
 # ---------------------------------------------------------------------------
 
 enabled: false
@@ -31,9 +32,13 @@ sync:
   # Shorter than the window below, so a strike is seen before it ages out.
   every: 5m
 
-  # from=-15minutes is the window; strikes older than that drop out of the feed
-  # and their markers are retired automatically. limit caps a busy storm.
-  url: "https://data.api.xweather.com/lightning/closest?p={my.lat},{my.lon}&radius=30mi&limit=10&from=-15minutes&format=json"
+  # from=-15m is the window; strikes older than that drop out of the feed and
+  # their markers are retired automatically. limit caps a busy storm.
+  #
+  # The unit has to be a single letter. Xweather takes -15m and -1h, but answers
+  # a spelled-out -15minutes with success:true, a warn_invalid_param it buries in
+  # the body, and a window of its own choosing.
+  url: "https://data.api.xweather.com/lightning/closest?p={my.lat},{my.lon}&radius=30mi&limit=10&from=-15m&format=json"
   credential: xweather-pair
   timeout: 20s
 
