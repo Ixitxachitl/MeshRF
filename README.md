@@ -3,10 +3,13 @@
 MeshRF is a cross-platform Meshtastic SDR transceiver for Windows, Linux and
 macOS.
 
-Instead of using a LoRa modem chip, MeshRF uses an SDR (HackRF One or RTL-SDR)
-and performs LoRa demodulation/modulation in software on the host CPU. It
-decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
+MeshRF's usual mode uses an SDR (HackRF One or RTL-SDR) with no LoRa modem chip
+at all, performing LoRa demodulation and modulation in software on the host CPU.
+It decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
+
+A CH341+SX1262 USB stick can also be used for either direction, on its own or
+alongside an SDR — see [SX1262 USB sticks](#sx1262-usb-sticks).
 
 Current release line: **v2.0.4**
 
@@ -27,7 +30,9 @@ everything below describes it.
 ## Status
 
 - Receive path is operational end-to-end: SDR IQ -> DSP -> LoRa demod ->
-  Meshtastic frame decode -> decrypt -> parse -> UI.
+  Meshtastic frame decode -> decrypt -> parse -> UI. An SX1262 USB stick can
+  take the place of everything left of the frame decode, handing up finished
+  frames instead of IQ.
 - Transmit path is operational for channel broadcast, direct messages, and
   control/management packets, either modulated in software onto a HackRF or
   handed to an SX1262 USB stick.
@@ -41,16 +46,16 @@ everything below describes it.
 
 ### Radio and Signal Processing
 
-- Runtime-selectable SDR backend: HackRF One or RTL-SDR.
-- Independent RX and TX device selection.
-- Optional hardware transmitter: a CH341+SX1262 USB stick can be selected as
-  the TX device while an SDR keeps receiving. See
-  [Hardware transmit](#hardware-transmit-sx1262-usb-sticks).
+- Runtime-selectable radio backend: HackRF One or RTL-SDR for receive, HackRF
+  One for transmit, or a CH341+SX1262 USB stick for either direction.
+- Independent RX and TX device selection, so an SDR receiver can be paired with
+  a hardware transmitter. See [SX1262 USB sticks](#sx1262-usb-sticks).
 - Software LoRa demod/mod with Meshtastic-oriented preset support.
 - Optional receive conditioning features (including DC blocking).
-- Live spectrum and waterfall with packet-linked snapshot support.
+- Live spectrum and waterfall with packet-linked snapshot support (SDR receive
+  only — a hardware modem produces no IQ).
 
-### Hardware transmit (SX1262 USB sticks)
+### SX1262 USB sticks
 
 MeshRF normally modulates and demodulates LoRa in software using an SDR. It can
 instead hand framed bytes to a CH341+SX1262 USB stick, which does preamble,
@@ -256,7 +261,8 @@ MeshRF.Core  (.NET 8 class library)
   - SQLite stores (channels, nodes, messages, waypoints)
 
 MeshRF.Native (C++20, built with CMake)
-  - SDR HAL (HackRF, RTL-SDR)
+  - SDR HAL (HackRF, RTL-SDR) — IQ in, IQ out
+  - Packet-radio HAL (CH341 USB-SPI + SX126x) — framed bytes, no IQ
   - DSP + LoRa modem pipeline
   - Spectrum/waterfall and native packet plumbing
 ```
@@ -267,9 +273,9 @@ Common to every platform:
 
 - CMake 3.25+
 - .NET 8 SDK
-- SDR hardware: HackRF One, or an RTL-SDR dongle
-- Optionally, a CH341+SX1262 USB stick for hardware transmit (see
-  [Hardware transmit](#hardware-transmit-sx1262-usb-sticks))
+- Radio hardware: a HackRF One or RTL-SDR dongle, and/or a CH341+SX1262 USB
+  stick (see [SX1262 USB sticks](#sx1262-usb-sticks)). A stick alone is enough
+  for both directions; an SDR alone can receive, and needs a HackRF to transmit.
 
 **Windows 10/11 x64**
 
@@ -447,7 +453,7 @@ mismatch.
 | `app/MeshRF.App.Avalonia/` | Cross-platform desktop application (Windows/Linux/macOS) |
 | `app/MeshRF.App/` | Legacy WPF desktop application (Windows only, being retired) |
 | `app/MeshRF.Core/` | Managed protocol/interop/storage library |
-| `native/core/` | C++ SDR/DSP/LoRa core |
+| `native/core/` | C++ SDR/DSP/LoRa core, plus the CH341+SX126x packet radio |
 | `native/bridge/` | C ABI bridge DLL for P/Invoke |
 | `tests/managed/` | Managed unit tests |
 | `tests/native/` | Native unit tests |
