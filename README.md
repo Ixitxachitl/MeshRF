@@ -203,7 +203,39 @@ limits:
 - **Conditions**: `scope`, `channel`, `from` / `not_from`, `snr_above`,
   `hops_below`, `between`, `favorite`, `has_key`.
 - **Actions**: `reply`, `send`, `react`, `position`, `nodeinfo`, `traceroute`,
-  `http`, `delay`, `log`.
+  `http`, `waypoint`, `require`, `delay`, `log`.
+
+A `waypoint:` action drops a marker, optionally with a geofence and enter/exit
+alerts. A `require:` action stops the sequence unless a value holds — which is
+how a script acts on what an `http:` call returned, since conditions are settled
+before any action runs:
+
+```yaml
+trigger:
+  - every: 10m
+
+action:
+  - http:
+      url: "https://api.example.com/lightning?p={my.lat},{my.lon}&radius=30mi"
+      credential: [api-id, api-secret]   # one name, or several
+      optional: true                      # an empty answer is normal here
+      json:                               # several values, one response
+        lat: response[0].loc.lat
+        lon: response[0].loc.long
+  - require:
+      value: "{http.lat}"
+      not_empty: true
+  - waypoint:
+      lat: "{http.lat}"
+      lon: "{http.lon}"
+      name: "Lightning"
+      radius: 30mi
+      expires: 1h
+      notify_on_enter: true
+```
+
+`{my.lat}` and `{my.lon}` carry this node's home location, so a script asking a
+location-shaped question needs no coordinates pasted into it.
 
 A script can call a REST API and broadcast the answer. Fetching and sending are
 two steps, so the result can be shaped into a sentence, combined from more than
