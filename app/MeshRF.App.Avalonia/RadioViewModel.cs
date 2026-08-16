@@ -2116,7 +2116,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     /// <summary>Applies an edit to an existing waypoint and resends it (same
     /// id, new content) over the mesh, then swaps the local cache entry.</summary>
-    public async Task<bool> UpdateWaypointAsync(WaypointRecord original, string name, string description, double lat, double lon)
+    public async Task<bool> UpdateWaypointAsync(WaypointRecord original, WaypointEditResult edit)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device before editing waypoints."; return false; }
         var channel = _rxHost.FindChannelByName(original.Channel);
@@ -2124,11 +2124,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeWaypoint(channel, _rxHost.MyNodeNum, packetId, original.WaypointId,
-            lat, lon, name: name, description: description,
-            expireEpoch: original.ExpireEpoch, lockedTo: original.LockedTo, icon: original.Icon,
-            geofenceRadiusM: original.GeofenceRadius,
-            bboxWest: original.BboxWest, bboxSouth: original.BboxSouth, bboxEast: original.BboxEast, bboxNorth: original.BboxNorth,
-            notifyOnEnter: original.NotifyOnEnter, notifyOnExit: original.NotifyOnExit, notifyFavoritesOnly: original.NotifyFavoritesOnly);
+            edit.Latitude, edit.Longitude, name: edit.Name, description: edit.Description,
+            expireEpoch: edit.ExpireEpoch, lockedTo: edit.LockedTo, icon: edit.Icon,
+            geofenceRadiusM: edit.GeofenceRadius,
+            bboxWest: edit.BboxWest, bboxSouth: edit.BboxSouth, bboxEast: edit.BboxEast, bboxNorth: edit.BboxNorth,
+            notifyOnEnter: edit.NotifyOnEnter, notifyOnExit: edit.NotifyOnExit, notifyFavoritesOnly: edit.NotifyFavoritesOnly);
 
         if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed (device cannot transmit)."; return false; }
 
@@ -2139,29 +2139,30 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             WaypointId = original.WaypointId,
             PacketId = packetId,
             Channel = original.Channel,
-            Name = name,
-            Description = description,
-            Icon = original.Icon,
-            Latitude = lat,
-            Longitude = lon,
-            ExpireEpoch = original.ExpireEpoch,
-            LockedTo = original.LockedTo,
+            Name = edit.Name,
+            Description = edit.Description,
+            Icon = edit.Icon,
+            Latitude = edit.Latitude,
+            Longitude = edit.Longitude,
+            AltitudeM = original.AltitudeM,
+            ExpireEpoch = edit.ExpireEpoch,
+            LockedTo = edit.LockedTo,
             RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            GeofenceRadius = original.GeofenceRadius,
-            BboxWest = original.BboxWest,
-            BboxSouth = original.BboxSouth,
-            BboxEast = original.BboxEast,
-            BboxNorth = original.BboxNorth,
-            NotifyOnEnter = original.NotifyOnEnter,
-            NotifyOnExit = original.NotifyOnExit,
-            NotifyFavoritesOnly = original.NotifyFavoritesOnly,
+            GeofenceRadius = edit.GeofenceRadius,
+            BboxWest = edit.BboxWest,
+            BboxSouth = edit.BboxSouth,
+            BboxEast = edit.BboxEast,
+            BboxNorth = edit.BboxNorth,
+            NotifyOnEnter = edit.NotifyOnEnter,
+            NotifyOnExit = edit.NotifyOnExit,
+            NotifyFavoritesOnly = edit.NotifyFavoritesOnly,
         };
         _waypointStore.Upsert(updated);
         for (int i = 0; i < Waypoints.Count; i++)
         {
             if (Waypoints[i].Id == original.Id) { Waypoints[i] = updated; break; }
         }
-        StatusText = $"Updated waypoint \"{name}\"";
+        StatusText = $"Updated waypoint \"{edit.Name}\"";
         return true;
     }
 

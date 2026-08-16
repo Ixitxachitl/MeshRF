@@ -41,10 +41,9 @@ public partial class MapPanel : UserControl
         if (_viewModel is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        var result = await WaypointEditWindow.EditAsync(owner, wp);
+        var result = await WaypointEditWindow.EditAsync(owner, wp, _viewModel.MyNodeNumber);
         if (result is null) return;
-        await _viewModel.UpdateWaypointAsync(wp, result.Name, result.Description,
-                                             result.Latitude, result.Longitude);
+        await _viewModel.UpdateWaypointAsync(wp, result);
     }
 
     /// <summary>Binds the panel to the view model and restores saved map

@@ -209,6 +209,19 @@ public partial class RadioViewModel
     // ----- New-waypoint composer -----
 
     [ObservableProperty] private string _selectedWaypointEmoji = "📍";
+
+    /// <summary>What the composer's icon button shows. An empty selection sends
+    /// no <c>Waypoint.icon</c> at all, so the button needs a placeholder to stay
+    /// findable.</summary>
+    public string WaypointIconGlyph =>
+        string.IsNullOrEmpty(SelectedWaypointEmoji) ? "＋" : SelectedWaypointEmoji;
+
+    partial void OnSelectedWaypointEmojiChanged(string value) =>
+        OnPropertyChanged(nameof(WaypointIconGlyph));
+
+    [RelayCommand]
+    private void ClearWaypointIcon() => SelectedWaypointEmoji = string.Empty;
+
     [ObservableProperty] private string _waypointNameInput = string.Empty;
     [ObservableProperty] private string _waypointDescriptionInput = string.Empty;
     [ObservableProperty] private bool _waypointLockToMe;

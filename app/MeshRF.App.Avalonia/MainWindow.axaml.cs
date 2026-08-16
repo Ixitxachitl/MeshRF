@@ -654,9 +654,9 @@ public partial class MainWindow : Window
     private async void OnEditWaypoint(object? sender, RoutedEventArgs e)
     {
         if (WaypointsGridProxy.SelectedItem is not WaypointRecord wp) return;
-        var result = await WaypointEditWindow.EditAsync(this, wp);
+        var result = await WaypointEditWindow.EditAsync(this, wp, _viewModel.MyNodeNumber);
         if (result is null) return;
-        await _viewModel.UpdateWaypointAsync(wp, result.Name, result.Description, result.Latitude, result.Longitude);
+        await _viewModel.UpdateWaypointAsync(wp, result);
     }
 
     /// <summary>"React…" — pick a glyph, then send it as a tapback.</summary>

@@ -2,28 +2,86 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="MeshRF.AvaloniaApp.WaypointEditWindow"
         Title="Edit waypoint"
-        Width="360" SizeToContent="Height"
+        Width="380" SizeToContent="Height" MaxHeight="760"
         CanResize="False"
         WindowStartupLocation="CenterOwner">
-    <StackPanel Margin="12" Spacing="8">
-        <TextBlock Text="Name" FontSize="11" />
-        <TextBox Name="NameBox" />
-        <TextBlock Text="Description" FontSize="11" />
-        <TextBox Name="DescriptionBox" AcceptsReturn="True" Height="60" TextWrapping="Wrap" />
-        <Grid ColumnDefinitions="*,*">
-            <StackPanel Grid.Column="0" Margin="0,0,4,0">
-                <TextBlock Text="Latitude" FontSize="11" />
-                <TextBox Name="LatBox" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Margin="4,0,0,0">
-                <TextBlock Text="Longitude" FontSize="11" />
-                <TextBox Name="LonBox" />
-            </StackPanel>
-        </Grid>
-        <TextBlock Name="ErrorText" Foreground="#C62828" FontSize="11" IsVisible="False" />
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+    <DockPanel Margin="12">
+        <TextBlock Name="ErrorText" DockPanel.Dock="Bottom" Foreground="#C62828" FontSize="11"
+                   TextWrapping="Wrap" IsVisible="False" Margin="0,8,0,0" />
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Spacing="8" Margin="0,8,0,0">
             <Button Content="Cancel" Click="OnCancel" />
             <Button Content="Save &amp; resend" Click="OnSave" />
         </StackPanel>
-    </StackPanel>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Icon" FontSize="11" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button Name="IconButton" Width="28" Height="28" Padding="0"
+                            HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                            Click="OnPickIcon"
+                            ToolTip.Tip="Click to pick the waypoint emoji" />
+                    <Button Content="Clear" Click="OnClearIcon" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <TextBlock Text="Name" FontSize="11" />
+                <TextBox Name="NameBox" />
+
+                <TextBlock Text="Description" FontSize="11" />
+                <TextBox Name="DescriptionBox" AcceptsReturn="True" Height="54" TextWrapping="Wrap" />
+
+                <Grid ColumnDefinitions="*,*">
+                    <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                        <TextBlock Text="Latitude" FontSize="11" />
+                        <TextBox Name="LatBox" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                        <TextBlock Text="Longitude" FontSize="11" />
+                        <TextBox Name="LonBox" />
+                    </StackPanel>
+                </Grid>
+
+                <CheckBox Name="LockToMeBox" Content="Lock to me"
+                          ToolTip.Tip="Sets Waypoint.locked_to to your node number, so compliant clients refuse edits/deletes from other nodes" />
+                <TextBlock Name="LockedElsewhereText" FontSize="11" IsVisible="False" TextWrapping="Wrap" />
+
+                <CheckBox Name="UseExpiryBox" Content="Set expiration" />
+                <StackPanel Orientation="Vertical" Spacing="4"
+                            IsEnabled="{Binding #UseExpiryBox.IsChecked}">
+                    <DatePicker Name="ExpiryDatePicker" />
+                    <TimePicker Name="ExpiryTimePicker" ClockIdentifier="12HourClock" UseSeconds="True" />
+                </StackPanel>
+
+                <CheckBox Name="UseGeofenceBox" Content="Add geofence"
+                          ToolTip.Tip="Attach a circular geofence to this waypoint (Waypoint.geofence_radius)" />
+                <StackPanel Orientation="Vertical" Spacing="2"
+                            IsEnabled="{Binding #UseGeofenceBox.IsChecked}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Radius (m)" VerticalAlignment="Center" />
+                        <TextBox Name="GeofenceRadiusBox" Width="80"
+                                 ToolTip.Tip="Circular geofence radius in meters" />
+                    </StackPanel>
+                    <CheckBox Name="NotifyOnEnterBox" Content="Notify on enter" />
+                    <CheckBox Name="NotifyOnExitBox" Content="Notify on exit" />
+                    <CheckBox Name="NotifyFavoritesOnlyBox" Content="Favorites only"
+                              ToolTip.Tip="Only raise enter/exit notifications for nodes marked as favorites (per receiver)" />
+                </StackPanel>
+
+                <CheckBox Name="UseBoundingBoxBox" Content="Add bounding box geofence"
+                          ToolTip.Tip="Attach a rectangular geofence to this waypoint (Waypoint.bounding_box). May be combined with the circular radius above." />
+                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto"
+                      IsEnabled="{Binding #UseBoundingBoxBox.IsChecked}">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="West" FontSize="11" Margin="0,0,4,0" />
+                    <TextBox Grid.Row="1" Grid.Column="0" Name="BboxWestBox" Margin="0,0,4,4" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="East" FontSize="11" Margin="4,0,0,0" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Name="BboxEastBox" Margin="4,0,0,4" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="South" FontSize="11" Margin="0,0,4,0" />
+                    <TextBox Grid.Row="3" Grid.Column="0" Name="BboxSouthBox" Margin="0,0,4,0" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="North" FontSize="11" Margin="4,0,0,0" />
+                    <TextBox Grid.Row="3" Grid.Column="1" Name="BboxNorthBox" Margin="4,0,0,0" />
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
 </Window>

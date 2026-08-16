@@ -122,9 +122,12 @@
                         <TextBlock Text="WP" VerticalAlignment="Center" />
                         <Button x:Name="EmojiButton" Width="28" Height="28" Padding="0"
                                 HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                Content="{Binding SelectedWaypointEmoji}"
+                                Content="{Binding WaypointIconGlyph}"
                                 Click="OnPickEmoji"
                                 ToolTip.Tip="Click to pick waypoint emoji" />
+                        <Button Content="Clear" VerticalAlignment="Center"
+                                Command="{Binding ClearWaypointIconCommand}"
+                                ToolTip.Tip="Send the waypoint with no icon at all" />
                     </StackPanel>
 
                     <TextBlock Text="Name" Margin="0,6,0,0" />
