@@ -11,13 +11,13 @@ provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 A CH341+SX1262 USB stick can also be used for either direction, on its own or
 alongside an SDR — see [SX1262 USB sticks](#sx1262-usb-sticks).
 
-Current release line: **v2.0.4**
+Current release line: **v2.0.5**
 
 ### Two apps, for one release
 
 | App | Version | Platforms | Status |
 | --- | --- | --- | --- |
-| `MeshRF.App.Avalonia` | 2.0.4 | Windows, Linux, macOS | The app MeshRF ships |
+| `MeshRF.App.Avalonia` | 2.0.5 | Windows, Linux, macOS | The app MeshRF ships |
 | `MeshRF.App` (WPF) | 1.0.9 | Windows only | Final release — no longer maintained |
 
 Both read the same `settings.json` and the same SQLite databases, so you can
