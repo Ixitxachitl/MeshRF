@@ -114,11 +114,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     private void InitScripting()
     {
         _scriptEngine.Diagnostic += line => LogFromAnyThread($"scripts: {line}");
-        _rxHost.ScriptSelfProvider = () => new ScriptSelf(
-            _rxHost.MyNodeNum, MyShortName, MyLongName,
-            // 101 is the mains-powered sentinel this app reports in its own
-            // device metrics; ScriptTemplate renders it as "mains".
-            BatteryPct: 101);
+        _rxHost.ScriptSelfProvider = BuildScriptSelf;
         _rxHost.ScriptEventObserved = OnScriptEvent;
         _scriptHttp.Credentials = this;
         ReloadScripts();
@@ -168,6 +164,29 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     /// between a mistaken regex and a channel nobody else can use.</summary>
     private const int ScriptsGlobalMaxPerHour = 30;
 
+    /// <summary>
+    /// This node as scripts see it, rebuilt per event so a script always reads
+    /// the current name and position rather than whatever they were when
+    /// scripting started.
+    /// </summary>
+    private ScriptSelf BuildScriptSelf()
+    {
+        double? lat = null, lon = null;
+        if (TryGetHomeLocation(out var homeLat, out var homeLon))
+        {
+            lat = homeLat;
+            lon = homeLon;
+        }
+
+        return new ScriptSelf(
+            _rxHost.MyNodeNum, MyShortName, MyLongName,
+            // 101 is the mains-powered sentinel this app reports in its own
+            // device metrics; ScriptTemplate renders it as "mains".
+            BatteryPct: 101,
+            Latitude: lat,
+            Longitude: lon);
+    }
+
     // ----- event path ---------------------------------------------------------
 
     /// <summary>
@@ -205,7 +224,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         {
             runs = _scriptEngine.Tick(
                 DateTimeOffset.Now,
-                new ScriptSelf(_rxHost.MyNodeNum, MyShortName, MyLongName, 101));
+                BuildScriptSelf());
         }
         catch (Exception ex)
         {
@@ -286,6 +305,18 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 continue;
             }
 
+            if (action.Kind == ScriptActionKind.Require)
+            {
+                if (action.Require is not { } requirement) continue;
+                if (requirement.Holds(run.Expansion, out var detail)) continue;
+
+                // Logged rather than silent: a script that stops here is doing
+                // its job, but "why did nothing happen?" has to be answerable
+                // without turning on dry run and waiting for it to fire again.
+                _rxHost.Log($"scripts: {run.Alias} — stopped, {detail} is not true");
+                return;
+            }
+
             // Expanded here, not when the script matched: an http: action
             // earlier in this sequence may have supplied part of the wording.
             var text = run.Expansion.ExpandMessage(action.Text);
@@ -294,7 +325,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
 
             try
             {
-                await DispatchAsync(action, text);
+                await DispatchAsync(run, action, text);
             }
             catch (Exception ex)
             {
@@ -350,15 +381,17 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             return false;
         }
 
-        run.Expansion.SetHttpResult(request.SaveAs, result.Value);
+        foreach (var (name, value) in result.Values) run.Expansion.SetHttpResult(name, value);
         run.Expansion.SetHttpResult("status", result.Status.ToString(CultureInfo.InvariantCulture));
-        _rxHost.Log($"scripts: {run.Alias} — {result.Status}, {{http.{request.SaveAs}}} = \"{result.Value}\"");
+
+        var read = string.Join(", ", result.Values.Select(v => $"{{http.{v.Key}}} = \"{v.Value}\""));
+        _rxHost.Log($"scripts: {run.Alias} — {result.Status}, {read}");
         return true;
     }
 
     /// <summary>Turns one resolved action into a transmission.</summary>
     /// <param name="text">The message body, already expanded and clamped.</param>
-    private async Task DispatchAsync(ResolvedAction action, string text)
+    private async Task DispatchAsync(ScriptRun run, ResolvedAction action, string text)
     {
         if (!CanTransmit)
         {
@@ -406,6 +439,10 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 HandleAutoReplyRequest(PortNum.Position, action.ToNode, action.ChannelName);
                 break;
 
+            case ScriptActionKind.Waypoint:
+                await DropWaypointAsync(run, action, text);
+                break;
+
             case ScriptActionKind.Traceroute:
             {
                 // Routed through the same command the context menu uses, so a
@@ -422,6 +459,78 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             }
         }
     }
+
+    /// <summary>
+    /// Sends a scripted waypoint.
+    /// </summary>
+    /// <remarks>
+    /// Coordinates are resolved here rather than in the engine because they may
+    /// come from an http: result earlier in the same sequence, or from this
+    /// node's home location, neither of which the engine knows about when the
+    /// script matched.
+    /// </remarks>
+    private async Task DropWaypointAsync(ScriptRun run, ResolvedAction action, string expandedName)
+    {
+        if (action.Waypoint is not { } waypoint) return;
+
+        double lat, lon;
+        if (waypoint.UseHome)
+        {
+            if (!TryGetHomeLocation(out lat, out lon))
+            {
+                _rxHost.Log("scripts: waypoint skipped — no home location is set (My Node → Home)");
+                return;
+            }
+        }
+        else
+        {
+            var latText = run.Expansion.Expand(waypoint.Latitude);
+            var lonText = run.Expansion.Expand(waypoint.Longitude);
+            if (!TryCoordinate(latText, 90, out lat) || !TryCoordinate(lonText, 180, out lon))
+            {
+                _rxHost.Log($"scripts: waypoint skipped — \"{latText}\", \"{lonText}\" is not a position");
+                return;
+            }
+        }
+
+        var channel = waypoint.Channel.Length > 0
+            ? _rxHost.FindChannelByName(waypoint.Channel) ?? PrimaryChannel()
+            : PrimaryChannel();
+        if (channel is null)
+        {
+            _rxHost.Log("scripts: waypoint skipped — no channel to send it on");
+            return;
+        }
+
+        var packetId = NextPacketId();
+        // Expiry is relative in a script and absolute on the wire. A marker a
+        // script drops unattended really wants one, which is why the parser
+        // warns when it is missing.
+        uint expireEpoch = waypoint.Expires > TimeSpan.Zero
+            ? (uint)DateTimeOffset.UtcNow.Add(waypoint.Expires).ToUnixTimeSeconds()
+            : 0;
+
+        var frame = MeshEncoder.EncodeWaypoint(
+            channel, _rxHost.MyNodeNum, packetId, waypointId: packetId, lat, lon,
+            name: expandedName.Length > 0 ? expandedName : "Waypoint",
+            description: ScriptTemplate.ClampToPayload(run.Expansion.Expand(waypoint.Description)),
+            expireEpoch: expireEpoch,
+            lockedTo: waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
+            icon: waypoint.Icon.Length > 0 ? EmojiToCodePoint(waypoint.Icon) : null,
+            geofenceRadiusM: waypoint.RadiusM,
+            notifyOnEnter: waypoint.NotifyOnEnter,
+            notifyOnExit: waypoint.NotifyOnExit,
+            to: 0xFFFFFFFFu,
+            hopLimit: (byte)HopLimit,
+            okToMqtt: OkToMqtt);
+
+        if (!await TransmitFrameAsync(frame))
+            _rxHost.Log("scripts: waypoint transmit failed");
+    }
+
+    private static bool TryCoordinate(string text, double limit, out double value) =>
+        double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+        && Math.Abs(value) <= limit;
 
     /// <summary>
     /// Works out which channel a scripted message goes on, who it is addressed

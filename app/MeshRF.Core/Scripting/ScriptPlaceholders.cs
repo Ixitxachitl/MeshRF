@@ -31,6 +31,8 @@ public static class ScriptPlaceholders
         ("my.id",        "This node's id."),
         ("my.short",     "This node's short name."),
         ("my.long",      "This node's long name."),
+        ("my.lat",       "This node's home latitude. Empty if no home location is set."),
+        ("my.lon",       "This node's home longitude. Empty if no home location is set."),
         ("node.battery", "This node's battery level, percent."),
         ("http.body",    "Result of the preceding http: action (the default save_as name)."),
         ("http.status",  "HTTP status code of the last http: action."),

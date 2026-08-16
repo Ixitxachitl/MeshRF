@@ -437,6 +437,20 @@ public sealed class ScriptEngine
                         ScriptActionKind.Http, action.Http.Url,
                         0, string.Empty, 0, TimeSpan.Zero, action.Http);
 
+            case ScriptActionKind.Waypoint:
+                return action.Waypoint is null
+                    ? null
+                    : new ResolvedAction(
+                        ScriptActionKind.Waypoint, action.Waypoint.Name,
+                        0, action.Waypoint.Channel, 0, TimeSpan.Zero, Waypoint: action.Waypoint);
+
+            case ScriptActionKind.Require:
+                return action.Require is null
+                    ? null
+                    : new ResolvedAction(
+                        ScriptActionKind.Require, action.Require.Value,
+                        0, string.Empty, 0, TimeSpan.Zero, Require: action.Require);
+
             case ScriptActionKind.React:
                 if (evt.PacketId == 0)
                 {

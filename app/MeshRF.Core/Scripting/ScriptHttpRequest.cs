@@ -8,6 +8,11 @@ public enum ScriptHttpMethod
     Put,
 }
 
+/// <summary>One value pulled out of a JSON response.</summary>
+/// <param name="SaveAs">Placeholder name, so <c>lat</c> becomes {http.lat}.</param>
+/// <param name="JsonPath">Dotted path, e.g. <c>report[0].loc.lat</c>.</param>
+public readonly record struct ScriptHttpExtraction(string SaveAs, string JsonPath);
+
 /// <summary>
 /// An <c>http:</c> action: call a REST endpoint and keep part of the answer for
 /// a later <c>reply:</c> or <c>send:</c> to say.
@@ -26,18 +31,46 @@ public sealed class ScriptHttpRequest
 
     public ScriptHttpMethod Method { get; init; } = ScriptHttpMethod.Get;
 
-    /// <summary>Name of a stored credential to authenticate with, or empty.
-    /// The value itself never appears in a script file — see
-    /// <see cref="ScriptCredential"/>.</summary>
-    public string Credential { get; init; } = string.Empty;
+    /// <summary>
+    /// Stored credentials to authenticate with, by name. The values themselves
+    /// never appear in a script file — see <see cref="ScriptCredential"/>.
+    /// </summary>
+    /// <remarks>
+    /// A list because not every API authenticates with a single secret: an id
+    /// and secret pair passed as two query parameters is common, and splitting
+    /// them across two entries keeps both out of the script and lets each say
+    /// where it attaches.
+    /// </remarks>
+    public IReadOnlyList<string> CredentialNames { get; init; } = Array.Empty<string>();
 
-    /// <summary>Dotted path into a JSON response, e.g.
-    /// <c>current.temp_c</c> or <c>results[0].name</c>. Empty means use the
-    /// whole response body.</summary>
-    public string JsonPath { get; init; } = string.Empty;
+    /// <summary>
+    /// Values to pull out of a JSON response. Empty means store the whole body
+    /// under <see cref="SaveAs"/>.
+    /// </summary>
+    /// <remarks>
+    /// A list rather than one path because the interesting responses carry
+    /// several values that belong together — a strike's latitude and longitude
+    /// are useless apart, and fetching them separately would mean two requests
+    /// against a moving target.
+    /// </remarks>
+    public IReadOnlyList<ScriptHttpExtraction> Extractions { get; init; } =
+        Array.Empty<ScriptHttpExtraction>();
 
-    /// <summary>Placeholder name the result is stored under, so
-    /// <c>save_as: temp</c> makes it available as <c>{http.temp}</c>.</summary>
+    /// <summary>
+    /// Treat a path that is not in the response as empty instead of failing.
+    /// </summary>
+    /// <remarks>
+    /// Off by default so a mistyped path is reported rather than silently
+    /// yielding nothing. Turned on when absence is a normal answer — an API
+    /// asked for the nearest lightning strike returns an empty list most of the
+    /// time, and that is the quiet case, not a fault. Pair it with a
+    /// <c>require:</c> on the value to decide what to do about it.
+    /// </remarks>
+    public bool Optional { get; init; }
+
+    /// <summary>Placeholder name the whole body is stored under when no
+    /// extraction is given, so <c>save_as: temp</c> makes it
+    /// <c>{http.temp}</c>.</summary>
     public string SaveAs { get; init; } = "body";
 
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(10);

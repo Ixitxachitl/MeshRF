@@ -16,6 +16,8 @@ namespace MeshRF.Scripting;
 /// <param name="ReplyId">Packet to thread under, or 0.</param>
 /// <param name="Delay">How long to wait before running this action.</param>
 /// <param name="Http">The request, for an http: action.</param>
+/// <param name="Waypoint">The marker, for a waypoint: action.</param>
+/// <param name="Require">The test, for a require: action.</param>
 public sealed record ResolvedAction(
     ScriptActionKind Kind,
     string Text,
@@ -23,13 +25,16 @@ public sealed record ResolvedAction(
     string ChannelName,
     uint ReplyId,
     TimeSpan Delay,
-    ScriptHttpRequest? Http = null)
+    ScriptHttpRequest? Http = null,
+    ScriptWaypoint? Waypoint = null,
+    ScriptRequirement? Require = null)
 {
-    /// <summary>Whether this action puts a frame on the air. An http: action
-    /// makes a network request but transmits nothing, so it does not count
-    /// against the airtime budget.</summary>
+    /// <summary>Whether this action puts a frame on the air. http: makes a
+    /// network request and require: only decides, so neither counts against the
+    /// airtime budget.</summary>
     public bool Transmits =>
-        Kind is not (ScriptActionKind.Delay or ScriptActionKind.Log or ScriptActionKind.Http);
+        Kind is not (ScriptActionKind.Delay or ScriptActionKind.Log
+                     or ScriptActionKind.Http or ScriptActionKind.Require);
 
     /// <summary>One-line description for the log, e.g.
     /// <c>reply to !a1b2c3d4: "pong — 7 dB"</c>. Takes the already-expanded
@@ -45,6 +50,10 @@ public sealed record ResolvedAction(
         ScriptActionKind.NodeInfo => $"send node info to {nameOf(ToNode)}",
         ScriptActionKind.Traceroute => $"traceroute to {nameOf(ToNode)}",
         ScriptActionKind.Http => $"{Http?.Method.ToString().ToUpperInvariant()} {expandedText}",
+        ScriptActionKind.Waypoint =>
+            $"waypoint \"{expandedText}\"" +
+            (Waypoint is { RadiusM: > 0 } fenced ? $" with a {fenced.RadiusM} m fence" : ""),
+        ScriptActionKind.Require => $"require {Require?.Describe()}",
         ScriptActionKind.Delay => $"wait {Delay.TotalSeconds:0.#}s",
         ScriptActionKind.Log => $"log: \"{expandedText}\"",
         _ => Kind.ToString(),

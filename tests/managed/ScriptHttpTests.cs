@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -61,8 +61,8 @@ public class ScriptHttpTests
 
         var http = result.Script!.Actions[0].Http!;
         Assert.Equal(ScriptHttpMethod.Get, http.Method);
-        Assert.Equal("weather", http.Credential);
-        Assert.Equal("current.temp_c", http.JsonPath);
+        Assert.Equal(["weather"], http.CredentialNames.ToArray());
+        Assert.Equal("current.temp_c", Assert.Single(http.Extractions).JsonPath);
         Assert.Equal("temp", http.SaveAs);
         Assert.Equal(TimeSpan.FromSeconds(8), http.Timeout);
     }
@@ -296,13 +296,12 @@ public class ScriptHttpTests
             new ScriptHttpRequest
             {
                 Url = "https://api.test/v1?q={args}",
-                JsonPath = "current.temp_c",
-                SaveAs = "temp",
+                Extractions = [new ScriptHttpExtraction("temp", "current.temp_c")],
             },
             Expansion("!wx london"));
 
         Assert.True(result.Ok, result.Error);
-        Assert.Equal("14.5", result.Value);
+        Assert.Equal("14.5", result.Values["temp"]);
         Assert.Equal(200, result.Status);
         Assert.Equal("https://api.test/v1?q=london", handler.Last!.RequestUri!.ToString());
     }
@@ -317,7 +316,7 @@ public class ScriptHttpTests
             new ScriptHttpRequest { Url = "https://api.test/" }, Expansion());
 
         Assert.True(result.Ok);
-        Assert.Equal("plain text answer", result.Value);
+        Assert.Equal("plain text answer", result.Values["body"]);
     }
 
     [Fact]
@@ -331,7 +330,7 @@ public class ScriptHttpTests
         var result = await client.SendAsync(
             new ScriptHttpRequest { Url = "https://api.test/" }, Expansion());
 
-        Assert.Equal("line one line two line three", result.Value);
+        Assert.Equal("line one line two line three", result.Values["body"]);
     }
 
     [Fact]
@@ -341,7 +340,7 @@ public class ScriptHttpTests
         using var __ = client;
 
         var result = await client.SendAsync(
-            new ScriptHttpRequest { Url = "https://api.test/", JsonPath = "temp" }, Expansion());
+            new ScriptHttpRequest { Url = "https://api.test/", Extractions = [new ScriptHttpExtraction("temp", "temp")] }, Expansion());
 
         Assert.False(result.Ok);
         Assert.Equal(404, result.Status);
@@ -360,12 +359,12 @@ public class ScriptHttpTests
         });
 
         var result = await client.SendAsync(
-            new ScriptHttpRequest { Url = "https://api.test/", Credential = "k" }, Expansion());
+            new ScriptHttpRequest { Url = "https://api.test/", CredentialNames = ["k"] }, Expansion());
 
         Assert.Equal("Bearer", handler.Last!.Headers.Authorization!.Scheme);
         Assert.Equal("s3cret", handler.Last.Headers.Authorization.Parameter);
         // Nothing the caller can log or broadcast contains the key.
-        Assert.DoesNotContain("s3cret", result.Value);
+        Assert.DoesNotContain("s3cret", string.Join("|", result.Values.Values));
         Assert.DoesNotContain("s3cret", result.Error);
     }
 
@@ -379,7 +378,7 @@ public class ScriptHttpTests
             Name = "k", Placement = ScriptCredentialPlacement.Header, Parameter = "X-API-Key", Value = "abc123",
         });
 
-        await client.SendAsync(new ScriptHttpRequest { Url = "https://api.test/", Credential = "k" }, Expansion());
+        await client.SendAsync(new ScriptHttpRequest { Url = "https://api.test/", CredentialNames = ["k"] }, Expansion());
 
         Assert.Equal("abc123", handler.Last!.Headers.GetValues("X-API-Key").Single());
     }
@@ -395,7 +394,7 @@ public class ScriptHttpTests
         });
 
         await client.SendAsync(
-            new ScriptHttpRequest { Url = "https://api.test/v1?q={args}", Credential = "k" },
+            new ScriptHttpRequest { Url = "https://api.test/v1?q={args}", CredentialNames = ["k"] },
             Expansion("!wx london"));
 
         Assert.Equal("https://api.test/v1?q=london&appid=abc123", handler.Last!.RequestUri!.ToString());
@@ -409,7 +408,7 @@ public class ScriptHttpTests
         client.Credentials = new Credentials();
 
         var result = await client.SendAsync(
-            new ScriptHttpRequest { Url = "https://api.test/", Credential = "nope" }, Expansion());
+            new ScriptHttpRequest { Url = "https://api.test/", CredentialNames = ["nope"] }, Expansion());
 
         Assert.False(result.Ok);
         Assert.Contains("no credential named \"nope\"", result.Error);

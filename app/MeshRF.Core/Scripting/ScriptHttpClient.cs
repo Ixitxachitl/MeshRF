@@ -7,11 +7,17 @@ using System.Text.RegularExpressions;
 namespace MeshRF.Scripting;
 
 /// <summary>The outcome of one <c>http:</c> action.</summary>
-/// <param name="Ok">Whether a value was obtained.</param>
-/// <param name="Value">The extracted, sanitised value, ready to be broadcast.</param>
+/// <param name="Ok">Whether the values were obtained.</param>
+/// <param name="Values">Extracted, sanitised values by placeholder name, ready
+/// to be broadcast.</param>
 /// <param name="Status">HTTP status code, or 0 if the request never completed.</param>
 /// <param name="Error">Why it failed, in plain language, for the log.</param>
-public readonly record struct ScriptHttpResult(bool Ok, string Value, int Status, string Error);
+public readonly record struct ScriptHttpResult(
+    bool Ok, IReadOnlyDictionary<string, string> Values, int Status, string Error)
+{
+    public static ScriptHttpResult Failed(int status, string error) =>
+        new(false, new Dictionary<string, string>(), status, error);
+}
 
 /// <summary>
 /// Performs a script's REST call: builds the request, attaches the named
@@ -54,26 +60,29 @@ public sealed class ScriptHttpClient : IDisposable
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            return new ScriptHttpResult(false, string.Empty, 0,
+            return ScriptHttpResult.Failed(0,
                 $"\"{url}\" is not an http or https address once its placeholders were filled in");
         }
 
-        ScriptCredential? credential = null;
-        if (request.Credential.Length > 0)
+        var resolved = new List<ScriptCredential>(request.CredentialNames.Count);
+        foreach (var name in request.CredentialNames)
         {
-            credential = Credentials?.Find(request.Credential);
+            var credential = Credentials?.Find(name);
             if (credential is null)
             {
-                return new ScriptHttpResult(false, string.Empty, 0,
-                    $"no credential named \"{request.Credential}\" — add it under Credentials in the Scripts window");
+                return ScriptHttpResult.Failed(0,
+                    $"no credential named \"{name}\" — add it under Credentials in the Scripts window");
             }
+            resolved.Add(credential);
+            // Query credentials go on before the request is built, since the
+            // URI is fixed once the message exists.
             if (credential.Placement == ScriptCredentialPlacement.Query)
                 uri = AppendQuery(uri, credential.Parameter, credential.Value);
         }
 
         using var message = new HttpRequestMessage(MethodOf(request.Method), uri);
 
-        if (credential is not null)
+        foreach (var credential in resolved)
         {
             switch (credential.Placement)
             {
@@ -115,27 +124,44 @@ public sealed class ScriptHttpClient : IDisposable
                 // and "400" on its own is not something a user can act on.
                 var excerpt = Sanitize(text);
                 if (excerpt.Length > 120) excerpt = excerpt[..120] + "…";
-                return new ScriptHttpResult(false, string.Empty, status,
+                return ScriptHttpResult.Failed(status,
                     $"the server answered {status} {response.ReasonPhrase}" +
                     (excerpt.Length > 0 ? $" — {excerpt}" : string.Empty));
             }
 
-            if (request.JsonPath.Length == 0)
-                return new ScriptHttpResult(true, Sanitize(text), status, string.Empty);
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
 
-            var value = JsonValuePath.Read(text, request.JsonPath, out var error);
-            return value is null
-                ? new ScriptHttpResult(false, string.Empty, status, error)
-                : new ScriptHttpResult(true, Sanitize(value), status, string.Empty);
+            if (request.Extractions.Count == 0)
+            {
+                values[request.SaveAs] = Sanitize(text);
+                return new ScriptHttpResult(true, values, status, string.Empty);
+            }
+
+            foreach (var extraction in request.Extractions)
+            {
+                var value = JsonValuePath.Read(text, extraction.JsonPath, out var error);
+                if (value is null)
+                {
+                    // All or nothing unless the script said absence was
+                    // expected: one that reads a latitude and then fails to
+                    // read the matching longitude must not go on to place a
+                    // waypoint at half a position.
+                    if (!request.Optional) return ScriptHttpResult.Failed(status, $"{extraction.SaveAs}: {error}");
+                    values[extraction.SaveAs] = string.Empty;
+                    continue;
+                }
+                values[extraction.SaveAs] = Sanitize(value);
+            }
+            return new ScriptHttpResult(true, values, status, string.Empty);
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         {
-            return new ScriptHttpResult(false, string.Empty, 0,
+            return ScriptHttpResult.Failed(0,
                 $"the request took longer than {request.Timeout.TotalSeconds:0.#}s and was given up on");
         }
         catch (HttpRequestException ex)
         {
-            return new ScriptHttpResult(false, string.Empty, 0, $"the request failed — {ex.Message}");
+            return ScriptHttpResult.Failed(0, $"the request failed — {ex.Message}");
         }
     }
 

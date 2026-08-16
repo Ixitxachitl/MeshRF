@@ -83,6 +83,12 @@ public static class ScriptTemplate
             case "my.short": return evt.Self.ShortName;
             case "my.long": return evt.Self.LongName;
 
+            // Empty rather than "?" when no home is set: these go into URLs and
+            // waypoints, where a question mark would build a nonsense request.
+            // Empty is what a require: can test for.
+            case "my.lat": return Coordinate(evt.Self.Latitude);
+            case "my.lon": return Coordinate(evt.Self.Longitude);
+
             case "node.battery":
                 return evt.Self.BatteryPct switch
                 {
@@ -119,6 +125,11 @@ public static class ScriptTemplate
     /// missing data.</summary>
     private static string Number(double? value, string format) =>
         value?.ToString(format, CultureInfo.InvariantCulture) ?? "?";
+
+    /// <summary>Formats a coordinate to roughly a metre, invariant so a decimal
+    /// comma from the host locale can never reach a URL or a waypoint.</summary>
+    private static string Coordinate(double? value) =>
+        value?.ToString("0.#####", CultureInfo.InvariantCulture) ?? string.Empty;
 
     /// <summary>
     /// Splits a command message into its arguments: everything after the

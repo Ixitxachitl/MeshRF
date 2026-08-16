@@ -19,9 +19,21 @@ public enum ScriptEventKind
 /// <param name="LongName">Our configured long name.</param>
 /// <param name="BatteryPct">Battery level, or 101 for the mains-powered
 /// sentinel this app reports (see RadioViewModel's device metrics).</param>
-public sealed record ScriptSelf(uint NodeNum, string ShortName, string LongName, int? BatteryPct)
+/// <param name="Latitude">This node's home latitude, or null when none is set.</param>
+/// <param name="Longitude">This node's home longitude, or null when none is set.</param>
+public sealed record ScriptSelf(
+    uint NodeNum,
+    string ShortName,
+    string LongName,
+    int? BatteryPct,
+    double? Latitude = null,
+    double? Longitude = null)
 {
     public string Id => $"!{NodeNum:x8}";
+
+    /// <summary>Whether this node knows where it is, so a script asking a
+    /// location-shaped question of an API has something to ask about.</summary>
+    public bool HasLocation => Latitude is not null && Longitude is not null;
 
     public static readonly ScriptSelf Unknown = new(0, string.Empty, string.Empty, null);
 }

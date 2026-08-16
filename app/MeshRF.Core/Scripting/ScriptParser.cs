@@ -29,12 +29,25 @@ public static class ScriptParser
         ["scope", "channel", "from", "not_from", "snr_above", "hops_below", "between", "favorite", "has_key"];
 
     private static readonly string[] ActionKinds =
-        ["reply", "send", "react", "position", "nodeinfo", "traceroute", "http", "delay", "log"];
+        ["reply", "send", "react", "position", "nodeinfo", "traceroute", "http", "waypoint", "require",
+         "delay", "log"];
+
+    private static readonly string[] WaypointKeys =
+        ["lat", "lon", "name", "description", "icon", "radius", "expires",
+         "notify_on_enter", "notify_on_exit", "channel", "lock_to_me"];
+
+    /// <summary>Comparators a require: may use. Exactly one per entry.</summary>
+    private static readonly string[] RequireComparisons =
+        ["equals", "not_equals", "above", "below", "at_least", "at_most", "between",
+         "contains", "matches", "is_empty", "not_empty"];
+
+    private static readonly string[] RequireKeys =
+        [.. RequireComparisons, "value", "ignore_case"];
 
     private static readonly string[] SendKeys = ["to", "channel", "text", "reply_link"];
 
     private static readonly string[] HttpKeys =
-        ["url", "method", "credential", "json", "save_as", "timeout", "body", "content_type"];
+        ["url", "method", "credential", "json", "save_as", "timeout", "body", "content_type", "optional"];
 
     /// <summary>Longest a script may wait on one request. Long enough for a slow
     /// API, short enough that a hung endpoint cannot pin a script's run open.</summary>
@@ -504,9 +517,10 @@ public static class ScriptParser
         var value = map.Children[key];
         int line = (int)key.Start.Line, column = (int)key.Start.Column;
 
-        // send: and http: carry their options in a nested mapping; every other
-        // action takes a bare scalar, so siblings are always a mistake there.
-        if (kind is not ("send" or "http")) RejectUnknownKeys(map, kinds, "action option", problems);
+        // These carry their options in a nested mapping; every other action
+        // takes a bare scalar, so siblings are always a mistake there.
+        if (kind is not ("send" or "http" or "waypoint" or "require"))
+            RejectUnknownKeys(map, kinds, "action option", problems);
 
         switch (kind)
         {
@@ -612,6 +626,12 @@ public static class ScriptParser
             case "http":
                 return ParseHttp(value, line, column, problems);
 
+            case "waypoint":
+                return ParseWaypoint(value, line, column, problems);
+
+            case "require":
+                return ParseRequire(value, line, column, problems);
+
             case "delay":
             {
                 var delay = ReadDuration(key, value, problems, "delay");
@@ -692,11 +712,56 @@ public static class ScriptParser
         }
         WarnUnknownPlaceholders(body, line, column, problems);
 
-        var jsonPath = (ReadString(http, "json", problems) ?? string.Empty).Trim();
-        if (jsonPath.Length > 0 && !JsonValuePath.IsValid(jsonPath, out var pathError))
+        // json: takes either one path (stored under save_as) or a mapping of
+        // name -> path, which is how several values from the same response are
+        // kept together.
+        var extractions = new List<ScriptHttpExtraction>();
+        if (TryGet(http, "json", out var jsonKey, out var jsonValue))
         {
-            problems.Add(ScriptProblem.Error(line, column, $"http: json: {pathError}"));
-            return null;
+            if (jsonValue is YamlMappingNode jsonMap)
+            {
+                foreach (var entry in jsonMap.Children)
+                {
+                    var name = Key(entry.Key);
+                    if (name.Length == 0 || !name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+                    {
+                        problems.Add(ScriptProblem.Error(entry.Key.Start.Line, entry.Key.Start.Column,
+                            $"http: json: \"{name}\" — use letters, digits and underscores, e.g. lat: report[0].loc.lat"));
+                        return null;
+                    }
+                    if (string.Equals(name, "status", StringComparison.OrdinalIgnoreCase))
+                    {
+                        problems.Add(ScriptProblem.Error(entry.Key.Start.Line, entry.Key.Start.Column,
+                            "http: json: \"status\" is taken — {http.status} always holds the response code"));
+                        return null;
+                    }
+                    var path = (AsScalar(entry.Value, problems, name) ?? string.Empty).Trim();
+                    if (!JsonValuePath.IsValid(path, out var mapError))
+                    {
+                        problems.Add(ScriptProblem.Error(entry.Value.Start.Line, entry.Value.Start.Column,
+                            $"http: json: {name}: {mapError}"));
+                        return null;
+                    }
+                    extractions.Add(new ScriptHttpExtraction(name, path));
+                }
+                if (extractions.Count == 0)
+                {
+                    problems.Add(ScriptProblem.Error(jsonKey.Start.Line, jsonKey.Start.Column,
+                        "http: json: is empty — give it a path, or a set of name: path entries"));
+                    return null;
+                }
+            }
+            else
+            {
+                var jsonPath = (AsScalar(jsonValue, problems, "json") ?? string.Empty).Trim();
+                if (jsonPath.Length > 0 && !JsonValuePath.IsValid(jsonPath, out var pathError))
+                {
+                    problems.Add(ScriptProblem.Error(line, column, $"http: json: {pathError}"));
+                    return null;
+                }
+                if (jsonPath.Length > 0)
+                    extractions.Add(new ScriptHttpExtraction(string.Empty, jsonPath));
+            }
         }
 
         var saveAs = (ReadString(http, "save_as", problems) ?? "body").Trim();
@@ -727,6 +792,29 @@ public static class ScriptParser
             timeout = parsed.Value;
         }
 
+        // One name or a list: an id/secret pair is two separate credentials,
+        // each knowing where it attaches.
+        var credentialNames = new List<string>();
+        if (TryGet(http, "credential", out var credentialKey, out var credentialValue))
+        {
+            credentialNames = AsStringList(credentialValue, problems, "credential",
+                (int)credentialKey.Start.Line, (int)credentialKey.Start.Column);
+            if (credentialNames.Count == 0)
+            {
+                problems.Add(ScriptProblem.Error(credentialKey.Start.Line, credentialKey.Start.Column,
+                    "http: credential: needs a name, or a list of names"));
+                return null;
+            }
+        }
+
+        // The single-path form names itself from save_as, which the mapping
+        // form has no use for.
+        for (int i = 0; i < extractions.Count; i++)
+        {
+            if (extractions[i].SaveAs.Length == 0)
+                extractions[i] = extractions[i] with { SaveAs = saveAs };
+        }
+
         return new ScriptAction
         {
             Kind = ScriptActionKind.Http,
@@ -735,13 +823,273 @@ public static class ScriptParser
             {
                 Url = url,
                 Method = method,
-                Credential = (ReadString(http, "credential", problems) ?? string.Empty).Trim(),
-                JsonPath = jsonPath,
+                CredentialNames = credentialNames,
+                Extractions = extractions,
                 SaveAs = saveAs,
                 Timeout = timeout,
                 Body = body,
                 ContentType = (ReadString(http, "content_type", problems) ?? "application/json").Trim(),
+                Optional = ReadBool(http, "optional", problems) ?? false,
             },
+        };
+    }
+
+    /// <summary>Parses a <c>waypoint:</c> action.</summary>
+    private static ScriptAction? ParseWaypoint(
+        YamlNode value, int line, int column, List<ScriptProblem> problems)
+    {
+        if (value is not YamlMappingNode map)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                "waypoint: needs indented lat:/lon:/name: entries under it"));
+            return null;
+        }
+        RejectUnknownKeys(map, WaypointKeys, "waypoint option", problems);
+
+        var lat = (ReadString(map, "lat", problems) ?? string.Empty).Trim();
+        var lon = (ReadString(map, "lon", problems) ?? string.Empty).Trim();
+
+        // "home" is the common case for a script marking local conditions, and
+        // saves repeating coordinates the app already knows.
+        bool useHome = string.Equals(lat, "home", StringComparison.OrdinalIgnoreCase);
+        if (!useHome)
+        {
+            if (lat.Length == 0 || lon.Length == 0)
+            {
+                problems.Add(ScriptProblem.Error(line, column,
+                    "waypoint: needs both lat: and lon:, or lat: home to use this node's home location"));
+                return null;
+            }
+            // A literal can be checked now; a placeholder only resolves when the
+            // script runs.
+            if (!lat.Contains('{') && !IsCoordinate(lat, 90))
+            {
+                problems.Add(ScriptProblem.Error(line, column,
+                    $"waypoint: lat: \"{lat}\" is not a latitude between -90 and 90"));
+                return null;
+            }
+            if (!lon.Contains('{') && !IsCoordinate(lon, 180))
+            {
+                problems.Add(ScriptProblem.Error(line, column,
+                    $"waypoint: lon: \"{lon}\" is not a longitude between -180 and 180"));
+                return null;
+            }
+        }
+
+        var name = ReadString(map, "name", problems) ?? string.Empty;
+        var description = ReadString(map, "description", problems) ?? string.Empty;
+        WarnUnknownPlaceholders(name, line, column, problems);
+        WarnUnknownPlaceholders(description, line, column, problems);
+
+        uint radiusM = 0;
+        if (TryGet(map, "radius", out var radiusKey, out var radiusValue))
+        {
+            var text = AsScalar(radiusValue, problems, "radius");
+            if (text is null) return null;
+            var metres = ParseDistanceMetres(text);
+            if (metres is null)
+            {
+                problems.Add(ScriptProblem.Error(radiusKey.Start.Line, radiusKey.Start.Column,
+                    $"waypoint: radius: has to be a distance like 30mi, 50km or 500m, not '{text}'"));
+                return null;
+            }
+            radiusM = (uint)Math.Round(metres.Value);
+        }
+
+        var expires = TimeSpan.Zero;
+        if (TryGet(map, "expires", out var expiresKey, out var expiresValue))
+        {
+            var parsed = ReadDuration(expiresKey, expiresValue, problems, "expires");
+            if (parsed is null) return null;
+            expires = parsed.Value;
+        }
+        else
+        {
+            problems.Add(ScriptProblem.Warning(line, column,
+                "waypoint: has no expires:, so this marker stays on everyone's map until it is cleared by hand"));
+        }
+
+        bool notifyEnter = ReadBool(map, "notify_on_enter", problems) ?? false;
+        bool notifyExit = ReadBool(map, "notify_on_exit", problems) ?? false;
+        if ((notifyEnter || notifyExit) && radiusM == 0)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                "waypoint: notify_on_enter/notify_on_exit need a radius: — there is no fence to cross without one"));
+            return null;
+        }
+
+        return new ScriptAction
+        {
+            Kind = ScriptActionKind.Waypoint,
+            Line = line,
+            Waypoint = new ScriptWaypoint
+            {
+                Latitude = lat,
+                Longitude = lon,
+                UseHome = useHome,
+                Name = name,
+                Description = description,
+                Icon = (ReadString(map, "icon", problems) ?? string.Empty).Trim(),
+                RadiusM = radiusM,
+                Expires = expires,
+                NotifyOnEnter = notifyEnter,
+                NotifyOnExit = notifyExit,
+                Channel = (ReadString(map, "channel", problems) ?? string.Empty).Trim(),
+                LockToMe = ReadBool(map, "lock_to_me", problems) ?? true,
+            },
+        };
+    }
+
+    /// <summary>Parses a <c>require:</c> action.</summary>
+    private static ScriptAction? ParseRequire(
+        YamlNode value, int line, int column, List<ScriptProblem> problems)
+    {
+        if (value is not YamlMappingNode map)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                "require: needs an indented value: and one comparison, e.g. above: 30"));
+            return null;
+        }
+        RejectUnknownKeys(map, RequireKeys, "require option", problems);
+
+        var tested = ReadString(map, "value", problems) ?? string.Empty;
+        if (tested.Trim().Length == 0)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                "require: needs a value: to test, e.g. value: \"{http.code}\""));
+            return null;
+        }
+        WarnUnknownPlaceholders(tested, line, column, problems);
+
+        var used = map.Children.Keys.Select(Key)
+            .Where(k => RequireComparisons.Contains(k, StringComparer.Ordinal)).ToList();
+        if (used.Count == 0)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                $"require: needs one comparison. Valid: {string.Join(", ", RequireComparisons)}"));
+            return null;
+        }
+        if (used.Count > 1)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                $"require: names more than one comparison ({string.Join(", ", used)}) — give each its own require:"));
+            return null;
+        }
+
+        var name = used[0];
+        TryGet(map, name, out var comparisonKey, out var comparisonValue);
+        bool ignoreCase = ReadBool(map, "ignore_case", problems) ?? true;
+
+        var comparison = name switch
+        {
+            "equals" => ScriptComparison.Equals,
+            "not_equals" => ScriptComparison.NotEquals,
+            "above" => ScriptComparison.Above,
+            "below" => ScriptComparison.Below,
+            "at_least" => ScriptComparison.AtLeast,
+            "at_most" => ScriptComparison.AtMost,
+            "between" => ScriptComparison.Between,
+            "contains" => ScriptComparison.Contains,
+            "matches" => ScriptComparison.Matches,
+            "is_empty" => ScriptComparison.IsEmpty,
+            _ => ScriptComparison.NotEmpty,
+        };
+
+        string operand = string.Empty, operand2 = string.Empty;
+        Regex? pattern = null;
+
+        switch (comparison)
+        {
+            case ScriptComparison.IsEmpty:
+            case ScriptComparison.NotEmpty:
+                // The value carries the whole meaning; "is_empty: true" reads
+                // naturally but there is nothing to compare against.
+                break;
+
+            case ScriptComparison.Between:
+            {
+                var bounds = AsStringList(comparisonValue, problems, "between",
+                    (int)comparisonKey.Start.Line, (int)comparisonKey.Start.Column);
+                if (bounds.Count != 2)
+                {
+                    problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
+                        "require: between: needs exactly two bounds, e.g. between: [200, 232]"));
+                    return null;
+                }
+                operand = bounds[0];
+                operand2 = bounds[1];
+                break;
+            }
+
+            case ScriptComparison.Matches:
+            {
+                operand = AsScalar(comparisonValue, problems, "matches") ?? string.Empty;
+                try
+                {
+                    pattern = new Regex(operand,
+                        RegexOptions.CultureInvariant | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None),
+                        RegexTimeout);
+                }
+                catch (ArgumentException ex)
+                {
+                    problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
+                        $"require: matches: is not a valid pattern — {ex.Message.TrimEnd('.')}"));
+                    return null;
+                }
+                break;
+            }
+
+            default:
+                operand = AsScalar(comparisonValue, problems, name) ?? string.Empty;
+                if (operand.Trim().Length == 0)
+                {
+                    problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
+                        $"require: {name}: needs something to compare against"));
+                    return null;
+                }
+                break;
+        }
+
+        return new ScriptAction
+        {
+            Kind = ScriptActionKind.Require,
+            Line = line,
+            Require = new ScriptRequirement
+            {
+                Value = tested,
+                Comparison = comparison,
+                Operand = operand,
+                Operand2 = operand2,
+                IgnoreCase = ignoreCase,
+                Pattern = pattern,
+            },
+        };
+    }
+
+    private static bool IsCoordinate(string text, double limit) =>
+        double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+        && Math.Abs(value) <= limit;
+
+    private static readonly Regex s_distance = new(
+        @"^(?<n>\d+(?:\.\d+)?)\s*(?<u>m|meter|meters|metre|metres|km|kilometer|kilometers|kilometre|kilometres|mi|mile|miles|nmi)?$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>Parses <c>30mi</c>, <c>50km</c>, <c>500m</c> or a bare number
+    /// meaning metres, returning metres. Public so the help window and the
+    /// tests describe exactly what is accepted.</summary>
+    public static double? ParseDistanceMetres(string text)
+    {
+        var match = s_distance.Match(text.Trim());
+        if (!match.Success) return null;
+        if (!double.TryParse(match.Groups["n"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var n))
+            return null;
+
+        return match.Groups["u"].Value.ToLowerInvariant() switch
+        {
+            "" or "m" or "meter" or "meters" or "metre" or "metres" => n,
+            "km" or "kilometer" or "kilometers" or "kilometre" or "kilometres" => n * 1000.0,
+            "nmi" => n * 1852.0,
+            _ => n * 1609.344,
         };
     }
 

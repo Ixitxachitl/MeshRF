@@ -149,6 +149,12 @@ public enum ScriptActionKind
     /// <summary>Call a REST endpoint and keep the answer for a later action to
     /// say. Transmits nothing itself.</summary>
     Http,
+    /// <summary>Drop a waypoint on the map, optionally with a geofence.</summary>
+    Waypoint,
+    /// <summary>Stop the sequence unless something holds. The only way to act
+    /// on what an earlier http: returned, since conditions are settled before
+    /// any action runs.</summary>
+    Require,
     /// <summary>Pause before the next action in the sequence.</summary>
     Delay,
     /// <summary>Write a line to the app log. Transmits nothing.</summary>
@@ -178,6 +184,12 @@ public sealed class ScriptAction
 
     /// <summary>The request, for <see cref="ScriptActionKind.Http"/>.</summary>
     public ScriptHttpRequest? Http { get; init; }
+
+    /// <summary>The waypoint, for <see cref="ScriptActionKind.Waypoint"/>.</summary>
+    public ScriptWaypoint? Waypoint { get; init; }
+
+    /// <summary>The test, for <see cref="ScriptActionKind.Require"/>.</summary>
+    public ScriptRequirement? Require { get; init; }
 
     public int Line { get; init; }
 }
