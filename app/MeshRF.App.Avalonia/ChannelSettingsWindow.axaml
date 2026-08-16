@@ -57,12 +57,10 @@
                       ToolTip.Tip="Accept this channel's traffic from the MQTT broker and inject it into the local mesh (requires the MQTT bridge to be enabled)." />
         </StackPanel>
 
-        <!-- No Save/Cancel: edits apply as they are made. This line is the only
-             feedback that anything happened, and the place a rejected PSK is
-             reported — the PSK box itself must keep whatever was typed. -->
+        <!-- Empty unless something is wrong: this is where a rejected PSK is
+             reported, since the PSK box itself must keep whatever was typed. -->
         <TextBlock Name="StatusText" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2"
                    Margin="0,12,0,0" TextWrapping="Wrap"
-                   Foreground="{DynamicResource BrushSubtle}"
-                   Text="Changes are saved as you make them." />
+                   Foreground="{DynamicResource BrushSubtle}" />
     </Grid>
 </Window>

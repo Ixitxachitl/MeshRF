@@ -115,6 +115,7 @@ public partial class ChannelSettingsWindow : Window
 
         // The name feeds the hash, so it can change under an edit.
         HashText.Text = $"hash 0x{_channel.Config.Hash:X2}";
-        StatusText.Text = "Changes are saved as you make them.";
+        // Clears a PSK rejection once the field parses again.
+        StatusText.Text = string.Empty;
     }
 }
