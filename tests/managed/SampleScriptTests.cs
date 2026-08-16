@@ -58,38 +58,59 @@ public class SampleScriptTests
         Assert.True(result.IsValid, $"{fileName}: {result.FirstError}");
     }
 
+    private static ScriptParseResult ParseSample(string fileName) =>
+        ScriptParser.Parse(File.ReadAllText(Path.Combine(SamplesDirectory, fileName)));
+
     [Theory]
     [MemberData(nameof(SampleFiles))]
     public void A_Sample_Ships_Disabled(string fileName)
     {
         // Copying a sample into the scripts folder must not start it
-        // transmitting. Reading the raw file rather than the parsed script,
-        // because that is what the Scripts window's toggle reads.
-        var text = File.ReadAllText(Path.Combine(SamplesDirectory, fileName));
-
-        Assert.False(ScriptParser.Parse(text).Script!.Enabled, $"{fileName} ships enabled");
+        // transmitting, whichever kind of file it is.
+        Assert.False(ParseSample(fileName).Enabled, $"{fileName} ships enabled");
     }
 
     [Theory]
     [MemberData(nameof(SampleFiles))]
     public void A_Sample_Is_Throttled_And_Explains_Itself(string fileName)
     {
-        var script = ScriptParser.Parse(File.ReadAllText(Path.Combine(SamplesDirectory, fileName))).Script!;
+        var parse = ParseSample(fileName);
+        Assert.False(string.IsNullOrWhiteSpace(parse.Alias), $"{fileName} has no alias to show in the list");
 
-        Assert.False(string.IsNullOrWhiteSpace(script.Alias), $"{fileName} has no alias to show in the list");
+        if (parse.Sync is { } sync)
+        {
+            // A feed's throttle is how often it reads; it sends only what
+            // actually changed, so there is no per-hour ceiling to set.
+            Assert.True(sync.Every >= TimeSpan.FromMinutes(1), $"{fileName} polls too fast");
+            return;
+        }
+
+        var script = parse.Script!;
         Assert.True(script.Limits.MaxPerHour > 0, $"{fileName} has no hourly ceiling");
         Assert.True(script.Limits.Cooldown > TimeSpan.Zero, $"{fileName} has no cooldown");
     }
 
     [Theory]
     [MemberData(nameof(SampleFiles))]
-    public void A_Sample_That_Places_A_Waypoint_Gives_It_An_Expiry(string fileName)
+    public void A_Sample_Leaves_No_Waypoint_Nobody_Can_Clear(string fileName)
     {
-        var script = ScriptParser.Parse(File.ReadAllText(Path.Combine(SamplesDirectory, fileName))).Script!;
+        var parse = ParseSample(fileName);
 
-        foreach (var waypoint in script.Actions.Select(a => a.Waypoint).OfType<ScriptWaypoint>())
+        if (parse.Sync is { } sync)
         {
-            // An automated marker nobody clears stays on everyone's map.
+            // A mirrored marker is allowed to outlive a clock, because the sync
+            // retires it when the record goes. What it must not be is both
+            // unexpiring and locked, which would leave it on every map with
+            // nobody able to remove it.
+            Assert.True(sync.Waypoint.Expires > TimeSpan.Zero || !sync.Waypoint.LockToMe,
+                $"{fileName} mirrors a waypoint that never expires and is locked");
+            return;
+        }
+
+        foreach (var waypoint in parse.Script!.Actions.Select(a => a.Waypoint).OfType<ScriptWaypoint>())
+        {
+            // A script has no idea when its marker stops being true, so it has
+            // to give one an expiry.
             Assert.True(waypoint.Expires > TimeSpan.Zero, $"{fileName} places a waypoint that never expires");
         }
     }

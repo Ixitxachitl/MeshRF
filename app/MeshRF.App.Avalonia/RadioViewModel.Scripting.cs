@@ -24,8 +24,13 @@ namespace MeshRF.AvaloniaApp;
 public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
 {
     private readonly ScriptEngine _scriptEngine = new();
+    private readonly FeedSyncEngine _feedEngine = new();
     private readonly ScriptLibrary _scriptLibrary = new();
     private readonly ScriptHttpClient _scriptHttp = new();
+
+    /// <summary>Guards against a slow feed being fetched again on the next
+    /// poll while the first request is still outstanding.</summary>
+    private readonly HashSet<string> _feedsInFlight = new(StringComparer.Ordinal);
 
     /// <summary>In-flight runs, keyed by script name, so <c>mode:</c> has
     /// something to act on. Only scripts containing a delay stay here long
@@ -115,6 +120,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     private void InitScripting()
     {
         _scriptEngine.Diagnostic += line => LogFromAnyThread($"scripts: {line}");
+        _feedEngine.Diagnostic += line => LogFromAnyThread($"sync: {line}");
         _rxHost.ScriptSelfProvider = BuildScriptSelf;
         _rxHost.ScriptEventObserved = OnScriptEvent;
         _scriptHttp.Credentials = this;
@@ -150,8 +156,10 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     {
         try
         {
-            _scriptEngine.Load(_scriptLibrary.Load(), DateTimeOffset.Now);
+            var files = _scriptLibrary.Load();
+            _scriptEngine.Load(files, DateTimeOffset.Now);
             _scriptEngine.Limiter.GlobalMaxPerHour = ScriptsGlobalMaxPerHour;
+            _feedEngine.Load(files, DateTimeOffset.Now);
         }
         catch (Exception ex)
         {
@@ -235,6 +243,115 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
 
         foreach (var run in runs) Start(run);
         if (runs.Count > 0) RaiseScriptsStatusChanged();
+
+        TickFeeds();
+    }
+
+    // ----- feed mirrors -------------------------------------------------------
+
+    /// <summary>
+    /// Reads any feed whose interval has elapsed and sends whatever the
+    /// reconciliation asks for.
+    /// </summary>
+    /// <remarks>
+    /// Fire-and-forget per feed rather than awaited: a slow endpoint must not
+    /// hold up the poll timer, and each feed is independent of the others.
+    /// </remarks>
+    private void TickFeeds()
+    {
+        if (_feedEngine.ArmedCount == 0) return;
+
+        foreach (var due in _feedEngine.Due(DateTimeOffset.Now))
+        {
+            if (!_feedsInFlight.Add(due.FileName)) continue;
+            _ = MirrorFeedAsync(due);
+        }
+    }
+
+    private async Task MirrorFeedAsync(FeedSyncDue due)
+    {
+        try
+        {
+            var self = BuildScriptSelf();
+            var expansion = new ScriptExpansion(new ScriptEvent { Self = self, At = DateTimeOffset.Now });
+
+            var result = await _scriptHttp.SendAsync(due.Sync.Request, expansion);
+            if (!result.Ok)
+            {
+                _rxHost.Log($"sync: {Name(due)} — {result.Error}");
+                return;
+            }
+            if (!result.Values.TryGetValue(due.Sync.Request.SaveAs, out var body))
+            {
+                _rxHost.Log($"sync: {Name(due)} — the response was empty");
+                return;
+            }
+
+            var actions = _feedEngine.Reconcile(due.FileName, body, self, DateTimeOffset.Now);
+            if (actions.Count == 0) return;
+
+            _rxHost.Log($"sync: {Name(due)} — " + string.Join(", ",
+                actions.GroupBy(a => a.Kind).Select(g => $"{g.Count()} {g.Key.ToString().ToLowerInvariant()}")));
+
+            foreach (var action in actions)
+            {
+                if (ScriptsDryRun)
+                {
+                    _rxHost.Log($"sync: {Name(due)} — would {action.Kind.ToString().ToLowerInvariant()} " +
+                                $"\"{action.Name}\" at {action.Latitude:0.#####},{action.Longitude:0.#####}");
+                    continue;
+                }
+                await SendFeedWaypointAsync(due.Sync, action);
+            }
+        }
+        catch (Exception ex)
+        {
+            _rxHost.Log($"sync: {Name(due)} — failed: {ex.Message}");
+        }
+        finally
+        {
+            _feedsInFlight.Remove(due.FileName);
+        }
+
+        static string Name(FeedSyncDue d) => d.Sync.Alias.Length > 0 ? d.Sync.Alias : d.FileName;
+    }
+
+    /// <summary>Sends one mirrored marker. A removal is the same frame with an
+    /// expiry in the past, which is the only way to retire one.</summary>
+    private async Task SendFeedWaypointAsync(MeshFeedSync sync, FeedSyncAction action)
+    {
+        if (!CanTransmit)
+        {
+            _rxHost.Log("sync: nothing sent — no TX-capable device, or this node has no identity yet");
+            return;
+        }
+
+        var channel = sync.Waypoint.Channel.Length > 0
+            ? _rxHost.FindChannelByName(sync.Waypoint.Channel) ?? PrimaryChannel()
+            : PrimaryChannel();
+        if (channel is null)
+        {
+            _rxHost.Log("sync: nothing sent — no channel to send on");
+            return;
+        }
+
+        var frame = MeshEncoder.EncodeWaypoint(
+            channel, _rxHost.MyNodeNum, NextPacketId(), action.WaypointId,
+            action.Latitude, action.Longitude,
+            name: action.Name.Length > 0 ? action.Name : "Waypoint",
+            description: action.Description,
+            expireEpoch: action.ExpireEpoch,
+            lockedTo: sync.Waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
+            icon: sync.Waypoint.Icon.Length > 0 ? EmojiToCodePoint(sync.Waypoint.Icon) : null,
+            geofenceRadiusM: action.IsRemoval ? 0 : sync.Waypoint.RadiusM,
+            notifyOnEnter: !action.IsRemoval && sync.Waypoint.NotifyOnEnter,
+            notifyOnExit: !action.IsRemoval && sync.Waypoint.NotifyOnExit,
+            to: 0xFFFFFFFFu,
+            hopLimit: (byte)HopLimit,
+            okToMqtt: OkToMqtt);
+
+        if (!await TransmitFrameAsync(frame))
+            _rxHost.Log($"sync: transmit failed for \"{action.Name}\"");
     }
 
     // ----- run execution ------------------------------------------------------

@@ -96,6 +96,10 @@ public static class ScriptParser
             return new ScriptParseResult(null, problems);
         }
 
+        // A file is one kind or the other. Deciding here rather than by
+        // filename keeps both in one folder, one list and one editor.
+        if (TryGet(root, "sync", out _, out _)) return ParseSync(root, problems);
+
         RejectUnknownKeys(root, TopLevelKeys, "key", problems);
 
         bool enabled = ReadBool(root, "enabled", problems) ?? false;
@@ -128,6 +132,287 @@ public static class ScriptParser
             Limits = limits,
         };
         return new ScriptParseResult(script, problems);
+    }
+
+    private static readonly string[] SyncTopLevelKeys = ["enabled", "alias", "sync"];
+
+    private static readonly string[] SyncKeys =
+        ["every", "url", "credential", "headers", "timeout", "items", "id", "active",
+         "lat", "lon", "within", "watch", "waypoint"];
+
+    private static readonly string[] SyncWaypointKeys =
+        ["name", "description", "icon", "radius", "expires",
+         "notify_on_enter", "notify_on_exit", "channel", "lock_to_me"];
+
+    /// <summary>
+    /// Parses a feed sync. Shares enabled:/alias: with a script so the library,
+    /// the enable toggle and the list all work on either without knowing which
+    /// they hold.
+    /// </summary>
+    private static ScriptParseResult ParseSync(YamlMappingNode root, List<ScriptProblem> problems)
+    {
+        RejectUnknownKeys(root, SyncTopLevelKeys, "key", problems);
+
+        bool enabled = ReadBool(root, "enabled", problems) ?? false;
+        string alias = ReadString(root, "alias", problems) ?? string.Empty;
+
+        TryGet(root, "sync", out var syncKey, out var syncValue);
+        if (syncValue is not YamlMappingNode sync)
+        {
+            problems.Add(ScriptProblem.Error(syncKey.Start.Line, syncKey.Start.Column,
+                "sync: needs indented url:/id:/lat: entries under it"));
+            return new ScriptParseResult(null, problems);
+        }
+        RejectUnknownKeys(sync, SyncKeys, "sync key", problems);
+
+        int line = (int)syncKey.Start.Line, column = (int)syncKey.Start.Column;
+
+        var url = ReadString(sync, "url", problems) ?? string.Empty;
+        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                "sync: url: has to start with https:// or http://"));
+            return new ScriptParseResult(null, problems);
+        }
+        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add(ScriptProblem.Warning(line, column,
+                "sync: this URL is plain http, so the request and any credential travel unencrypted"));
+        }
+
+        var every = TimeSpan.FromMinutes(5);
+        if (TryGet(sync, "every", out var everyKey, out var everyValue))
+        {
+            var parsed = ReadDuration(everyKey, everyValue, problems, "every");
+            if (parsed is null) return new ScriptParseResult(null, problems);
+            if (parsed.Value < TimeSpan.FromMinutes(1))
+            {
+                problems.Add(ScriptProblem.Error(everyKey.Start.Line, everyKey.Start.Column,
+                    "sync: every: has to be at least 1m"));
+                return new ScriptParseResult(null, problems);
+            }
+            every = parsed.Value;
+        }
+
+        var timeout = TimeSpan.FromSeconds(20);
+        if (TryGet(sync, "timeout", out var timeoutKey, out var timeoutValue))
+        {
+            var parsed = ReadDuration(timeoutKey, timeoutValue, problems, "timeout");
+            if (parsed is null || parsed.Value > MaxHttpTimeout)
+            {
+                problems.Add(ScriptProblem.Error(line, column,
+                    $"sync: timeout: has to be a duration no longer than {MaxHttpTimeout.TotalSeconds:0}s"));
+                return new ScriptParseResult(null, problems);
+            }
+            timeout = parsed.Value;
+        }
+
+        var credentials = new List<string>();
+        if (TryGet(sync, "credential", out var credKey, out var credValue))
+        {
+            credentials = AsStringList(credValue, problems, "credential",
+                (int)credKey.Start.Line, (int)credKey.Start.Column);
+        }
+
+        var headers = new List<ScriptHttpHeader>();
+        if (TryGet(sync, "headers", out var headersKey, out var headersValue))
+        {
+            if (headersValue is not YamlMappingNode headerMap)
+            {
+                problems.Add(ScriptProblem.Error(headersKey.Start.Line, headersKey.Start.Column,
+                    "sync: headers: needs indented name: value entries under it"));
+                return new ScriptParseResult(null, problems);
+            }
+            foreach (var entry in headerMap.Children)
+            {
+                var headerName = Key(entry.Key);
+                if (headerName.Length == 0 || headerName.Any(c => char.IsWhiteSpace(c) || c == ':'))
+                {
+                    problems.Add(ScriptProblem.Error(entry.Key.Start.Line, entry.Key.Start.Column,
+                        $"sync: headers: \"{headerName}\" is not a header name"));
+                    return new ScriptParseResult(null, problems);
+                }
+                headers.Add(new ScriptHttpHeader(headerName, AsScalar(entry.Value, problems, headerName) ?? string.Empty));
+            }
+        }
+
+        // items: is allowed to be empty — a feed answering with the array
+        // itself is common, and Watch Duty's does exactly that.
+        var items = (ReadString(sync, "items", problems) ?? string.Empty).Trim();
+        if (items.Length > 0 && !JsonValuePath.IsValid(items, out var itemsError))
+        {
+            problems.Add(ScriptProblem.Error(line, column, $"sync: items: {itemsError}"));
+            return new ScriptParseResult(null, problems);
+        }
+
+        string? RequiredPath(string key, string fallback)
+        {
+            var path = (ReadString(sync, key, problems) ?? fallback).Trim();
+            if (path.Length == 0)
+            {
+                problems.Add(ScriptProblem.Error(line, column, $"sync: needs {key}:"));
+                return null;
+            }
+            if (!JsonValuePath.IsValid(path, out var error))
+            {
+                problems.Add(ScriptProblem.Error(line, column, $"sync: {key}: {error}"));
+                return null;
+            }
+            return path;
+        }
+
+        var idPath = RequiredPath("id", "id");
+        var latPath = RequiredPath("lat", string.Empty);
+        var lonPath = RequiredPath("lon", string.Empty);
+        if (idPath is null || latPath is null || lonPath is null) return new ScriptParseResult(null, problems);
+
+        var activePath = (ReadString(sync, "active", problems) ?? string.Empty).Trim();
+        if (activePath.Length > 0 && !JsonValuePath.IsValid(activePath, out var activeError))
+        {
+            problems.Add(ScriptProblem.Error(line, column, $"sync: active: {activeError}"));
+            return new ScriptParseResult(null, problems);
+        }
+
+        double? within = null;
+        if (TryGet(sync, "within", out var withinKey, out var withinValue))
+        {
+            var text = AsScalar(withinValue, problems, "within");
+            var metres = text is null ? null : ParseDistanceMetres(text);
+            if (metres is null)
+            {
+                problems.Add(ScriptProblem.Error(withinKey.Start.Line, withinKey.Start.Column,
+                    $"sync: within: has to be a distance like 30mi, 50km or 500m, not '{text}'"));
+                return new ScriptParseResult(null, problems);
+            }
+            within = metres.Value;
+        }
+
+        var watch = new List<string>();
+        if (TryGet(sync, "watch", out var watchKey, out var watchValue))
+        {
+            watch = AsStringList(watchValue, problems, "watch",
+                (int)watchKey.Start.Line, (int)watchKey.Start.Column);
+            foreach (var path in watch)
+            {
+                if (JsonValuePath.IsValid(path, out var watchError)) continue;
+                problems.Add(ScriptProblem.Error(watchKey.Start.Line, watchKey.Start.Column,
+                    $"sync: watch: {path}: {watchError}"));
+                return new ScriptParseResult(null, problems);
+            }
+        }
+        if (watch.Count == 0)
+        {
+            problems.Add(ScriptProblem.Warning(line, column,
+                "sync: has no watch:, so a marker is only ever placed and retired, never updated. " +
+                "List the fields whose changes are worth resending for."));
+        }
+
+        var waypoint = ParseSyncWaypoint(sync, line, column, problems);
+        if (waypoint is null) return new ScriptParseResult(null, problems);
+
+        if (problems.Any(p => p.Severity == ScriptProblemSeverity.Error))
+            return new ScriptParseResult(null, problems);
+
+        return new ScriptParseResult(null, problems, new MeshFeedSync
+        {
+            Enabled = enabled,
+            Alias = alias,
+            Every = every,
+            Request = new ScriptHttpRequest
+            {
+                Url = url,
+                CredentialNames = credentials,
+                Headers = headers,
+                Timeout = timeout,
+                Optional = true,
+            },
+            ItemsPath = items,
+            IdPath = idPath,
+            ActivePath = activePath,
+            LatitudePath = latPath,
+            LongitudePath = lonPath,
+            WithinMetres = within,
+            WatchPaths = watch,
+            Waypoint = waypoint,
+            Expires = waypoint.Expires,
+        });
+    }
+
+    private static ScriptWaypoint? ParseSyncWaypoint(
+        YamlMappingNode sync, int line, int column, List<ScriptProblem> problems)
+    {
+        if (!TryGet(sync, "waypoint", out var key, out var value))
+        {
+            problems.Add(ScriptProblem.Error(line, column, "sync: needs a waypoint: block"));
+            return null;
+        }
+        if (value is not YamlMappingNode map)
+        {
+            problems.Add(ScriptProblem.Error(key.Start.Line, key.Start.Column,
+                "sync: waypoint: needs indented name:/icon: entries under it"));
+            return null;
+        }
+        RejectUnknownKeys(map, SyncWaypointKeys, "waypoint option", problems);
+
+        var name = ReadString(map, "name", problems) ?? string.Empty;
+        if (name.Trim().Length == 0)
+        {
+            problems.Add(ScriptProblem.Error(key.Start.Line, key.Start.Column,
+                "sync: waypoint: needs a name:, e.g. name: \"Fire: {item.name}\""));
+            return null;
+        }
+
+        uint radiusM = 0;
+        if (TryGet(map, "radius", out var radiusKey, out var radiusValue))
+        {
+            var text = AsScalar(radiusValue, problems, "radius");
+            var metres = text is null ? null : ParseDistanceMetres(text);
+            if (metres is null)
+            {
+                problems.Add(ScriptProblem.Error(radiusKey.Start.Line, radiusKey.Start.Column,
+                    $"sync: waypoint: radius: has to be a distance like 10mi, not '{text}'"));
+                return null;
+            }
+            radiusM = (uint)Math.Round(metres.Value);
+        }
+
+        // Zero means never, which is what a mirrored marker usually wants: it is
+        // retired when the record it stands for goes, not on a clock.
+        var expires = TimeSpan.Zero;
+        if (TryGet(map, "expires", out var expiresKey, out var expiresValue))
+        {
+            var parsed = ReadDuration(expiresKey, expiresValue, problems, "expires");
+            if (parsed is null) return null;
+            expires = parsed.Value;
+        }
+
+        bool notifyEnter = ReadBool(map, "notify_on_enter", problems) ?? false;
+        bool notifyExit = ReadBool(map, "notify_on_exit", problems) ?? false;
+        if ((notifyEnter || notifyExit) && radiusM == 0)
+        {
+            problems.Add(ScriptProblem.Error(key.Start.Line, key.Start.Column,
+                "sync: waypoint: notify_on_enter/notify_on_exit need a radius:"));
+            return null;
+        }
+
+        // Unlocked by default, unlike a script's waypoint: these are placed
+        // unattended and may outlive this node's interest in them, so whoever
+        // receives one should be able to clear it.
+        bool lockToMe = ReadBool(map, "lock_to_me", problems) ?? false;
+
+        return new ScriptWaypoint
+        {
+            Name = name,
+            Description = ReadString(map, "description", problems) ?? string.Empty,
+            Icon = (ReadString(map, "icon", problems) ?? string.Empty).Trim(),
+            RadiusM = radiusM,
+            Expires = expires,
+            NotifyOnEnter = notifyEnter,
+            NotifyOnExit = notifyExit,
+            Channel = (ReadString(map, "channel", problems) ?? string.Empty).Trim(),
+            LockToMe = lockToMe,
+        };
     }
 
     // ----- top-level scalars -------------------------------------------------

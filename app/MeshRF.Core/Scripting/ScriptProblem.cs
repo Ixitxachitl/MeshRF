@@ -49,11 +49,29 @@ public readonly record struct ScriptProblem(
 /// valid, plus every problem found. A result with any
 /// <see cref="ScriptProblemSeverity.Error"/> has a null
 /// <see cref="Script"/>.</summary>
-/// <param name="Script">The parsed script, or null if it had errors.</param>
+/// <param name="Script">The parsed script, or null if it had errors or the file
+/// is a feed sync rather than a script.</param>
 /// <param name="Problems">Everything found, errors and warnings alike.</param>
-public sealed record ScriptParseResult(MeshScript? Script, IReadOnlyList<ScriptProblem> Problems)
+/// <param name="Sync">The parsed feed sync, for a file whose top level is
+/// <c>sync:</c>. Exactly one of this and <paramref name="Script"/> is set on a
+/// valid file.</param>
+public sealed record ScriptParseResult(
+    MeshScript? Script,
+    IReadOnlyList<ScriptProblem> Problems,
+    MeshFeedSync? Sync = null)
 {
-    public bool IsValid => Script is not null;
+    public bool IsValid => Script is not null || Sync is not null;
+
+    /// <summary>Whether this file mirrors a feed rather than answering events.</summary>
+    public bool IsSync => Sync is not null;
+
+    /// <summary>Name for the list, whichever kind the file turned out to be.</summary>
+    public string Alias =>
+        Script?.Alias is { Length: > 0 } scriptAlias ? scriptAlias
+        : Sync?.Alias is { Length: > 0 } syncAlias ? syncAlias
+        : string.Empty;
+
+    public bool Enabled => Script?.Enabled ?? Sync?.Enabled ?? false;
 
     public bool HasErrors => Problems.Any(p => p.Severity == ScriptProblemSeverity.Error);
 

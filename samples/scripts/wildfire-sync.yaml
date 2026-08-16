@@ -1,0 +1,65 @@
+# Mirrors active Watch Duty wildfires within 30 miles as waypoints.
+#
+# No credential needed — the API is open.
+#
+# Unlike a script, which answers something that happened, this keeps a set of
+# waypoints in step with a list. Every poll it places a marker for each fire it
+# has not seen, resends one whose watched fields changed, and retires one that
+# has gone or gone inactive. That last part is why this cannot be a script: a
+# fire leaving the feed is not an event anything can trigger on.
+#
+# Markers do not expire on their own — they are cleared when the fire goes out.
+# They are also sent unlocked, so anyone who receives one can delete it; this
+# node may be switched off long before the fire is.
+#
+# The field names and headers come from a working Home Assistant integration
+# against the same endpoint. The reply is a bare array, lat and lng are top
+# level, acreage and containment are under data, and closed incidents are
+# returned too, which is what active: filters on.
+
+enabled: false
+
+alias: Watch Duty fires
+
+sync:
+  every: 15m
+
+  url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
+  # Not optional: without these the endpoint answers 406 Not Acceptable.
+  headers:
+    Accept: "application/json, text/plain, */*"
+    User-Agent: "MeshRF/2 (https://github.com/Ixitxachitl/MeshRF)"
+
+  # The response is the array itself, so there is no path to it. A paginated
+  # feed would say   items: results   here instead.
+  items: ""
+
+  # Identity. This is what makes a resend replace a marker rather than add a
+  # second one, so it has to be stable for the life of the record.
+  id: id
+
+  # What "still here" means. A record that stops being active is retired
+  # exactly like one that stops being returned at all.
+  active: is_active
+
+  lat: lat
+  lon: lng
+
+  # Fires anywhere in the state come back; only these are worth marking.
+  within: 30mi
+
+  # Resend only when one of these changes. Without it, a feed that restamps
+  # every record on every poll would rebroadcast the lot every fifteen minutes.
+  # date_modified is deliberately not here for that reason.
+  watch:
+    - data.acreage
+    - data.containment
+    - data.evacuation_orders
+    - data.evacuation_warnings
+
+  waypoint:
+    name: "Fire: {item.name}"
+    description: "{item.data.acreage} acres, {item.data.containment}% contained"
+    icon: "🔥"
+    radius: 10mi
+    notify_on_enter: true

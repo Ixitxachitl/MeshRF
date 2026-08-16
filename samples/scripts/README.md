@@ -18,7 +18,14 @@ starts transmitting because you copied it.
 | [ping.yaml](ping.yaml) | nothing | Answers `!ping` with a signal report. |
 | [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
 | [lightning-waypoint.yaml](lightning-waypoint.yaml) | Xweather id + secret | Drops a waypoint on the nearest lightning strike within 30 miles. |
-| [wildfire-waypoint.yaml](wildfire-waypoint.yaml) | nothing | Drops a waypoint on an active Watch Duty fire. **Unverified** — read the header. |
+| [wildfire-waypoint.yaml](wildfire-waypoint.yaml) | nothing | Drops a waypoint on the nearest active Watch Duty fire. |
+| [wildfire-sync.yaml](wildfire-sync.yaml) | nothing | Mirrors *every* nearby Watch Duty fire, keeping markers in step as they change and retiring them when they go out. |
+
+The last one is a **feed sync** rather than a script: instead of answering an
+event, it keeps a set of waypoints in step with a list. It places a marker for
+each record it has not seen, resends one whose watched fields changed, and
+retires one that has gone. That last part is why it cannot be a script — a
+record leaving a feed is not an event anything can trigger on.
 
 Start with `ping.yaml`. It needs no account and no network, so if it answers,
 the engine is armed and working and anything that goes wrong afterwards is the
