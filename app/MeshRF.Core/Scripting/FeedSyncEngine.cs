@@ -82,6 +82,13 @@ public sealed class FeedSyncEngine
             if (previous.TryGetValue(file.FileName, out var was))
             {
                 foreach (var kv in was.Seen) loaded.Seen[kv.Key] = kv.Value;
+
+                // Keep its place in the schedule. A reload happens whenever any
+                // file in the folder changes — enabling an unrelated script is
+                // enough — and a feed that was already running has no reason to
+                // re-read on someone else's account. Unless its own interval
+                // changed, in which case the old schedule is the wrong one.
+                if (was.Sync.Every == sync.Every) loaded.NextDue = was.NextDue;
             }
             _feeds.Add(loaded);
         }

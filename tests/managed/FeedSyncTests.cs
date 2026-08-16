@@ -353,6 +353,38 @@ public class FeedSyncTests
     }
 
     [Fact]
+    public void Reloading_Does_Not_Restart_A_Running_Feed_Clock()
+    {
+        var engine = Armed();
+        Assert.Single(engine.Due(Noon));                    // the first read
+        Assert.Empty(engine.Due(Noon.AddMinutes(5)));       // next due at +15
+
+        // A reload — someone enabled an unrelated script, or the editor saved.
+        var parse = ScriptParser.Parse(Yaml);
+        engine.Load([new ScriptFile(FileName, FileName, Yaml, Enabled: true, parse)], Noon.AddMinutes(5));
+
+        // Still on its own schedule rather than reading again on the spot.
+        Assert.Empty(engine.Due(Noon.AddMinutes(6)));
+        Assert.Single(engine.Due(Noon.AddMinutes(16)));
+    }
+
+    [Fact]
+    public void Changing_The_Interval_Does_Restart_The_Clock()
+    {
+        var engine = Armed();
+        Assert.Single(engine.Due(Noon));
+
+        // every: 15m -> 1m. The old schedule is now the wrong one, so the feed
+        // takes the new interval from the reload rather than an hour later.
+        var faster = Yaml.Replace("every: 15m", "every: 1m");
+        var parse = ScriptParser.Parse(faster);
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        engine.Load([new ScriptFile(FileName, FileName, faster, Enabled: true, parse)], Noon.AddMinutes(5));
+
+        Assert.Single(engine.Due(Noon.AddMinutes(5)));
+    }
+
+    [Fact]
     public void Due_Respects_The_Interval_But_Fires_Immediately_On_Load()
     {
         var engine = Armed();
