@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -35,18 +36,31 @@ public readonly record struct ScriptHttpResult(
 /// </remarks>
 public sealed class ScriptHttpClient : IDisposable
 {
-    /// <summary>Ceiling on how much of a response is read. Generous for an API
-    /// answer, small enough that a misaimed URL returning a web page cannot
-    /// tie up memory.</summary>
-    private const int MaxResponseBytes = 64 * 1024;
+    /// <summary>
+    /// Ceiling on how much of a response is read.
+    /// </summary>
+    /// <remarks>
+    /// Sized for a feed rather than for a single reading: a list of every
+    /// active incident in a country runs to about a megabyte, where a script
+    /// pulling one temperature needs a few hundred bytes. Reaching this is
+    /// reported as itself rather than left to surface as a JSON parse failure
+    /// halfway through a truncated document.
+    /// </remarks>
+    private const int MaxResponseBytes = 4 * 1024 * 1024;
 
     private readonly HttpClient _http;
 
     public ScriptHttpClient(HttpClient? client = null)
     {
         // Per-request timeouts come from the script, so the client's own is
-        // left open and cancellation does the work.
-        _http = client ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        // left open and cancellation does the work. Compression is on because
+        // responses are read over someone's metered connection as often as not,
+        // and the cap on how much is read applies after decoding either way.
+        _http = client ?? new HttpClient(
+            new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+        {
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("MeshRF-scripts/1.0");
     }
 
@@ -83,7 +97,16 @@ public sealed class ScriptHttpClient : IDisposable
             }
         }
 
-        using var message = new HttpRequestMessage(MethodOf(request.Method), uri);
+        using var message = new HttpRequestMessage(MethodOf(request.Method), uri)
+        {
+            // Prefer HTTP/2, falling back to 1.1 when a server does not offer
+            // it. Some edge filters refuse a request that claims to be a modern
+            // client yet speaks 1.1 with none of the headers a browser sends,
+            // answering 406 with nothing to indicate why — .NET defaults to 1.1
+            // where curl and most libraries negotiate upward.
+            Version = HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        };
 
         // Before the credentials, so a script cannot shadow the header a
         // credential is about to set. A header named here also replaces the
@@ -129,7 +152,14 @@ public sealed class ScriptHttpClient : IDisposable
                 .ConfigureAwait(false);
 
             int status = (int)response.StatusCode;
-            var text = await ReadCappedAsync(response, timeout.Token).ConfigureAwait(false);
+            var (text, truncated) = await ReadCappedAsync(response, timeout.Token).ConfigureAwait(false);
+
+            if (truncated)
+            {
+                return ScriptHttpResult.Failed(status,
+                    $"the response is larger than {MaxResponseBytes / (1024 * 1024)} MB and was cut short, " +
+                    "so it could not be read — narrow the request if the API allows it");
+            }
 
             if (!response.IsSuccessStatusCode)
             {
@@ -186,11 +216,13 @@ public sealed class ScriptHttpClient : IDisposable
     };
 
     /// <summary>Reads at most <see cref="MaxResponseBytes"/>, whatever the
-    /// server claims in Content-Length.</summary>
-    private static async Task<string> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
+    /// server claims in Content-Length. Reads one byte past the cap so a
+    /// response that reached it can be told from one that merely filled it.</summary>
+    private static async Task<(string Text, bool Truncated)> ReadCappedAsync(
+        HttpResponseMessage response, CancellationToken ct)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        var buffer = new byte[MaxResponseBytes];
+        var buffer = new byte[MaxResponseBytes + 1];
         int total = 0;
         while (total < buffer.Length)
         {
@@ -198,7 +230,8 @@ public sealed class ScriptHttpClient : IDisposable
             if (read == 0) break;
             total += read;
         }
-        return Encoding.UTF8.GetString(buffer, 0, total);
+        bool truncated = total > MaxResponseBytes;
+        return (Encoding.UTF8.GetString(buffer, 0, Math.Min(total, MaxResponseBytes)), truncated);
     }
 
     private static readonly Regex s_whitespace = new(@"\s+", RegexOptions.Compiled | RegexOptions.CultureInvariant);

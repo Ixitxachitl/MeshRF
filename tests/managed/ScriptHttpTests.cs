@@ -355,6 +355,24 @@ public class ScriptHttpTests
     }
 
     [Fact]
+    public async Task A_Response_Past_The_Cap_Says_So_Rather_Than_Failing_To_Parse()
+    {
+        // Truncating mid-document used to surface as "not valid JSON" several
+        // hundred kilobytes in, which says nothing about what actually went
+        // wrong. A feed of every active incident in a country is about a
+        // megabyte, so the cap is well clear of one — but it has to explain
+        // itself when something does reach it.
+        var (client, _) = Stub("[" + new string('x', 5 * 1024 * 1024) + "]");
+        using var __ = client;
+
+        var result = await client.SendAsync(new ScriptHttpRequest { Url = "https://api.test/" }, Expansion());
+
+        Assert.False(result.Ok);
+        Assert.Contains("larger than", result.Error);
+        Assert.Contains("cut short", result.Error);
+    }
+
+    [Fact]
     public async Task An_Error_Status_Fails_With_The_Reason()
     {
         var (client, _) = Stub("""{"error":"city not found"}""", HttpStatusCode.NotFound);
