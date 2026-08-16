@@ -6,7 +6,7 @@
 .DESCRIPTION
   1. Sets MRF_TX_CAPTURE so Core::transmit() writes the final device-rate IQ
      (post resample + offset-mix + normalize) to a .cf32 file.
-  2. Launches the WPF app.
+  2. Launches the app.
   3. You press a Send button (text message OR node info) ONE time, then close
      the app window.
   4. The script runs scripts/analyze_capture.py on the dump and prints whether
@@ -60,7 +60,7 @@ Write-Host ""
 $env:MRF_TX_CAPTURE = $capturePath
 
 Write-Host "Launching app... (close its window when you've sent one packet)" -ForegroundColor Green
-dotnet run --project app/MeshRF.App/MeshRF.App.csproj -c Debug --no-build
+dotnet run --project app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj -c Debug --no-build
 
 # Clean up the env var for this shell.
 Remove-Item Env:\MRF_TX_CAPTURE -ErrorAction SilentlyContinue

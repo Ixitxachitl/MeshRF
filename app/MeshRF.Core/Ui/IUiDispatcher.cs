@@ -2,8 +2,7 @@
 namespace MeshRF;
 
 /// <summary>
-/// Portable stand-in for the UI-framework dispatcher (WPF's
-/// <c>System.Windows.Threading.Dispatcher</c>, Avalonia's
+/// Portable stand-in for the UI-framework dispatcher (Avalonia's
 /// <c>Avalonia.Threading.Dispatcher</c>). Every call site in the shared RX
 /// pipeline wants the same thing — run this on the UI thread at background
 /// priority, so a burst of received packets can't starve UI rendering — so

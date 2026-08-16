@@ -56,8 +56,8 @@ public sealed record MqttBridgeOptions(
 /// ServiceEnvelope wrapper — deciding whether to accept/decrypt/inject a
 /// received envelope, and what to publish for an outgoing packet, is
 /// <see cref="MqttPolicy"/>'s and the caller's job. It is UI-framework
-/// agnostic and lives here rather than in either app so the WPF and Avalonia
-/// front ends share one bridge.
+/// agnostic and lives here rather than in the app so it stays testable on its
+/// own.
 ///
 /// All events fire on MQTTnet's internal worker thread(s), not the UI
 /// thread — callers must marshal to the UI dispatcher themselves.

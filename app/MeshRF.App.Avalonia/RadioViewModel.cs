@@ -24,11 +24,9 @@ public sealed record SampleRateOption(uint Hz, string Label)
 /// <summary>
 /// Radio control surface: device select / start-stop RX / signal stats,
 /// plus a real (not mocked) message/node list — received frames are fed
-/// through the same MeshRxRouter (MeshRF.Core) the WPF app uses, via
-/// AvaloniaMeshRxHost. Also owns node/waypoint/message context-menu actions
-/// (traceroute, telemetry/position/nodeinfo requests, reply/react, etc.) —
-/// mirrors MeshRF.App's MainViewModel, minus the games, which are deliberately
-/// not carried over.
+/// through MeshRxRouter (MeshRF.Core) via AvaloniaMeshRxHost. Also owns
+/// node/waypoint/message context-menu actions (traceroute,
+/// telemetry/position/nodeinfo requests, reply/react, etc.).
 /// </summary>
 public partial class RadioViewModel : ObservableObject, IDisposable
 {

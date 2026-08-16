@@ -21,11 +21,11 @@ using ProtoHardwareModel = Meshtastic.Protobufs.HardwareModel;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// MQTT uplink/downlink bridge, ported from MeshRF.App's MainViewModel. The
-/// connection itself is <see cref="MqttBridge"/> and every gating decision is
-/// <see cref="MqttPolicy"/> — both live in MeshRF.Core and are shared with the
-/// WPF app, so this file is only the wiring: settings, the uplink hook off the
-/// RX path, downlink injection back into it, and the periodic map report.
+/// MQTT uplink/downlink bridge. The connection itself is
+/// <see cref="MqttBridge"/> and every gating decision is
+/// <see cref="MqttPolicy"/> — both live in MeshRF.Core, so this file is only
+/// the wiring: settings, the uplink hook off the RX path, downlink injection
+/// back into it, and the periodic map report.
 /// </summary>
 public partial class RadioViewModel
 {

@@ -13,17 +13,6 @@ alongside an SDR — see [SX1262 USB sticks](#sx1262-usb-sticks).
 
 Current release line: **v2.0.5**
 
-### Two apps, for one release
-
-| App | Version | Platforms | Status |
-| --- | --- | --- | --- |
-| `MeshRF.App.Avalonia` | 2.0.5 | Windows, Linux, macOS | The app MeshRF ships |
-| `MeshRF.App` (WPF) | 1.0.9 | Windows only | Final release — no longer maintained |
-
-Both read the same `settings.json` and the same SQLite databases, so you can
-move between them. After 2.0.0 / 1.0.9, only the Avalonia app is developed, and
-everything below describes it.
-
 <img width="1547" height="990" alt="image" src="https://github.com/user-attachments/assets/ba593234-2b41-4b29-85e2-f85aba94e5fe" />
 
 
@@ -162,8 +151,7 @@ stays hidden and the first device found is used.
 ### UI and Workflow
 
 - Cross-platform Avalonia desktop app (.NET 8, Windows/Linux/macOS) with MVVM
-  architecture. The original Windows-only WPF app is being retired; both ship
-  side by side for one release, after which Avalonia is the only app.
+  architecture.
 - Channel/DM tabs with persisted history.
 - RTTTL notification controls (including per-channel mute options).
 - Improved auto-scroll and large-node-count map performance tuning.
@@ -287,9 +275,6 @@ it on, and **Dry run** evaluates and logs everything without transmitting.
 MeshRF.App.Avalonia  (.NET 8 Avalonia — Windows/Linux/macOS)
   - UI, map, waterfall, view models, app settings
   - P/Invoke into native bridge library
-
-MeshRF.App   (.NET 8 WPF — Windows only, being retired)
-  - Same, for the legacy Windows build
 
 MeshRF.Core  (.NET 8 class library)
   - Native interop bindings
@@ -426,9 +411,7 @@ managed output folder after build.
 dotnet run --project app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj -c Debug --no-build
 ```
 
-VS Code tasks are included for configure/build/test/run workflows; the primary
-Build/Run buttons target the Avalonia app, with the WPF app under a "legacy"
-group.
+VS Code tasks are included for configure/build/test/run workflows.
 
 ## Testing
 
@@ -457,21 +440,16 @@ builds a self-contained single-file release into `dist/`:
 | macOS | `MeshRF-v<version>-osx-arm64.zip` (or `-osx-x64`) |
 
 ```powershell
-# The Avalonia app, versioned from its own project
+# Package for the host platform
 pwsh scripts/build-release.ps1
 
-# The legacy WPF app, or both (Windows only)
-pwsh scripts/build-release.ps1 -App Wpf
-pwsh scripts/build-release.ps1 -App Both
-
-# Override the version, and optionally tag the repo version
+# Override the version, and optionally tag it
 pwsh scripts/build-release.ps1 -Version 2.0.1
 pwsh scripts/build-release.ps1 -Tag
 ```
 
-Each app is versioned from its own project file, falling back to
-`Directory.Build.props`, so `-App Both` produces `MeshRF-v2.0.0-*` and
-`MeshRF-wpf-v1.0.9-*` in one run.
+The version comes from the app project's `VersionPrefix`, falling back to
+`Directory.Build.props`.
 
 The bundle includes the published app, the native bridge (plus the SDR runtime
 DLLs on Windows), `LICENSE`, `README.md`, and on Linux a `.desktop` entry and
@@ -488,7 +466,6 @@ mismatch.
 | Path | Purpose |
 | --- | --- |
 | `app/MeshRF.App.Avalonia/` | Cross-platform desktop application (Windows/Linux/macOS) |
-| `app/MeshRF.App/` | Legacy WPF desktop application (Windows only, being retired) |
 | `app/MeshRF.Core/` | Managed protocol/interop/storage library |
 | `native/core/` | C++ SDR/DSP/LoRa core, plus the CH341+SX126x packet radio |
 | `native/bridge/` | C ABI bridge DLL for P/Invoke |

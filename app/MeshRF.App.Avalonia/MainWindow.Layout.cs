@@ -9,10 +9,8 @@ using Avalonia.Threading;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// Window geometry and splitter-pane persistence, ported from MeshRF.App's
-/// MainWindow ApplyWindowBounds/SaveLayout. Uses the same shared settings.json
-/// keys (WindowWidth/Height/Left/Top/WindowState plus the *PaneStar values), so
-/// the two apps remember their layout the same way.
+/// Window geometry and splitter-pane persistence, stored in settings.json
+/// (WindowWidth/Height/Left/Top/WindowState plus the *PaneStar values).
 /// </summary>
 public partial class MainWindow
 {

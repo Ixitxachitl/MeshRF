@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The test project sets UseWPF, whose implicit-using set leaves out System.IO.
-using System.IO;
 using MeshRF.Scripting;
 using Xunit;
 

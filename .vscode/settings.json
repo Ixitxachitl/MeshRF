@@ -17,24 +17,6 @@
             "tooltip": "Launch the Avalonia app (no rebuild)"
         },
         {
-            "label": "$(history) WPF (legacy)",
-            "tooltip": "Windows-only WPF app — retired after the final dual release",
-            "tasks": [
-                {
-                    "label": "Build & Run WPF",
-                    "task": "Build & Run WPF"
-                },
-                {
-                    "label": "Build WPF App",
-                    "task": "Build App"
-                },
-                {
-                    "label": "Run WPF App (no rebuild)",
-                    "task": "Run App"
-                }
-            ]
-        },
-        {
             "label": "$(gear) Native",
             "tooltip": "Native (C++) tasks",
             "tasks": [
@@ -49,10 +31,6 @@
                 {
                     "label": "Test Native (ctest)",
                     "task": "Test Native"
-                },
-                {
-                    "label": "Deploy Native DLL (WPF only)",
-                    "task": "Deploy Native DLL"
                 }
             ]
         },
@@ -76,21 +54,8 @@
         },
         {
             "label": "$(package) Release",
-            "tooltip": "Package a release into dist/ via scripts/build-release.ps1",
-            "tasks": [
-                {
-                    "label": "Release: Avalonia",
-                    "task": "Build Release (Avalonia)"
-                },
-                {
-                    "label": "Release: WPF (legacy)",
-                    "task": "Build Release (WPF)"
-                },
-                {
-                    "label": "Release: both apps",
-                    "task": "Build Release (Both)"
-                }
-            ]
+            "task": "Build Release",
+            "tooltip": "Package a release into dist/ via scripts/build-release.ps1"
         },
         {
             "label": "$(trash) Clean",

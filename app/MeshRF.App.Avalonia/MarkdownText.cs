@@ -13,8 +13,7 @@ namespace MeshRF.AvaloniaApp;
 /// Attached property that renders a message body as inline Markdown on a
 /// TextBlock: <c>**bold**</c>/<c>__bold__</c> becomes bold, <c>*italic*</c>/
 /// <c>_italic_</c> becomes italic, and bare URLs become clickable links.
-/// Unmatched markers stay literal. Port of MeshRF.App's Behaviors/MarkdownText,
-/// using the same parsing rules so both apps render a message identically.
+/// Unmatched markers stay literal.
 /// </summary>
 public static class MarkdownText
 {

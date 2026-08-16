@@ -12,11 +12,6 @@
     3. Copies the native runtime libraries next to the published executable.
     4. Packages the staged folder: .zip on Windows/macOS, .tar.gz on Linux.
 
-    Which app is published depends on -App:
-      Avalonia (default) — the cross-platform app, buildable on all three OSes.
-      Wpf                — Windows-only; kept for the final WPF release.
-      Both               — Windows only; produces two archives.
-
     The version defaults to <VersionPrefix> in Directory.Build.props. Pass -Tag
     to also create an annotated git tag (v<version>).
 
@@ -27,13 +22,11 @@
 
 .EXAMPLE
     pwsh scripts/build-release.ps1
-    pwsh scripts/build-release.ps1 -App Both -Version 1.1.0 -Tag
+    pwsh scripts/build-release.ps1 -Version 1.1.0 -Tag
 #>
 [CmdletBinding()]
 param(
     [string]$Version,
-    [ValidateSet('Avalonia', 'Wpf', 'Both')]
-    [string]$App = 'Avalonia',
     [string]$NativeConfig,
     [switch]$Tag
 )
@@ -84,10 +77,6 @@ else {
     throw "Unsupported host platform."
 }
 
-if ($App -ne 'Avalonia' -and $platform -ne 'windows') {
-    throw "-App $App requires Windows; the WPF app cannot be built on $platform."
-}
-
 # --- Preflight: linked protobuf schemas ----------------------------------
 $protoSentinel = Join-Path $repoRoot 'third_party/meshtastic_protobufs/meshtastic/mesh.proto'
 if (-not (Test-Path $protoSentinel)) {
@@ -104,9 +93,8 @@ function Resolve-Cmake {
 $cmake = Resolve-Cmake
 
 # --- Resolve version -----------------------------------------------------
-# The two apps are versioned independently (the WPF app pins its own final
-# version), so this resolves per project rather than once: the app's own
-# VersionPrefix if it declares one, otherwise the repo default.
+# The app's own VersionPrefix if it declares one, otherwise the repo default in
+# Directory.Build.props.
 function Resolve-AppVersion {
     param([string]$ProjectPath)
 
@@ -121,7 +109,7 @@ function Resolve-AppVersion {
     throw "Could not resolve a version for $ProjectPath (no VersionPrefix in it or Directory.Build.props)."
 }
 
-Write-Host "Building MeshRF — $platform/$rid ($nativeConfig), app: $App" -ForegroundColor Cyan
+Write-Host "Building MeshRF — $platform/$rid ($nativeConfig)" -ForegroundColor Cyan
 
 # --- Don't fight a running instance for the shared library ---------------
 # Warned about rather than done silently: this runs before any build step has
@@ -152,7 +140,7 @@ if ($LASTEXITCODE) { throw "native build failed ($LASTEXITCODE)" }
 function New-Package {
     param(
         [string]$ProjectPath,
-        [string]$ArtifactName,   # e.g. MeshRF or MeshRF-wpf
+        [string]$ArtifactName,   # archive name stem, e.g. MeshRF
         [string]$PublishRid
     )
 
@@ -224,19 +212,11 @@ function New-Package {
     Write-Host "Release ready: $(Split-Path $out -Leaf) ($size)" -ForegroundColor Green
 }
 
-if ($App -in @('Avalonia', 'Both')) {
-    New-Package -ProjectPath 'app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj' `
-                -ArtifactName 'MeshRF' -PublishRid $rid
-}
-if ($App -in @('Wpf', 'Both')) {
-    New-Package -ProjectPath 'app/MeshRF.App/MeshRF.App.csproj' `
-                -ArtifactName 'MeshRF-wpf' -PublishRid 'win-x64'
-}
+New-Package -ProjectPath 'app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj' `
+            -ArtifactName 'MeshRF' -PublishRid $rid
 
 # --- Optional git tag ----------------------------------------------------
 if ($Tag) {
-    # Tag the repo version (the Avalonia app's); the WPF app's own version is
-    # not what the repo is at.
     $tagVersion = Resolve-AppVersion -ProjectPath (Join-Path $repoRoot 'app/MeshRF.App.Avalonia/MeshRF.App.Avalonia.csproj')
     $tagName = "v$tagVersion"
     if (git tag --list $tagName) {

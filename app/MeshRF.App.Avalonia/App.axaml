@@ -13,8 +13,7 @@
         <local:IgnoredNodeForegroundConverter x:Key="IgnoredForeground" />
         <!-- Grey/green/red for the delivery mark on an outgoing message. -->
         <local:DeliveryMarkForegroundConverter x:Key="DeliveryMarkForeground" />
-        <!-- Mirrors MeshRF.App's Themes/Dark.xaml palette, so the two apps
-             read as the same product. Light theme isn't ported yet. -->
+        <!-- App-wide dark palette. Light theme isn't implemented yet. -->
         <SolidColorBrush x:Key="BrushAppBackground"      Color="#FF1E1E1E" />
         <SolidColorBrush x:Key="BrushAppForeground"      Color="#FFE6E6E6" />
         <SolidColorBrush x:Key="BrushSubtle"             Color="#FFB0B0B0" />
@@ -32,7 +31,7 @@
         <!-- Compact sliders. Avalonia's Fluent Slider is built for touch: its
              natural height is 50px (15px pre-margin + 20px thumb + 15px
              post-margin), which is what made the gain/waterfall toolbar rows
-             tower over MeshRF.App's. Overriding these theme resources shrinks
+             tower over everything else. Overriding these theme resources shrinks
              the template itself to ~16px; forcing Height on the control instead
              just clips the thumb, since the template still wants its 50px. -->
         <GridLength x:Key="SliderPreContentMargin">0</GridLength>
@@ -47,10 +46,9 @@
         <!-- Node/waypoint tables (Avalonia.Controls.DataGrid). -->
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
 
-        <!-- MeshRF.App runs at WPF's default ~12px control text; Avalonia's
-             FluentTheme defaults noticeably larger (14px+, with generous
-             touch-sized padding) which reads as oversized next to it. Pull
-             the baseline down app-wide rather than per-control. -->
+        <!-- Avalonia's FluentTheme defaults to 14px+ control text with generous
+             touch-sized padding, which reads as oversized for a dense desktop
+             layout. Pull the baseline down app-wide rather than per-control. -->
         <Style Selector="Window">
             <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
             <Setter Property="FontSize" Value="12" />
@@ -232,7 +230,7 @@
         </Style>
 
         <!-- Node/waypoint tables: pull the Fluent DataGrid onto this app's dark
-             palette and down to the compact row height MeshRF.App's grids use. -->
+             palette and down to a compact row height. -->
         <Style Selector="DataGrid">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
@@ -256,8 +254,8 @@
             <Setter Property="Padding" Value="6,0,0,0" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <!-- Fluent's DataGridCell centres its content; MeshRF.App's grids
-                 are left-aligned like a normal table. -->
+            <!-- Fluent's DataGridCell centres its content; these grids should
+                 be left-aligned like a normal table. -->
             <Setter Property="HorizontalContentAlignment" Value="Left" />
         </Style>
         <!-- DataGridTextColumn gives its generated CellTextBlock a 12px margin

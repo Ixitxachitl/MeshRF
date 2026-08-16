@@ -8,7 +8,7 @@ namespace MeshRF.Mqtt;
 /// default values, topic construction, and the uplink/downlink gating
 /// decisions. Mirrors Meshtastic firmware's <c>src/mqtt/MQTT.cpp</c> and
 /// <c>src/mesh/Default.h</c>. All I/O (the actual MQTT connection) lives in
-/// MeshRF.App's <c>MqttBridge</c>; this class has none.
+/// <see cref="MqttBridge"/>; this class has none.
 /// </summary>
 public static class MqttPolicy
 {

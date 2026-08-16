@@ -30,17 +30,12 @@ jobs:
           # (2026 here, 2022 on developer machines).
           - os: windows-latest
             platform: windows
-            # Avalonia only. The WPF app's final build (1.0.9) shipped with the
-            # 2.0.0 release and is never built again.
-            app: Avalonia
             artifact: dist/*.zip
           - os: ubuntu-latest
             platform: linux
-            app: Avalonia
             artifact: dist/*.tar.gz
           - os: macos-latest
             platform: macos
-            app: Avalonia
             artifact: dist/*.zip
 
     runs-on: ${{ matrix.os }}
@@ -86,9 +81,8 @@ jobs:
           "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$HOME/vcpkg" >> "$GITHUB_ENV"
 
-      # The two apps carry their own versions, so a tag cannot simply be forced
-      # onto both. Check the tag against the repo version instead: a mismatch
-      # fails loudly here rather than silently producing artifacts whose names
+      # Check the tag against the declared repo version: a mismatch fails
+      # loudly here rather than silently producing artifacts whose names
       # disagree with the release they are attached to.
       - name: Check tag matches the declared version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -106,10 +100,10 @@ jobs:
         shell: pwsh
         run: |
           # Hashtable splat, not an array: array splatting binds positionally,
-          # so @('-App','Avalonia') put the literal string "-App" into the
-          # script's first parameter ($Version) and published "MeshRF v-App".
-          $params = @{ App = '${{ matrix.app }}' }
-          # Only an explicit workflow_dispatch input overrides; otherwise each
+          # so @('-Version','1.2.3') would put the literal string "-Version"
+          # into the script's first parameter and publish "MeshRF v-Version".
+          $params = @{}
+          # Only an explicit workflow_dispatch input overrides; otherwise the
           # app uses the version it declares.
           if ('${{ inputs.version }}') { $params.Version = '${{ inputs.version }}' }
           ./scripts/build-release.ps1 @params

@@ -4,10 +4,9 @@ using Avalonia.Controls;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// MQTT bridge settings, ported from MeshRF.App's MqttSettingsWindow. Every
-/// field is a two-way binding onto <see cref="RadioViewModel"/>, which persists
-/// on change and reconfigures the bridge — so there is no Save button, matching
-/// the WPF original.
+/// MQTT bridge settings. Every field is a two-way binding onto
+/// <see cref="RadioViewModel"/>, which persists on change and reconfigures the
+/// bridge — so there is no Save button.
 /// </summary>
 public partial class MqttSettingsWindow : Window
 {

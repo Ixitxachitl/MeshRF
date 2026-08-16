@@ -2,9 +2,8 @@
 namespace MeshRF;
 
 /// <summary>
-/// Portable RTTTL → 16-bit mono PCM/WAV synthesis, factored out of
-/// MeshRF.App's RtttlPlayer so any frontend can render the same tune. Only
-/// playback is platform-specific; everything here is pure computation.
+/// Portable RTTTL → 16-bit mono PCM/WAV synthesis. Only playback is
+/// platform-specific; everything here is pure computation.
 /// </summary>
 public static class RtttlSynth
 {

@@ -18,8 +18,7 @@ public sealed record TelemetrySeries(string Label, Color Colour, Func<TelemetryH
 
 /// <summary>
 /// A titled sparkline pane: one line per enabled series over the shared time
-/// axis, with a checkbox strip to toggle series. Ported from MeshRF.App's
-/// telemetry window, which draws the same thing onto a WPF Canvas.
+/// axis, with a checkbox strip to toggle series.
 ///
 /// Each series is normalised to its own min/max rather than sharing one axis —
 /// the quantities have wildly different ranges (uptime in seconds against

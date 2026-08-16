@@ -6,9 +6,8 @@ using Avalonia.Media;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// Lightweight dBFS spectrum line plot, ported from MeshRF.App's WPF
-/// SpectrumView (FrameworkElement/OnRender/StreamGeometry) onto Avalonia's
-/// Control/Render/StreamGeometry equivalents.
+/// Lightweight dBFS spectrum line plot, drawn immediate-mode into a
+/// StreamGeometry.
 /// </summary>
 public class SpectrumView : Control
 {

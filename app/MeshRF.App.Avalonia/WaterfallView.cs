@@ -15,15 +15,14 @@ public enum WaterfallColormap
 }
 
 /// <summary>
-/// Scrolling dBFS waterfall, ported from MeshRF.App's WPF WaterfallView but
-/// driving both surfaces it does in WPF: the live scrolling ring buffer with
-/// auto-levels, and — via ScaleToFit/TimeHorizontal/SmoothPixels plus the
-/// bicubic snapshot rasterizer below — the frozen "last packet" panel.
-/// This port always does a
-/// full-frame re-render on Push rather than WPF's incremental single-row
-/// bitmap shift — the shift is an optimization for a native ~60fps push
-/// rate; at this app's spectrum poll rate a full re-render is cheap enough
-/// that the extra complexity isn't worth it.
+/// Scrolling dBFS waterfall, driving two surfaces: the live scrolling ring
+/// buffer with auto-levels, and — via ScaleToFit/TimeHorizontal/SmoothPixels
+/// plus the bicubic snapshot rasterizer below — the frozen "last packet" panel.
+///
+/// Push always does a full-frame re-render rather than an incremental
+/// single-row bitmap shift. The shift is an optimization for a native ~60fps
+/// push rate; at this app's spectrum poll rate a full re-render is cheap
+/// enough that the extra complexity isn't worth it.
 /// </summary>
 public sealed class WaterfallView : Image
 {

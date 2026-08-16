@@ -11,10 +11,9 @@
         Width="1280" Height="900">
 
     <Window.Styles>
-        <!-- Unseen-activity pulse on a tab header, matching MeshRF.App's
-             flashing storyboard. Alternating playback fades out and back rather
-             than snapping, and it runs until the tab is selected and the view
-             model clears TabNeedsAttention. -->
+        <!-- Unseen-activity pulse on a tab header. Alternating playback fades
+             out and back rather than snapping, and it runs until the tab is
+             selected and the view model clears TabNeedsAttention. -->
         <!-- Reaction chips are buttons but should read as inline tags, so the
              stock button chrome is stripped back to a hover cue. -->
         <Style Selector="Button.reactionChip">
@@ -114,8 +113,8 @@
         <!-- Shared by both channel and DM-conversation tab content templates
              (see TabControl.Resources below) so the message list markup,
              including its reply/react context menu, isn't duplicated. -->
-        <!-- Message row: [timestamp] [from] [body + reactions], matching
-             MeshRF.App's three-column layout and monospace body. -->
+        <!-- Message row: [timestamp] [from] [body + reactions], three columns
+             with a monospace body. -->
         <DataTemplate x:Key="MessageListTemplate" x:DataType="mesh:ITabItem">
             <ListBox ItemsSource="{Binding Messages}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
                      local:AutoScrollBehavior.IsEnabled="{Binding #RootWindow.DataContext.AutoScroll}">
@@ -301,7 +300,7 @@
           </DockPanel>
         </Border>
 
-        <!-- Toolbar row 2: RX/TX gains, gated by which device is selected (like MeshRF.App's IsHackRf/IsRtlSdr/IsTxHackRf). -->
+        <!-- Toolbar row 2: RX/TX gains, gated by which device is selected (IsHackRf/IsRtlSdr/IsTxHackRf). -->
         <Border DockPanel.Dock="Top"
                 Background="{DynamicResource BrushPanelBackground}"
                 BorderBrush="{DynamicResource BrushPanelBorder}"
@@ -469,13 +468,11 @@
             </StackPanel>
         </Border>
 
-        <!-- Main content: same 2x2 quadrant layout as MeshRF.App (map / nodes
-             on the left, spectrum+waterfall / chat+log on the right), so the
-             two apps read as the same product. The map quarter is still a
-             placeholder; spectrum/waterfall are ported (see SpectrumView /
+        <!-- Main content: a 2x2 quadrant layout — map / nodes on the left,
+             spectrum+waterfall / chat+log on the right (see SpectrumView /
              WaterfallView / FrequencyAxis). -->
         <Grid x:Name="MainLayoutGrid" Margin="6">
-            <!-- Equal halves, matching MeshRF.App's LeftPaneGrid/RightPaneGrid split. -->
+            <!-- Equal halves: left pane / splitter / right pane. -->
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" MinWidth="200" />
                 <ColumnDefinition Width="5" />
@@ -550,7 +547,7 @@
                     <StackPanel Grid.Row="2">
                         <TextBlock Margin="4,0,0,4" FontWeight="Bold" Text="{Binding NodesHeader}" />
 
-                        <!-- Node list filter bar (mirrors MeshRF.App's). -->
+                        <!-- Node list filter bar. -->
                         <Border Margin="0,0,0,3" Padding="4,3"
                                 Background="{DynamicResource BrushPanelBackground}"
                                 BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
@@ -753,9 +750,8 @@
                             </ContextMenu>
                         </DataGrid.ContextMenu>
                         <DataGrid.Columns>
-                            <!-- Indicator columns, mirroring MeshRF.App's. That app
-                                 uses Segoe MDL2 glyphs, which are Windows-only, so
-                                 these use plain Unicode symbols instead.
+                            <!-- Indicator columns. Plain Unicode symbols rather than
+                                 Segoe MDL2 glyphs, which are Windows-only.
 
                                  Each sorts on the same bool its cell shows, spelled
                                  out for the same reason as the text columns below:
@@ -1026,11 +1022,10 @@
                                       Background="{DynamicResource BrushSplitter}" />
 
                         <!-- 22 (freq axis) / * (live waterfall) / 84 (frozen "last packet"
-                             snapshot panel, same fixed height as MeshRF.App's LastPacketRow) —
-                             matching MeshRF.App's row proportions here matters: reserving that
-                             84px keeps the live waterfall the same on-screen height as Windows,
-                             so a fixed real-world time span always renders the same number of
-                             rows tall on both apps. -->
+                             snapshot panel). The snapshot panel's height is fixed rather
+                             than proportional so the live waterfall above it keeps a
+                             stable on-screen height — a fixed real-world time span then
+                             always renders the same number of rows tall. -->
                         <Grid Grid.Row="2" x:Name="WaterfallStackGrid" Background="{DynamicResource BrushSpectrumBackground}">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="22" />
@@ -1126,8 +1121,8 @@
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <!-- Classes.attention drives the pulse animation in
                                              Window.Styles: Avalonia has no DataTrigger, so a
-                                             bound style class is how the WPF storyboard's
-                                             behaviour is expressed here. -->
+                                             bound style class is how the animation is
+                                             driven off view-model state. -->
                                         <TextBlock Text="{Binding TabHeader}" VerticalAlignment="Center"
                                                    Classes.attention="{Binding TabNeedsAttention}" />
                                         <Button Content="&#x2715;" FontSize="9" Padding="3,0" Margin="2,0,-4,0"

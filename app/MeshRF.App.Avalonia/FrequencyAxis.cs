@@ -11,7 +11,7 @@ namespace MeshRF.AvaloniaApp;
 /// on) the spectrum/waterfall. The displayed span is centered at
 /// <see cref="CenterFreqHz"/> and is <see cref="SpanHz"/> wide, matching the
 /// FFT-shifted spectrum bins (DC at the center). Draws evenly spaced ticks
-/// with absolute-MHz labels. Ported from MeshRF.App's WPF FrequencyAxis.
+/// with absolute-MHz labels.
 /// </summary>
 public sealed class FrequencyAxis : Control
 {

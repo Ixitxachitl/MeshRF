@@ -20,15 +20,15 @@ namespace MeshRF.AvaloniaApp;
 /// home location, every node that reports a position, and every waypoint with
 /// its circular and/or rectangular geofence.
 ///
-/// Ported from MeshRF.App's MapView, but drawn immediate-mode into a single
-/// <see cref="Render(DrawingContext)"/> rather than WPF's two Canvases of
-/// retained Image/Ellipse/TextBlock visuals. That drops the whole apparatus
-/// the WPF version needs to stay fast — per-node visual diffing, a spatial
-/// bucket index, BitmapCache, render-throttle timers and a background
-/// coordinate cache — because redrawing a few hundred markers into a
-/// DrawingContext costs less than reconciling a visual tree. What it costs
-/// instead is hit-testing: markers are not visuals, so pointer hits are
-/// resolved against <see cref="_hitTargets"/>, rebuilt each render.
+/// Everything is drawn immediate-mode into a single
+/// <see cref="Render(DrawingContext)"/> rather than as retained
+/// Image/Ellipse/TextBlock visuals. That drops the whole apparatus a retained
+/// tree needs to stay fast — per-node visual diffing, a spatial bucket index,
+/// bitmap caching, render-throttle timers and a background coordinate cache —
+/// because redrawing a few hundred markers into a DrawingContext costs less
+/// than reconciling a visual tree. What it costs instead is hit-testing:
+/// markers are not visuals, so pointer hits are resolved against
+/// <see cref="_hitTargets"/>, rebuilt each render.
 /// </summary>
 public sealed class MapCanvas : Control
 {

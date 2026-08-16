@@ -2,9 +2,7 @@
 
   <!-- Shared identity / versioning for every managed project in the repo.
        This is the repo's own version, which is the cross-platform Avalonia
-       app's: 2.0.0 marks it becoming the app MeshRF ships. The legacy WPF app
-       pins its own final version in MeshRF.App.csproj instead, so the two are
-       versioned independently from here on.
+       app's: 2.0.0 marks it becoming the app MeshRF ships.
 
        scripts/build-release.ps1 reads VersionPrefix from the app project being
        packaged, falling back to this file. -->

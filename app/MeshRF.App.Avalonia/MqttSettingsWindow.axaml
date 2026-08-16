@@ -49,8 +49,8 @@
                         IsVisible="{Binding IsMqttPasswordRevealed}"
                         Command="{Binding ToggleRevealMqttPasswordCommand}"
                         ToolTip.Tip="Hide the password" />
-                <!-- RevealPassword toggles masking in place, so unlike the WPF
-                     original this needs one box rather than a hidden/shown pair. -->
+                <!-- RevealPassword toggles masking in place, so this needs one
+                     box rather than a hidden/shown pair. -->
                 <TextBox FontFamily="Consolas" PasswordChar="●"
                          RevealPassword="{Binding IsMqttPasswordRevealed}"
                          Text="{Binding MqttPassword, Mode=TwoWay}"

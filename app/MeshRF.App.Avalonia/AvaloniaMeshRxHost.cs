@@ -39,14 +39,13 @@ public sealed record AckRequest(MeshHeader Header, string? ChannelName, bool Pkc
                                 uint ErrorReason = RoutingError.None);
 
 /// <summary>
-/// <see cref="IMeshRxHost"/> for the Avalonia app: decodes traffic on any
-/// configured channel (persisted via <see cref="ChannelStore"/>, same
-/// %APPDATA%/config path the WPF app uses) into per-channel message tabs,
-/// routes direct messages addressed to us into per-peer conversation tabs,
-/// classifies reply/reaction text messages, and keeps <see cref="NodeStore"/>
-/// updated from NodeInfo/Position/Telemetry. Relaying and MQTT uplink are
-/// delegated out to the view model via <see cref="RelayScheduler"/> and
-/// <see cref="UplinkHandler"/>; the games stay WPF-only by choice.
+/// <see cref="IMeshRxHost"/> for the app: decodes traffic on any configured
+/// channel (persisted via <see cref="ChannelStore"/> under %APPDATA%/config)
+/// into per-channel message tabs, routes direct messages addressed to us into
+/// per-peer conversation tabs, classifies reply/reaction text messages, and
+/// keeps <see cref="NodeStore"/> updated from NodeInfo/Position/Telemetry.
+/// Relaying and MQTT uplink are delegated out to the view model via
+/// <see cref="RelayScheduler"/> and <see cref="UplinkHandler"/>.
 /// </summary>
 public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 {
@@ -71,8 +70,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
 
-    /// <summary>Session node number: MeshRF.App's UserNodeNum when set (shared
-    /// settings.json), otherwise an ephemeral random identity so a
+    /// <summary>Session node number: <c>UserNodeNum</c> from settings.json when
+    /// set, otherwise an ephemeral random identity so a
     /// transmitted frame still carries a valid "from" and gets recognized
     /// as our own echo (isFromUs) instead of a new incoming packet.</summary>
     public uint MyNodeNum { get; private set; }
@@ -268,9 +267,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     /// <summary>Loads channel chat history, then reopens only the DM tabs that
-    /// were left open last session (not every peer we have history with) —
-    /// mirrors MeshRF.App's MainViewModel, which persists
-    /// <c>AppSettings.OpenConversations</c> and replays only those.</summary>
+    /// were left open last session (not every peer we have history with):
+    /// <c>AppSettings.OpenConversations</c> is persisted, and only those are
+    /// replayed.</summary>
     private void LoadMessageHistory(IReadOnlyList<uint> openConversationNodeNums)
     {
         // Reactions are stored as their own rows, so replay in two passes per
@@ -306,7 +305,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// <summary>Insert by timestamp. History replays chronologically, but
     /// reactions are resolved in a second pass — appending them would bunch
     /// every orphaned reaction at the bottom instead of leaving it where it
-    /// happened. Mirrors MeshRF.App's InsertMessageChronologically.</summary>
+    /// happened.</summary>
     private static void InsertChronologically(IList<ChannelMessage> messages, ChannelMessage message)
     {
         int index = messages.Count;
@@ -333,8 +332,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         }
     }
 
-    /// <summary>Persist a message we transmitted, so it survives a restart —
-    /// mirrors MeshRF.App's PersistOutgoingText.</summary>
+    /// <summary>Persist a message we transmitted, so it survives a
+    /// restart.</summary>
     public void PersistOutgoingText(uint to, uint packetId, string text, string channel, uint replyId = 0)
     {
         if (MyNodeNum == 0) return;
@@ -430,9 +429,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     /// <summary>Adds and persists a new secondary channel with an
-    /// auto-generated "Channel N" name and a fresh random PSK — mirrors
-    /// MeshRF.App's "+" button exactly (no name prompt; rename via the
-    /// channel's Settings dialog afterward).</summary>
+    /// auto-generated "Channel N" name and a fresh random PSK. Backs the "+"
+    /// button: no name prompt, rename via the channel's Settings dialog
+    /// afterward.</summary>
     public ChannelTabViewModel AddChannel()
     {
         var taken = Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config.Index).ToHashSet();
@@ -687,8 +686,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     public void Log(string message)
     {
-        // Stamped here, at the single funnel, so every line gets one — same as
-        // MeshRF.App's Log(). Uses the unit-system-aware convention.
+        // Stamped here, at the single funnel, so every line gets one. Uses the
+        // unit-system-aware convention.
         LogLines.Add($"[{UiFormats.Stamp(DateTime.Now)}] {message}");
         while (LogLines.Count > 500) LogLines.RemoveAt(0);
     }
@@ -992,7 +991,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
         long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway)
     {
-        // Log every successful decode, like MeshRF.App's OnMessageDecoded does.
+        // Log every successful decode.
         // Without this the log only ever shows MeshRxRouter's "(dup)" and
         // "rx undecoded" lines, making normal flood retransmissions look like
         // every packet was being rejected as a duplicate.
@@ -1197,8 +1196,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             Duplicate: false, HasBitfield: false, ErrorReason: reason));
     }
 
-    /// <summary>One-line log summary of a decoded packet, mirroring
-    /// MeshRF.App's BuildDecodedPortSummary.</summary>
+    /// <summary>One-line log summary of a decoded packet.</summary>
     private string BuildDecodedPortSummary(MeshHeader header, MeshDecodeResult result, string senderName)
     {
         string prefix = $"  [{result.ChannelName}] {senderName} {result.Port}";

@@ -9,9 +9,9 @@ namespace MeshRF.Nodes;
 /// telemetry payload, including the "kind" tag and the value signature the
 /// store uses to avoid recording a row that repeats the previous one verbatim.
 ///
-/// Shared so both apps classify and de-duplicate history identically — a
-/// signature computed differently in one app would make its rows look new to
-/// the other.
+/// Centralised so every call site classifies and de-duplicates history
+/// identically — a signature computed differently anywhere would make rows
+/// already in the store look new.
 /// </summary>
 public static class TelemetryHistoryFactory
 {

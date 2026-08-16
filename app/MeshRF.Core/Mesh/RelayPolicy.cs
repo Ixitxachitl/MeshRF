@@ -18,8 +18,8 @@ public sealed record RelayContext(
 
 /// <summary>
 /// Whether and when to rebroadcast an overheard packet, mirroring Meshtastic
-/// firmware's flooding router. Shared by both apps: a node that relays by
-/// different rules than the mesh expects either drops traffic others rely on
+/// firmware's flooding router. Getting this right matters: a node that relays
+/// by different rules than the mesh expects either drops traffic others rely on
 /// it to carry, or adds copies the mesh has to absorb.
 ///
 /// The rules come from firmware's Router/FloodingRouter and RadioInterface.

@@ -22,8 +22,7 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
-    <!-- Node/waypoint tables are column grids in MeshRF.App (WPF DataGrid);
-         this is the Avalonia equivalent so the two apps' tables match. -->
+    <!-- Column grids for the node and waypoint tables. -->
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
   </ItemGroup>
@@ -56,12 +55,14 @@
   </Target>
 
   <!-- Copy the native bridge library produced by CMake into the output dir so
-       P/Invoke can find it at runtime. Mirrors MeshRF.App.csproj's
-       CopyNativeBridge target; see that file for the RelWithDebInfo rationale.
-       Each OS has its own CMake preset (and so its own build dir) and its own
-       shared-library extension; override NativeConfig/NativeBinDir directly to
-       point somewhere else. The macOS branch is untested — see the
-       macos-arm64 preset in CMakePresets.json. -->
+       P/Invoke can find it at runtime. The native DSP hot path is far too slow
+       in a Debug (unoptimized, bounds-checked) build to sustain 2.4 MS/s, so
+       this defaults to the optimized RelWithDebInfo native build even when the
+       managed app is built Debug. Override with -p:NativeConfig=Debug if you
+       need to debug the C++ side. Each OS has its own CMake preset (and so its
+       own build dir) and its own shared-library extension; override
+       NativeConfig/NativeBinDir directly to point somewhere else. The macOS
+       branch is untested — see the macos-arm64 preset in CMakePresets.json. -->
   <PropertyGroup>
     <NativeConfig Condition="'$(NativeConfig)' == ''">RelWithDebInfo</NativeConfig>
     <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$(OS)' == 'Windows_NT'">$(MSBuildThisFileDirectory)..\..\build\windows-x64\bin\$(NativeConfig)</NativeBinDir>

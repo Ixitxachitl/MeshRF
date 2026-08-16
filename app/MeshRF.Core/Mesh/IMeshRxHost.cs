@@ -48,8 +48,7 @@ public interface IMeshRxHost
     /// sender's node number, so only the host — which knows what it put on the
     /// air — can recognise it.
     ///
-    /// Defaulted to false so hosts that do not relay (and the frozen WPF
-    /// MainViewModel) keep compiling unchanged.
+    /// Defaulted to false so hosts that do not relay keep compiling unchanged.
     /// </summary>
     bool WasRelayedByUs(MeshHeader header) => false;
 
@@ -77,8 +76,8 @@ public interface IMeshRxHost
     /// is itself the evidence that our first ack never arrived. Firmware does
     /// this in <c>NextHopRouter::shouldFilterReceived</c>.
     ///
-    /// Defaulted to a no-op so hosts that predate the ack path (the frozen WPF
-    /// MainViewModel) keep compiling unchanged.
+    /// Defaulted to a no-op so hosts that predate the ack path keep compiling
+    /// unchanged.
     /// </summary>
     void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result) { }
 

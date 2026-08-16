@@ -8,12 +8,8 @@ namespace MeshRF;
 
 /// <summary>
 /// User-facing app settings persisted as JSON under
-/// %APPDATA%\MeshRF\settings.json — the exact same file and schema as
-/// MeshRF.App's own <c>AppSettings</c> (that WPF-only class is untouched;
-/// this is a separate, parallel copy so the Avalonia app can read/write the
-/// same file losslessly without depending on the WPF assembly). Keep the
-/// two in sync by hand when either gains a new field — there's no automated
-/// check for drift.
+/// %APPDATA%\MeshRF\settings.json. Lives in Core rather than in the app so the
+/// settings schema stays independent of the UI framework.
 /// </summary>
 public sealed class AppSettings
 {
@@ -95,8 +91,7 @@ public sealed class AppSettings
     public double WaterfallFloorDb { get; set; } = -100.0;
     public double WaterfallCeilDb { get; set; } = 0.0;
     /// <summary>Waterfall scroll speed in rows per second (time resolution).
-    /// Range 5–480 in the Avalonia app; MeshRF.App still clamps to 5–240 and
-    /// rewrites anything above that when it saves.</summary>
+    /// Clamped to 5–480.</summary>
     public double WaterfallRowsPerSecond { get; set; } = 60.0;
 
     /// <summary>UI theme: "Light", "Dark", or "System".</summary>
@@ -478,8 +473,7 @@ public sealed class AppSettings
         catch
         {
             // Not a DPAPI blob for this app/user (legacy plaintext, or a
-            // different user/machine) — treat as plaintext, same fallback
-            // MeshRF.App's copy uses.
+            // different user/machine) — treat as plaintext.
             return onDisk;
         }
     }
