@@ -32,6 +32,12 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     /// poll while the first request is still outstanding.</summary>
     private readonly HashSet<string> _feedsInFlight = new(StringComparer.Ordinal);
 
+    /// <summary>Gap between the waypoints of one reconciliation. Long enough
+    /// that a batch reads as several transmissions rather than one burst, short
+    /// enough that a realistic batch finishes well inside a polling
+    /// interval.</summary>
+    private static readonly TimeSpan FeedSendSpacing = TimeSpan.FromSeconds(8);
+
     /// <summary>In-flight runs, keyed by script name, so <c>mode:</c> has
     /// something to act on. Only scripts containing a delay stay here long
     /// enough to matter.</summary>
@@ -293,6 +299,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             _rxHost.Log($"sync: {Name(due)} — " + string.Join(", ",
                 actions.GroupBy(a => a.Kind).Select(g => $"{g.Count()} {g.Key.ToString().ToLowerInvariant()}")));
 
+            bool first = true;
             foreach (var action in actions)
             {
                 if (ScriptsDryRun)
@@ -301,6 +308,15 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                                 $"\"{action.Name}\" at {action.Latitude:0.#####},{action.Longitude:0.#####}");
                     continue;
                 }
+
+                // Spaced out. A first poll can have a dozen markers to place,
+                // and the transmitter will happily send them back to back —
+                // several hundred bytes each, seconds apart, on a channel
+                // everyone shares. Nothing here is urgent enough to justify
+                // that: a fire that has been burning for a day keeps.
+                if (!first) await Task.Delay(FeedSendSpacing);
+                first = false;
+
                 await SendFeedWaypointAsync(due.Sync, action);
             }
         }
@@ -335,14 +351,17 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             return;
         }
 
+        var packetId = NextPacketId();
+        var icon = sync.Waypoint.Icon.Length > 0 ? EmojiToCodePoint(sync.Waypoint.Icon) : null;
+
         var frame = MeshEncoder.EncodeWaypoint(
-            channel, _rxHost.MyNodeNum, NextPacketId(), action.WaypointId,
+            channel, _rxHost.MyNodeNum, packetId, action.WaypointId,
             action.Latitude, action.Longitude,
             name: action.Name.Length > 0 ? action.Name : "Waypoint",
             description: action.Description,
             expireEpoch: action.ExpireEpoch,
             lockedTo: sync.Waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
-            icon: sync.Waypoint.Icon.Length > 0 ? EmojiToCodePoint(sync.Waypoint.Icon) : null,
+            icon: icon,
             geofenceRadiusM: action.IsRemoval ? 0 : sync.Waypoint.RadiusM,
             notifyOnEnter: !action.IsRemoval && sync.Waypoint.NotifyOnEnter,
             notifyOnExit: !action.IsRemoval && sync.Waypoint.NotifyOnExit,
@@ -351,7 +370,30 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             okToMqtt: OkToMqtt);
 
         if (!await TransmitFrameAsync(frame))
+        {
             _rxHost.Log($"sync: transmit failed for \"{action.Name}\"");
+            return;
+        }
+
+        _rxHost.RecordOutgoingWaypoint(new WaypointRecord
+        {
+            FromNode = _rxHost.MyNodeNum,
+            WaypointId = action.WaypointId,
+            PacketId = packetId,
+            Channel = channel.Name,
+            Name = action.Name,
+            Description = action.Description,
+            Icon = icon,
+            Latitude = action.Latitude,
+            Longitude = action.Longitude,
+            ExpireEpoch = action.ExpireEpoch,
+            LockedTo = sync.Waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
+            RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            GeofenceRadius = action.IsRemoval ? 0 : sync.Waypoint.RadiusM,
+            NotifyOnEnter = !action.IsRemoval && sync.Waypoint.NotifyOnEnter,
+            NotifyOnExit = !action.IsRemoval && sync.Waypoint.NotifyOnExit,
+        });
+        RaiseMapDataChanged();
     }
 
     // ----- run execution ------------------------------------------------------
@@ -631,13 +673,17 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             ? (uint)DateTimeOffset.UtcNow.Add(waypoint.Expires).ToUnixTimeSeconds()
             : WaypointRecord.NeverExpiresEpoch;
 
+        var name = expandedName.Length > 0 ? expandedName : "Waypoint";
+        var description = ScriptTemplate.ClampToPayload(run.Expansion.Expand(waypoint.Description));
+        var icon = waypoint.Icon.Length > 0 ? EmojiToCodePoint(waypoint.Icon) : null;
+
         var frame = MeshEncoder.EncodeWaypoint(
             channel, _rxHost.MyNodeNum, packetId, waypointId: packetId, lat, lon,
-            name: expandedName.Length > 0 ? expandedName : "Waypoint",
-            description: ScriptTemplate.ClampToPayload(run.Expansion.Expand(waypoint.Description)),
+            name: name,
+            description: description,
             expireEpoch: expireEpoch,
             lockedTo: waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
-            icon: waypoint.Icon.Length > 0 ? EmojiToCodePoint(waypoint.Icon) : null,
+            icon: icon,
             geofenceRadiusM: waypoint.RadiusM,
             notifyOnEnter: waypoint.NotifyOnEnter,
             notifyOnExit: waypoint.NotifyOnExit,
@@ -646,7 +692,30 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             okToMqtt: OkToMqtt);
 
         if (!await TransmitFrameAsync(frame))
+        {
             _rxHost.Log("scripts: waypoint transmit failed");
+            return;
+        }
+
+        _rxHost.RecordOutgoingWaypoint(new WaypointRecord
+        {
+            FromNode = _rxHost.MyNodeNum,
+            WaypointId = packetId,
+            PacketId = packetId,
+            Channel = channel.Name,
+            Name = name,
+            Description = description,
+            Icon = icon,
+            Latitude = lat,
+            Longitude = lon,
+            ExpireEpoch = expireEpoch,
+            LockedTo = waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
+            RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            GeofenceRadius = waypoint.RadiusM,
+            NotifyOnEnter = waypoint.NotifyOnEnter,
+            NotifyOnExit = waypoint.NotifyOnExit,
+        });
+        RaiseMapDataChanged();
     }
 
     /// <summary>

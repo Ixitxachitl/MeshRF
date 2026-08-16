@@ -1312,6 +1312,30 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     private bool IsNodeRtttlMuted(uint nodeNum) => _nodeStore.Get(nodeNum)?.MuteRtttl == true;
 
+    /// <summary>
+    /// Files a waypoint this node has just sent, the way receiving one files it.
+    /// </summary>
+    /// <remarks>
+    /// A transmission is never decoded back — the router drops a frame from our
+    /// own node before it reaches the waypoint handler — so anything sent has
+    /// to be recorded here or it exists everywhere except on the map that sent
+    /// it. Replacing a matching id rather than always adding is what makes a
+    /// resend an update, including the past-dated one that retires a marker:
+    /// that greys out here exactly as it does for everyone who received it.
+    /// </remarks>
+    public void RecordOutgoingWaypoint(WaypointRecord record)
+    {
+        _waypointStore.Upsert(record);
+
+        for (int i = 0; i < Waypoints.Count; i++)
+        {
+            if (Waypoints[i].FromNode != record.FromNode || Waypoints[i].WaypointId != record.WaypointId) continue;
+            Waypoints[i] = record;
+            return;
+        }
+        Waypoints.Add(record);
+    }
+
     private void HandleWaypoint(MeshHeader header, MeshDecodeResult result)
     {
         var wp = result.Waypoint!;
