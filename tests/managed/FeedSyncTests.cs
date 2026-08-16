@@ -17,7 +17,15 @@ public class FeedSyncTests
     // Truckee-ish, with a nearby fire ~12 km away and a far one ~600 km away.
     private static readonly ScriptSelf Home = new(1, "ME", "My Node", 101, 39.20882, -120.79279);
 
-    private const string Yaml =
+    /// <summary>
+    /// The sample, with LF endings whatever the file on disk uses. Tests below
+    /// vary it by replacing whole lines, and a raw literal carries the source
+    /// file's own endings — so without this a \n in a search string quietly
+    /// matches nothing and the test passes while testing the unmodified sample.
+    /// </summary>
+    private static string Yaml => RawYaml.ReplaceLineEndings("\n");
+
+    private const string RawYaml =
         """
         enabled: true
         alias: Fires
@@ -40,8 +48,9 @@ public class FeedSyncTests
             radius: 10mi
         """;
 
-    private static FeedSyncEngine Armed(string yaml = Yaml)
+    private static FeedSyncEngine Armed(string? yaml = null)
     {
+        yaml ??= Yaml;
         var parse = ScriptParser.Parse(yaml);
         Assert.True(parse.IsValid, parse.FirstError?.ToString());
         Assert.True(parse.IsSync);
@@ -142,6 +151,52 @@ public class FeedSyncTests
 
         Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(15)));
         Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(30)));
+    }
+
+    [Fact]
+    public void An_Immutable_Feed_Places_Once_And_Never_Resends()
+    {
+        // watch: [] says the records are moments, not things with later states.
+        // A strike has nothing to catch up with, so a second send could only put
+        // the same bytes on the air twice — including the refresh that would
+        // otherwise fire at half the expiry.
+        var yaml = Yaml
+            .Replace("  watch:\n    - data.acreage\n    - data.containment\n", "  watch: []\n")
+            .Replace("radius: 10mi", "expires: 1h");
+        var parse = ScriptParser.Parse(yaml);
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        Assert.True(parse.Sync!.Immutable);
+
+        var engine = new FeedSyncEngine();
+        engine.Load([new ScriptFile(FileName, FileName, yaml, Enabled: true, parse)], Noon);
+
+        Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+
+        // Well past half the expiry, where a refresh would normally be due.
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(45)));
+        // And even when the record's own fields move.
+        Assert.Empty(engine.Reconcile(
+            FileName, Feed(Fire(1, "Bear Fire", acreage: 9999)), Home, Noon.AddMinutes(50)));
+
+        // Retirement still works — that is not a resend, it is the end.
+        var removed = Assert.Single(engine.Reconcile(FileName, "[]", Home, Noon.AddMinutes(55)));
+        Assert.Equal(FeedSyncActionKind.Remove, removed.Kind);
+    }
+
+    [Fact]
+    public void A_Mutable_Feed_Still_Refreshes_Before_Its_Marker_Lapses()
+    {
+        // The counterpart: something that can change has to be kept alive, or
+        // its marker expires while the thing it describes is still burning.
+        var yaml = Yaml.Replace("radius: 10mi", "expires: 1h");
+        var parse = ScriptParser.Parse(yaml);
+        var engine = new FeedSyncEngine();
+        engine.Load([new ScriptFile(FileName, FileName, yaml, Enabled: true, parse)], Noon);
+
+        Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+        var refreshed = Assert.Single(
+            engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(45)));
+        Assert.Equal(FeedSyncActionKind.Refresh, refreshed.Kind);
     }
 
     [Fact]

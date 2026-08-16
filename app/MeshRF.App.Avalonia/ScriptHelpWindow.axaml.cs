@@ -202,7 +202,8 @@ public partial class ScriptHelpWindow : Window
         new("active: is_active", "Path to the flag saying a record is still live. One that goes false is retired exactly like one that stops being returned. Omit if every record returned counts."),
         new("lat: / lon:", "Paths to the position within each record."),
         new("within: 30mi", "Only mirror records this close to home. Omit to mirror the lot."),
-        new("watch: [a, b]", "Paths whose changes are worth resending for. Without it a marker is only ever placed and retired; with the wrong fields in it, a feed that restamps every record rebroadcasts everything on every poll."),
+        new("watch: [a, b]", "Paths whose changes are worth resending for. With the wrong fields in it, a feed that restamps every record rebroadcasts everything on every poll."),
+        new("watch: []", "Says the records never change — a lightning strike, not a fire. A marker is placed once and retired once, with nothing in between, and never refreshed. Different from leaving watch: out, which is only an omission and is warned about."),
         new("waypoint:", "The marker. Same keys as a script's, minus lat/lon — those come from the paths above — and its name and description are templates over {item.*}."),
         new("  expires:", "Usually omitted. A mirrored marker is retired when its record goes, not on a clock, so it does not need one."),
         new("  lock_to_me:", "Off by default here, unlike a script's waypoint. These are placed unattended and may outlive this node's interest, so whoever receives one should be able to clear it."),
@@ -212,6 +213,7 @@ public partial class ScriptHelpWindow : Window
     [
         new("Why not a script", "A record leaving a feed is not an event — nothing happens when something stops being in a list. Only something holding the previous list can notice, which is why this has its own engine rather than being a trigger."),
         new("What it sends", "A marker for each record it has not seen, a resend for one whose watched fields changed, and an expiry in the past for one that has gone. There is no delete on the wire; a past expiry is how a waypoint is retired."),
+        new("Keeping one alive", "If the marker has an expires:, one still present is resent at half that age so it does not lapse while its record is live. watch: [] turns that off, since something that cannot change is meant to lapse."),
         new("After a restart", "The first poll re-places what is still there, over the top of itself, because a marker's id comes from the record's id rather than being random. Nothing accumulates."),
         new("Airtime", "A feed sends only what actually changed, so it is not charged against the script budget. watch: is what keeps that true."),
         new("Dry run", "Applies here too: every place, update and removal is logged and nothing is transmitted."),

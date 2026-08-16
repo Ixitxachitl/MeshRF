@@ -18,8 +18,8 @@ starts transmitting because you copied it.
 | [ping.yaml](ping.yaml) | nothing | Answers `!ping` with a signal report. |
 | [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
 | [lightning-waypoint.yaml](lightning-waypoint.yaml) | Xweather id + secret | Drops a waypoint on the nearest lightning strike within 30 miles. |
-| [lightning-sync.yaml](lightning-sync.yaml) | Xweather id + secret | Mirrors recent nearby strikes as point markers, retiring each as it ages out. |
 | [wildfire-waypoint.yaml](wildfire-waypoint.yaml) | nothing | Drops a waypoint on the nearest active Watch Duty fire. |
+| [lightning-sync.yaml](lightning-sync.yaml) | Xweather id + secret | Mirrors recent nearby strikes as point markers, retiring each as it ages out. |
 | [wildfire-sync.yaml](wildfire-sync.yaml) | nothing | Mirrors *every* nearby Watch Duty fire, keeping markers in step as they change and retiring them when they go out. |
 
 The last two are **feed syncs** rather than a script: instead of answering an
@@ -27,6 +27,12 @@ event, it keeps a set of waypoints in step with a list. It places a marker for
 each record it has not seen, resends one whose watched fields changed, and
 retires one that has gone. That last part is why it cannot be a script — a
 record leaving a feed is not an event anything can trigger on.
+
+Each is paired with a script above it that reads the same feed. The script marks
+the one nearest you; the sync mirrors the lot. A sync also says whether its
+records can change: the fire sync watches acreage and containment, while the
+lightning sync declares `watch: []` — a strike is a moment, so its marker is
+placed once and never resent.
 
 Read a sync's header before enabling it: how many markers it can place depends
 on how busy the feed is, and a storm makes far more lightning than a fire

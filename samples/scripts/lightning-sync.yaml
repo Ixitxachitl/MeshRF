@@ -46,8 +46,9 @@ sync:
   # ignored, and says out loud what the script is for.
   within: 30mi
 
-  # Empty on purpose: a strike is a moment, not a thing that changes. Without
-  # the key at all the editor would warn that nothing can ever update.
+  # Empty on purpose: a strike is a moment, not a thing that changes. Nothing
+  # is ever resent, and a marker is placed once and retired once. Without the
+  # key at all the editor would warn that nothing can ever update.
   watch: []
 
   waypoint:

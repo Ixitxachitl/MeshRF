@@ -339,6 +339,9 @@ public static class ScriptParser
             LongitudePath = lonPath,
             WithinMetres = within,
             WatchPaths = watch,
+            // An explicit empty list is a statement that the records never
+            // change, which is different from not having said.
+            Immutable = watchGiven && watch.Count == 0,
             Waypoint = waypoint,
             Expires = waypoint.Expires,
         });

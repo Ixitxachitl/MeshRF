@@ -175,6 +175,10 @@ public sealed class FeedSyncEngine
 
                 present.Add(id);
 
+                // Declared immutable: already placed is already correct, and
+                // there is nothing a second send could say.
+                if (sync.Immutable && feed.Seen.ContainsKey(id)) continue;
+
                 var expansion = new ScriptExpansion(new ScriptEvent { Self = self, At = now }) { Item = raw };
                 var name = ScriptTemplate.ClampToPayload(expansion.Expand(sync.Waypoint.Name));
                 var description = ScriptTemplate.ClampToPayload(expansion.Expand(sync.Waypoint.Description));

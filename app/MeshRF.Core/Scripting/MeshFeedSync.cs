@@ -62,6 +62,19 @@ public sealed class MeshFeedSync
     /// </remarks>
     public IReadOnlyList<string> WatchPaths { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// The records never change, declared by an explicit empty <c>watch:</c>.
+    /// A marker is placed once and retired once, and nothing between.
+    /// </summary>
+    /// <remarks>
+    /// A lightning strike is a moment: it has no later state to catch up with,
+    /// so re-sending its marker could only put the same bytes on the air twice.
+    /// This also turns off the refresh that would otherwise keep a marker alive
+    /// past half its expiry — for something immutable, lapsing on time is the
+    /// intended end rather than something to prevent.
+    /// </remarks>
+    public bool Immutable { get; init; }
+
     /// <summary>The marker to place. Its name and description are templates
     /// over <c>{item.*}</c>.</summary>
     public ScriptWaypoint Waypoint { get; init; } = new();
