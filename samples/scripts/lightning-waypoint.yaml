@@ -6,9 +6,7 @@
 #   Parameter      client_id        Value      your Xweather client id
 #   2nd parameter  client_secret    2nd value  your Xweather client secret
 #
-# Xweather also issues a single API key. It is not used here: a bearer header
-# was rejected with invalid_client, and the id/secret pair is what this endpoint
-# accepts.
+# Xweather also issues a single API key; this endpoint wants the id/secret pair.
 #
 # The search is centred on this node's home location (My Node -> Home), so
 # there is nothing to edit when you move.

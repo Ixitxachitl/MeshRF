@@ -12,10 +12,9 @@
 # They are also sent unlocked, so anyone who receives one can delete it; this
 # node may be switched off long before the fire is.
 #
-# The field names and headers come from a working Home Assistant integration
-# against the same endpoint. The reply is a bare array, lat and lng are top
-# level, acreage and containment are under data, and closed incidents are
-# returned too, which is what active: filters on.
+# The reply is a bare array — lat and lng at the top level, acreage and
+# containment under data — and it includes closed incidents, which is what
+# active: filters out.
 
 enabled: false
 
@@ -25,7 +24,7 @@ sync:
   every: 15m
 
   url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
-  # Not optional: without these the endpoint answers 406 Not Acceptable.
+  # Required: the endpoint refuses a request without them.
   headers:
     Accept: "application/json, text/plain, */*"
     User-Agent: "MeshRF/2 (https://github.com/Ixitxachitl/MeshRF)"

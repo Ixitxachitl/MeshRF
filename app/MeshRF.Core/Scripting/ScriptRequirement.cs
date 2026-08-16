@@ -157,11 +157,9 @@ public sealed class ScriptRequirement
     /// node's home location.
     /// </summary>
     /// <remarks>
-    /// Needed because not every API can narrow by distance itself. Watch Duty's
-    /// returns every active incident and leaves the filtering to the caller —
-    /// its Home Assistant integration runs the same haversine against each
-    /// zone. Without this a script could only mark whichever fire happened to
-    /// come back first, wherever it was.
+    /// Not every API can narrow by distance itself; some return everything and
+    /// leave the filtering to the caller. Without this a script could only act
+    /// on whichever record happened to come back first, wherever it was.
     /// </remarks>
     private bool WithinRange(string value, ScriptSelf self, out string detail)
     {
