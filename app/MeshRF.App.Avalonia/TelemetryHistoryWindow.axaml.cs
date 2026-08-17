@@ -29,11 +29,23 @@ public partial class TelemetryHistoryWindow : Window
 
     /// <summary>Opens the window for a peer, or focuses the one already open —
     /// mirrors MeshRF.App, which keeps one history window per conversation.</summary>
+    // One window per conversation. Without this every click opened another
+    // copy of the same history, and closing them was the only way back.
+    private static readonly Dictionary<uint, TelemetryHistoryWindow> s_open = new();
+
     public static void Show(Window owner, ConversationTabViewModel conversation)
     {
+        if (s_open.TryGetValue(conversation.NodeNum, out var existing))
+        {
+            existing.Activate();
+            return;
+        }
+
         conversation.EnsureHistoryLoaded();
 
         var w = new TelemetryHistoryWindow { DataContext = conversation };
+        s_open[conversation.NodeNum] = w;
+        w.Closed += (_, _) => s_open.Remove(conversation.NodeNum);
         w.Title = $"Telemetry History — {conversation.TabHeader}";
 
         w.DeviceGraph.SetSeries(

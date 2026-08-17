@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Collections.Specialized;
 using Avalonia.Controls;
 
 namespace MeshRF.AvaloniaApp;
@@ -28,8 +29,19 @@ public partial class LocationHistoryWindow : Window
         _conversation.ClearLocationHistoryCommand.Execute(null);
     }
 
+    // One window per conversation, as above. This one also has to unsubscribe:
+    // the CollectionChanged handler below outlives the window otherwise, so
+    // every open left another dead window's handler firing on the live history.
+    private static readonly Dictionary<uint, LocationHistoryWindow> s_open = new();
+
     public static void Show(Window owner, ConversationTabViewModel conversation)
     {
+        if (s_open.TryGetValue(conversation.NodeNum, out var existing))
+        {
+            existing.Activate();
+            return;
+        }
+
         conversation.EnsureHistoryLoaded();
 
         var w = new LocationHistoryWindow
@@ -41,7 +53,15 @@ public partial class LocationHistoryWindow : Window
 
         // The map needs a size before it can fit the track, so wait for layout.
         w.Opened += (_, _) => w.RefreshTrack();
-        conversation.LocationHistory.CollectionChanged += (_, _) => w.RefreshTrack();
+        void OnHistoryChanged(object? s, NotifyCollectionChangedEventArgs e) => w.RefreshTrack();
+        conversation.LocationHistory.CollectionChanged += OnHistoryChanged;
+
+        s_open[conversation.NodeNum] = w;
+        w.Closed += (_, _) =>
+        {
+            conversation.LocationHistory.CollectionChanged -= OnHistoryChanged;
+            s_open.Remove(conversation.NodeNum);
+        };
 
         w.Show(owner);
     }
