@@ -724,6 +724,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         MyHwModel = string.IsNullOrEmpty(savedUserHwModel) ? MyHwModel : savedUserHwModel;
         MyPublicKey = savedUserPublicKey;
         MyPrivateKey = savedUserPrivateKey;
+        // Repair a pair that disagrees on disk — a hand-edited settings.json, or
+        // one written before the private key re-derived its public half. Called
+        // explicitly rather than left to the assignment above, whose change
+        // handler only fires when the value actually differs from the default
+        // and would otherwise make this depend on the order of these two lines.
+        SyncPublicKeyToPrivateKey();
         MyNodeStatus = savedUserNodeStatus;
         HopLimit = savedHopLimit > 0 ? savedHopLimit : HopLimit;
         OkToMqtt = savedOkToMqtt;
@@ -1381,8 +1387,35 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasLicensedEncryptedChannelWarning));
     }
     partial void OnMyIsUnmessagableChanged(bool value) { SaveSettings(); RefreshSelfNode(); }
-    partial void OnMyPublicKeyChanged(string value) => SaveSettings();
-    partial void OnMyPrivateKeyChanged(string value) => SaveSettings();
+    // The self node record embeds the public key and derives our node number
+    // from it, so a key change has to reach the node store like any other
+    // identity edit — otherwise the grid keeps reporting the old key's
+    // derived-node-number match.
+    partial void OnMyPublicKeyChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+
+    partial void OnMyPrivateKeyChanged(string value)
+    {
+        SyncPublicKeyToPrivateKey();
+        SaveSettings();
+    }
+
+    /// <summary>
+    /// Re-derive the public key whenever the private key changes. The private
+    /// key is editable so an identity can be imported from a real node, and the
+    /// public key is a pure function of it — leaving a stale one behind breaks
+    /// PKI messaging silently in both directions, since the stale key is what
+    /// NodeInfo advertises for peers to encrypt to while we decrypt with the
+    /// new private key. Nothing on the air reports that mismatch.
+    ///
+    /// A private key that is absent or not 32 bytes leaves the pair untouched:
+    /// that is a field mid-edit, not an instruction to clear the public key.
+    /// </summary>
+    private void SyncPublicKeyToPrivateKey()
+    {
+        if (!Curve25519.TryGetPublicKeyBase64(MyPrivateKey, out var derived)) return;
+        if (!string.Equals(derived, MyPublicKey, StringComparison.Ordinal))
+            MyPublicKey = derived;
+    }
     partial void OnMyNodeStatusChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnHopLimitChanged(int value) => SaveSettings();
     partial void OnOkToMqttChanged(bool value) => SaveSettings();

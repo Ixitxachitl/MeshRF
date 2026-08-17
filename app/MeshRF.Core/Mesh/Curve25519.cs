@@ -54,6 +54,45 @@ public static class Curve25519
     }
 
     /// <summary>
+    /// Derive the base64 public key that belongs to a base64 private key, for
+    /// keeping a stored pair consistent. The public key is a pure function of
+    /// the private one, so a stored pair that disagrees does not describe two
+    /// choices — it means the public half is simply wrong, and repairing it is
+    /// the only way PKI direct messages can work: the public key is what peers
+    /// are told to encrypt to, while decryption uses the private key.
+    ///
+    /// False when the private key is missing or not 32 bytes — a half-typed or
+    /// cleared field, where the existing public key should be left alone rather
+    /// than blanked. Unclamped input still derives correctly, so a key imported
+    /// from another implementation works.
+    /// </summary>
+    public static bool TryGetPublicKeyBase64(string? privateKeyBase64,
+                                             out string publicKeyBase64)
+    {
+        publicKeyBase64 = string.Empty;
+        if (string.IsNullOrWhiteSpace(privateKeyBase64)) return false;
+
+        byte[] priv;
+        try { priv = Convert.FromBase64String(privateKeyBase64.Trim()); }
+        catch (FormatException) { return false; }
+
+        if (priv.Length != 32)
+        {
+            CryptographicOperations.ZeroMemory(priv);
+            return false;
+        }
+        try
+        {
+            publicKeyBase64 = Convert.ToBase64String(GetPublicKey(priv));
+            return true;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(priv);
+        }
+    }
+
+    /// <summary>
     /// Compute the raw X25519 shared secret between our <paramref name="privateKey"/>
     /// and a peer's <paramref name="peerPublicKey"/> (both 32 bytes) — the
     /// <c>Curve25519::dh2</c> step the Meshtastic firmware performs. The caller
