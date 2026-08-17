@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Collections.Specialized;
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
@@ -89,11 +90,32 @@ public sealed class TelemetryGraph : UserControl
         _plot.Configure(_series, _points);
     }
 
+    /// <summary>
+    /// Points to plot. When the list raises change notifications the pane
+    /// follows them, so deleting a sample or hearing a new one redraws without
+    /// the caller having to ask — the list is live, and a graph that only drew
+    /// once showed the state at the moment the window opened.
+    /// </summary>
     public void SetPoints(IReadOnlyList<TelemetryHistoryPoint> points)
     {
+        if (ReferenceEquals(_points, points)) return;
+
+        // Detach from the previous list first: SetPoints can be called again
+        // for the same pane, and a stale subscription would keep redrawing this
+        // graph from a collection it no longer shows.
+        if (_points is INotifyCollectionChanged oldNotifier)
+            oldNotifier.CollectionChanged -= OnPointsChanged;
+
         _points = points;
+
+        if (_points is INotifyCollectionChanged notifier)
+            notifier.CollectionChanged += OnPointsChanged;
+
         _plot.Configure(_series, _points);
     }
+
+    private void OnPointsChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        _plot.Configure(_series, _points);
 
     /// <summary>The drawing surface. Separate from the control so the legend and
     /// title stay ordinary layout while only this part is custom-rendered.</summary>
