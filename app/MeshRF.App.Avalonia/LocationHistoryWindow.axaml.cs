@@ -29,6 +29,37 @@ public partial class LocationHistoryWindow : Window
         _conversation.ClearLocationHistoryCommand.Execute(null);
     }
 
+    private void OnGridKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key != Avalonia.Input.Key.Delete) return;
+        e.Handled = true;
+        _ = DeleteSelectedAsync(sender as DataGrid);
+    }
+
+    private void OnDeleteSelected(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        _ = DeleteSelectedAsync(PointsGrid);
+
+    /// <summary>
+    /// Deletes whatever is selected, after confirming. The selection is copied
+    /// out first: removing from the bound collection changes the grid's own
+    /// SelectedItems underneath the loop.
+    /// </summary>
+    private async Task DeleteSelectedAsync(DataGrid? grid)
+    {
+        if (_conversation is null || grid is null) return;
+
+        var points = grid.SelectedItems.OfType<LocationHistoryPoint>().ToList();
+        if (points.Count == 0) return;
+
+        if (!await ConfirmDialog.ConfirmAsync(this, "Delete positions",
+                $"Delete {points.Count} recorded position{(points.Count == 1 ? "" : "s")} for {_conversation.PeerName}? This cannot be undone.",
+                confirmText: "Delete"))
+            return;
+
+        _conversation.DeleteLocationHistoryPoints(points);
+        RefreshTrack();
+    }
+
     // One window per conversation, as above. This one also has to unsubscribe:
     // the CollectionChanged handler below outlives the window otherwise, so
     // every open left another dead window's handler firing on the live history.

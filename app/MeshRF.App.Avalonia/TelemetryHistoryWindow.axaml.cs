@@ -27,6 +27,45 @@ public partial class TelemetryHistoryWindow : Window
         convo.ClearTelemetryHistoryCommand.Execute(null);
     }
 
+    private void OnGridKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key != Avalonia.Input.Key.Delete) return;
+        e.Handled = true;
+        _ = DeleteSelectedAsync(sender as DataGrid);
+    }
+
+    /// <summary>The menu item sits inside the grid's own ContextMenu, so the
+    /// grid it belongs to is the one that owns the menu — four panes share this
+    /// handler and each has to delete from itself.</summary>
+    private void OnDeleteSelected(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        // PlacementTarget is the grid the menu was opened over, which is the
+        // only reliable way back: the four panes share this handler.
+        var menu = (sender as MenuItem)?.Parent as ContextMenu;
+        _ = DeleteSelectedAsync(menu?.PlacementTarget as DataGrid);
+    }
+
+    /// <summary>
+    /// Deletes whatever is selected in one pane, after confirming. A sample can
+    /// appear in only one pane, so deleting from the pane it is shown in is the
+    /// whole story — but the removal still reaches every collection, since the
+    /// view model keeps the combined list alongside the per-pane ones.
+    /// </summary>
+    private async Task DeleteSelectedAsync(DataGrid? grid)
+    {
+        if (DataContext is not ConversationTabViewModel convo || grid is null) return;
+
+        var points = grid.SelectedItems.OfType<TelemetryHistoryPoint>().ToList();
+        if (points.Count == 0) return;
+
+        if (!await ConfirmDialog.ConfirmAsync(this, "Delete telemetry",
+                $"Delete {points.Count} recorded snapshot{(points.Count == 1 ? "" : "s")} for {convo.PeerName}? This cannot be undone.",
+                confirmText: "Delete"))
+            return;
+
+        convo.DeleteTelemetryHistoryPoints(points);
+    }
+
     /// <summary>Opens the window for a peer, or focuses the one already open —
     /// mirrors MeshRF.App, which keeps one history window per conversation.</summary>
     // One window per conversation. Without this every click opened another
