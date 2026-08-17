@@ -868,7 +868,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         {
             _pendingAcks.Remove(header.PacketId);
             SettleDelivery(pending.Message, MessageDelivery.Delivered);
-            Log($"  relayed by {NodeDisplayName(header.From)} — channel message {header.PacketId:x8} reached the mesh");
+            Log($"  relayed by {RelayDisplayName(header.RelayNode)} — channel message {header.PacketId:x8} reached the mesh");
             return;
         }
 
@@ -878,8 +878,31 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (pending.Message.Delivery != MessageDelivery.Sent) return;
 
         SettleDelivery(pending.Message, MessageDelivery.DeliveredToMesh);
-        Log($"  relayed by {NodeDisplayName(header.From)} — direct message {header.PacketId:x8} reached the mesh, "
+        Log($"  relayed by {RelayDisplayName(header.RelayNode)} — direct message {header.PacketId:x8} reached the mesh, "
             + "waiting on the recipient");
+    }
+
+    /// <summary>
+    /// Names the station that put a relayed frame back on the air. A rebroadcast
+    /// keeps the original sender in <c>from</c> — us, on our own echo — so the
+    /// relayer is only identifiable by relay_node, and that is just the low byte
+    /// of its node number. A name is claimed only when exactly one known node
+    /// ends in that byte; otherwise the byte itself is all we can honestly say.
+    /// </summary>
+    private string RelayDisplayName(byte relayByte)
+    {
+        uint match = 0;
+        int hits = 0;
+        foreach (var node in _nodeStore.All())
+        {
+            // We never relay our own transmissions, so a match on our own node
+            // is a neighbour that happens to share our low byte, not us.
+            if (node.NodeNum == MyNodeNum) continue;
+            if ((node.NodeNum & 0xFF) != relayByte) continue;
+            if (++hits > 1) break;
+            match = node.NodeNum;
+        }
+        return hits == 1 ? NodeDisplayName(match) : $"relay 0x{relayByte:X2}";
     }
 
     /// <summary>
