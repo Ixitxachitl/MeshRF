@@ -333,6 +333,27 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public void PlayIncomingRingtone() =>
         _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
 
+    /// <summary>
+    /// Sounds a script's <c>ring:</c> action. Each part falls back to the app's
+    /// configured setting, so a script that asks for neither is exactly the
+    /// alert the operator already tuned.
+    /// </summary>
+    /// <remarks>
+    /// The play mode is deliberately not scriptable: Off means the operator has
+    /// turned ringing off altogether, and a script should not be able to
+    /// override that. It is the one setting here that is a decision rather than
+    /// a preference.
+    /// </remarks>
+    private void PlayScriptRingtone(MeshRF.Scripting.ScriptRingtone? ring)
+    {
+        var mode = ParseRingtoneMode(RingtoneMode);
+        if (mode == MeshRF.RingtoneMode.Off) return;
+
+        string tune = ring is null || ring.UsesConfiguredTune ? RingtoneRtttl : ring.Tune;
+        double volume = (ring?.VolumePercent ?? RingtoneVolume) / 100.0;
+        _ringtone.Play(tune, mode, Math.Clamp(volume, 0.0, 1.0));
+    }
+
     partial void OnRingtoneModeChanged(string value) => SaveSettings();
     partial void OnRingtoneVolumeChanged(double value) => SaveSettings();
     partial void OnRingtoneRtttlChanged(string value) => SaveSettings();

@@ -163,6 +163,8 @@ public enum ScriptActionKind
     Delay,
     /// <summary>Write a line to the app log. Transmits nothing.</summary>
     Log,
+    /// <summary>Sound the ringtone on this machine. Transmits nothing.</summary>
+    Ring,
 }
 
 public sealed record ScriptAction
@@ -194,6 +196,9 @@ public sealed record ScriptAction
 
     /// <summary>The test, for <see cref="ScriptActionKind.Require"/>.</summary>
     public ScriptRequirement? Require { get; init; }
+
+    /// <summary>The tune, for <see cref="ScriptActionKind.Ring"/>.</summary>
+    public ScriptRingtone? Ringtone { get; init; }
 
     /// <summary>
     /// Optional gate: this one action runs only while the test holds, and the

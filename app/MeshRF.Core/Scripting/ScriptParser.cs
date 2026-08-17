@@ -30,7 +30,9 @@ public static class ScriptParser
 
     private static readonly string[] ActionKinds =
         ["reply", "send", "react", "position", "nodeinfo", "traceroute", "http", "waypoint", "require",
-         "delay", "log"];
+         "delay", "log", "ring"];
+
+    private static readonly string[] RingKeys = ["tune", "volume"];
 
     private static readonly string[] WaypointKeys =
         ["lat", "lon", "name", "description", "icon", "radius", "expires",
@@ -861,11 +863,14 @@ public static class ScriptParser
         // These carry their options in a nested mapping; every other action
         // takes a bare scalar, so siblings are always a mistake there — except
         // when:, which any action may carry.
-        if (kind is not ("send" or "http" or "waypoint" or "require"))
+        if (kind is not ("send" or "http" or "waypoint" or "require" or "ring"))
             RejectUnknownKeys(map, [.. kinds, "when"], "action option", problems);
 
         switch (kind)
         {
+            case "ring":
+                return ParseRing(value, line, column, problems);
+
             case "reply":
             case "log":
             {
@@ -1206,6 +1211,71 @@ public static class ScriptParser
     }
 
     /// <summary>Parses a <c>waypoint:</c> action.</summary>
+    /// <summary>
+    /// Parses a <c>ring:</c> action in either shape: a bare scalar naming the
+    /// tune, or a mapping adding volume. Both readings are natural, and the
+    /// scalar form keeps the common "just make a noise" case to one line.
+    /// </summary>
+    private static ScriptAction? ParseRing(
+        YamlNode value, int line, int column, List<ScriptProblem> problems)
+    {
+        string tune = string.Empty;
+        int? volume = null;
+
+        if (value is YamlScalarNode)
+        {
+            var text = AsScalar(value, problems, "ring");
+            if (text is null) return null;
+            tune = NormalizeRingTune(text);
+        }
+        else if (value is YamlMappingNode map)
+        {
+            RejectUnknownKeys(map, RingKeys, "ring option", problems);
+
+            if (ReadString(map, "tune", problems) is { } t)
+                tune = NormalizeRingTune(t);
+
+            if (ReadString(map, "volume", problems) is { } v)
+            {
+                if (!int.TryParse(v.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int pct)
+                    || pct < 0 || pct > 100)
+                {
+                    problems.Add(ScriptProblem.Error(line, column,
+                        "ring: volume must be a whole number from 0 to 100"));
+                    return null;
+                }
+                volume = pct;
+            }
+        }
+        else
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                "ring: takes a tune, 'default', or indented tune:/volume: entries"));
+            return null;
+        }
+
+        return new ScriptAction
+        {
+            Kind = ScriptActionKind.Ring,
+            Ringtone = new ScriptRingtone { Tune = tune, VolumePercent = volume },
+            Line = line,
+        };
+    }
+
+    /// <summary>
+    /// Empty for the app's configured ringtone, otherwise the RTTTL as written.
+    /// "default" is accepted as a word so a script can ask for the configured
+    /// tune out loud rather than by omission — and so `ring: default` reads as
+    /// an instruction rather than an oversight.
+    /// </summary>
+    private static string NormalizeRingTune(string text)
+    {
+        var trimmed = text.Trim();
+        return string.Equals(trimmed, "default", StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : trimmed;
+    }
+
     private static ScriptAction? ParseWaypoint(
         YamlNode value, int line, int column, List<ScriptProblem> problems)
     {

@@ -488,6 +488,11 @@ public sealed class ScriptEngine
                 return new ResolvedAction(
                     ScriptActionKind.Log, action.Text, 0, string.Empty, 0, TimeSpan.Zero);
 
+            case ScriptActionKind.Ring:
+                return new ResolvedAction(
+                    ScriptActionKind.Ring, string.Empty, 0, string.Empty, 0, TimeSpan.Zero,
+                    Ringtone: action.Ringtone);
+
             default:
                 return null;
         }

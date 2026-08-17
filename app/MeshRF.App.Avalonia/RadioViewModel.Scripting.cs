@@ -477,6 +477,12 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 continue;
             }
 
+            if (action.Kind == ScriptActionKind.Ring)
+            {
+                PlayScriptRingtone(action.Ringtone);
+                continue;
+            }
+
             if (action.Kind == ScriptActionKind.Http)
             {
                 if (!await FetchAsync(run, action, cancellation)) return;

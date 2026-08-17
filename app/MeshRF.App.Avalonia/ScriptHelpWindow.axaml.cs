@@ -118,6 +118,7 @@ public partial class ScriptHelpWindow : Window
         new("when:", "Optional on any action: run this one only while a test holds, and carry on with the rest either way. Takes the same value:/comparison keys as require:, so two replies with opposite when: entries is how a script chooses between them."),
         new("delay: 30s", "Wait before the next action. Maximum 1h."),
         new("log: \"text\"", "Write a line to the MeshRF log. Transmits nothing — useful while testing."),
+        new("ring: default", "Sound the ringtone on this machine. Transmits nothing. Use 'default' for the ringtone configured in settings, or give RTTTL to play something else. Indent tune:/volume: entries to set both; volume is 0-100 and defaults to the configured one. Never sounds while the ringtone mode is Off."),
     ];
 
     public IReadOnlyList<HelpRow> Placeholders { get; } =

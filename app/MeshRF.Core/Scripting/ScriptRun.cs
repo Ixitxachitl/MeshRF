@@ -30,14 +30,16 @@ public sealed record ResolvedAction(
     ScriptHttpRequest? Http = null,
     ScriptWaypoint? Waypoint = null,
     ScriptRequirement? Require = null,
-    ScriptRequirement? When = null)
+    ScriptRequirement? When = null,
+    ScriptRingtone? Ringtone = null)
 {
     /// <summary>Whether this action puts a frame on the air. http: makes a
-    /// network request and require: only decides, so neither counts against the
-    /// airtime budget.</summary>
+    /// network request, require: only decides, and ring: is a noise on this
+    /// machine, so none count against the airtime budget.</summary>
     public bool Transmits =>
         Kind is not (ScriptActionKind.Delay or ScriptActionKind.Log
-                     or ScriptActionKind.Http or ScriptActionKind.Require);
+                     or ScriptActionKind.Http or ScriptActionKind.Require
+                     or ScriptActionKind.Ring);
 
     /// <summary>One-line description for the log, e.g.
     /// <c>reply to !a1b2c3d4: "pong — 7 dB"</c>. Takes the already-expanded
