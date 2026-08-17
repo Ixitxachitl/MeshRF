@@ -382,20 +382,27 @@ public partial class RadioViewModel
         AutoReportNodeStatusSeconds = Clamp(_settings.AutoReportNodeStatusSeconds);
     }
 
-    private void StoreAutoReportSettings()
+    /// <summary>
+    /// Writes the schedules onto <paramref name="s"/>, which is not always the
+    /// <c>_settings</c> field: SaveSettings persists a copy freshly loaded from
+    /// the file, so anything written to the field instead of the target reaches
+    /// memory and never the disk. Takes the target explicitly for that reason,
+    /// like StoreNodeFilterSettings and SaveMqttSettings beside it.
+    /// </summary>
+    private void StoreAutoReportSettings(AppSettings s)
     {
-        _settings.AutoReportNodeInfoEnabled = AutoReportNodeInfoEnabled;
-        _settings.AutoReportNodeInfoSeconds = Clamp(AutoReportNodeInfoSeconds);
-        _settings.AutoReportPositionEnabled = AutoReportPositionEnabled;
-        _settings.AutoReportPositionSeconds = Clamp(AutoReportPositionSeconds);
-        _settings.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
-        _settings.AutoReportDeviceMetricsSeconds = Clamp(AutoReportDeviceMetricsSeconds);
-        _settings.AutoReportEnvironmentMetricsEnabled = AutoReportEnvironmentMetricsEnabled;
-        _settings.AutoReportEnvironmentMetricsSeconds = Clamp(AutoReportEnvironmentMetricsSeconds);
-        _settings.AutoReportAirQualityMetricsEnabled = AutoReportAirQualityMetricsEnabled;
-        _settings.AutoReportAirQualityMetricsSeconds = Clamp(AutoReportAirQualityMetricsSeconds);
-        _settings.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
-        _settings.AutoReportNodeStatusSeconds = Clamp(AutoReportNodeStatusSeconds);
+        s.AutoReportNodeInfoEnabled = AutoReportNodeInfoEnabled;
+        s.AutoReportNodeInfoSeconds = Clamp(AutoReportNodeInfoSeconds);
+        s.AutoReportPositionEnabled = AutoReportPositionEnabled;
+        s.AutoReportPositionSeconds = Clamp(AutoReportPositionSeconds);
+        s.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
+        s.AutoReportDeviceMetricsSeconds = Clamp(AutoReportDeviceMetricsSeconds);
+        s.AutoReportEnvironmentMetricsEnabled = AutoReportEnvironmentMetricsEnabled;
+        s.AutoReportEnvironmentMetricsSeconds = Clamp(AutoReportEnvironmentMetricsSeconds);
+        s.AutoReportAirQualityMetricsEnabled = AutoReportAirQualityMetricsEnabled;
+        s.AutoReportAirQualityMetricsSeconds = Clamp(AutoReportAirQualityMetricsSeconds);
+        s.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
+        s.AutoReportNodeStatusSeconds = Clamp(AutoReportNodeStatusSeconds);
     }
 
     private void UpdateAutoReportSummary()

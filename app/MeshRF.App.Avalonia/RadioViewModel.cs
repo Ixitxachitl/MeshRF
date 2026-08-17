@@ -1564,7 +1564,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// exactly as loaded, so concurrent MeshRF.App edits survive.</summary>
     private void ApplyOwnedSettings(AppSettings settings)
     {
-        var _settings = settings; // shadow so the assignments below read naturally
+        // Shadow so the assignments below read naturally. The shadow only
+        // covers this method body: a helper called from here that writes to the
+        // field instead of taking the target lands in memory and never on disk,
+        // which is how the auto-report schedules went unsaved. Every helper
+        // below therefore takes the target explicitly — keep it that way.
+        var _settings = settings;
         _settings.RxDeviceKind = SelectedDevice.ToString();
         _settings.TxDeviceKind = SelectedTxDevice.ToString();
         _settings.Preset = SelectedPreset.ToString();
@@ -1605,7 +1610,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.MutedRingtoneChannels = Tabs.OfType<ChannelTabViewModel>()
             .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
         _settings.MapNodeLabelMode = MapNodeLabelMode;
-        StoreAutoReportSettings();
+        StoreAutoReportSettings(_settings);
         _settings.ScriptsEnabled = ScriptsEnabled;
         _settings.ScriptsDryRun = ScriptsDryRun;
         // Must be here, not merely mutated in place: SaveSettings writes a copy
