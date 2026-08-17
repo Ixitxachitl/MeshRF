@@ -588,6 +588,40 @@ public sealed class NodeStore : IDisposable
         }
     }
 
+    /// <summary>Deletes several rows in one transaction. A selection of a few
+    /// hundred points is one commit rather than one per row.</summary>
+    public void DeleteLocationHistory(IReadOnlyCollection<long> ids) =>
+        DeleteHistoryRows("node_location_history", ids);
+
+    /// <summary>Deletes several rows in one transaction, as above.</summary>
+    public void DeleteTelemetryHistory(IReadOnlyCollection<long> ids) =>
+        DeleteHistoryRows("node_telemetry_history", ids);
+
+    /// <summary>
+    /// Shared row-delete for the two history tables. The table name is a
+    /// compile-time literal from the two callers above, never caller input, and
+    /// the ids are bound as parameters.
+    /// </summary>
+    private void DeleteHistoryRows(string table, IReadOnlyCollection<long> ids)
+    {
+        ThrowIfDisposed();
+        if (ids.Count == 0) return;
+        lock (_gate)
+        {
+            using var tx = _conn.BeginTransaction();
+            using var cmd = _conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = $"DELETE FROM {table} WHERE id = $id";
+            var p = cmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Integer);
+            foreach (var id in ids)
+            {
+                p.Value = id;
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
     public void ClearLocationHistory(uint nodeNum)
     {
         ThrowIfDisposed();

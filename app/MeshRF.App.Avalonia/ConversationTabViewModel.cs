@@ -301,4 +301,30 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
         RemoveTelemetryPoint(point);
         RaiseHistoryFlags();
     }
+
+    /// <summary>
+    /// Removes a selection of positions in one go. Snapshotted by the caller
+    /// before this runs, since removing from the bound collection mutates the
+    /// grid's own selection as it goes.
+    /// </summary>
+    public void DeleteLocationHistoryPoints(IReadOnlyList<LocationHistoryPoint> points)
+    {
+        if (points.Count == 0) return;
+
+        var ids = points.Where(p => p.Id != 0).Select(p => p.Id).ToList();
+        if (ids.Count > 0) _nodeStore?.DeleteLocationHistory(ids);
+        foreach (var p in points) LocationHistory.Remove(p);
+        RaiseHistoryFlags();
+    }
+
+    /// <summary>Removes a selection of telemetry samples in one go.</summary>
+    public void DeleteTelemetryHistoryPoints(IReadOnlyList<TelemetryHistoryPoint> points)
+    {
+        if (points.Count == 0) return;
+
+        var ids = points.Where(p => p.Id != 0).Select(p => p.Id).ToList();
+        if (ids.Count > 0) _nodeStore?.DeleteTelemetryHistory(ids);
+        foreach (var p in points) RemoveTelemetryPoint(p);
+        RaiseHistoryFlags();
+    }
 }
