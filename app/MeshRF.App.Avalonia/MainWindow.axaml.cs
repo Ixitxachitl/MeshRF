@@ -665,6 +665,9 @@ public partial class MainWindow : Window
             await _viewModel.DeleteWaypointCommand.ExecuteAsync(wp);
     }
 
+    private void OnOpenRingtoneSettings(object? sender, RoutedEventArgs e) =>
+        RingtoneSettingsWindow.Show(this, _viewModel);
+
     private async void OnEditWaypoint(object? sender, RoutedEventArgs e)
     {
         if (WaypointsGridProxy.SelectedItem is not WaypointRecord wp) return;

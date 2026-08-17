@@ -313,6 +313,14 @@ public sealed class AppSettings
     public string RingtoneRtttl { get; set; } =
         "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p";
 
+    /// <summary>
+    /// Tone for a geofence enter/exit crossing, kept separate from the message
+    /// ringtone: a crossing is a background event worth a short chime, not the
+    /// insistent alert that a message addressed to you deserves. Shares the
+    /// ringtone's mode and volume.
+    /// </summary>
+    public string GeofenceRtttl { get; set; } = "chirp:d=32,o=5,b=160:c,e,g";
+
     // -- Map viewport ------------------------------------------------------
 
     public double? MapCenterLat { get; set; }

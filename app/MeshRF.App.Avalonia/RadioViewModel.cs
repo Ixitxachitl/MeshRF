@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -313,6 +313,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _ringtoneRtttl = IRingtonePlayer.MeshtasticDefault;
 
+    /// <summary>Tone for a geofence crossing. A short chime by default: a
+    /// crossing is worth noticing, not worth the insistent alert a message
+    /// addressed to you gets. Shares the ringtone's mode and volume, so
+    /// silencing one silences both.</summary>
+    public const string DefaultGeofenceRtttl = "chirp:d=32,o=5,b=160:c,e,g";
+
+    [ObservableProperty]
+    private string _geofenceRtttl = DefaultGeofenceRtttl;
+
     /// <summary>Map the display name to the enum, matching MeshRF.App's labels.
     /// Fully qualified because the RingtoneMode property above shadows the
     /// enum type name inside this class.</summary>
@@ -332,6 +341,25 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <summary>Play the incoming-message alert, unless it's muted.</summary>
     public void PlayIncomingRingtone() =>
         _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+
+    /// <summary>Puts both tunes back to stock. Mode and volume are left alone:
+    /// they are how loud and how long the operator wants alerts, which is a
+    /// separate decision from which tune plays.</summary>
+    [RelayCommand]
+    private void RestoreDefaultTones()
+    {
+        RingtoneRtttl = IRingtonePlayer.MeshtasticDefault;
+        GeofenceRtttl = DefaultGeofenceRtttl;
+    }
+
+    [RelayCommand]
+    private void TestGeofenceTone() =>
+        _ringtone.Play(GeofenceRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+
+    /// <summary>Play the geofence crossing chime. Shares the ringtone's mode
+    /// and volume so the Off setting silences crossings too.</summary>
+    public void PlayGeofenceTone() =>
+        _ringtone.Play(GeofenceRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
 
     /// <summary>
     /// Sounds a script's <c>ring:</c> action. Each part falls back to the app's
@@ -357,6 +385,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnRingtoneModeChanged(string value) => SaveSettings();
     partial void OnRingtoneVolumeChanged(double value) => SaveSettings();
     partial void OnRingtoneRtttlChanged(string value) => SaveSettings();
+    partial void OnGeofenceRtttlChanged(string value) => SaveSettings();
 
     [ObservableProperty]
     private uint _pendingReplyPacketId;
@@ -611,6 +640,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedRingtoneMode = _settings.RingtoneMode;
         var savedRingtoneVolume = _settings.RingtoneVolume;
         var savedRingtoneRtttl = _settings.RingtoneRtttl;
+        var savedGeofenceRtttl = _settings.GeofenceRtttl;
         var savedLastSelectedChannelIndex = _settings.LastSelectedChannelIndex;
         var savedSelectedConversationNode = _settings.SelectedConversationNode;
 
@@ -654,6 +684,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.OpenConversationsChanged += SaveOpenConversations;
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
         _rxHost.IncomingChannelMessage += PlayIncomingRingtone;
+        _rxHost.GeofenceCrossed += PlayGeofenceTone;
         _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
         _rxHost.TelemetryReplyRequested += HandleTelemetryReplyRequest;
         _rxHost.AckRequested += SendAck;
@@ -776,6 +807,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (RingtoneModes.Contains(savedRingtoneMode)) RingtoneMode = savedRingtoneMode;
         RingtoneVolume = savedRingtoneVolume;
         if (!string.IsNullOrWhiteSpace(savedRingtoneRtttl)) RingtoneRtttl = savedRingtoneRtttl;
+        if (!string.IsNullOrWhiteSpace(savedGeofenceRtttl)) GeofenceRtttl = savedGeofenceRtttl;
         LoadNodeFilterSettings(_settings);
         // Must precede the gate below: the SaveSettings() there writes every
         // field this app owns, so loading after it would persist the
@@ -1628,6 +1660,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.RingtoneMode = RingtoneMode;
         _settings.RingtoneVolume = (int)Math.Round(RingtoneVolume);
         _settings.RingtoneRtttl = RingtoneRtttl;
+        _settings.GeofenceRtttl = GeofenceRtttl;
         _settings.MutedRingtoneChannels = Tabs.OfType<ChannelTabViewModel>()
             .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
         _settings.MapNodeLabelMode = MapNodeLabelMode;

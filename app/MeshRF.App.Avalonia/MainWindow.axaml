@@ -442,27 +442,29 @@
             </WrapPanel>
         </Border>
 
-        <!-- Toolbar row 4: ringtone for incoming direct messages. -->
+        <!-- Toolbar row 4: alert sounds. The tunes themselves live in the
+             Sounds dialog — two RTTTL strings are far too wide for a toolbar,
+             and there are two of them now. -->
         <Border DockPanel.Dock="Top"
                 Background="{DynamicResource BrushPanelBackground}"
                 BorderBrush="{DynamicResource BrushPanelBorder}"
                 BorderThickness="0,0,0,1"
                 Padding="4,1">
             <WrapPanel>
-                <TextBlock Text="Ringtone" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
+                <TextBlock Text="Sounds" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding RingtoneModes}" SelectedItem="{Binding RingtoneMode}"
                           FontSize="11" Width="100" Height="26" Margin="0,0,10,2"
-                          ToolTip.Tip="How long the alert tone plays when a direct message arrives" />
+                          ToolTip.Tip="How long an alert tone plays. Off silences every alert, including a script's ring: action." />
                 <TextBlock Text="Volume" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <Slider Width="120" Minimum="0" Maximum="100" TickFrequency="5"
                         Value="{Binding RingtoneVolume}" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <TextBlock Width="36" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,2"
                            Text="{Binding RingtoneVolume, StringFormat='{}{0:F0}%'}" />
-                <TextBlock Text="RTTTL" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
-                <TextBox Text="{Binding RingtoneRtttl}" FontSize="11" Width="520" Height="26" Margin="0,0,4,2"
-                         ToolTip.Tip="Ringtone in Meshtastic RTTTL format" />
+                <Button Content="Tones…" FontSize="11" Height="26" Margin="0,0,4,2"
+                        Click="OnOpenRingtoneSettings"
+                        ToolTip.Tip="Edit the message and geofence tunes" />
                 <Button Content="Preview" FontSize="11" Height="26" Margin="0,0,0,2"
-                        Command="{Binding TestRingtoneCommand}" ToolTip.Tip="Preview the current ringtone" />
+                        Command="{Binding TestRingtoneCommand}" ToolTip.Tip="Preview the message tone" />
             </WrapPanel>
         </Border>
 

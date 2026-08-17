@@ -1,0 +1,64 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.RingtoneSettingsWindow"
+        x:DataType="app:RadioViewModel"
+        Title="Sounds"
+        Width="700" Height="420"
+        MinWidth="560" MinHeight="360"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="12" ColumnDefinitions="Auto,*"
+              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+
+            <TextBlock Grid.Row="0" Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,0,0,10"
+                       Foreground="{DynamicResource BrushSubtle}" FontSize="11"
+                       Text="Both tunes are Meshtastic RTTTL, the same format the firmware's external notification module takes. Mode and volume apply to both — setting the mode to Off silences everything, including scripts." />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Mode" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4" Width="160" HorizontalAlignment="Left"
+                      ItemsSource="{Binding RingtoneModes}" SelectedItem="{Binding RingtoneMode, Mode=TwoWay}"
+                      ToolTip.Tip="How long a tune plays for. Off silences every alert, including a script's ring: action." />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Volume" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="2" Grid.Column="1" Margin="0,4,0,4">
+                <TextBlock DockPanel.Dock="Right" Width="44" VerticalAlignment="Center"
+                           Text="{Binding RingtoneVolume, StringFormat='{}{0:F0}%'}" />
+                <Slider Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                        Value="{Binding RingtoneVolume, Mode=TwoWay}" VerticalAlignment="Center" />
+            </DockPanel>
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Message tone" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,4,0,4">
+                <Button DockPanel.Dock="Right" Content="Test" Margin="6,0,0,0" Padding="10,2"
+                        Command="{Binding TestRingtoneCommand}"
+                        ToolTip.Tip="Preview the message tone" />
+                <TextBox FontFamily="Consolas" FontSize="11"
+                         Text="{Binding RingtoneRtttl, Mode=TwoWay}"
+                         ToolTip.Tip="Sounded for a direct message, and for channel traffic that is not muted." />
+            </DockPanel>
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Geofence tone" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="4" Grid.Column="1" Margin="0,4,0,4">
+                <Button DockPanel.Dock="Right" Content="Test" Margin="6,0,0,0" Padding="10,2"
+                        Command="{Binding TestGeofenceToneCommand}"
+                        ToolTip.Tip="Preview the geofence tone" />
+                <TextBox FontFamily="Consolas" FontSize="11"
+                         Text="{Binding GeofenceRtttl, Mode=TwoWay}"
+                         ToolTip.Tip="Sounded when a node enters or leaves a waypoint's geofence. A short chime by default, so a crossing reads differently from someone talking to you." />
+            </DockPanel>
+
+            <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap"
+                       Foreground="{DynamicResource BrushSubtle}" FontSize="11"
+                       Text="Default geofence chime: chirp:d=32,o=5,b=160:c,e,g" />
+
+            <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                <Button Content="Restore defaults" Padding="10,3"
+                        Command="{Binding RestoreDefaultTonesCommand}"
+                        ToolTip.Tip="Put both tunes back to the stock Meshtastic ringtone and the default geofence chime. Mode and volume are left alone." />
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Window>

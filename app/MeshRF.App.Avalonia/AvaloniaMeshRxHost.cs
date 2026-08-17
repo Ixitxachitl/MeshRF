@@ -134,6 +134,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// muted, from a node that's neither ignored nor individually muted.</summary>
     public Action? IncomingChannelMessage { get; set; }
 
+    /// <summary>Sounded for a geofence crossing. Separate from the message
+    /// alerts so a crossing can be a short chime rather than the ringtone that
+    /// announces someone talking to you.</summary>
+    public Action? GeofenceCrossed { get; set; }
+
     /// <summary>Raised when a directed request we're the target of wants an
     /// auto-reply (NodeInfo/Position/Telemetry/Traceroute). The owner (which
     /// holds the transmit-capable MeshtasticCore) wires this up; left null
@@ -1401,7 +1406,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         PersistChannelNote(wp.Channel, text);
 
         if (!chanTab.MuteRtttl && !IsNodeIgnored(nodeNum) && !IsNodeRtttlMuted(nodeNum))
-            IncomingChannelMessage?.Invoke();
+            GeofenceCrossed?.Invoke();
     }
 
     /// <summary>Stores an app-generated, channel-scoped note (a geofence alert)
