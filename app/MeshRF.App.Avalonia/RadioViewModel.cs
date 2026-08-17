@@ -493,6 +493,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         string.Equals(UnitSystemName, "Imperial", StringComparison.OrdinalIgnoreCase)
             ? UnitSystem.Imperial : UnitSystem.Metric;
 
+    /// <summary>The system the editable unit-bearing fields were last written
+    /// in. Tracked rather than inferred, because a toggle has to convert their
+    /// text and <see cref="CurrentUnitSystem"/> already reads as the new one by
+    /// the time the change handler runs.</summary>
+    private UnitSystem _inputUnitSystem = UnitSystem.Metric;
+
     // The unit system alone drives temperature and distance display (as in
     // MeshRF.App); the legacy per-quantity settings are kept in sync with it.
     public bool UseImperial => CurrentUnitSystem == UnitSystem.Imperial;
@@ -1479,6 +1485,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         foreach (var node in _rxHost.Nodes) node.NotifyChanged();
         foreach (var wp in _rxHost.Waypoints) wp.NotifyChanged();
         UpdateAutoReportSummary();
+        // Marker tooltips carry altitudes and geofence radii, and are built
+        // fresh in GetMapMarkers() — so the map has to be asked to re-render or
+        // it keeps showing the previous units until something else moves.
+        RaiseMapDataChanged();
     }
 
     partial void OnUnitSystemNameChanged(string value)
@@ -1486,6 +1496,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Metric mode uses European date/time conventions everywhere dates
         // are rendered (grids, chat bubbles, log stamps, history windows).
         UiFormats.European = CurrentUnitSystem == UnitSystem.Metric;
+        // Re-express what is already typed into the unit-bearing fields, so a
+        // 100 m radius becomes 328 ft rather than being reread as 100 ft.
+        WaypointGeofenceRadiusInput = DisplayUnits.ConvertShortDistanceText(
+            WaypointGeofenceRadiusInput, _inputUnitSystem, CurrentUnitSystem);
+        _inputUnitSystem = CurrentUnitSystem;
         // Skipped mid-construction: nothing is rendered yet, and the explicit
         // UiFormats sync after settings load covers the initial state.
         if (_settingsLoaded) RefreshUnitDependentDisplays();
@@ -1495,6 +1510,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(UseMiles));
         OnPropertyChanged(nameof(HomeAltitudeLabel));
         OnPropertyChanged(nameof(NodeDistanceUnitShort));
+        OnPropertyChanged(nameof(WaypointGeofenceRadiusLabel));
         SaveSettings();
     }
 

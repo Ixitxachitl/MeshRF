@@ -38,6 +38,10 @@ public partial class WaypointEditWindow : Window
 
     private uint _myNodeNum;
 
+    /// <summary>Units the radius field is read and written in. The waypoint
+    /// itself always carries metres.</summary>
+    private UnitSystem _unitSystem = UnitSystem.Metric;
+
     private string _icon = string.Empty;
 
     public WaypointEditWindow()
@@ -45,16 +49,18 @@ public partial class WaypointEditWindow : Window
         InitializeComponent();
     }
 
-    public static async Task<WaypointEditResult?> EditAsync(Window owner, WaypointRecord wp, uint myNodeNum)
+    public static async Task<WaypointEditResult?> EditAsync(Window owner, WaypointRecord wp, uint myNodeNum,
+                                                            UnitSystem unitSystem)
     {
         var win = new WaypointEditWindow();
-        win.Load(wp, myNodeNum);
+        win.Load(wp, myNodeNum, unitSystem);
         await win.ShowDialog(owner);
         return win._result;
     }
 
-    private void Load(WaypointRecord wp, uint myNodeNum)
+    private void Load(WaypointRecord wp, uint myNodeNum, UnitSystem unitSystem)
     {
+        _unitSystem = unitSystem;
         _myNodeNum = myNodeNum;
         _icon = wp.IconText;
         ShowIcon();
@@ -83,9 +89,9 @@ public partial class WaypointEditWindow : Window
         ExpiryTimePicker.SelectedTime = expiry.TimeOfDay;
 
         UseGeofenceBox.IsChecked = wp.HasCircularGeofence;
-        GeofenceRadiusBox.Text = wp.GeofenceRadius > 0
-            ? wp.GeofenceRadius.ToString(CultureInfo.InvariantCulture)
-            : "100";
+        GeofenceRadiusLabel.Text = $"Radius ({DisplayUnits.ShortDistanceUnitShort(unitSystem)})";
+        GeofenceRadiusBox.Text = DisplayUnits.FormatShortDistanceInput(
+            wp.GeofenceRadius > 0 ? wp.GeofenceRadius : 100u, unitSystem);
         NotifyOnEnterBox.IsChecked = wp.NotifyOnEnter;
         NotifyOnExitBox.IsChecked = wp.NotifyOnExit;
         NotifyFavoritesOnlyBox.IsChecked = wp.NotifyFavoritesOnly;
@@ -139,12 +145,16 @@ public partial class WaypointEditWindow : Window
         uint geofenceRadius = 0;
         if (UseGeofenceBox.IsChecked == true)
         {
-            if (!uint.TryParse(GeofenceRadiusBox.Text, NumberStyles.Integer,
-                               CultureInfo.InvariantCulture, out geofenceRadius) || geofenceRadius == 0)
+            // Read in the display units and converted to the metres the
+            // waypoint carries, so the error has to name the unit it wanted.
+            var unit = DisplayUnits.ShortDistanceUnitShort(_unitSystem);
+            if (DisplayUnits.ParseShortDistanceInput(GeofenceRadiusBox.Text, _unitSystem)
+                    is not uint parsedRadius || parsedRadius == 0)
             {
-                ShowError("Geofence radius must be a whole number of meters above 0.");
+                ShowError($"Geofence radius must be a number of {unit} above 0.");
                 return;
             }
+            geofenceRadius = parsedRadius;
         }
 
         double? bboxWest = null, bboxSouth = null, bboxEast = null, bboxNorth = null;

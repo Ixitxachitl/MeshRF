@@ -41,7 +41,8 @@ public partial class MapPanel : UserControl
         if (_viewModel is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        var result = await WaypointEditWindow.EditAsync(owner, wp, _viewModel.MyNodeNumber);
+        var result = await WaypointEditWindow.EditAsync(owner, wp, _viewModel.MyNodeNumber,
+                                                       _viewModel.CurrentUnitSystem);
         if (result is null) return;
         await _viewModel.UpdateWaypointAsync(wp, result);
     }

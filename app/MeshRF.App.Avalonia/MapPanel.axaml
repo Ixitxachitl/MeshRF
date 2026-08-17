@@ -157,9 +157,9 @@
                     <StackPanel Orientation="Vertical" Margin="0,2,0,0" Spacing="2"
                                 IsEnabled="{Binding UseWaypointGeofence}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Radius (m)" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding WaypointGeofenceRadiusLabel}" VerticalAlignment="Center" />
                             <TextBox Width="80" Text="{Binding WaypointGeofenceRadiusInput, Mode=TwoWay}"
-                                     ToolTip.Tip="Circular geofence radius in meters" />
+                                     ToolTip.Tip="Circular geofence radius, in your selected display units. Sent as metres, which is what Waypoint.geofence_radius carries." />
                         </StackPanel>
                         <CheckBox Content="Notify on enter" IsChecked="{Binding WaypointNotifyOnEnter, Mode=TwoWay}" />
                         <CheckBox Content="Notify on exit" IsChecked="{Binding WaypointNotifyOnExit, Mode=TwoWay}" />

@@ -90,6 +90,74 @@ public static class DisplayUnits
             : (int)Math.Round(parsed);
     }
 
+    /// <summary>
+    /// A metre-scale distance the user configured — a geofence radius, say — in
+    /// the display units. Deliberately not the same as the position-precision
+    /// buckets below, which round to the nearest 10 m because they describe how
+    /// far a location has been fuzzed; showing a geofence typed as 25 m back as
+    /// "30 m" would misreport the user's own setting.
+    /// </summary>
+    public static string FormatShortDistance(double meters, UnitSystem unitSystem)
+    {
+        if (IsImperial(unitSystem))
+        {
+            var feet = meters * FeetPerMeter;
+            // Threshold tested against the rounded value, so the branch and the
+            // number printed agree: exactly one mile lands a hair under 5280 ft
+            // in binary and would otherwise render as "5280 ft" with the miles
+            // branch sitting right there unused.
+            //
+            // Whole feet: this is a unit conversion, so it carries the value
+            // across rather than rounding it into a bucket.
+            return Math.Round(feet) >= 5280 ? $"{feet / 5280d:0.##} mi" : $"{feet:0} ft";
+        }
+        return meters >= 1000 ? $"{meters / 1000d:0.###} km" : $"{meters:0.#} m";
+    }
+
+    /// <summary>Unit for metre-scale distances — a geofence radius rather than
+    /// a range between nodes, which is in km/miles.</summary>
+    public static string ShortDistanceUnitShort(UnitSystem unitSystem) =>
+        IsImperial(unitSystem) ? "ft" : "m";
+
+    /// <summary>
+    /// A metre-scale distance as the bare number for an editable field, with no
+    /// unit attached — the label carries that. Whole units, because the field is
+    /// a whole number of metres on the wire.
+    /// </summary>
+    public static string FormatShortDistanceInput(uint meters, UnitSystem unitSystem) =>
+        IsImperial(unitSystem)
+            ? Math.Round(meters * FeetPerMeter).ToString("F0", CultureInfo.InvariantCulture)
+            : meters.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Read a metre-scale field back to metres, the unit the protobuf carries.
+    /// Null when the text is not a usable number, so a caller can tell "empty or
+    /// malformed" from a real zero.
+    /// </summary>
+    public static uint? ParseShortDistanceInput(string? text, UnitSystem unitSystem)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (!double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            return null;
+        if (parsed < 0) return null;
+
+        var meters = IsImperial(unitSystem) ? parsed / FeetPerMeter : parsed;
+        var rounded = Math.Round(meters);
+        return rounded > uint.MaxValue ? null : (uint)rounded;
+    }
+
+    /// <summary>
+    /// Re-express a metre-scale field's text when the unit system changes, so a
+    /// value the user typed keeps its real-world size instead of being reread as
+    /// the new unit. Empty or malformed text is left alone.
+    /// </summary>
+    public static string ConvertShortDistanceText(string? text, UnitSystem fromUnits, UnitSystem toUnits)
+    {
+        if (fromUnits == toUnits || string.IsNullOrWhiteSpace(text)) return text ?? string.Empty;
+        if (ParseShortDistanceInput(text, fromUnits) is not uint meters) return text;
+        return FormatShortDistanceInput(meters, toUnits);
+    }
+
     public static double ConvertDistanceInputToKm(double distance, UnitSystem unitSystem) =>
         IsImperial(unitSystem) ? distance * KmPerMile : distance;
 

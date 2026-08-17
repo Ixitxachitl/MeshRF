@@ -170,12 +170,15 @@ public partial class RadioViewModel
           .Append("\nFrom ").Append(_rxHost.NodeDisplayName(wp.FromNode))
           .Append('\n').Append(wp.Latitude.ToString("F5", CultureInfo.InvariantCulture))
           .Append(", ").Append(wp.Longitude.ToString("F5", CultureInfo.InvariantCulture));
-        if (wp.AltitudeM is int alt) sb.Append("  ").Append(alt).Append(" m");
+        if (wp.AltitudeM is int alt)
+            sb.Append("  ").Append(DisplayUnits.FormatAltitude(alt, CurrentUnitSystem));
         if (!string.IsNullOrWhiteSpace(wp.Description)) sb.Append('\n').Append(wp.Description);
         if (wp.LockedTo != 0)
             sb.Append("\nLocked to !").Append(wp.LockedTo.ToString("x8", CultureInfo.InvariantCulture));
         if (wp.GeofenceRadius > 0)
-            sb.Append("\nGeofence: ").Append(wp.GeofenceRadius).Append(" m radius");
+            sb.Append("\nGeofence: ")
+              .Append(DisplayUnits.FormatShortDistance(wp.GeofenceRadius, CurrentUnitSystem))
+              .Append(" radius");
         if (wp.BboxWest is double bw && wp.BboxSouth is double bs &&
             wp.BboxEast is double be && wp.BboxNorth is double bn)
             sb.Append("\nGeofence box: ")
@@ -231,7 +234,14 @@ public partial class RadioViewModel
     [ObservableProperty] private TimeSpan? _waypointExpiryTime = new TimeSpan(12, 0, 0);
 
     [ObservableProperty] private bool _useWaypointGeofence;
+    /// <summary>In the display units, not necessarily metres — see
+    /// <see cref="WaypointGeofenceRadiusLabel"/> for which.</summary>
     [ObservableProperty] private string _waypointGeofenceRadiusInput = "100";
+
+    /// <summary>Names the unit the radius box is read in, so the field can be
+    /// typed in feet without the protobuf's metres leaking into the UI.</summary>
+    public string WaypointGeofenceRadiusLabel =>
+        $"Radius ({DisplayUnits.ShortDistanceUnitShort(CurrentUnitSystem)})";
     [ObservableProperty] private bool _waypointNotifyOnEnter;
     [ObservableProperty] private bool _waypointNotifyOnExit;
     [ObservableProperty] private bool _waypointNotifyFavoritesOnly;
@@ -299,8 +309,8 @@ public partial class RadioViewModel
     private uint BuildWaypointGeofenceRadius()
     {
         if (!UseWaypointGeofence) return 0;
-        return uint.TryParse(WaypointGeofenceRadiusInput, NumberStyles.Integer,
-                             CultureInfo.InvariantCulture, out var r) ? r : 0u;
+        // Typed in the display units; the protobuf field is always metres.
+        return DisplayUnits.ParseShortDistanceInput(WaypointGeofenceRadiusInput, CurrentUnitSystem) ?? 0u;
     }
 
     private static uint? EmojiToCodePoint(string? emoji)
