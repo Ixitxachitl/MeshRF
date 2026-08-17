@@ -287,7 +287,17 @@ public partial class RadioViewModel
             relativeHumidityPct: weather.RelativeHumidityPct,
             barometricPressureHpa: weather.BarometricPressureHpa,
             to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
-        StatusText = await TransmitFrameAsync(frame) ? "Sent environment metrics." : "Transmit failed.";
+        if (await TransmitFrameAsync(frame))
+        {
+            StatusText = "Sent environment metrics.";
+            _rxHost.RecordSelfTelemetry(new MeshTelemetry
+            {
+                TemperatureC = weather.TemperatureC,
+                RelativeHumidityPct = weather.RelativeHumidityPct,
+                BarometricPressureHpa = weather.BarometricPressureHpa,
+            });
+        }
+        else StatusText = "Transmit failed.";
     }
 
     [RelayCommand]
@@ -310,7 +320,16 @@ public partial class RadioViewModel
         var frame = MeshEncoder.EncodeTelemetryAirQualityMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
             pm25Standard: aq.Pm25Standard, pm100Standard: aq.Pm100Standard,
             to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
-        StatusText = await TransmitFrameAsync(frame) ? "Sent air quality metrics." : "Transmit failed.";
+        if (await TransmitFrameAsync(frame))
+        {
+            StatusText = "Sent air quality metrics.";
+            _rxHost.RecordSelfTelemetry(new MeshTelemetry
+            {
+                Pm25Standard = aq.Pm25Standard,
+                Pm100Standard = aq.Pm100Standard,
+            });
+        }
+        else StatusText = "Transmit failed.";
     }
 
     // ----- Auto-report schedules -----

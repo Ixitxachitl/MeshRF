@@ -1112,6 +1112,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                         header.From,
                         DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime,
                         result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM);
+                EvaluateGeofenceCrossing(header.From, result.Position.Latitude, result.Position.Longitude);
                 MarkNodeDirty(header.From);
                 break;
 
@@ -1341,6 +1342,130 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     private bool IsNodeRtttlMuted(uint nodeNum) => _nodeStore.Get(nodeNum)?.MuteRtttl == true;
+
+    // Whether a node was last seen inside a given geofence, keyed by waypoint
+    // and node. Only a change of state is an event, so the previous answer has
+    // to be remembered; without it every position report inside a fence would
+    // alert again.
+    private readonly Dictionary<(long WaypointId, uint NodeNum), bool> _geofenceInsideState = new();
+
+    /// <summary>
+    /// Raises enter/exit alerts for a node's new position. Called for received
+    /// positions and for our own, so a fence around home reports us arriving
+    /// the same way it reports anyone else.
+    /// </summary>
+    /// <remarks>
+    /// The first position seen for a (fence, node) pair records state without
+    /// alerting: with no prior reading there is no crossing, and treating an
+    /// unknown as "outside" would fire a spurious enter for every node already
+    /// sitting inside a fence when the app starts.
+    /// </remarks>
+    public void EvaluateGeofenceCrossing(uint nodeNum, double lat, double lon)
+    {
+        if (nodeNum == 0 || Waypoints.Count == 0) return;
+
+        foreach (var wp in Waypoints)
+        {
+            if (!wp.HasGeofence || wp.IsExpired) continue;
+            if (!wp.NotifyOnEnter && !wp.NotifyOnExit) continue;
+            if (wp.NotifyFavoritesOnly && _nodeStore.Get(nodeNum)?.Favorite != true) continue;
+
+            bool inside = Geofence.Contains(wp, lat, lon);
+            var key = (wp.Id, nodeNum);
+            bool hadPrior = _geofenceInsideState.TryGetValue(key, out bool wasInside);
+            _geofenceInsideState[key] = inside;
+            if (!hadPrior || inside == wasInside) continue;
+
+            if (inside && wp.NotifyOnEnter) RaiseGeofenceAlert(wp, nodeNum, entered: true);
+            else if (!inside && wp.NotifyOnExit) RaiseGeofenceAlert(wp, nodeNum, entered: false);
+        }
+    }
+
+    /// <summary>Posts a crossing to the waypoint's channel, persists it so it
+    /// survives a restart, and rings unless the channel or the node is
+    /// muted — the same rules ordinary channel traffic follows.</summary>
+    private void RaiseGeofenceAlert(WaypointRecord wp, uint nodeNum, bool entered)
+    {
+        string text = $"{NodeDisplayName(nodeNum)} {(entered ? "entered" : "exited")} geofence \"{wp.DisplayName}\"";
+        Log($"  geofence: {text}");
+
+        if (ResolveChannelTab(wp.Channel) is not { } chanTab) return;
+
+        chanTab.Messages.Add(new ChannelMessage
+        {
+            FromId = string.IsNullOrWhiteSpace(wp.Name) ? "Geofence" : wp.Name,
+            Text = text,
+        });
+        while (chanTab.Messages.Count > MaxMessagesPerTab) chanTab.Messages.RemoveAt(0);
+        MarkTabNeedsAttention(chanTab);
+        PersistChannelNote(wp.Channel, text);
+
+        if (!chanTab.MuteRtttl && !IsNodeIgnored(nodeNum) && !IsNodeRtttlMuted(nodeNum))
+            IncomingChannelMessage?.Invoke();
+    }
+
+    /// <summary>Stores an app-generated, channel-scoped note (a geofence alert)
+    /// so it survives a reload. Filed on the note port with the channel in the
+    /// channel column, the same way DM-scoped notes are.</summary>
+    private void PersistChannelNote(string channelName, string text)
+    {
+        if (string.IsNullOrWhiteSpace(channelName)) return;
+        try
+        {
+            _messageStore.Add(new MessageRecord
+            {
+                PacketId = (uint)Random.Shared.NextInt64(1, uint.MaxValue),
+                FromNode = 0,
+                ToNode = MyNodeNum,
+                Channel = channelName,
+                PortNum = MessageStore.ConversationNotePort,
+                Text = text,
+                Decrypted = true,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Delivery = (int)MessageDelivery.None,
+            });
+        }
+        catch (Exception ex) { Log($"geofence note store failed: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Files a position this node has just sent, the way receiving one files
+    /// it. A transmission is never decoded back, so without this our own track
+    /// is the only one the history never records.
+    /// </summary>
+    public void RecordSelfPosition(double latitude, double longitude, int? altitudeM)
+    {
+        if (MyNodeNum == 0) return;
+
+        var now = DateTimeOffset.UtcNow;
+        var previous = _nodeStore.Get(MyNodeNum);
+        bool moved = previous?.Latitude != latitude || previous?.Longitude != longitude;
+
+        _nodeStore.Upsert(new NodeRecord
+        {
+            NodeNum = MyNodeNum,
+            LastHeardEpoch = now.ToUnixTimeSeconds(),
+            Latitude = latitude,
+            Longitude = longitude,
+            AltitudeM = altitudeM,
+        });
+        // Same "only when it moved" rule the receive path uses: position is
+        // re-sent on a timer, and storing every repeat would bury real movement.
+        if (moved)
+            _nodeStore.AddLocationHistory(MyNodeNum, now.UtcDateTime, latitude, longitude, altitudeM);
+
+        EvaluateGeofenceCrossing(MyNodeNum, latitude, longitude);
+        MarkNodeDirty(MyNodeNum);
+    }
+
+    /// <summary>Files telemetry this node has just sent, as receiving it would.
+    /// Shares RecordTelemetryHistory's duplicate suppression.</summary>
+    public void RecordSelfTelemetry(MeshTelemetry telemetry)
+    {
+        if (MyNodeNum == 0) return;
+        RecordTelemetryHistory(MyNodeNum, telemetry, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        MarkNodeDirty(MyNodeNum);
+    }
 
     /// <summary>
     /// Files a waypoint this node has just sent, the way receiving one files it.

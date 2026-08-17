@@ -2183,7 +2183,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             altitudeM: alt, precisionBits: channel.PositionPrecision,
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
-        StatusText = await TransmitFrameAsync(frame) ? "Sent position." : "Transmit failed.";
+        if (await TransmitFrameAsync(frame))
+        {
+            StatusText = "Sent position.";
+            // Only on a successful send: a refused transmit never went on the
+            // air, so recording it would put a point in our track that no peer
+            // ever heard.
+            _rxHost.RecordSelfPosition(lat, lon, alt);
+        }
+        else StatusText = "Transmit failed.";
     }
 
     [RelayCommand]
@@ -2198,7 +2206,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             batteryLevel: 101, // 101 = "powered from mains", same sentinel MeshRF.App uses on AC.
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
-        StatusText = await TransmitFrameAsync(frame) ? "Sent device metrics." : "Transmit failed.";
+        if (await TransmitFrameAsync(frame))
+        {
+            StatusText = "Sent device metrics.";
+            _rxHost.RecordSelfTelemetry(new MeshTelemetry { BatteryLevel = 101 });
+        }
+        else StatusText = "Transmit failed.";
     }
 
     [RelayCommand]
