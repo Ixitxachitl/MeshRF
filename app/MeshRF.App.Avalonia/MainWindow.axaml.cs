@@ -534,6 +534,20 @@ public partial class MainWindow : Window
         LocationHistoryWindow.Show(this, _viewModel.HistoryConversationFor(node.NodeNum));
     }
 
+    // The DM tab's own DataContext is the conversation, so it is already the
+    // instance HistoryConversationFor would hand back for an open tab.
+    private void OnOpenConversationTelemetryHistory(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ConversationTabViewModel convo }) return;
+        TelemetryHistoryWindow.Show(this, convo);
+    }
+
+    private void OnOpenConversationLocationHistory(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ConversationTabViewModel convo }) return;
+        LocationHistoryWindow.Show(this, convo);
+    }
+
     private void OnOpenSelfTelemetryHistory(object? sender, RoutedEventArgs e) =>
         TelemetryHistoryWindow.Show(this, _viewModel.HistoryConversationFor(_viewModel.MyNodeNumber));
 

@@ -1167,9 +1167,19 @@
                                                     Click="OnClearConversationMessages"
                                                     ToolTip.Tip="Clear this conversation from the view" />
                                             <ToggleButton DockPanel.Dock="Right" Content="Mute Ringtone"
-                                                          Padding="6,1" VerticalAlignment="Center"
+                                                          Padding="6,1" VerticalAlignment="Center" Margin="4,0,0,0"
                                                           IsChecked="{Binding MuteRtttl, Mode=TwoWay}"
                                                           ToolTip.Tip="Mute the incoming ringtone for this node" />
+                                            <!-- This peer's recorded history, the counterpart of the
+                                                 My Node buttons and the node grid's menu entries. -->
+                                            <Button DockPanel.Dock="Right" Content="Location" Padding="6,1"
+                                                    VerticalAlignment="Center" Margin="4,0,0,0"
+                                                    Click="OnOpenConversationLocationHistory"
+                                                    ToolTip.Tip="This node's recorded location history" />
+                                            <Button DockPanel.Dock="Right" Content="Telemetry" Padding="6,1"
+                                                    VerticalAlignment="Center" Margin="4,0,0,0"
+                                                    Click="OnOpenConversationTelemetryHistory"
+                                                    ToolTip.Tip="This node's recorded telemetry history" />
                                             <StackPanel>
                                                 <TextBlock FontWeight="SemiBold" Text="{Binding PeerName}" />
                                                 <TextBlock FontFamily="Consolas" Text="{Binding PeerId}"
