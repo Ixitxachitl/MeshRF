@@ -151,6 +151,72 @@ TEST(Sx126xProfiles, BothBoardsShareAWiringButNotAPowerModel) {
     EXPECT_EQ(toad.max_out_dbm, 30);
 }
 
+TEST(Sx126xTxBand, PermitsAFrequencyInsideTheDeclaredBand) {
+    std::string reason = "unset";
+    EXPECT_TRUE(hal::sx126x_tx_frequency_permitted(913'125'000, 902'000'000,
+                                                   928'000'000, reason));
+    EXPECT_EQ(reason, "unset") << "a permitted frequency must not write a reason";
+
+    // Both edges are inclusive: a region's band start and end are legal places
+    // to sit, and rejecting them would make the top and bottom slots unusable.
+    EXPECT_TRUE(hal::sx126x_tx_frequency_permitted(902'000'000, 902'000'000,
+                                                   928'000'000, reason));
+    EXPECT_TRUE(hal::sx126x_tx_frequency_permitted(928'000'000, 902'000'000,
+                                                   928'000'000, reason));
+}
+
+TEST(Sx126xTxBand, RefusesOutsideTheDeclaredBandAndSaysWhy) {
+    std::string reason;
+    // The case this exists for: an 868 or 915 stick pointed at 433, where the
+    // front end is hundreds of MHz off and the PA sees a bad load.
+    EXPECT_FALSE(hal::sx126x_tx_frequency_permitted(433'500'000, 902'000'000,
+                                                    928'000'000, reason));
+    EXPECT_NE(reason.find("433.5"), std::string::npos) << reason;
+    EXPECT_NE(reason.find("902"), std::string::npos) << reason;
+
+    reason.clear();
+    EXPECT_FALSE(hal::sx126x_tx_frequency_permitted(901'000'000, 902'000'000,
+                                                    928'000'000, reason));
+    EXPECT_FALSE(reason.empty());
+}
+
+TEST(Sx126xTxBand, EnforcesTheChipRangeEvenWithNoBandDeclared) {
+    // Zero limits mean the operator's region was never pushed down. That must
+    // not gate ordinary transmits, but the chip's own range still holds — it is
+    // a property of the silicon, not of anyone's front end.
+    std::string reason = "unset";
+    EXPECT_TRUE(hal::sx126x_tx_frequency_permitted(915'000'000, 0, 0, reason));
+    EXPECT_EQ(reason, "unset");
+
+    // 2.4 GHz is the reachable-by-accident case: Region.LORA_24 is in the UI's
+    // list, belongs to the SX1280, and would otherwise program a PLL word the
+    // radio cannot lock and report success having radiated nothing.
+    reason.clear();
+    EXPECT_FALSE(hal::sx126x_tx_frequency_permitted(2'450'000'000, 0, 0, reason));
+    EXPECT_FALSE(reason.empty());
+
+    reason.clear();
+    EXPECT_FALSE(hal::sx126x_tx_frequency_permitted(100'000'000, 0, 0, reason));
+    EXPECT_FALSE(reason.empty());
+}
+
+TEST(Sx126xTxBand, ChipRangeBeatsAnOverwideDeclaredBand) {
+    // A caller declaring a band the chip cannot serve must not widen what the
+    // radio will do: the chip check runs first and independently.
+    std::string reason;
+    EXPECT_FALSE(hal::sx126x_tx_frequency_permitted(2'450'000'000, 1'000'000,
+                                                    6'000'000'000, reason));
+    EXPECT_NE(reason.find("SX1262"), std::string::npos) << reason;
+}
+
+TEST(Sx126xTxBand, ChipRangeEdgesAreInclusive) {
+    std::string reason;
+    EXPECT_TRUE(hal::sx126x_tx_frequency_permitted(hal::kSx126xMinFreqHz, 0, 0, reason));
+    EXPECT_TRUE(hal::sx126x_tx_frequency_permitted(hal::kSx126xMaxFreqHz, 0, 0, reason));
+    EXPECT_FALSE(hal::sx126x_tx_frequency_permitted(hal::kSx126xMinFreqHz - 1, 0, 0, reason));
+    EXPECT_FALSE(hal::sx126x_tx_frequency_permitted(hal::kSx126xMaxFreqHz + 1, 0, 0, reason));
+}
+
 TEST(Sx126xAirtime, MatchesTheSemtechFormulaForLongFast) {
     // SF11 / 250 kHz / 4-5, 16-symbol preamble, explicit header, CRC on:
     // 20.25 preamble symbols + 38 payload symbols at 8.192 ms each.

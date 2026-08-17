@@ -97,6 +97,35 @@ public static class ChannelPlan
         _                       => "Invalid",
     };
 
+    /// <summary>
+    /// True when <paramref name="mhz"/> falls inside the region's band. Used to
+    /// gate SX1262 transmits: a stick's front end is built for one band and
+    /// reports nothing about which, so the selected region is the only
+    /// statement of it available. Every slot this class produces is in band, so
+    /// this only ever rejects a hand-entered frequency or a stale saved one.
+    /// </summary>
+    public static bool Contains(Region region, double mhz)
+    {
+        var range = Range(region);
+        // A hair of tolerance so a frequency sitting exactly on a band edge
+        // isn't rejected by double rounding.
+        const double eps = 1e-6;
+        return mhz >= range.FreqStartMHz - eps && mhz <= range.FreqEndMHz + eps;
+    }
+
+    /// <summary>
+    /// True when two regions' bands touch at all. A move between overlapping
+    /// bands (say US to ANZ) is a retune the hardware handles; a move between
+    /// disjoint ones (US to EU_433) means the stick is either the wrong one for
+    /// the new region or about to drive its PA hundreds of MHz off-band.
+    /// </summary>
+    public static bool BandsOverlap(Region a, Region b)
+    {
+        var ra = Range(a);
+        var rb = Range(b);
+        return ra.FreqStartMHz <= rb.FreqEndMHz && rb.FreqStartMHz <= ra.FreqEndMHz;
+    }
+
     public static int SlotCount(Region region, LoraPreset preset)
     {
         var range = Range(region);

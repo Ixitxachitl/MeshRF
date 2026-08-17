@@ -158,6 +158,45 @@ std::int8_t sx126x_chip_power_dbm(const Sx126xBoardProfile& profile,
         std::clamp(chip, -9, static_cast<int>(profile.max_chip_dbm)));
 }
 
+bool sx126x_tx_frequency_permitted(std::uint64_t freq_hz,
+                                   std::uint64_t band_min_hz,
+                                   std::uint64_t band_max_hz,
+                                   std::string& reason) {
+    const auto mhz = [](std::uint64_t hz) {
+        std::string s = std::to_string(static_cast<double>(hz) / 1e6);
+        // to_string gives six decimals; three keeps the kHz digit that slot
+        // frequencies land on (913.125) without the trailing noise.
+        if (const auto dot = s.find('.'); dot != std::string::npos && s.size() > dot + 4)
+            s.erase(dot + 4);
+        return s + " MHz";
+    };
+
+    if (freq_hz < kSx126xMinFreqHz || freq_hz > kSx126xMaxFreqHz) {
+        // Outside this the PLL simply will not lock, so the failure would
+        // otherwise be a silent one: the radio reports TX_DONE having radiated
+        // nothing. The 2.4 GHz region is the way to reach it by accident — that
+        // band belongs to the SX1280, and no SX1262 stick can serve it.
+        reason = mhz(freq_hz) + " is outside the SX1262's " +
+                 mhz(kSx126xMinFreqHz) + " to " + mhz(kSx126xMaxFreqHz) +
+                 " range — no SX1262 stick can transmit there";
+        return false;
+    }
+
+    // A zero band is "not declared", not "nothing permitted": the chip range
+    // above still applies, and a caller that never learned the region should
+    // not be silently unable to transmit.
+    if (band_min_hz == 0 && band_max_hz == 0) return true;
+
+    if (freq_hz < band_min_hz || freq_hz > band_max_hz) {
+        reason = mhz(freq_hz) + " is outside the selected region's " +
+                 mhz(band_min_hz) + " to " + mhz(band_max_hz) +
+                 " band — a stick's front end is built for one band, and "
+                 "driving its PA outside it can damage the radio";
+        return false;
+    }
+    return true;
+}
+
 double lora_airtime_seconds(const modem::LoraParams& params, std::size_t payload_len) {
     const double sf = params.spreading_factor;
     const double bw = params.bandwidth_hz > 0 ? params.bandwidth_hz : 125000.0;
@@ -538,6 +577,15 @@ bool Sx126xRadio::transmit(const PacketRadioConfig& cfg,
                            std::string& error) {
     if (payload.empty()) { error = "empty payload"; return false; }
     if (payload.size() > 255) { error = "payload exceeds the 255-byte LoRa limit"; return false; }
+
+    // Last gate before the PA is keyed, and deliberately here rather than in
+    // configure_phy(): that is shared with enter_rx(), and off-band receive is
+    // both harmless and useful. Checked in the driver rather than only in the
+    // caller so no other transmit path — including the auto-reply hook, which
+    // reaches Core::transmit() directly — can get around it.
+    if (!sx126x_tx_frequency_permitted(cfg.center_freq_hz, cfg.tx_band_min_hz,
+                                       cfg.tx_band_max_hz, error))
+        return false;
 
     if (!configure_phy(cfg, static_cast<std::uint8_t>(payload.size()), true, error))
         return false;

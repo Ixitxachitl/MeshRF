@@ -173,6 +173,23 @@ MRF_API void MRF_CALL mrf_core_tx_power_range(const mrf_core_t* core,
     if (max_dbm) *max_dbm = hi;
 }
 
+MRF_API void MRF_CALL mrf_core_set_tx_band_limits(mrf_core_t* core,
+                                                  uint64_t min_hz,
+                                                  uint64_t max_hz) {
+    if (!core) return;
+    core->core.set_tx_band_limits(min_hz, max_hz);
+}
+
+MRF_API void MRF_CALL mrf_core_get_tx_band_limits(const mrf_core_t* core,
+                                                  uint64_t* min_hz,
+                                                  uint64_t* max_hz) {
+    if (!core) return;
+    std::uint64_t lo = 0, hi = 0;
+    core->core.tx_band_limits(lo, hi);
+    if (min_hz) *min_hz = lo;
+    if (max_hz) *max_hz = hi;
+}
+
 MRF_API void MRF_CALL mrf_core_set_gains(mrf_core_t* core,
                                          uint8_t lna_db,
                                          uint8_t vga_db,

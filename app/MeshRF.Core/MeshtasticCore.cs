@@ -332,6 +332,43 @@ public sealed class MeshtasticCore : IDisposable
         }
     }
 
+    /// <summary>
+    /// The band the operator declared by selecting a region, in Hz. SX1262
+    /// transmits outside it are refused: a stick's front end serves one band,
+    /// cannot be identified over SPI, and a band-limited PA driven far off-band
+    /// can be damaged rather than merely inefficient. Receive is never
+    /// restricted, and the HackRF path ignores this. Both zero means undeclared,
+    /// leaving only the SX1262's own 150-960 MHz range enforced.
+    /// </summary>
+    public (ulong MinHz, ulong MaxHz) TxBandLimitsHz
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (_disposed) return (0, 0);
+                unsafe
+                {
+                    ulong min = 0, max = 0;
+                    NativeMethods.CoreGetTxBandLimits(_handle, &min, &max);
+                    return (min, max);
+                }
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+        set
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (!_disposed)
+                    NativeMethods.CoreSetTxBandLimits(_handle, value.MinHz, value.MaxHz);
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
+
     /// <summary>The RX backend that actually opened (may differ from the request).</summary>
     public RadioDeviceKind DeviceKind
     {

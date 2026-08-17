@@ -115,6 +115,19 @@ public:
     // the UI can bound its control before a device is connected.
     void tx_power_range_dbm(std::int8_t& min_dbm, std::int8_t& max_dbm) const noexcept;
 
+    // The band the operator declared by selecting a region, in Hz. Packet
+    // transmits outside it are refused: a stick's front end is built for one
+    // band, cannot be identified over SPI, and a band-limited PA driven far
+    // off-band can be damaged rather than merely inefficient. Receive is never
+    // restricted.
+    //
+    // Both zero (the default) means undeclared, leaving only the SX1262's own
+    // 150-960 MHz range enforced. Callers that track a region should set this
+    // whenever it changes. Ignored by the HackRF path, whose front end is
+    // broadband by design.
+    void set_tx_band_limits(std::uint64_t min_hz, std::uint64_t max_hz);
+    void tx_band_limits(std::uint64_t& min_hz, std::uint64_t& max_hz) const noexcept;
+
     // The RX backend that actually opened (may differ from the requested kind
     // when Auto probes, or when the requested device was unavailable).
     [[nodiscard]] hal::DeviceKind rx_device_kind() const noexcept;

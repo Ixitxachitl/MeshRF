@@ -387,6 +387,16 @@
                                IsVisible="{Binding ShowSx1262PowerWarning}"
                                Text="⚠ over 22 dBm can exceed USB current — use a powered hub"
                                ToolTip.Tip="The MeshToad's PA draws up to ~900 mA on transmit, more than a USB 2.0 port is required to supply. Brownouts show up as failed transmits." />
+                    <!-- A button, not a label: this one gates transmit, so it
+                         needs somewhere to click. MeshRF cannot know which band
+                         the stick was built for, so a deliberate 433 or 868
+                         owner has to be able to proceed. -->
+                    <Button FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                            Padding="6,1" Foreground="#FFE0A030"
+                            IsVisible="{Binding ShowSx1262BandWarning}"
+                            Command="{Binding AcknowledgeBandChangeCommand}"
+                            Content="{Binding Sx1262BandWarningText}"
+                            ToolTip.Tip="A stick's matching network, filter and PA are built for one band, and nothing in the hardware reports which — so changing to a band that doesn't overlap the last one has to be confirmed. Transmitting far outside the band the stick was built for can damage its PA. Click to confirm this is the right band for your hardware." />
                 </StackPanel>
             </WrapPanel>
         </Border>

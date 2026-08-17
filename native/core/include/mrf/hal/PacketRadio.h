@@ -53,6 +53,20 @@ struct PacketRadioConfig {
     // Requested power at the antenna port, in dBm. The backend subtracts any
     // external PA gain and clamps to the board's range. Ignored on receive.
     std::int8_t       power_dbm{22};
+    // Band the operator declared by choosing a region, in Hz. Transmit is
+    // refused outside it: a stick's front end — matching network, filter, PA —
+    // is built for one band and cannot be read back over SPI, so the region is
+    // the only statement of it available, and driving a band-limited PA far
+    // off-band is the one mistake here that damages hardware rather than
+    // merely wasting power.
+    //
+    // Receive ignores both: listening off-band keys no PA, and being able to
+    // do it is how you find where a stick's filtering actually rolls off.
+    //
+    // Zero means no band was declared, leaving only the chip's own range to
+    // enforce. Callers that know the region should always set these.
+    std::uint64_t     tx_band_min_hz{0};
+    std::uint64_t     tx_band_max_hz{0};
 };
 
 // One frame off the air. The radio has already checked the CRC and stripped

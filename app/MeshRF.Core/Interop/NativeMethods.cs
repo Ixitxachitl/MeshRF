@@ -74,6 +74,12 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_tx_power_range")]
     public static unsafe partial void CoreTxPowerRange(nint core, int* minDbm, int* maxDbm);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_set_tx_band_limits")]
+    public static partial void CoreSetTxBandLimits(nint core, ulong minHz, ulong maxHz);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_tx_band_limits")]
+    public static unsafe partial void CoreGetTxBandLimits(nint core, ulong* minHz, ulong* maxHz);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_set_gains")]
     public static partial void CoreSetGains(nint core, byte lnaDb, byte vgaDb, int ampEnable);
 

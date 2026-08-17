@@ -147,6 +147,44 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public bool ShowSx1262PowerWarning =>
         IsTxSx1262 && SelectedSx1262Board == Sx1262Board.MeshToad && Sx1262TxPowerDbm > 22;
 
+    /// <summary>The band we were last transmitting in, so a region change can
+    /// be measured against it. Null until the constructor finishes loading —
+    /// restoring a saved region is not a band change.</summary>
+    private Region? _acknowledgedBandRegion;
+
+    /// <summary>Set when the region moves to a band that does not overlap the
+    /// one we were operating in, and a stick is the transmitter. Blocks
+    /// transmit until acknowledged, because the app cannot know which band the
+    /// attached stick was built for and the accidental case — a mis-clicked
+    /// region dropdown — is indistinguishable from the deliberate one.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSx1262BandWarning))]
+    private bool _bandChangeNeedsAck;
+
+    public bool ShowSx1262BandWarning => IsTxSx1262 && BandChangeNeedsAck;
+
+    /// <summary>Text of the band warning, naming both bands — the number is the
+    /// whole point, so it belongs in the message rather than a tooltip.</summary>
+    public string Sx1262BandWarningText
+    {
+        get
+        {
+            var r = ChannelPlan.Range(SelectedRegion);
+            return $"⚠ {SelectedRegion} is {r.FreqStartMHz:0.###}–{r.FreqEndMHz:0.###} MHz — " +
+                   "confirm your stick is built for this band";
+        }
+    }
+
+    /// <summary>Accepts the band change. One click for someone who really does
+    /// own a stick for the new band; the same click is what an accidental
+    /// region change has to survive.</summary>
+    [RelayCommand]
+    private void AcknowledgeBandChange()
+    {
+        _acknowledgedBandRegion = SelectedRegion;
+        BandChangeNeedsAck = false;
+    }
+
     // 906.875 MHz = US LongFast slot 20, same default MeshRF.App's
     // MainViewModel starts from.
     [ObservableProperty]
@@ -728,6 +766,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settingsLoaded = true;
         SaveSettings();
 
+        // Arms the band check against whatever region was restored. Set here
+        // rather than at the field so the region loaded above counts as the
+        // starting band and doesn't itself demand confirmation.
+        _acknowledgedBandRegion = SelectedRegion;
+
         // The bridge was deliberately not started during the load above (its
         // change handlers bail out while _settingsLoaded is false), so connect
         // once here with the complete configuration. The map report schedule
@@ -763,6 +806,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             _core.Sx1262Board = SelectedSx1262Board;
             _core.Sx1262Serial = SelectedSx1262Serial;
             _core.TxPowerDbm = (sbyte)Math.Clamp(Sx1262TxPowerDbm, -128, 127);
+            // Same reason as the board above: OnSelectedRegionChanged ran during
+            // the settings load, before the core existed, so the band it would
+            // have pushed never landed. Without this the core holds its
+            // undeclared 0/0 and only the chip's own range is enforced.
+            ApplyTxBandLimits();
             _core.SetRxDevice(SelectedDevice);
             _core.SetTxDevice(SelectedTxDevice);
             if (SelectedDevice == RadioDeviceKind.Sx1262 ||
@@ -781,6 +829,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             RefreshSampleRateSelection(SelectedDevice, GetSavedRxSampleRateHz(SelectedDevice));
             _rxHost.TransmitAutoReply = frame =>
             {
+                // An auto-reply only exists because a frame arrived, so RX is
+                // normally up by construction — but this is a direct call past
+                // TransmitFrameAsync, so it carries the same gate explicitly
+                // rather than relying on that.
+                if (!IsRunning) return;
                 var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
                 try { _core.Transmit(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable); }
                 catch { /* best-effort auto-reply */ }
@@ -802,25 +855,35 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private void Poll()
     {
-        // Ahead of the running check: auto-reports only need a TX-capable
-        // device, not an active receive.
-        KickAutoReportTick();
-        // Ahead of it too, and separate from the auto-report tick: a map report
-        // is published straight to the broker and never goes over the air, so
-        // it needs no TX-capable device at all.
+        // Refreshed before anything reads it: the ticks below gate on RX being
+        // up, and must see this poll's state rather than the previous one's.
+        if (_core is not null) IsRunning = _core.IsRunning;
+
+        // A map report is published straight to the broker and never goes over
+        // the air, so it needs neither a TX-capable device nor a receiver.
         TickMapReport();
-        // Scheduled script triggers (every:/at:), for the same reason the
-        // auto-report tick is up here: they need a transmitter, not a receiver.
-        TickScripts();
-        // Also ahead of the running check: a message sent just before RX was
-        // stopped still deserves to stop saying nothing and settle as failed,
-        // and an ack we still owe a peer is dropped rather than left queued.
+        // Ahead of the running check because neither transmits: a message sent
+        // just before RX was stopped still deserves to stop saying nothing and
+        // settle as failed, and an ack we still owe a peer is dropped rather
+        // than left queued.
         _rxHost.SweepPendingAcks();
-        SweepAckRetransmits();
+        // Scheduled script triggers (every:/at:). Not gated here because a
+        // script's non-radio actions are still worth running; any send it
+        // attempts is refused downstream like every other transmit.
+        TickScripts();
+
+        // Both of these key the transmitter unprompted, so both wait for an
+        // active receiver: nothing goes on the air before the operator has
+        // knowingly started RX, and nothing talks over a channel we cannot
+        // hear. The core refuses them anyway — this keeps them from trying.
+        if (IsRunning)
+        {
+            KickAutoReportTick();
+            SweepAckRetransmits();
+        }
 
         if (_core is null) return;
 
-        IsRunning = _core.IsRunning;
         DeviceStatus = $"RX: {_core.DeviceName}  TX: {_core.TxDeviceName} — {_core.DeviceStatus}";
         if (!IsRunning) return;
 
@@ -1010,6 +1073,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowSx1262SerialPicker));
         OnPropertyChanged(nameof(ShowSx1262BoardPrompt));
         OnPropertyChanged(nameof(ShowSx1262PowerWarning));
+        OnPropertyChanged(nameof(ShowSx1262BandWarning));
         // Send is gated on CanTransmit, which this switch can flip in either
         // direction — an SX1262 that opened makes it true where a bare TX
         // selection change previously left the button stale.
@@ -1160,7 +1224,42 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
-    partial void OnSelectedRegionChanged(Region value) { RebuildSlots(snapToDefault: true); SaveSettings(); }
+    partial void OnSelectedRegionChanged(Region value)
+    {
+        RebuildSlots(snapToDefault: true);
+        ApplyTxBandLimits();
+        // A move to a band that doesn't touch the one we were operating in has
+        // to be confirmed. Only once the constructor has established a starting
+        // band: restoring a saved region is not a change. Nothing to confirm
+        // either when the bands overlap, which covers every ordinary retune.
+        if (_acknowledgedBandRegion is { } previous)
+        {
+            if (ChannelPlan.BandsOverlap(previous, value))
+            {
+                _acknowledgedBandRegion = value;
+                BandChangeNeedsAck = false;
+            }
+            else
+            {
+                BandChangeNeedsAck = true;
+            }
+        }
+        OnPropertyChanged(nameof(Sx1262BandWarningText));
+        OnPropertyChanged(nameof(ShowSx1262BandWarning));
+        SaveSettings();
+    }
+
+    /// <summary>Tells the core which band the selected region permits, so the
+    /// SX1262 driver can refuse a transmit outside it. Receive is unaffected.
+    /// </summary>
+    private void ApplyTxBandLimits()
+    {
+        if (_core is null) return;
+        var range = ChannelPlan.Range(SelectedRegion);
+        _core.TxBandLimitsHz = (
+            (ulong)Math.Round(range.FreqStartMHz * 1_000_000.0),
+            (ulong)Math.Round(range.FreqEndMHz * 1_000_000.0));
+    }
 
     partial void OnSelectedSlotChanged(int value)
     {
@@ -1524,10 +1623,40 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task<bool> TransmitFrameAsync(byte[] frame)
     {
         if (_core is null) return false;
+        // Refused here as well as in the core so the reason is a sentence rather
+        // than a failed send, and so nothing occupies the TX semaphore or waits
+        // for a channel-idle opportunity that a stopped receiver can never
+        // report.
+        if (!IsRunning)
+        {
+            StatusText = "Start RX before transmitting — nothing is sent while the receiver is stopped.";
+            return false;
+        }
         if (LicensedChannelBlocking(frame) is { } blockedChannel)
         {
             StatusText = $"Licensed mode: \"{blockedChannel}\" still has a PSK — encryption isn't permitted on amateur bands. Clear its key to transmit.";
             return false;
+        }
+        // Band checks, both SX1262-only: the HackRF's front end is broadband,
+        // so an off-band frequency there costs efficiency rather than hardware.
+        // The driver enforces the same limits natively — this is here so the
+        // refusal names the region and arrives before the send is queued.
+        if (IsTxSx1262)
+        {
+            if (BandChangeNeedsAck)
+            {
+                StatusText = $"Confirm the band change to {SelectedRegion} before transmitting — " +
+                             "a stick built for another band can be damaged by transmitting here.";
+                return false;
+            }
+            if (!ChannelPlan.Contains(SelectedRegion, CenterFreqMHz))
+            {
+                var r = ChannelPlan.Range(SelectedRegion);
+                StatusText = $"{CenterFreqMHz:0.###} MHz is outside {SelectedRegion} " +
+                             $"({r.FreqStartMHz:0.###}–{r.FreqEndMHz:0.###} MHz) — " +
+                             "pick a slot, or change region if that's really your band.";
+                return false;
+            }
         }
         var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
         var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
@@ -1686,7 +1815,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     }
 
     private bool CanSendMessage() =>
-        _core?.CanTransmit == true && SelectedTab is not null && !string.IsNullOrWhiteSpace(MessageText);
+        _core?.CanTransmit == true && IsRunning &&
+        SelectedTab is not null && !string.IsNullOrWhiteSpace(MessageText);
 
     partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
     partial void OnSelectedTabChanged(ITabItem? value)
@@ -1809,7 +1939,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     // ----- Node context-menu actions -----
 
-    private bool CanTransmit => _core?.CanTransmit == true && _rxHost.MyNodeNum != 0;
+    /// <summary>A TX-capable device, an identity to send as, and an active
+    /// receiver. RX is required because nothing should key up before the
+    /// operator has knowingly put the node on the air, and because without a
+    /// receiver there is no listen-before-talk. The core enforces the same rule
+    /// so the unsolicited senders cannot slip past it.</summary>
+    private bool CanTransmit =>
+        _core?.CanTransmit == true && IsRunning && _rxHost.MyNodeNum != 0;
 
     private ChannelConfig? PrimaryChannel() =>
         (Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)

@@ -64,6 +64,24 @@ void sx126x_sync_word_bytes(std::uint8_t sync_word, std::uint8_t& msb, std::uint
 // be asked for. This is where a MeshToad's 30 dBm becomes the chip's 22.
 std::int8_t sx126x_chip_power_dbm(const Sx126xBoardProfile& profile, std::int8_t requested_dbm);
 
+// SX1262 operating range (datasheet §6.1). A property of the silicon, the same
+// on every unit in every region — unlike a band edge, which belongs to the
+// front end and is the operator's to declare.
+constexpr std::uint64_t kSx126xMinFreqHz = 150'000'000;
+constexpr std::uint64_t kSx126xMaxFreqHz = 960'000'000;
+
+// Whether `freq_hz` may be transmitted on, given the operator's declared band.
+// False with `reason` set when it may not. Two independent limits: the chip
+// range above, which cannot lock outside itself, and the declared band, which
+// protects a front end whose real edges no register reports. A zero band means
+// none was declared, so only the chip range applies.
+//
+// Deliberately not consulted on receive — see PacketRadioConfig.
+bool sx126x_tx_frequency_permitted(std::uint64_t freq_hz,
+                                   std::uint64_t band_min_hz,
+                                   std::uint64_t band_max_hz,
+                                   std::string& reason);
+
 // Drives one SX126x over a CH341 bridge. Not thread-safe; Core serializes
 // transmits behind its own lock.
 class Sx126xRadio {

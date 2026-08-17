@@ -127,6 +127,10 @@ struct Core::Impl {
     // answers. The EEPROM serial is the only thing that distinguishes them.
     std::string      sx1262_serial;
     std::int8_t      tx_power_dbm{22};
+    // Declared transmit band, from the operator's region. Zero until the
+    // caller says otherwise — see Core::set_tx_band_limits().
+    std::uint64_t    tx_band_min_hz{0};
+    std::uint64_t    tx_band_max_hz{0};
     // Signal quality from the last packet the stick received. Real numbers off
     // the radio rather than estimates off an IQ stream, and the only source of
     // either when no SDR is running.
@@ -472,6 +476,21 @@ bool Core::transmit(modem::Preset preset, std::uint64_t center_freq_hz,
 bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_hz,
                     std::span<const std::uint8_t> payload,
                     std::uint8_t txvga_gain_db, bool amp_enable) {
+    // Nothing transmits unless we are listening, on every backend. Two reasons,
+    // and the first is why this lives here rather than only in the UI: the app
+    // has several unsolicited senders — auto-replies, auto-reports, scheduled
+    // scripts, ack retransmits — and at startup they would otherwise key up
+    // before the operator has knowingly put the node on the air. Second, no
+    // receiver means no listen-before-talk: transmit() has no idea whether the
+    // channel is busy, so it would talk over whatever is already there.
+    //
+    // `running` covers both paths — the SDR stream and the stick's continuous
+    // receive both set it — and is atomic, so this needs no lock.
+    if (!impl_->running) {
+        impl_->push_event("Transmit refused: start RX first \xE2\x80\x94 "
+                          "nothing transmits while the receiver is stopped");
+        return false;
+    }
     // Hardware modem path: hand the framed bytes straight to the SX1262 and
     // skip modulation, resampling and the whole IQ pipeline. RX is deliberately
     // left running — the stick is a separate USB device, so the SDR keeps its
@@ -491,6 +510,8 @@ bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_h
             packet_cfg.center_freq_hz = center_freq_hz;
             packet_cfg.params         = params;
             packet_cfg.power_dbm      = impl_->tx_power_dbm;
+            packet_cfg.tx_band_min_hz = impl_->tx_band_min_hz;
+            packet_cfg.tx_band_max_hz = impl_->tx_band_max_hz;
         }
     }
     if (use_packet_tx) {
@@ -1224,6 +1245,21 @@ std::int8_t Core::tx_power_dbm() const noexcept {
 void Core::tx_power_range_dbm(std::int8_t& min_dbm, std::int8_t& max_dbm) const noexcept {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     hal::packet_radio_power_range(impl_->sx1262_board, min_dbm, max_dbm);
+}
+
+void Core::set_tx_band_limits(std::uint64_t min_hz, std::uint64_t max_hz) {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    // Reversed edges would refuse every frequency, turning a caller's mistake
+    // into a radio that silently cannot transmit. Normalize instead.
+    if (min_hz > max_hz) std::swap(min_hz, max_hz);
+    impl_->tx_band_min_hz = min_hz;
+    impl_->tx_band_max_hz = max_hz;
+}
+
+void Core::tx_band_limits(std::uint64_t& min_hz, std::uint64_t& max_hz) const noexcept {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    min_hz = impl_->tx_band_min_hz;
+    max_hz = impl_->tx_band_max_hz;
 }
 
 hal::DeviceKind Core::rx_device_kind() const noexcept {

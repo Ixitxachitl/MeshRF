@@ -94,6 +94,19 @@ MRF_API void MRF_CALL mrf_core_tx_power_range(const mrf_core_t* core,
                                               int32_t* min_dbm,
                                               int32_t* max_dbm);
 
+// The band the operator declared by selecting a region, in Hz. SX1262
+// transmits outside it are refused, because a stick's front end serves one
+// band and cannot be identified over SPI. Receive is never restricted, and the
+// HackRF path ignores this entirely. Both zero means undeclared, leaving only
+// the SX1262's own 150-960 MHz range enforced. Reversed edges are normalized.
+MRF_API void MRF_CALL mrf_core_set_tx_band_limits(mrf_core_t* core,
+                                                  uint64_t min_hz,
+                                                  uint64_t max_hz);
+// Either pointer may be NULL.
+MRF_API void MRF_CALL mrf_core_get_tx_band_limits(const mrf_core_t* core,
+                                                  uint64_t* min_hz,
+                                                  uint64_t* max_hz);
+
 // IQ capture: dump the decimated modem-input stream (interleaved float32
 // I/Q, ".cf32") to `path`. Safe to toggle while RX runs. Capped to ~60 s.
 MRF_API int  MRF_CALL mrf_core_start_capture(mrf_core_t* core, const char* path);
