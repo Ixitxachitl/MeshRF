@@ -17,8 +17,12 @@ namespace MeshRF.Scripting;
 /// </remarks>
 public static class ScriptTemplate
 {
-    private static readonly Regex s_token =
-        new(@"\{([a-zA-Z][a-zA-Z0-9_.]*)\}", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    /// <summary>A token, plus any filters piped onto it: <c>{snr|round:0}</c>,
+    /// <c>{args|trim|truncate:40}</c>. A filter argument runs to the next pipe
+    /// or the closing brace, so <c>{x|default:not sure}</c> keeps its spaces.</summary>
+    internal static readonly Regex Token = new(
+        @"\{([a-zA-Z][a-zA-Z0-9_.]*)((?:\|[a-zA-Z_]+(?::[^|{}]*)?)*)\}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>The value this app reports for its own battery when running on
     /// mains, mirroring firmware's convention.</summary>
@@ -39,12 +43,42 @@ public static class ScriptTemplate
     {
         if (template.Length == 0 || !template.Contains('{')) return template;
 
-        return s_token.Replace(template, match =>
+        return Token.Replace(template, match =>
         {
             var value = Resolve(match.Groups[1].Value, evt, args, captures, httpResults, item);
             if (value is null) return match.Value;
+
+            // Filters run on the resolved value and before the escape, so a URL
+            // or a JSON body still escapes whatever the chain produced.
+            foreach (var (name, argument) in Filters(match.Groups[2].Value))
+            {
+                var filtered = ScriptFilters.Apply(name, argument, value);
+                // An unknown filter leaves the whole token as written, the same
+                // as an unknown placeholder: the editor already warned, and a
+                // visible mistake beats a silent one.
+                if (filtered is null) return match.Value;
+                value = filtered;
+            }
+
             return escape is null ? value : escape(value);
         });
+    }
+
+    /// <summary>
+    /// Splits the pipe section of a token into filters, in order.
+    /// </summary>
+    /// <param name="chain">The captured tail, e.g. <c>|trim|truncate:40</c>.</param>
+    internal static IEnumerable<(string Name, string? Argument)> Filters(string chain)
+    {
+        if (chain.Length == 0) yield break;
+
+        foreach (var written in chain.Split('|', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int colon = written.IndexOf(':');
+            yield return colon < 0
+                ? (written, null)
+                : (written[..colon], written[(colon + 1)..]);
+        }
     }
 
     private static string? Resolve(
@@ -82,6 +116,13 @@ public static class ScriptTemplate
             case "from.id": return evt.FromId;
             case "from.short": return evt.FromShort;
             case "from.long": return evt.FromLong;
+
+            // Empty when the sender has never sent a position, for the same
+            // reason {my.lat} is: these go into URLs, where a question mark
+            // would build a nonsense request, and empty is what a require: or a
+            // when: can test for.
+            case "from.lat": return Coordinate(evt.FromLatitude);
+            case "from.lon": return Coordinate(evt.FromLongitude);
 
             case "channel": return evt.Channel;
             case "snr": return Number(evt.SnrDb, "0.#");

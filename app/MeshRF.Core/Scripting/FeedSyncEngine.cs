@@ -18,15 +18,27 @@ public sealed record FeedSyncDue(string FileName, MeshFeedSync Sync);
 /// from one that has gone. That memory is the whole reason this exists rather
 /// than being a script: a record leaving a feed is not an event anything can
 /// trigger on.</para>
-/// <para>The memory is deliberately in-process and not persisted, which is safe
-/// because of two other choices. A marker's waypoint id is derived from the
-/// record's own id, so re-sending after a restart replaces rather than
-/// duplicates. And a marker this node forgot about — because it was closed when
-/// the record went away — can be cleared by whoever holds it, since these are
-/// sent unlocked.</para>
+/// <para>The memory outlives the process, through <see cref="FeedSyncStore"/>.
+/// It has to: a resend after a restart is harmless on the receiving end, since
+/// a marker's waypoint id is derived from the record's own id and so replaces
+/// rather than duplicates, but it is not harmless on the air — mirroring a
+/// busy feed would re-broadcast every marker it holds every time the app
+/// opened. What a restart does still cost is a marker whose record went away
+/// while the app was closed: nothing retires it here, and it is left for
+/// whoever holds it to clear, which is why these are sent unlocked.</para>
 /// </remarks>
 public sealed class FeedSyncEngine
 {
+    private readonly FeedSyncStore? _store;
+
+    /// <param name="store">Where the memory is kept between runs. Null keeps it
+    /// in-process, which is what the tests want.</param>
+    public FeedSyncEngine(FeedSyncStore? store = null)
+    {
+        _store = store;
+        _store?.Load();
+    }
+
     /// <summary>What was last sent for one record.</summary>
     private sealed class Tracked
     {
@@ -78,6 +90,26 @@ public sealed class FeedSyncEngine
                 // first markers.
                 NextDue = now,
             };
+
+            // What this feed had on the map when the app last ran. Read before
+            // the in-process carry-over so a reload's memory wins over the
+            // saved one, which may be a poll or two behind.
+            if (_store is not null)
+            {
+                foreach (var (id, memory) in _store.For(file.FileName))
+                {
+                    loaded.Seen[id] = new Tracked
+                    {
+                        WaypointId = memory.W,
+                        Fingerprint = memory.F,
+                        LastSent = DateTimeOffset.FromUnixTimeSeconds(memory.T),
+                        Latitude = memory.Lat,
+                        Longitude = memory.Lon,
+                        Name = memory.N,
+                        Description = memory.D,
+                    };
+                }
+            }
 
             if (previous.TryGetValue(file.FileName, out var was))
             {
@@ -235,6 +267,16 @@ public sealed class FeedSyncEngine
                 // there is no delete on the wire.
                 ExpireEpoch: (uint)now.AddMinutes(-1).ToUnixTimeSeconds()));
         }
+
+        // Written after every reconcile, not only when something was sent: a
+        // record whose expiry clock advanced still needs its new LastSent kept,
+        // or a restart would refresh markers that did not need it.
+        _store?.Save(feed.FileName, feed.Seen.ToDictionary(
+            kv => kv.Key,
+            kv => new FeedSyncMemory(
+                kv.Value.WaypointId, kv.Value.Fingerprint, kv.Value.LastSent.ToUnixTimeSeconds(),
+                kv.Value.Latitude, kv.Value.Longitude, kv.Value.Name, kv.Value.Description),
+            StringComparer.Ordinal));
 
         return actions;
     }

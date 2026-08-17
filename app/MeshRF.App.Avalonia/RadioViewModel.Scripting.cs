@@ -24,7 +24,9 @@ namespace MeshRF.AvaloniaApp;
 public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
 {
     private readonly ScriptEngine _scriptEngine = new();
-    private readonly FeedSyncEngine _feedEngine = new();
+    // With a store, so a restart does not re-place every marker a feed is
+    // already mirroring.
+    private readonly FeedSyncEngine _feedEngine = new(new FeedSyncStore());
     private readonly ScriptLibrary _scriptLibrary = new();
     private readonly ScriptHttpClient _scriptHttp = new();
 
@@ -130,6 +132,12 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         _rxHost.ScriptSelfProvider = BuildScriptSelf;
         _rxHost.ScriptEventObserved = OnScriptEvent;
         _scriptHttp.Credentials = this;
+
+        // First run: put the samples where the Scripts window can show them.
+        // They arrive disabled, so this transmits nothing.
+        if (_scriptLibrary.InstallSamples() is { Count: > 0 } installed)
+            _rxHost.Log($"scripts: installed {installed.Count} samples in {_scriptLibrary.DirectoryPath}");
+
         ReloadScripts();
         // Now that the engine actually has its scripts, report the state the
         // settings load could not. Silent only when there is genuinely nothing
@@ -444,6 +452,16 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             {
                 _rxHost.Log($"scripts: {run.Alias} restarted, abandoning the rest of the sequence");
                 return;
+            }
+
+            // Gates come first, so a skipped action costs nothing else — not a
+            // delay, not a fetch. Logged for the same reason a require: is: an
+            // action that quietly did not happen is otherwise unanswerable.
+            if (action.When is { } gate && !gate.Holds(run.Expansion, out var gateDetail))
+            {
+                _rxHost.Log($"scripts: {run.Alias} — skipped {action.Kind.ToString().ToLowerInvariant()}, " +
+                            $"{gateDetail} is not true");
+                continue;
             }
 
             if (action.Kind == ScriptActionKind.Delay)

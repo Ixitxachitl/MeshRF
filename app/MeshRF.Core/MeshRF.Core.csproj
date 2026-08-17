@@ -41,6 +41,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The sample scripts, written into the user's scripts folder the first
+         time it is read (see ScriptLibrary.InstallSamples). Embedded rather
+         than copied beside the executable so a published build cannot lose
+         them, and so the copy the app installs is the copy in the repo. -->
+    <EmbeddedResource Include="..\..\samples\scripts\*.yaml">
+      <LogicalName>samples/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
     <Protobuf Include="..\..\third_party\meshtastic_protobufs\meshtastic\*.proto"
               ProtoRoot="..\..\third_party\meshtastic_protobufs"
               GrpcServices="None" />

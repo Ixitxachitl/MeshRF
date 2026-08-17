@@ -99,6 +99,74 @@ public sealed class ScriptLibrary
         return results;
     }
 
+    /// <summary>Marks a folder as already seeded, so the samples are written
+    /// once and a deleted one stays deleted.</summary>
+    private const string SamplesMarkerName = ".samples";
+
+    /// <summary>
+    /// Writes the sample scripts into an empty scripts folder, once. Returns
+    /// the names installed, or nothing when the folder has already been seeded
+    /// or already holds scripts.
+    /// </summary>
+    /// <remarks>
+    /// <para>Samples that ship inert are worth installing rather than
+    /// documenting: the vocabulary is easier to read from a working file than
+    /// from a reference, and every one of them arrives <c>enabled: false</c> so
+    /// nothing transmits because MeshRF was opened.</para>
+    /// <para>Two guards keep this from fighting the user. A folder that already
+    /// contains scripts is left completely alone — an upgrade must not drop six
+    /// files into a set someone has curated — and the marker means a sample
+    /// deleted on purpose is not restored on the next start.</para>
+    /// </remarks>
+    public IReadOnlyList<string> InstallSamples()
+    {
+        var marker = Path.Combine(_directory, SamplesMarkerName);
+        if (File.Exists(marker)) return [];
+
+        try
+        {
+            // Already has scripts: adopt the folder as set up rather than
+            // adding to it, and record that so this never runs again.
+            if (Directory.EnumerateFiles(_directory, "*.yaml").Any() ||
+                Directory.EnumerateFiles(_directory, "*.yml").Any())
+            {
+                WriteMarker(marker);
+                return [];
+            }
+
+            var installed = new List<string>();
+            var assembly = typeof(ScriptLibrary).Assembly;
+
+            foreach (var resource in assembly.GetManifestResourceNames()
+                                             .Where(n => n.StartsWith("samples/", StringComparison.Ordinal))
+                                             .OrderBy(n => n, StringComparer.Ordinal))
+            {
+                using var stream = assembly.GetManifestResourceStream(resource);
+                if (stream is null) continue;
+
+                using var reader = new StreamReader(stream);
+                var fileName = resource["samples/".Length..];
+                File.WriteAllText(Path.Combine(_directory, fileName), reader.ReadToEnd(), Utf8NoBom);
+                installed.Add(fileName);
+            }
+
+            WriteMarker(marker);
+            return installed;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // A folder we cannot write is not a reason to fail to start; the
+            // Scripts window will simply show an empty list.
+            return [];
+        }
+    }
+
+    private static void WriteMarker(string path) =>
+        File.WriteAllText(path,
+            "# Written once, when MeshRF installed its sample scripts here.\n" +
+            "# Delete this file to have them installed again on the next start.\n",
+            Utf8NoBom);
+
     /// <summary>Creates a new script from the starter template and returns its
     /// file name. The name is sanitised and de-duplicated, so a user typing
     /// "Auto reply!" twice gets auto-reply.yaml and auto-reply-2.yaml.</summary>

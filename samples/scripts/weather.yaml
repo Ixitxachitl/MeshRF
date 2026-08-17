@@ -1,0 +1,177 @@
+# Answers !wx with a weather report, for the sender or for a place they name.
+#
+# CREDENTIAL
+#   Name        openweather
+#   Attach as   Query
+#   Parameter   appid        Value   your OpenWeatherMap API key
+#
+# Uses One Call 3.0, which needs the "One Call by Call" subscription, plus the
+# free Geocoding API. Two requests per answer, whichever way it is asked:
+#
+#   !wx              the sender's own last reported position, from the node table
+#   !wx 95701        a numeric postcode. Outside the US add the country: 8001,CH
+#   !wx Alta, CA     anything else, read by OpenWeather's geocoder — a town, a
+#                    "town, state", a "town, state, country", or a postcode that
+#                    is not all digits, like a British or Canadian one
+#
+# Units follow the place being reported on, not this node: everywhere is fetched
+# in metric, and the report for a country that thinks in Fahrenheit converts on
+# the way out. To always answer one way, delete the other report's when:.
+
+enabled: false
+
+alias: Answer !wx with a weather report
+
+trigger:
+  - command: wx
+
+condition:
+  # The primary channel only — the one channel everyone in the mesh shares.
+  # Named by role, so this keeps working whatever the channel is called.
+  - scope: primary
+
+action:
+  # Nothing to go on: no place named, and the sender has never sent a position.
+  # Testing the two together is what "neither is set" looks like — an empty
+  # value pasted onto an empty value is still empty.
+  - reply: "I don't know where you are — try !wx 95701 or !wx Alta, CA"
+    when:
+      value: "{args}{from.lat}"
+      is_empty: true
+  - require:
+      value: "{args}{from.lat}"
+      not_empty: true
+
+  # All three lookups answer in the same shape — a position and a place to name
+  # it by — so whichever one runs, the forecast call below is the same.
+  #
+  # A postcode, with an optional country: 95701, or 8001,CH. OpenWeather has a
+  # separate endpoint for these, and it answers 404 for one it does not know,
+  # which stops the script and says so in the log.
+  - http:
+      url: "https://api.openweathermap.org/geo/1.0/zip?zip={args}"
+      credential: openweather
+      # The postcode endpoint answers with one object. The other two answer with
+      # a list, so their paths start [0] — the shapes differ, and reusing one
+      # set for the other reads every field as missing.
+      json:
+        lat: lat
+        lon: lon
+        city: name
+        country: country
+    when:
+      value: "{args}"
+      matches: '^\s*\d{3,10}\s*(,\s*[a-z]{2}\s*)?$'
+
+  # Anything else that is not empty: a place name. optional: true because "no
+  # such place" comes back as an empty list rather than as an error, and an
+  # empty {http.lat} is what the actions below test.
+  - http:
+      url: "https://api.openweathermap.org/geo/1.0/direct?q={args}&limit=1"
+      credential: openweather
+      optional: true
+      json: &place
+        lat: "[0].lat"
+        lon: "[0].lon"
+        city: "[0].name"
+        country: "[0].country"
+        # Only US results carry one, which is why the report puts its comma on
+        # with prefix: rather than writing one in.
+        state: "[0].state"
+    when:
+      value: "{args}"
+      matches: '^(?!\s*\d{3,10}\s*(,\s*[a-z]{2}\s*)?$)\s*\S'
+
+  # No place named: turn the sender's own position into a name to call it by,
+  # and a country to pick the units from. The reverse geocoder echoes the
+  # position back, so this fills in exactly what the other two do.
+  - http:
+      url: "https://api.openweathermap.org/geo/1.0/reverse?lat={from.lat}&lon={from.lon}&limit=1"
+      credential: openweather
+      optional: true
+      json: *place
+    when:
+      value: "{args}"
+      is_empty: true
+
+  # The forecast itself. Gating on the latitude rather than on {args} keeps a
+  # failed lookup from building a request with an empty coordinate in it.
+  #
+  # exclude= trims the response to what this reads: One Call returns 48 hourly
+  # and 8 daily entries otherwise, which is a lot of JSON to pull over a
+  # connection that is answering a radio.
+  - http:
+      url: "https://api.openweathermap.org/data/3.0/onecall?lat={http.lat}&lon={http.lon}&units=metric&exclude=minutely,hourly,alerts"
+      credential: openweather
+      timeout: 20s
+      # optional: because rain and snow are only in the response when there is
+      # some — a dry hour has no rain object at all, and the report says 0 for
+      # it rather than failing.
+      optional: true
+      json:
+        desc: current.weather[0].description
+        temp: current.temp
+        feels: current.feels_like
+        humidity: current.humidity
+        wind: current.wind_speed
+        deg: current.wind_deg
+        rain: current.rain.1h
+        snow: current.snow.1h
+        sunrise: current.sunrise
+        sunset: current.sunset
+        # One Call reports the phase as 0-1 through the cycle, which the moon
+        # filter takes directly — real ephemeris rather than the almanac maths
+        # {date|moon} would do without an API.
+        moon: daily[0].moon_phase
+    when:
+      value: "{http.lat}"
+      not_empty: true
+
+  # Covers both ways of coming up empty: a place nobody could find, and a
+  # position that reverse-geocodes to nothing (open ocean, mostly). The default:
+  # is what keeps the second one from reading "I couldn't find """.
+  - reply: "I couldn't find {args|default:where you are} — try a postcode, or \"town, state\""
+    when:
+      value: "{http.temp}"
+      is_empty: true
+
+  # The same report twice, in the units the place it describes uses. The filters
+  # are doing what the Home Assistant version needed a template language for: a
+  # bearing becomes a compass point and an arrow, a description becomes an
+  # emoji, an epoch becomes a wall-clock time, and °C becomes °F.
+  #
+  # The heading is bold Markdown, which MeshRF and the Meshtastic clients both
+  # render.
+  #
+  # The United States, Liberia and Myanmar. An empty country means the lookup
+  # failed, and matches neither report.
+  - reply: |-
+      **{http.city}{http.state|prefix:, }**
+      {date} {time|clock}
+      🌡️ {http.temp|fahrenheit|round:0}°F feels {http.feels|fahrenheit|round:0}°F 💧 {http.humidity}%
+      🌧️ {http.rain|inches|round:2|default:0}in ❄️ {http.snow|inches|round:2|default:0}in
+      📋 {http.desc|weather} {http.desc}
+      💨 {http.deg|compass} {http.deg|arrow} {http.wind|mph|round:0}mph
+      🌛 {http.moon|moon} 🌅 {http.sunrise|clock} 🌇 {http.sunset|clock}
+    when:
+      value: "{http.country}"
+      matches: '^(US|LR|MM)$'
+
+  - reply: |-
+      **{http.city}{http.state|prefix:, }**
+      {date} {time|clock}
+      🌡️ {http.temp|round:0}°C feels {http.feels|round:0}°C 💧 {http.humidity}%
+      🌧️ {http.rain|round:1|default:0}mm ❄️ {http.snow|round:1|default:0}mm
+      📋 {http.desc|weather} {http.desc}
+      💨 {http.deg|compass} {http.deg|arrow} {http.wind|round:0}m/s
+      🌛 {http.moon|moon} 🌅 {http.sunrise|clock} 🌇 {http.sunset|clock}
+    when:
+      value: "{http.country}"
+      matches: '^(?!(US|LR|MM)$)[a-z]{2}$'
+
+limits:
+  # Five minutes per node, twelve an hour. Weather does not change faster than
+  # that, and each answer costs two requests against the One Call allowance.
+  cooldown: 5m
+  per_node: true
+  max_per_hour: 12

@@ -340,6 +340,146 @@ public class ScriptParserTests
         Assert.Null(ScriptParser.ParseTime(text));
     }
 
+    [Theory]
+    [InlineData("any", ScriptScope.Any)]
+    [InlineData("direct", ScriptScope.Direct)]
+    [InlineData("channel", ScriptScope.Channel)]
+    [InlineData("primary", ScriptScope.Primary)]
+    public void Every_Scope_Parses(string text, ScriptScope expected)
+    {
+        var result = ScriptParser.Parse(
+            $"trigger:\n  - command: ping\ncondition:\n  - scope: {text}\naction:\n  - reply: \"ok\"\n");
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        Assert.Equal(expected, Assert.Single(result.Script!.Conditions).Scope);
+    }
+
+    [Fact]
+    public void A_Mistyped_Filter_Warns_And_Suggests_The_Real_One()
+    {
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - reply: "{snr|roudn:1} dB"
+            """);
+
+        // A warning, not an error: the script still sends, it just sends the
+        // token as written, which is the mistake worth pointing at.
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        var warning = Assert.Single(result.Problems);
+        Assert.Equal(ScriptProblemSeverity.Warning, warning.Severity);
+        Assert.Contains("'roudn' is not a filter", warning.Message);
+        Assert.Contains("did you mean 'round'", warning.Message);
+    }
+
+    [Fact]
+    public void A_Filtered_Placeholder_Is_Still_Checked_For_Being_Real()
+    {
+        // The pipe must not become a way to smuggle a typo past the editor.
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - reply: "{from.shrt|upper}"
+            """);
+
+        var warning = Assert.Single(result.Problems);
+        Assert.Contains("{from.shrt} is not a placeholder", warning.Message);
+    }
+
+    [Fact]
+    public void An_Action_Can_Carry_A_When_Gate()
+    {
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - reply: "close by"
+                when:
+                  value: "{hops}"
+                  at_most: 1
+              - reply: "a long way off"
+                when:
+                  value: "{hops}"
+                  above: 1
+            """);
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        var actions = result.Script!.Actions;
+        Assert.Equal(2, actions.Count);
+        Assert.Equal(ScriptComparison.AtMost, actions[0].When!.Comparison);
+        Assert.Equal("{hops}", actions[0].When!.Value);
+        Assert.Equal(ScriptComparison.Above, actions[1].When!.Comparison);
+    }
+
+    [Fact]
+    public void A_When_Sits_Beside_An_Action_That_Nests_Its_Own_Options()
+    {
+        // The fiddly shape: when: is a sibling of send:, not one of its keys,
+        // so it has to survive the nested action's own key check.
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - send:
+                  to: "{from.id}"
+                  text: "still there"
+                when:
+                  value: "{snr}"
+                  below: -10
+            """);
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        var action = Assert.Single(result.Script!.Actions);
+        Assert.Equal(ScriptActionKind.Send, action.Kind);
+        Assert.Equal(ScriptComparison.Below, action.When!.Comparison);
+    }
+
+    [Fact]
+    public void A_When_On_A_Require_Is_Rejected()
+    {
+        // Two tests on one entry, one of which stops the sequence and one of
+        // which skips it — no reading of that is the obvious one.
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - require:
+                  value: "{http.body}"
+                  not_empty: true
+                when:
+                  value: "{hops}"
+                  equals: 0
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("require: cannot take a when:", SingleError(result).Message);
+    }
+
+    [Fact]
+    public void A_Broken_When_Names_When_Rather_Than_Require()
+    {
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - reply: "ok"
+                when:
+                  value: "{hops}"
+            """);
+
+        Assert.False(result.IsValid);
+        var error = SingleError(result);
+        Assert.StartsWith("when: needs one comparison", error.Message);
+    }
+
     [Fact]
     public void Problems_Carry_A_Usable_Position()
     {

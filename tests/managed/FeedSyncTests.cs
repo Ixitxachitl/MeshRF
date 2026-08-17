@@ -48,15 +48,16 @@ public class FeedSyncTests
             radius: 10mi
         """;
 
-    private static FeedSyncEngine Armed(string? yaml = null)
+    private static FeedSyncEngine Armed(string? yaml = null, FeedSyncStore? store = null,
+                                        DateTimeOffset? at = null)
     {
         yaml ??= Yaml;
         var parse = ScriptParser.Parse(yaml);
         Assert.True(parse.IsValid, parse.FirstError?.ToString());
         Assert.True(parse.IsSync);
 
-        var engine = new FeedSyncEngine();
-        engine.Load([new ScriptFile(FileName, FileName, yaml, Enabled: true, parse)], Noon);
+        var engine = new FeedSyncEngine(store);
+        engine.Load([new ScriptFile(FileName, FileName, yaml, Enabled: true, parse)], at ?? Noon);
         return engine;
     }
 
@@ -417,5 +418,71 @@ public class FeedSyncTests
         var nowhere = new ScriptSelf(1, "ME", "My Node", 101);
 
         Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), nowhere, Noon));
+    }
+
+    [Fact]
+    public void A_Restart_Does_Not_Re_Place_Markers_That_Are_Already_Out_There()
+    {
+        // The whole point of persisting: a fire season is dozens of markers,
+        // and without this every start re-broadcasts the lot.
+        using var temp = new TempFile();
+        var feed = Feed(Fire(1, "Bear Fire"), Fire(2, "Ridge Fire"));
+
+        var first = Armed(store: new FeedSyncStore(temp.Path));
+        Assert.Equal(2, first.Reconcile(FileName, feed, Home, Noon).Count);
+
+        // A new engine, as a new process would build it, reading the file the
+        // first one wrote.
+        var second = Armed(store: new FeedSyncStore(temp.Path), at: Noon.AddMinutes(20));
+        Assert.Empty(second.Reconcile(FileName, feed, Home, Noon.AddMinutes(20)));
+    }
+
+    [Fact]
+    public void A_Restart_Still_Notices_What_Changed_While_It_Was_Closed()
+    {
+        // Remembering must not mean going deaf: the saved fingerprint is what
+        // an update is measured against.
+        using var temp = new TempFile();
+
+        var first = Armed(store: new FeedSyncStore(temp.Path));
+        first.Reconcile(FileName, Feed(Fire(1, "Bear Fire", acreage: 1200)), Home, Noon);
+
+        var second = Armed(store: new FeedSyncStore(temp.Path), at: Noon.AddMinutes(20));
+        var action = Assert.Single(
+            second.Reconcile(FileName, Feed(Fire(1, "Bear Fire", acreage: 5000)), Home, Noon.AddMinutes(20)));
+
+        Assert.Equal(FeedSyncActionKind.Update, action.Kind);
+        Assert.Contains("5000 acres", action.Description);
+    }
+
+    [Fact]
+    public void A_Feed_Turned_Off_And_On_Again_Keeps_Its_Markers()
+    {
+        // Its section is left alone while it is not loaded, rather than being
+        // pruned as unknown — otherwise disabling a sync for a minute costs a
+        // full re-place.
+        using var temp = new TempFile();
+
+        var first = Armed(store: new FeedSyncStore(temp.Path));
+        Assert.Single(first.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+
+        // A run in which this feed is not loaded at all, and another feed is.
+        var other = new FeedSyncEngine(new FeedSyncStore(temp.Path));
+        other.Load([], Noon.AddMinutes(10));
+
+        var back = Armed(store: new FeedSyncStore(temp.Path), at: Noon.AddMinutes(20));
+        Assert.Empty(back.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(20)));
+    }
+
+    /// <summary>A scratch path that cleans itself up.</summary>
+    private sealed class TempFile : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"MeshRF.FeedSync.{Guid.NewGuid():n}.json");
+
+        public void Dispose()
+        {
+            try { File.Delete(Path); } catch (IOException) { }
+        }
     }
 }

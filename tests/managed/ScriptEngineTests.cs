@@ -475,6 +475,38 @@ public class ScriptEngineTests
     }
 
     [Fact]
+    public void A_When_Gate_Rides_Along_To_Be_Decided_As_The_Sequence_Runs()
+    {
+        // Two answers, opposite gates: the pair is how a script chooses, since
+        // a require: could only stop. Which one holds cannot be settled here —
+        // a gate may read {http.*} from a fetch that has not happened yet — so
+        // the engine carries both and the runner decides.
+        var engine = Engine(
+            """
+            trigger:
+              - command: p
+            action:
+              - reply: "heard you direct"
+                when:
+                  value: "{hops}"
+                  equals: 0
+              - reply: "{hops} hops out"
+                when:
+                  value: "{hops}"
+                  above: 0
+            """);
+
+        var run = Assert.Single(engine.Evaluate(Text("!p", hops: 2)));
+        Assert.Equal(2, run.Actions.Count);
+
+        Assert.False(run.Actions[0].When!.Holds(run.Expansion, out var skipped));
+        Assert.Contains("\"2\" equals \"0\"", skipped);
+
+        Assert.True(run.Actions[1].When!.Holds(run.Expansion, out _));
+        Assert.Equal("2 hops out", run.Expansion.ExpandMessage(run.Actions[1].Text));
+    }
+
+    [Fact]
     public void An_Overlong_Reply_Is_Clamped_To_What_The_Radio_Carries()
     {
         var engine = Engine(

@@ -110,6 +110,10 @@ public enum ScriptScope
     Direct,
     /// <summary>Broadcast on a channel.</summary>
     Channel,
+    /// <summary>On the primary channel, whatever it happens to be called.
+    /// Named by role rather than by name so a script stays portable — the
+    /// primary is the one channel every node in a mesh shares.</summary>
+    Primary,
 }
 
 public sealed class ScriptCondition
@@ -161,7 +165,7 @@ public enum ScriptActionKind
     Log,
 }
 
-public sealed class ScriptAction
+public sealed record ScriptAction
 {
     public ScriptActionKind Kind { get; init; }
 
@@ -190,6 +194,20 @@ public sealed class ScriptAction
 
     /// <summary>The test, for <see cref="ScriptActionKind.Require"/>.</summary>
     public ScriptRequirement? Require { get; init; }
+
+    /// <summary>
+    /// Optional gate: this one action runs only while the test holds, and the
+    /// sequence carries on either way.
+    /// </summary>
+    /// <remarks>
+    /// The difference from <see cref="ScriptActionKind.Require"/> is what
+    /// happens when it does not hold — require: abandons everything after it,
+    /// a when: skips its own action and nothing else. That is what lets a
+    /// script choose between two answers, which a stop-only test cannot
+    /// express. Evaluated in sequence like a require:, so it can read
+    /// {http.*} from a fetch earlier in the same run.
+    /// </remarks>
+    public ScriptRequirement? When { get; init; }
 
     public int Line { get; init; }
 }

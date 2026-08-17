@@ -63,7 +63,7 @@ public partial class ScriptHelpWindow : Window
 
     public IReadOnlyList<HelpRow> Conditions { get; } =
     [
-        new("scope: direct", "Only direct messages. Also: channel, any."),
+        new("scope: direct", "Only direct messages. Also: channel, any, and primary for the primary channel whatever it is named."),
         new("channel: [LongFast]", "Only these channels. One name or a list."),
         new("from: [\"!a1b2c3d4\"]", "Only these senders."),
         new("not_from: [\"!deadbeef\"]", "Never these senders."),
@@ -115,12 +115,16 @@ public partial class ScriptHelpWindow : Window
         new("position: true", "Send this node's position."),
         new("nodeinfo: true", "Send this node's name, hardware and public key."),
         new("traceroute: true", "Request the route to the triggering node."),
+        new("when:", "Optional on any action: run this one only while a test holds, and carry on with the rest either way. Takes the same value:/comparison keys as require:, so two replies with opposite when: entries is how a script chooses between them."),
         new("delay: 30s", "Wait before the next action. Maximum 1h."),
         new("log: \"text\"", "Write a line to the MeshRF log. Transmits nothing — useful while testing."),
     ];
 
     public IReadOnlyList<HelpRow> Placeholders { get; } =
         ScriptPlaceholders.All.Select(p => new HelpRow($"{{{p.Token}}}", p.Description)).ToList();
+
+    public IReadOnlyList<HelpRow> Filters { get; } =
+        ScriptFilters.All.Select(f => new HelpRow($"{{value|{f.Name}}}", f.Description)).ToList();
 
     public IReadOnlyList<HelpRow> Limits { get; } = BuildLimits();
 

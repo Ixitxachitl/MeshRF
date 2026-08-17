@@ -722,12 +722,13 @@ public static class ScriptParser
                     "any" => ScriptScope.Any,
                     "direct" => ScriptScope.Direct,
                     "channel" => ScriptScope.Channel,
+                    "primary" => ScriptScope.Primary,
                     _ => (ScriptScope?)null,
                 };
                 if (scope is null)
                 {
                     problems.Add(ScriptProblem.Error(line, column,
-                        $"scope: has to be any, direct or channel, not '{text}'"));
+                        $"scope: has to be any, direct, channel or primary, not '{text}'"));
                     return null;
                 }
                 return new ScriptCondition { Kind = ScriptConditionKind.Scope, Scope = scope.Value, Line = line };
@@ -829,16 +830,39 @@ public static class ScriptParser
 
     // ----- actions -----------------------------------------------------------
 
+    /// <summary>Parses one action entry, plus the <c>when:</c> gate any of them
+    /// may carry.</summary>
     private static ScriptAction? ParseAction(
+        YamlMappingNode map, YamlNode key, string kind, string[] kinds, List<ScriptProblem> problems)
+    {
+        var action = ParseActionKind(map, key, kind, kinds, problems);
+        if (action is null) return null;
+        if (!TryGet(map, "when", out var whenKey, out var whenValue)) return action;
+
+        int whenLine = (int)whenKey.Start.Line, whenColumn = (int)whenKey.Start.Column;
+        if (kind == "require")
+        {
+            problems.Add(ScriptProblem.Error(whenLine, whenColumn,
+                "require: cannot take a when: — it is already a test. " +
+                "Put the second test in its own require:, or use when: on the action you meant to gate"));
+            return null;
+        }
+
+        var gate = ParseRequirement(whenValue, whenLine, whenColumn, "when", problems);
+        return gate is null ? null : action with { When = gate };
+    }
+
+    private static ScriptAction? ParseActionKind(
         YamlMappingNode map, YamlNode key, string kind, string[] kinds, List<ScriptProblem> problems)
     {
         var value = map.Children[key];
         int line = (int)key.Start.Line, column = (int)key.Start.Column;
 
         // These carry their options in a nested mapping; every other action
-        // takes a bare scalar, so siblings are always a mistake there.
+        // takes a bare scalar, so siblings are always a mistake there — except
+        // when:, which any action may carry.
         if (kind is not ("send" or "http" or "waypoint" or "require"))
-            RejectUnknownKeys(map, kinds, "action option", problems);
+            RejectUnknownKeys(map, [.. kinds, "when"], "action option", problems);
 
         switch (kind)
         {
@@ -1292,19 +1316,34 @@ public static class ScriptParser
     private static ScriptAction? ParseRequire(
         YamlNode value, int line, int column, List<ScriptProblem> problems)
     {
+        var requirement = ParseRequirement(value, line, column, "require", problems);
+        return requirement is null
+            ? null
+            : new ScriptAction { Kind = ScriptActionKind.Require, Line = line, Require = requirement };
+    }
+
+    /// <summary>
+    /// Parses the shared test body behind <c>require:</c> and an action's
+    /// <c>when:</c> — one value, one comparison.
+    /// </summary>
+    /// <param name="what">Which key is being parsed, so the messages name the
+    /// one the user actually wrote.</param>
+    private static ScriptRequirement? ParseRequirement(
+        YamlNode value, int line, int column, string what, List<ScriptProblem> problems)
+    {
         if (value is not YamlMappingNode map)
         {
             problems.Add(ScriptProblem.Error(line, column,
-                "require: needs an indented value: and one comparison, e.g. above: 30"));
+                $"{what}: needs an indented value: and one comparison, e.g. above: 30"));
             return null;
         }
-        RejectUnknownKeys(map, RequireKeys, "require option", problems);
+        RejectUnknownKeys(map, RequireKeys, $"{what} option", problems);
 
         var tested = ReadString(map, "value", problems) ?? string.Empty;
         if (tested.Trim().Length == 0)
         {
             problems.Add(ScriptProblem.Error(line, column,
-                "require: needs a value: to test, e.g. value: \"{http.code}\""));
+                $"{what}: needs a value: to test, e.g. value: \"{{http.code}}\""));
             return null;
         }
         WarnUnknownPlaceholders(tested, line, column, problems);
@@ -1314,13 +1353,13 @@ public static class ScriptParser
         if (used.Count == 0)
         {
             problems.Add(ScriptProblem.Error(line, column,
-                $"require: needs one comparison. Valid: {string.Join(", ", RequireComparisons)}"));
+                $"{what}: needs one comparison. Valid: {string.Join(", ", RequireComparisons)}"));
             return null;
         }
         if (used.Count > 1)
         {
             problems.Add(ScriptProblem.Error(line, column,
-                $"require: names more than one comparison ({string.Join(", ", used)}) — give each its own require:"));
+                $"{what}: names more than one comparison ({string.Join(", ", used)}) — give each its own entry"));
             return null;
         }
 
@@ -1363,7 +1402,7 @@ public static class ScriptParser
                 if (bounds.Count != 2)
                 {
                     problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
-                        "require: between: needs exactly two bounds, e.g. between: [200, 232]"));
+                        $"{what}: between: needs exactly two bounds, e.g. between: [200, 232]"));
                     return null;
                 }
                 operand = bounds[0];
@@ -1379,7 +1418,7 @@ public static class ScriptParser
                 if (metres is null)
                 {
                     problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
-                        $"require: within: has to be a distance like 30mi, 50km or 500m, not '{text}'"));
+                        $"{what}: within: has to be a distance like 30mi, 50km or 500m, not '{text}'"));
                     return null;
                 }
                 rangeMetres = metres.Value;
@@ -1398,7 +1437,7 @@ public static class ScriptParser
                 catch (ArgumentException ex)
                 {
                     problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
-                        $"require: matches: is not a valid pattern — {ex.Message.TrimEnd('.')}"));
+                        $"{what}: matches: is not a valid pattern — {ex.Message.TrimEnd('.')}"));
                     return null;
                 }
                 break;
@@ -1409,26 +1448,21 @@ public static class ScriptParser
                 if (operand.Trim().Length == 0)
                 {
                     problems.Add(ScriptProblem.Error(comparisonKey.Start.Line, comparisonKey.Start.Column,
-                        $"require: {name}: needs something to compare against"));
+                        $"{what}: {name}: needs something to compare against"));
                     return null;
                 }
                 break;
         }
 
-        return new ScriptAction
+        return new ScriptRequirement
         {
-            Kind = ScriptActionKind.Require,
-            Line = line,
-            Require = new ScriptRequirement
-            {
-                Value = tested,
-                Comparison = comparison,
-                Operand = operand,
-                Operand2 = operand2,
-                IgnoreCase = ignoreCase,
-                Pattern = pattern,
-                RangeMetres = rangeMetres,
-            },
+            Value = tested,
+            Comparison = comparison,
+            Operand = operand,
+            Operand2 = operand2,
+            IgnoreCase = ignoreCase,
+            Pattern = pattern,
+            RangeMetres = rangeMetres,
         };
     }
 
@@ -1464,12 +1498,16 @@ public static class ScriptParser
     /// so before it goes out rather than after.</summary>
     private static void WarnLongMessage(string text, int line, int column, List<ScriptProblem> problems)
     {
-        // Placeholders expand at fire time, so this only catches text that is
-        // already too long before any substitution.
-        int bytes = System.Text.Encoding.UTF8.GetByteCount(text);
+        // Measured with the placeholders taken out. What they expand to is not
+        // knowable here, and counting "{http.humidity}" as fifteen bytes of
+        // message would flag a report that actually sends eighty — a warning
+        // that fires on correct scripts is one people learn to ignore. The
+        // literal text alone being over the limit is a real mistake, since not
+        // even an empty expansion could fit it.
+        int bytes = System.Text.Encoding.UTF8.GetByteCount(ScriptTemplate.Token.Replace(text, string.Empty));
         if (bytes <= 200) return;
         problems.Add(ScriptProblem.Warning(line, column,
-            $"this message is {bytes} bytes before placeholders expand, and the radio truncates around 200"));
+            $"the wording around the placeholders is {bytes} bytes on its own, and the radio truncates around 200"));
     }
 
     private static void WarnUnknownPlaceholders(string text, int line, int column, List<ScriptProblem> problems)
@@ -1479,6 +1517,13 @@ public static class ScriptParser
             problems.Add(ScriptProblem.Warning(line, column,
                 $"{{{token}}} is not a placeholder{Suggest(token, ScriptPlaceholders.All.Select(p => p.Token))} " +
                 "— it will be sent as literal text"));
+        }
+
+        foreach (var filter in ScriptPlaceholders.UnknownFilters(text).Distinct(StringComparer.Ordinal))
+        {
+            problems.Add(ScriptProblem.Warning(line, column,
+                $"'{filter}' is not a filter{Suggest(filter, ScriptFilters.Names)} " +
+                "— the placeholder will be sent as literal text"));
         }
     }
 

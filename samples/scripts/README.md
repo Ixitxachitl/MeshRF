@@ -1,7 +1,8 @@
 # Sample scripts
 
-Working starting points for MeshRF's automation scripts. Copy any of these into
-your scripts folder, fill in the credential it names, and turn it on.
+Working starting points for MeshRF's automation scripts. All of them are written
+into your scripts folder the first time MeshRF runs, so there is nothing to copy
+— open one, fill in the credential it names, and turn it on.
 
 ```
 %APPDATA%\MeshRF\scripts          Windows
@@ -11,28 +12,32 @@ your scripts folder, fill in the credential it names, and turn it on.
 
 The Scripts window's **Open folder** button takes you there, and **Reload**
 picks up anything dropped in. Every sample ships `enabled: false`, so nothing
-starts transmitting because you copied it.
+starts transmitting because it was installed.
+
+Installation happens once. A folder that already has scripts in it is left
+alone, and a sample you delete stays deleted — copy it back from here if you
+want it again.
 
 | Script | Needs | What it does |
 | --- | --- | --- |
 | [ping.yaml](ping.yaml) | nothing | Answers `!ping` with a signal report. |
+| [test-hops.yaml](test-hops.yaml) | a channel named Test | Answers anything saying "test" there with a keycap emoji for the hop count. |
 | [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
-| [lightning-waypoint.yaml](lightning-waypoint.yaml) | Xweather id + secret | Drops a waypoint on the nearest lightning strike within 30 miles. |
-| [wildfire-waypoint.yaml](wildfire-waypoint.yaml) | nothing | Drops a waypoint on the nearest active Watch Duty fire. |
+| [weather.yaml](weather.yaml) | OpenWeather key | Answers `!wx` with a report for where the sender is, or for a postcode or place they name. |
 | [lightning-sync.yaml](lightning-sync.yaml) | Xweather id + secret | Mirrors recent nearby strikes as point markers, retiring each as it ages out. |
 | [wildfire-sync.yaml](wildfire-sync.yaml) | nothing | Mirrors *every* nearby Watch Duty fire, keeping markers in step as they change and retiring them when they go out. |
 
 The last two are **feed syncs** rather than a script: instead of answering an
-event, it keeps a set of waypoints in step with a list. It places a marker for
+event, each keeps a set of waypoints in step with a list. It places a marker for
 each record it has not seen, resends one whose watched fields changed, and
 retires one that has gone. That last part is why it cannot be a script — a
-record leaving a feed is not an event anything can trigger on.
+record leaving a feed is not an event anything can trigger on. What it has
+placed is remembered between runs, so restarting MeshRF does not re-broadcast
+markers that are already out there.
 
-Each is paired with a script above it that reads the same feed. The script marks
-the one nearest you; the sync mirrors the lot. A sync also says whether its
-records can change: the fire sync watches acreage and containment, while the
-lightning sync declares `watch: []` — a strike is a moment, so its marker is
-placed once and never resent.
+A sync also says whether its records can change: the fire sync watches acreage
+and containment, while the lightning sync declares `watch: []` — a strike is a
+moment, so its marker is placed once and never resent.
 
 Read a sync's header before enabling it: how many markers it can place depends
 on how busy the feed is, and a storm makes far more lightning than a fire

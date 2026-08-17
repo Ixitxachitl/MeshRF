@@ -22,6 +22,8 @@ public static class ScriptPlaceholders
         ("from.id",      "Sender's node id, e.g. !a1b2c3d4."),
         ("from.short",   "Sender's short name."),
         ("from.long",    "Sender's long name."),
+        ("from.lat",     "Sender's last reported latitude, from the node table. Empty if they have never sent a position."),
+        ("from.lon",     "Sender's last reported longitude."),
         ("channel",      "Channel the message arrived on, or PKC for a direct message."),
         ("snr",          "Signal-to-noise ratio of the triggering packet, in dB."),
         ("rssi",         "Received signal strength of the triggering packet, in dBm."),
@@ -42,10 +44,11 @@ public static class ScriptPlaceholders
     private static readonly HashSet<string> s_known =
         new(All.Select(p => p.Token), StringComparer.Ordinal);
 
-    /// <summary>Matches a placeholder token. Indexed families (arg1, cap2) are
-    /// validated by <see cref="IsKnown"/> rather than enumerated here.</summary>
-    private static readonly Regex s_token =
-        new(@"\{([a-zA-Z][a-zA-Z0-9_.]*)\}", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    /// <summary>Matches a placeholder token, filters and all — the same pattern
+    /// expansion uses, so the editor checks exactly what the engine will read.
+    /// Indexed families (arg1, cap2) are validated by <see cref="IsKnown"/>
+    /// rather than enumerated here.</summary>
+    private static readonly Regex s_token = ScriptTemplate.Token;
 
     /// <summary>True if <paramref name="token"/> names a real placeholder,
     /// including the numbered arg/cap families.</summary>
@@ -89,6 +92,20 @@ public static class ScriptPlaceholders
         {
             var name = m.Groups[1].Value;
             if (!IsKnown(name)) yield return name;
+        }
+    }
+
+    /// <summary>Every unrecognised filter piped onto a placeholder in
+    /// <paramref name="text"/>, reported the same way and for the same reason:
+    /// a mistyped {snr|rnd:1} would otherwise go out as literal text.</summary>
+    public static IEnumerable<string> UnknownFilters(string text)
+    {
+        foreach (Match m in s_token.Matches(text))
+        {
+            foreach (var (name, _) in ScriptTemplate.Filters(m.Groups[2].Value))
+            {
+                if (!ScriptFilters.IsKnown(name)) yield return name;
+            }
         }
     }
 }

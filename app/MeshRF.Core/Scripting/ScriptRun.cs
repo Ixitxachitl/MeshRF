@@ -18,6 +18,8 @@ namespace MeshRF.Scripting;
 /// <param name="Http">The request, for an http: action.</param>
 /// <param name="Waypoint">The marker, for a waypoint: action.</param>
 /// <param name="Require">The test, for a require: action.</param>
+/// <param name="When">Gate on this action alone: it is skipped when the test
+/// does not hold, and the rest of the sequence runs regardless.</param>
 public sealed record ResolvedAction(
     ScriptActionKind Kind,
     string Text,
@@ -27,7 +29,8 @@ public sealed record ResolvedAction(
     TimeSpan Delay,
     ScriptHttpRequest? Http = null,
     ScriptWaypoint? Waypoint = null,
-    ScriptRequirement? Require = null)
+    ScriptRequirement? Require = null,
+    ScriptRequirement? When = null)
 {
     /// <summary>Whether this action puts a frame on the air. http: makes a
     /// network request and require: only decides, so neither counts against the

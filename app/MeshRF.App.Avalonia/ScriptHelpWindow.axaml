@@ -137,6 +137,21 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <TextBlock Classes="h" Text="Filters" />
+            <TextBlock Classes="p" Text="A placeholder may be piped through one or more of these, left to right — {snr|round:0} dB, {args|trim|truncate:40}. A filter that cannot do anything with the value, like round: on a missing reading, leaves it alone. The editor warns about a name that is not on this list." />
+            <ItemsControl ItemsSource="{Binding Filters}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="app:HelpRow">
+                        <Grid ColumnDefinitions="190,*" Margin="0,0,0,5">
+                            <SelectableTextBlock Grid.Column="0" Classes="code" FontSize="11"
+                                                 Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource BrushSubtle}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <TextBlock Classes="h" Text="Limits, and why they are on by default" />
             <TextBlock Classes="p"
                        Text="Airtime is shared with every other node in range, so a script that answers too eagerly is antisocial rather than merely noisy. Every script gets a cooldown (60s by default, applied per sending node) and an hourly ceiling (6 by default), and the engine applies its own budget across all scripts on top of those." />

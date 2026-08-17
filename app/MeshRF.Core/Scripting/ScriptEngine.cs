@@ -283,6 +283,9 @@ public sealed class ScriptEngine
                     ScriptScope.Any => true,
                     ScriptScope.Direct => evt.Kind != ScriptEventKind.Timer && evt.IsDirect,
                     ScriptScope.Channel => evt.Kind != ScriptEventKind.Timer && !evt.IsDirect,
+                    // Broadcast on the primary. A direct message carries no
+                    // channel of its own, so it is never "on" one.
+                    ScriptScope.Primary => evt.Kind != ScriptEventKind.Timer && !evt.IsDirect && evt.IsPrimaryChannel,
                     _ => false,
                 };
 
@@ -361,12 +364,17 @@ public sealed class ScriptEngine
         var actions = new List<ResolvedAction>(loaded.Script.Actions.Count);
         foreach (var action in loaded.Script.Actions)
         {
-            if (Resolve(loaded.FileName, action, evt, expansion) is { } resolved) actions.Add(resolved);
+            if (Resolve(loaded.FileName, action, evt, expansion) is not { } resolved) continue;
+            actions.Add(action.When is null ? resolved : resolved with { When = action.When });
         }
 
         if (actions.Count == 0) return null;
 
         // Charged against the global airtime budget only if it actually keys up.
+        // A gated action counts here even though it may be skipped: a when: can
+        // read {http.*}, so what it decides is not known until the sequence
+        // runs, and booking airtime that goes unused is the safe direction to
+        // be wrong in. Same as a run that stops at a require:.
         bool transmits = actions.Any(a => a.Transmits);
         if (!Limiter.TryFire(loaded.FileName, loaded.Script.Limits, evt.FromNode, evt.At, transmits, out var reason))
         {

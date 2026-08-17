@@ -60,8 +60,24 @@ public sealed record ScriptEvent
     public string FromShort { get; init; } = string.Empty;
     public string FromLong { get; init; } = string.Empty;
 
+    /// <summary>Where the sender was last reported to be, from the node table,
+    /// or null when they have never sent a position. Copied in with the rest of
+    /// the snapshot so a script asking "what is the weather where you are"
+    /// never reaches back into the node store.</summary>
+    public double? FromLatitude { get; init; }
+    public double? FromLongitude { get; init; }
+
+    /// <summary>Whether the sender's position is known, so a script can stop
+    /// before building a request around an empty coordinate.</summary>
+    public bool SenderHasLocation => FromLatitude is not null && FromLongitude is not null;
+
     /// <summary>Channel name, or "PKC" for an encrypted direct message.</summary>
     public string Channel { get; init; } = string.Empty;
+
+    /// <summary>Whether that channel is the primary one. Carried as a flag
+    /// rather than compared by name, since the primary's name differs from mesh
+    /// to mesh and is empty on a default-preset channel.</summary>
+    public bool IsPrimaryChannel { get; init; }
 
     /// <summary>Addressed to us specifically, rather than broadcast.</summary>
     public bool IsDirect { get; init; }

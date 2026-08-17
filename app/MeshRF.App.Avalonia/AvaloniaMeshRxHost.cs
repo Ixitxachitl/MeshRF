@@ -201,7 +201,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // Falls back to the display name rather than the raw id, so a
             // {from.long} in a greeting reads as a name either way.
             FromLong = string.IsNullOrEmpty(node?.LongName) ? NodeDisplayName(header.From) : node!.LongName,
+            FromLatitude = node?.Latitude,
+            FromLongitude = node?.Longitude,
             Channel = result.ChannelName ?? string.Empty,
+            // Only for a packet that actually named a channel: FindChannelByName
+            // falls back to the first tab when given nothing, which would make
+            // a direct message look like it arrived on the primary.
+            IsPrimaryChannel = !string.IsNullOrEmpty(result.ChannelName) &&
+                               FindChannelByName(result.ChannelName) is { Index: 0 },
             IsDirect = isDirect,
             SnrDb = record.SnrDb,
             RssiDbm = record.RssiDbfs,

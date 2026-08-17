@@ -1,0 +1,34 @@
+# Answers anything saying "test" on the Test channel with a hop-count keycap.
+#
+# A range check you can read at a glance: whoever sent it gets back 0️⃣ if you
+# heard them directly, 1️⃣ if one node relayed it, and so on. Nothing to
+# configure — the only thing it needs is a channel named Test.
+
+enabled: false
+
+alias: Answer "test" on Test with a hop-count keycap
+
+trigger:
+  # The word on its own, not any word containing it, so "latest" is left alone.
+  # Text triggers are case-insensitive unless you say otherwise, which is what
+  # matches Test, TEST and test alike.
+  - text: '\btest\b'
+
+condition:
+  # The Test channel only. A direct message arrives on "PKC" rather than a
+  # channel name, so this keeps the script off your DMs too.
+  - channel: Test
+
+action:
+  # Reply-linked, so clients thread the answer under the message it counted.
+  # The keycap filter turns the count into 0️⃣ … 🔟; {hops} on its own is the
+  # plain number.
+  - reply: "{hops|keycap}"
+
+limits:
+  # A minute per node. Range testing means sending the same word repeatedly from
+  # a moving position, and answering every one of those would put more traffic
+  # on the channel than the test itself.
+  cooldown: 60s
+  per_node: true
+  max_per_hour: 10

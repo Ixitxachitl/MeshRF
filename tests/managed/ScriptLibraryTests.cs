@@ -210,4 +210,48 @@ public class ScriptLibraryTests : IDisposable
         WriteFile("legacy.yml", "trigger:\n  - command: p\naction:\n  - reply: \"x\"\n");
         Assert.Equal("legacy.yml", Assert.Single(_library.Load()).FileName);
     }
+
+    [Fact]
+    public void The_Samples_Are_Installed_Into_An_Empty_Folder_And_Arrive_Inert()
+    {
+        var installed = _library.InstallSamples();
+
+        Assert.Equal(
+            ["ask-chatgpt.yaml", "lightning-sync.yaml", "ping.yaml", "test-hops.yaml",
+             "weather.yaml", "wildfire-sync.yaml"],
+            installed.OrderBy(n => n, StringComparer.Ordinal));
+
+        // Every one parses and is switched off, which is what makes installing
+        // them on someone's behalf a safe thing to do.
+        foreach (var file in _library.Load())
+        {
+            Assert.True(file.Parse.IsValid, $"{file.FileName}: {file.Parse.FirstError}");
+            Assert.False(file.Enabled, $"{file.FileName} was installed enabled");
+        }
+    }
+
+    [Fact]
+    public void The_Samples_Are_Installed_Once_And_A_Deleted_One_Stays_Deleted()
+    {
+        _library.InstallSamples();
+        _library.Delete("ping.yaml");
+
+        Assert.Empty(_library.InstallSamples());
+        Assert.DoesNotContain(_library.Load(), f => f.FileName == "ping.yaml");
+    }
+
+    [Fact]
+    public void A_Folder_That_Already_Has_Scripts_Is_Left_Alone()
+    {
+        // An upgrade must not drop six files into a set someone has curated.
+        WriteFile("mine.yaml", "trigger:\n  - command: p\naction:\n  - reply: \"x\"\n");
+
+        Assert.Empty(_library.InstallSamples());
+        Assert.Equal("mine.yaml", Assert.Single(_library.Load()).FileName);
+
+        // And it is marked, so the samples do not appear later if that one
+        // script is removed.
+        _library.Delete("mine.yaml");
+        Assert.Empty(_library.InstallSamples());
+    }
 }
