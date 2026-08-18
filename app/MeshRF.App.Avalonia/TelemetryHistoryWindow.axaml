@@ -32,7 +32,7 @@
                       SelectionMode="Extended" KeyDown="OnGridKeyDown">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="Delete selected" Click="OnDeleteSelected" />
+                        <MenuItem Header="Delete selected" />
                     </ContextMenu>
                 </DataGrid.ContextMenu>
                 <DataGrid.Columns>
@@ -61,7 +61,7 @@
                       SelectionMode="Extended" KeyDown="OnGridKeyDown">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="Delete selected" Click="OnDeleteSelected" />
+                        <MenuItem Header="Delete selected" />
                     </ContextMenu>
                 </DataGrid.ContextMenu>
                 <DataGrid.Columns>
@@ -81,7 +81,7 @@
                       SelectionMode="Extended" KeyDown="OnGridKeyDown">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="Delete selected" Click="OnDeleteSelected" />
+                        <MenuItem Header="Delete selected" />
                     </ContextMenu>
                 </DataGrid.ContextMenu>
                 <DataGrid.Columns>
@@ -102,7 +102,7 @@
                       SelectionMode="Extended" KeyDown="OnGridKeyDown">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="Delete selected" Click="OnDeleteSelected" />
+                        <MenuItem Header="Delete selected" />
                     </ContextMenu>
                 </DataGrid.ContextMenu>
                 <DataGrid.Columns>

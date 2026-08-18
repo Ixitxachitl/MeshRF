@@ -13,6 +13,22 @@ public partial class TelemetryHistoryWindow : Window
     public TelemetryHistoryWindow()
     {
         InitializeComponent();
+
+        // Each pane's Delete item is wired to its own grid here rather than
+        // through a shared XAML handler. A context menu lives in its own popup
+        // tree, so a handler cannot walk back to the grid it was opened over —
+        // capturing the grid is the only reliable way to know which of the four
+        // the click belongs to.
+        WireDeleteMenu(DeviceGrid);
+        WireDeleteMenu(EnvironmentGrid);
+        WireDeleteMenu(AirQualityGrid);
+        WireDeleteMenu(PowerGrid);
+    }
+
+    private void WireDeleteMenu(DataGrid grid)
+    {
+        if (grid.ContextMenu?.Items.OfType<MenuItem>().FirstOrDefault() is { } item)
+            item.Click += (_, _) => _ = DeleteSelectedAsync(grid);
     }
 
     private async void OnClear(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -32,17 +48,6 @@ public partial class TelemetryHistoryWindow : Window
         if (e.Key != Avalonia.Input.Key.Delete) return;
         e.Handled = true;
         _ = DeleteSelectedAsync(sender as DataGrid);
-    }
-
-    /// <summary>The menu item sits inside the grid's own ContextMenu, so the
-    /// grid it belongs to is the one that owns the menu — four panes share this
-    /// handler and each has to delete from itself.</summary>
-    private void OnDeleteSelected(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        // PlacementTarget is the grid the menu was opened over, which is the
-        // only reliable way back: the four panes share this handler.
-        var menu = (sender as MenuItem)?.Parent as ContextMenu;
-        _ = DeleteSelectedAsync(menu?.PlacementTarget as DataGrid);
     }
 
     /// <summary>
