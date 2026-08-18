@@ -606,33 +606,45 @@ public partial class RadioViewModel
         return true;
     }
 
-    // MeshRF's Region enum and the protobuf RegionCode enum are independently
-    // maintained and share neither ordinal positions nor member spelling
-    // (protoc emits "Us"/"Eu433" for "US"/"EU_433"), so Enum.TryParse on the
-    // name silently falls back to Unset. Map by meaning, explicitly.
-#pragma warning disable CS0612 // Ua868 is deprecated upstream but still a selectable MeshRF region
+    // Region's values are the protobuf's own, but protoc's member spelling
+    // differs ("Us"/"Eu433" for "US"/"EU_433") and the protobuf carries region
+    // codes MeshRF has no band for, so map by meaning rather than casting.
     private static ProtoRegionCode ToProtoRegionCode(Region region) => region switch
     {
-        Region.US      => ProtoRegionCode.Us,
-        Region.EU_433  => ProtoRegionCode.Eu433,
-        Region.EU_868  => ProtoRegionCode.Eu868,
-        Region.CN      => ProtoRegionCode.Cn,
-        Region.JP      => ProtoRegionCode.Jp,
-        Region.ANZ     => ProtoRegionCode.Anz,
-        Region.KR      => ProtoRegionCode.Kr,
-        Region.TW      => ProtoRegionCode.Tw,
-        Region.RU      => ProtoRegionCode.Ru,
-        Region.IN      => ProtoRegionCode.In,
-        Region.NZ_865  => ProtoRegionCode.Nz865,
-        Region.TH      => ProtoRegionCode.Th,
-        Region.LORA_24 => ProtoRegionCode.Lora24,
-        Region.UA_433  => ProtoRegionCode.Ua433,
-        Region.UA_868  => ProtoRegionCode.Ua868,
-        Region.MY_433  => ProtoRegionCode.My433,
-        Region.MY_919  => ProtoRegionCode.My919,
-        Region.SG_923  => ProtoRegionCode.Sg923,
-        Region.ANZ_433 => ProtoRegionCode.Anz433,
-        _              => ProtoRegionCode.Unset,
+        Region.US         => ProtoRegionCode.Us,
+        Region.EU_433     => ProtoRegionCode.Eu433,
+        Region.EU_868     => ProtoRegionCode.Eu868,
+        Region.EU_866     => ProtoRegionCode.Eu866,
+        Region.EU_N_868   => ProtoRegionCode.EuN868,
+        Region.CN         => ProtoRegionCode.Cn,
+        Region.JP         => ProtoRegionCode.Jp,
+        Region.ANZ        => ProtoRegionCode.Anz,
+        Region.ANZ_433    => ProtoRegionCode.Anz433,
+        Region.KR         => ProtoRegionCode.Kr,
+        Region.TW         => ProtoRegionCode.Tw,
+        Region.RU         => ProtoRegionCode.Ru,
+        Region.IN         => ProtoRegionCode.In,
+        Region.NZ_865     => ProtoRegionCode.Nz865,
+        Region.TH         => ProtoRegionCode.Th,
+        Region.LORA_24    => ProtoRegionCode.Lora24,
+        Region.UA_433     => ProtoRegionCode.Ua433,
+        Region.MY_433     => ProtoRegionCode.My433,
+        Region.MY_919     => ProtoRegionCode.My919,
+        Region.SG_923     => ProtoRegionCode.Sg923,
+        Region.PH_433     => ProtoRegionCode.Ph433,
+        Region.PH_868     => ProtoRegionCode.Ph868,
+        Region.PH_915     => ProtoRegionCode.Ph915,
+        Region.KZ_433     => ProtoRegionCode.Kz433,
+        Region.KZ_863     => ProtoRegionCode.Kz863,
+        Region.NP_865     => ProtoRegionCode.Np865,
+        Region.BR_902     => ProtoRegionCode.Br902,
+        Region.ITU1_2M    => ProtoRegionCode.Itu12M,
+        Region.ITU2_2M    => ProtoRegionCode.Itu22M,
+        Region.ITU3_2M    => ProtoRegionCode.Itu32M,
+        Region.ITU1_70CM  => ProtoRegionCode.Itu170Cm,
+        Region.ITU2_70CM  => ProtoRegionCode.Itu270Cm,
+        Region.ITU3_70CM  => ProtoRegionCode.Itu370Cm,
+        Region.ITU2_125CM => ProtoRegionCode.Itu2125Cm,
+        _                 => ProtoRegionCode.Unset,
     };
-#pragma warning restore CS0612
 }

@@ -14,24 +14,30 @@ public readonly record struct PresetLoraParams(byte Sf, double BwKhz, byte Cr);
 /// </summary>
 public static class LoraParamsHelper
 {
-    public static PresetLoraParams FromPreset(LoraPreset preset) => preset switch
+    /// <summary>
+    /// SF/BW/CR for a preset. <paramref name="wideLora"/> selects the scaled
+    /// bandwidths the 2.4 GHz SX128x regions use — spreading factor and coding
+    /// rate are the same either way, and the Lite/Narrow/Tiny presets are
+    /// unscaled, exactly as <c>modemPresetToParams()</c> has it.
+    /// </summary>
+    public static PresetLoraParams FromPreset(LoraPreset preset, bool wideLora = false) => preset switch
     {
-        LoraPreset.ShortTurbo   => new(7,  500.0,  5),
-        LoraPreset.ShortFast    => new(7,  250.0,  5),
-        LoraPreset.ShortSlow    => new(8,  250.0,  5),
-        LoraPreset.MediumFast   => new(9,  250.0,  5),
-        LoraPreset.MediumSlow   => new(10, 250.0,  5),
-        LoraPreset.LongTurbo    => new(11, 500.0,  8),
-        LoraPreset.LongFast     => new(11, 250.0,  5),
-        LoraPreset.LongModerate => new(11, 125.0,  8),
-        LoraPreset.LongSlow     => new(12, 125.0,  8),
-        LoraPreset.LiteFast     => new(9,  125.0,  5),
-        LoraPreset.LiteSlow     => new(10, 125.0,  5),
-        LoraPreset.NarrowFast   => new(7,  62.5,   6),
-        LoraPreset.NarrowSlow   => new(8,  62.5,   6),
-        LoraPreset.TinyFast     => new(7,  15.6,   5),
-        LoraPreset.TinySlow     => new(8,  15.6,   6),
-        LoraPreset.MediumTurbo  => new(9,  500.0,  5),
-        _                       => new(11, 250.0,  5),  // LongFast default
+        LoraPreset.ShortTurbo   => new(7,  wideLora ? 1625.0  : 500.0, 5),
+        LoraPreset.ShortFast    => new(7,  wideLora ? 812.5   : 250.0, 5),
+        LoraPreset.ShortSlow    => new(8,  wideLora ? 812.5   : 250.0, 5),
+        LoraPreset.MediumFast   => new(9,  wideLora ? 812.5   : 250.0, 5),
+        LoraPreset.MediumSlow   => new(10, wideLora ? 812.5   : 250.0, 5),
+        LoraPreset.LongTurbo    => new(11, wideLora ? 1625.0  : 500.0, 8),
+        LoraPreset.LongFast     => new(11, wideLora ? 812.5   : 250.0, 5),
+        LoraPreset.LongModerate => new(11, wideLora ? 406.25  : 125.0, 8),
+        LoraPreset.LongSlow     => new(12, wideLora ? 406.25  : 125.0, 8),
+        LoraPreset.LiteFast     => new(9,  125.0, 5),
+        LoraPreset.LiteSlow     => new(10, 125.0, 5),
+        LoraPreset.NarrowFast   => new(7,  62.5,  6),
+        LoraPreset.NarrowSlow   => new(8,  62.5,  6),
+        LoraPreset.TinyFast     => new(7,  15.6,  5),
+        LoraPreset.TinySlow     => new(8,  15.6,  6),
+        LoraPreset.MediumTurbo  => new(9,  wideLora ? 1625.0  : 500.0, 5),
+        _                       => new(11, wideLora ? 812.5   : 250.0, 5),  // LongFast default
     };
 }

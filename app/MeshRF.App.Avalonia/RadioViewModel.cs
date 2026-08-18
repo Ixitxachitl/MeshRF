@@ -198,6 +198,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private Region _selectedRegion = Region.US;
 
+    /// <summary>Tracks whether the last selected region was a 2.4 GHz one, so a
+    /// region change can tell a band class change from an ordinary retune.</summary>
+    private bool _lastWideLora = ChannelPlan.IsWideLora(Region.US);
+
     public Region[] AvailableRegions { get; } = Enum.GetValues<Region>();
 
     [ObservableProperty]
@@ -222,7 +226,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         get
         {
-            var p = LoraParamsHelper.FromPreset(SelectedPreset);
+            var p = LoraParamsHelper.FromPreset(SelectedPreset, ChannelPlan.IsWideLora(SelectedRegion));
             return OverrideSf != p.Sf || Math.Abs(OverrideBwKhz - p.BwKhz) > 0.01 || OverrideCr != p.Cr;
         }
     }
@@ -366,7 +370,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
         else
         {
-            var p = LoraParamsHelper.FromPreset(SelectedPreset);
+            var p = LoraParamsHelper.FromPreset(SelectedPreset, ChannelPlan.IsWideLora(SelectedRegion));
             sf = p.Sf;
             bwHz = p.BwKhz * 1000.0;
             cr = p.Cr;
@@ -1095,7 +1099,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <paramref name="preset"/> without triggering a save loop.</summary>
     private void ApplyPresetToLoraParams(LoraPreset preset)
     {
-        var p = LoraParamsHelper.FromPreset(preset);
+        var p = LoraParamsHelper.FromPreset(preset, ChannelPlan.IsWideLora(SelectedRegion));
         _suppressLoraParamSync = true;
         try
         {
@@ -1113,7 +1117,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private void RebuildSlots(bool snapToDefault = false)
     {
         var count = ChannelPlan.SlotCount(SelectedRegion, SelectedPreset);
-        var preferred = ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset);
+        var preferred = ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName());
         int desired = snapToDefault || SelectedSlot < 1 || SelectedSlot > count ? preferred : SelectedSlot;
 
         _suppressSlotSync = true;
@@ -1332,15 +1336,26 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Autofill SF/BW/CR from the new preset — preset is the anchor, so
         // overwriting any prior manual override here is the right UX.
         ApplyPresetToLoraParams(value);
-        RebuildSlots(snapToDefault: true);
         // An unnamed default primary channel is named after the preset, so it
-        // has to follow the preset when that changes.
+        // has to follow the preset when that changes. Rename before rebuilding
+        // the slots: the automatic slot is hashed from that name, so doing it
+        // after would hash the outgoing preset's name.
         _rxHost.SyncPrimaryChannelName(value);
+        RebuildSlots(snapToDefault: true);
         SaveSettings();
     }
 
     partial void OnSelectedRegionChanged(Region value)
     {
+        // The 2.4 GHz regions scale every preset's bandwidth, so crossing into
+        // or out of one changes what SF/BW/CR the preset means. Re-autofill for
+        // that move only — an ordinary sub-GHz region change must not discard a
+        // deliberate override.
+        if (_lastWideLora != ChannelPlan.IsWideLora(value))
+        {
+            _lastWideLora = ChannelPlan.IsWideLora(value);
+            ApplyPresetToLoraParams(SelectedPreset);
+        }
         RebuildSlots(snapToDefault: true);
         ApplyTxBandLimits();
         // A move to a band that doesn't touch the one we were operating in has
@@ -2073,10 +2088,21 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <summary>Persists edits made in the channel Settings dialog.</summary>
     public void SaveChannelSettings(ChannelTabViewModel channel)
     {
+        var previousPrimaryName = PrimaryChannelName();
         _rxHost.SaveChannelConfig(channel);
         // Clearing the primary's name, or promoting a different channel, can
         // leave it eligible to inherit the preset name again.
         _rxHost.SyncPrimaryChannelName(SelectedPreset);
+        // Firmware hashes the primary channel's name to pick the automatic
+        // frequency slot, so renaming it retunes every node that was on that
+        // slot. Follow the move only when the current slot still is the
+        // automatic one — a slot chosen by hand outranks the name, the same way
+        // a non-zero channel_num does in firmware.
+        if (!string.Equals(previousPrimaryName, PrimaryChannelName(), StringComparison.Ordinal) &&
+            SelectedSlot == ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, previousPrimaryName))
+        {
+            RebuildSlots(snapToDefault: true);
+        }
         // MuteRtttl lives in settings.json, not the channel store, so the
         // dialog's Save has to flush settings too.
         SaveSettings();
@@ -2112,6 +2138,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private ChannelConfig? PrimaryChannel() =>
         (Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
          ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault())?.Config;
+
+    /// <summary>The primary channel's name — what firmware hashes to pick the
+    /// automatic frequency slot. Empty before the channels have loaded, which
+    /// falls back to the preset name, exactly as an unnamed primary does.
+    /// </summary>
+    private string PrimaryChannelName() => PrimaryChannel()?.Name ?? string.Empty;
 
     private IEnumerable<ChannelConfig> AllChannelConfigs() =>
         Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config);

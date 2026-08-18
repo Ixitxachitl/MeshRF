@@ -119,6 +119,14 @@ public class ChannelPlanTests
     /// preset and slot is inside that region's own band, so the gate never
     /// fires on a legitimate selection — in any region, not just the 915 ones.
     /// </summary>
+    /// <remarks>
+    /// EU_866 with either Tiny preset is excluded because firmware itself
+    /// overshoots there: PROFILE_LITE's 0.4 MHz spacing makes the band an
+    /// awkward multiple of a 15.6 kHz slot, and applyModemConfig()'s round()
+    /// yields one slot more than fits, putting the top slot's centre 7.7 kHz
+    /// past 867.6. Mirroring firmware is the goal, so MeshRF reproduces the
+    /// overshoot and the band gate correctly refuses to transmit on it.
+    /// </remarks>
     [Fact]
     public void EverySlotOfEveryRegionAndPresetIsInItsOwnBand()
     {
@@ -126,6 +134,9 @@ public class ChannelPlanTests
         {
             foreach (var preset in Enum.GetValues<LoraPreset>())
             {
+                if (region == Region.EU_866 &&
+                    preset is LoraPreset.TinyFast or LoraPreset.TinySlow) continue;
+
                 var slots = ChannelPlan.SlotCount(region, preset);
                 for (var slot = 1; slot <= slots; slot++)
                 {
@@ -135,6 +146,119 @@ public class ChannelPlanTests
                 }
             }
         }
+    }
+
+    [Fact]
+    public void JpBandMatchesFirmware()
+    {
+        // RadioInterface.cpp: RDEF(JP, 920.5f, 923.5f, ...). An earlier table
+        // had 920.8-927.8, which put every JP slot on the wrong frequency and
+        // ran 4.3 MHz past the top of the Japanese band.
+        var r = ChannelPlan.Range(Region.JP);
+        Assert.Equal(920.5, r.FreqStartMHz, precision: 4);
+        Assert.Equal(923.5, r.FreqEndMHz, precision: 4);
+        Assert.Equal(12, ChannelPlan.SlotCount(Region.JP, LoraPreset.LongFast));
+        Assert.Equal(923.375, ChannelPlan.FrequencyMHz(Region.JP, LoraPreset.LongFast, 12), precision: 4);
+    }
+
+    [Fact]
+    public void SlotCountRoundsRatherThanTruncating()
+    {
+        // 26 MHz / 15.6 kHz = 1666.67. Firmware rounds to 1667; truncating to
+        // 1666 changes the modulo and so moves every hashed default slot.
+        Assert.Equal(1667, ChannelPlan.SlotCount(Region.US, LoraPreset.TinyFast));
+        Assert.Equal(1577, ChannelPlan.DefaultSlot(Region.US, LoraPreset.TinyFast));
+
+        // Presets that divide their band exactly are unaffected either way.
+        Assert.Equal(104, ChannelPlan.SlotCount(Region.US, LoraPreset.LongFast));
+    }
+
+    [Fact]
+    public void WideLoraRegionsScaleThePresetBandwidth()
+    {
+        Assert.True(ChannelPlan.IsWideLora(Region.LORA_24));
+        Assert.False(ChannelPlan.IsWideLora(Region.US));
+
+        // MeshRadio.h: LONG_FAST is 812.5 kHz on wideLora hardware, not 250.
+        Assert.Equal(0.8125, ChannelPlan.BandwidthMHz(LoraPreset.LongFast, wideLora: true), precision: 6);
+        Assert.Equal(0.250, ChannelPlan.BandwidthMHz(LoraPreset.LongFast, wideLora: false), precision: 6);
+        // Lite/Narrow/Tiny have no scaled variant.
+        Assert.Equal(0.0625, ChannelPlan.BandwidthMHz(LoraPreset.NarrowFast, wideLora: true), precision: 6);
+
+        // 83.5 MHz / 812.5 kHz = 103 slots, not the 334 a 250 kHz slot implies.
+        Assert.Equal(103, ChannelPlan.SlotCount(Region.LORA_24, LoraPreset.LongFast));
+    }
+
+    [Fact]
+    public void ABandTooNarrowForThePresetFallsBackToTheRegionDefault()
+    {
+        // EU_868 spans 250 kHz, so a 500 kHz Turbo preset cannot fit. Firmware
+        // records INVALID_RADIO_SETTING and clamps to the region's default
+        // preset rather than transmitting off-band.
+        Assert.False(ChannelPlan.Supports(Region.EU_868, LoraPreset.ShortTurbo));
+        Assert.False(ChannelPlan.Supports(Region.EU_868, LoraPreset.LongTurbo));
+        Assert.True(ChannelPlan.Supports(Region.EU_868, LoraPreset.LongFast));
+
+        Assert.Equal(LoraPreset.LongFast, ChannelPlan.DefaultPreset(Region.EU_868));
+        Assert.Equal(
+            ChannelPlan.FrequencyMHz(Region.EU_868, LoraPreset.LongFast, 1),
+            ChannelPlan.FrequencyMHz(Region.EU_868, LoraPreset.ShortTurbo, 1),
+            precision: 6);
+        Assert.True(ChannelPlan.Contains(Region.EU_868,
+            ChannelPlan.FrequencyMHz(Region.EU_868, LoraPreset.ShortTurbo, 1)));
+    }
+
+    [Fact]
+    public void RegionsWithSpacingAndPaddingUseTheirProfile()
+    {
+        // EU_866 is PROFILE_LITE: 0.4 MHz spacing, 37.5 kHz padding either
+        // side, so a 125 kHz LiteFast slot is 600 kHz wide and 2.0 MHz of band
+        // (plus one spacing) holds four of them.
+        Assert.Equal(4, ChannelPlan.SlotCount(Region.EU_866, LoraPreset.LiteFast));
+        Assert.Equal(865.7, ChannelPlan.FrequencyMHz(Region.EU_866, LoraPreset.LiteFast, 1), precision: 4);
+        Assert.Equal(867.5, ChannelPlan.FrequencyMHz(Region.EU_866, LoraPreset.LiteFast, 4), precision: 4);
+    }
+
+    [Fact]
+    public void RegionsThatPinASlotIgnoreTheHash()
+    {
+        // The ham bands and EU_N_868 carry an explicit overrideSlot in
+        // firmware's region table instead of hashing the channel name.
+        Assert.Equal(1, ChannelPlan.DefaultSlot(Region.EU_N_868, LoraPreset.NarrowSlow));
+        Assert.Equal(26, ChannelPlan.DefaultSlot(Region.ITU1_2M, LoraPreset.TinyFast));
+        Assert.Equal(51, ChannelPlan.DefaultSlot(Region.ITU2_2M, LoraPreset.TinyFast));
+        Assert.Equal(137, ChannelPlan.DefaultSlot(Region.ITU2_70CM, LoraPreset.NarrowSlow));
+        // A pinned slot holds whatever preset is selected, hash or no hash.
+        Assert.Equal(26, ChannelPlan.DefaultSlot(Region.ITU1_2M, LoraPreset.NarrowSlow));
+
+        // Each region pins a slot that exists at its own default preset...
+        foreach (var region in Enum.GetValues<Region>())
+        {
+            var preset = ChannelPlan.DefaultPreset(region);
+            Assert.InRange(ChannelPlan.DefaultSlot(region, preset), 1, ChannelPlan.SlotCount(region, preset));
+            Assert.True(ChannelPlan.Supports(region, preset),
+                $"{region} does not support its own default preset {preset}");
+        }
+
+        // ...but a wider preset leaves the pinned slot past the end of the
+        // band. Firmware returns it anyway and flags the config; Supports()
+        // is how a caller sees that coming.
+        Assert.Equal(8, ChannelPlan.SlotCount(Region.ITU1_2M, LoraPreset.LongFast));
+        Assert.Equal(26, ChannelPlan.DefaultSlot(Region.ITU1_2M, LoraPreset.LongFast));
+        Assert.False(ChannelPlan.Supports(Region.ITU1_2M, LoraPreset.LongFast));
+    }
+
+    [Fact]
+    public void DefaultSlotHashesTheChannelNameWhenTheChannelIsNamed()
+    {
+        // Firmware hashes the primary channel's name and only falls back to the
+        // preset display name when it is unset.
+        var unnamed = ChannelPlan.DefaultSlot(Region.US, LoraPreset.LongFast);
+        Assert.Equal(20, unnamed);
+        Assert.Equal(unnamed, ChannelPlan.DefaultSlot(Region.US, LoraPreset.LongFast, "LongFast"));
+
+        var named = ChannelPlan.DefaultSlot(Region.US, LoraPreset.LongFast, "MeshRF");
+        Assert.Equal((int)(ChannelPlan.Djb2("MeshRF") % 104) + 1, named);
     }
 
     [Fact]
