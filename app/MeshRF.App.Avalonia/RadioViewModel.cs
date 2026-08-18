@@ -208,7 +208,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private ObservableCollection<int> _slots = new();
 
     [ObservableProperty]
-    private int _selectedSlot = 20;
+    private int _selectedSlot = AutoSlot;
 
     // SF/BW/CR: auto-filled from the preset (ApplyPresetToLoraParams), editable
     // to override — mirrors MeshRF.App's OverrideSf/OverrideBwKhz/OverrideCr.
@@ -1114,16 +1114,38 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsCustomLoraParams));
     }
 
+    /// <summary>Firmware's "no slot chosen" sentinel (<c>channel_num == 0</c>),
+    /// offered in the picker as "Auto": the frequency then follows the region,
+    /// preset and primary channel name instead of being pinned.</summary>
+    private const int AutoSlot = 0;
+
+    /// <summary>Resolves <see cref="AutoSlot"/> to the slot it currently stands
+    /// for; any other value is already the answer.</summary>
+    private int EffectiveSlot(int slot) => slot == AutoSlot
+        ? ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName())
+        : slot;
+
+    /// <summary>The slot <see cref="AutoSlot"/> currently stands for, shown
+    /// inline in the picker as "Auto (n)" so the resolved choice is visible
+    /// without pinning it.</summary>
+    [ObservableProperty]
+    private int _autoResolvedSlot = 1;
+
     private void RebuildSlots(bool snapToDefault = false)
     {
         var count = ChannelPlan.SlotCount(SelectedRegion, SelectedPreset);
-        var preferred = ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName());
-        int desired = snapToDefault || SelectedSlot < 1 || SelectedSlot > count ? preferred : SelectedSlot;
+        AutoResolvedSlot = ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName());
+        // Snapping to the default means going back to Auto rather than pinning
+        // the slot the default currently resolves to — same frequency today,
+        // but it keeps following a later preset change or channel rename.
+        int desired = snapToDefault || SelectedSlot < AutoSlot || SelectedSlot > count
+            ? AutoSlot
+            : SelectedSlot;
 
         _suppressSlotSync = true;
         try
         {
-            var fresh = new ObservableCollection<int>();
+            var fresh = new ObservableCollection<int> { AutoSlot };
             for (var i = 1; i <= count; i++) fresh.Add(i);
             Slots = fresh;
             SelectedSlot = desired;
@@ -1134,7 +1156,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
 
         _suppressRetune = true;
-        try { CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, desired); }
+        try { CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, EffectiveSlot(desired)); }
         finally { _suppressRetune = false; }
     }
 
@@ -1393,8 +1415,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedSlotChanged(int value)
     {
-        if (_suppressSlotSync || value <= 0) return;
-        CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, value);
+        // AutoSlot is a real selection, not the "nothing selected" the old
+        // `value <= 0` guard treated it as; only a negative is out of range.
+        if (_suppressSlotSync || value < AutoSlot) return;
+        CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, EffectiveSlot(value));
         SaveSettings();
     }
 
@@ -2088,21 +2112,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <summary>Persists edits made in the channel Settings dialog.</summary>
     public void SaveChannelSettings(ChannelTabViewModel channel)
     {
-        var previousPrimaryName = PrimaryChannelName();
         _rxHost.SaveChannelConfig(channel);
         // Clearing the primary's name, or promoting a different channel, can
         // leave it eligible to inherit the preset name again.
         _rxHost.SyncPrimaryChannelName(SelectedPreset);
-        // Firmware hashes the primary channel's name to pick the automatic
-        // frequency slot, so renaming it retunes every node that was on that
-        // slot. Follow the move only when the current slot still is the
-        // automatic one — a slot chosen by hand outranks the name, the same way
-        // a non-zero channel_num does in firmware.
-        if (!string.Equals(previousPrimaryName, PrimaryChannelName(), StringComparison.Ordinal) &&
-            SelectedSlot == ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, previousPrimaryName))
-        {
-            RebuildSlots(snapToDefault: true);
-        }
+        // The primary channel's name feeds the automatic slot, and a channel
+        // edit can change it two ways: renaming the primary, or a role change
+        // that promotes a different channel into the job. Rebuilding covers
+        // both — on Auto it retunes, on a pinned slot it leaves the tuning
+        // alone and just refreshes the "Auto (n)" label. Unconditional on
+        // purpose: the dialog writes the new name into the live ChannelConfig
+        // before calling this, so there is no earlier value to compare against.
+        RebuildSlots();
         // MuteRtttl lives in settings.json, not the channel store, so the
         // dialog's Save has to flush settings too.
         SaveSettings();

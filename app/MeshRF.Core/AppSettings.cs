@@ -15,7 +15,10 @@ public sealed class AppSettings
 {
     public string Region { get; set; } = "US";
     public string Preset { get; set; } = "LongFast";
-    public int Slot { get; set; } = 20;
+    /// <summary>Frequency slot, 1-based. 0 = Auto: derive it from the region,
+    /// preset and primary channel name, as firmware does for channel_num 0.
+    /// </summary>
+    public int Slot { get; set; } = 0;
     public double CenterFreqMHz { get; set; } = 906.875;
 
     /// <summary>Spreading factor override (5–12). 0 = derive from preset.</summary>

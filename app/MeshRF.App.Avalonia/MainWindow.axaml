@@ -288,7 +288,21 @@
                 <ComboBox ItemsSource="{Binding Slots}"
                           SelectedItem="{Binding SelectedSlot}"
                           IsEnabled="{Binding !IsRunning}"
-                          FontSize="11" Width="70" Height="26" Margin="0,0,8,2" />
+                          FontSize="11" Width="100" Height="26" Margin="0,0,8,2"
+                          ToolTip.Tip="Frequency slot. Auto follows the region, preset and primary channel name, the way a node with no slot set does.">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="x:Int32">
+                            <TextBlock>
+                                <TextBlock.Text>
+                                    <MultiBinding Converter="{StaticResource SlotLabel}">
+                                        <Binding Path="." />
+                                        <Binding Path="#RootWindow.DataContext.AutoResolvedSlot" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
                 <TextBlock Text="Freq (MHz)" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
                          FontSize="11" Width="100" Height="26" Margin="0,0,8,2" />
