@@ -338,6 +338,48 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private void TestRingtone() =>
         _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
 
+    /// <summary>
+    /// Rolling airtime, for the channel_utilization and air_util_tx we report.
+    /// Firmware counts these off the radio's own timers; with no such counter
+    /// here, each frame's time on air is estimated from the preset and length.
+    /// </summary>
+    private readonly AirtimeTracker _airtime = new();
+
+    /// <summary>When RX last started, which is what our uptime measures. A node
+    /// that is not listening is not up, so this resets on every start rather
+    /// than tracking how long the app has been open.</summary>
+    private DateTime? _rxStartedUtc;
+
+    /// <summary>Notes a frame's time on air under the preset it was sent with.
+    /// A custom SF/BW/CR overrides the preset, since that is what the radio is
+    /// actually configured for.</summary>
+    private void RecordAirtime(int payloadBytes, bool isTx)
+    {
+        if (payloadBytes <= 0) return;
+
+        int sf; double bwHz; int cr;
+        if (IsCustomLoraParams)
+        {
+            sf = OverrideSf;
+            bwHz = OverrideBwKhz * 1000.0;
+            cr = OverrideCr;
+        }
+        else
+        {
+            var p = LoraParamsHelper.FromPreset(SelectedPreset);
+            sf = p.Sf;
+            bwHz = p.BwKhz * 1000.0;
+            cr = p.Cr;
+        }
+        _airtime.Record(AirtimeTracker.EstimateAirtimeMs(sf, bwHz, cr, payloadBytes), isTx);
+    }
+
+    /// <summary>Seconds since RX started, clamped to the protobuf's uint.</summary>
+    private uint UptimeSeconds =>
+        _rxStartedUtc is DateTime started
+            ? (uint)Math.Clamp((DateTime.UtcNow - started).TotalSeconds, 0, uint.MaxValue)
+            : 0u;
+
     /// <summary>Play the incoming-message alert, unless it's muted.</summary>
     public void PlayIncomingRingtone() =>
         _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
@@ -965,6 +1007,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!m.Success) return;
         if (!(m.Groups["status"].Success && m.Groups["status"].Value == "OK")) return;
 
+        // Counted before the decode: channel utilisation is about occupied air,
+        // so a frame that turns out not to be for us still used the channel.
+        RecordAirtime(m.Groups["hex"].Value.Length / 2, isTx: false);
+
         var frame = HexToBytes(m.Groups["hex"].Value);
         if (frame.Length < MeshHeader.Size) return;
         if (!MeshHeader.TryParse(frame, out var header)) return;
@@ -1014,6 +1060,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 {
                     _core.StartRx(SelectedPreset, hz);
                 }
+                // Only once the radio actually started: uptime should say how
+                // long we have been listening, not how long ago the button was
+                // pressed on a start that threw.
+                _rxStartedUtc = DateTime.UtcNow;
             }
             catch (InvalidOperationException ex)
             {
@@ -1782,6 +1832,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             _txSemaphore.Release();
         }
 
+        // Our own transmissions are the whole of air_util_tx, and they occupy
+        // the channel like anyone else's, so they count toward both figures.
+        if (sent) RecordAirtime(frame.Length, isTx: true);
+
         // Every send in the app funnels through here, so this is the one place
         // self-originated traffic needs to be offered to MQTT — firmware
         // uplinks its own packets from Router::send for the same reason.
@@ -2256,14 +2310,27 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
         channel ??= PrimaryChannel();
         if (channel is null) return;
+        _airtime.Compute(out float channelUtil, out float airUtilTx);
+        uint uptime = UptimeSeconds;
+        const byte mainsPowered = 101; // >100 is Meshtastic's "externally powered".
+
         var frame = MeshEncoder.EncodeTelemetryDeviceMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
-            batteryLevel: 101, // 101 = "powered from mains", same sentinel MeshRF.App uses on AC.
+            batteryLevel: mainsPowered,
+            channelUtilization: channelUtil,
+            airUtilTx: airUtilTx,
+            uptimeSeconds: uptime,
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
         if (await TransmitFrameAsync(frame))
         {
             StatusText = "Sent device metrics.";
-            _rxHost.RecordSelfTelemetry(new MeshTelemetry { BatteryLevel = 101 });
+            _rxHost.RecordSelfTelemetry(new MeshTelemetry
+            {
+                BatteryLevel = mainsPowered,
+                ChannelUtilization = channelUtil,
+                AirUtilTx = airUtilTx,
+                UptimeSeconds = uptime,
+            });
         }
         else StatusText = "Transmit failed.";
     }
