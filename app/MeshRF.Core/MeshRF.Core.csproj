@@ -32,6 +32,10 @@
     <!-- USB serial GPS. Cross-platform, so the reader lives here rather than
          in the app. -->
     <PackageReference Include="System.IO.Ports" Version="9.0.0" />
+    <!-- Battery voltage on Windows, which has no Win32 call for it — see
+         SystemPower. Referenced unconditionally so the build is the same on
+         every runner; every use is guarded by OperatingSystem.IsWindows(). -->
+    <PackageReference Include="System.Management" Version="9.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
     <!-- Automation scripts are hand-edited YAML files under
          %APPDATA%\MeshRF\scripts. Only the representation model is used (see

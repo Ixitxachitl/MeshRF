@@ -2312,10 +2312,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (channel is null) return;
         _airtime.Compute(out float channelUtil, out float airUtilTx);
         uint uptime = UptimeSeconds;
-        const byte mainsPowered = 101; // >100 is Meshtastic's "externally powered".
+
+        // The host's own battery: a laptop running MeshRF is a battery-powered
+        // node like any other. Falls back to what we last reported, so a
+        // machine whose battery briefly cannot be read does not appear to drop
+        // to zero on the mesh.
+        SystemPower.Read(out bool acOnline, out byte? batteryPct, out float? voltageV);
+        var previous = _rxHost.SelfBatteryLevel;
+        byte battery = SystemPower.BatteryLevelForWire(acOnline, batteryPct, previous);
+        voltageV ??= _rxHost.SelfVoltageV;
 
         var frame = MeshEncoder.EncodeTelemetryDeviceMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
-            batteryLevel: mainsPowered,
+            batteryLevel: battery,
+            voltage: voltageV,
             channelUtilization: channelUtil,
             airUtilTx: airUtilTx,
             uptimeSeconds: uptime,
@@ -2326,7 +2335,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             StatusText = "Sent device metrics.";
             _rxHost.RecordSelfTelemetry(new MeshTelemetry
             {
-                BatteryLevel = mainsPowered,
+                BatteryLevel = battery,
+                Voltage = voltageV,
                 ChannelUtilization = channelUtil,
                 AirUtilTx = airUtilTx,
                 UptimeSeconds = uptime,

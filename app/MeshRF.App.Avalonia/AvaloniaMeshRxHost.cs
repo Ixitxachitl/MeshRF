@@ -1463,6 +1463,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         MarkNodeDirty(MyNodeNum);
     }
 
+    /// <summary>Battery level we last reported, so a reading that momentarily
+    /// cannot be taken falls back to it rather than looking like a flat
+    /// battery. Null before the first report.</summary>
+    public byte? SelfBatteryLevel => _nodeStore.Get(MyNodeNum)?.BatteryPct;
+
+    /// <summary>Voltage we last reported, for the same reason.</summary>
+    public float? SelfVoltageV => _nodeStore.Get(MyNodeNum)?.VoltageV;
+
     /// <summary>Files telemetry this node has just sent, as receiving it would.
     /// Shares RecordTelemetryHistory's duplicate suppression.</summary>
     public void RecordSelfTelemetry(MeshTelemetry telemetry)
