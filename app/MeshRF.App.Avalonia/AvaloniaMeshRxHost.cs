@@ -437,7 +437,22 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         }
 
         foreach (var c in configs.OrderBy(c => c.Index))
-            Tabs.Add(new ChannelTabViewModel(c));
+            Tabs.Add(NewChannelTab(c));
+    }
+
+    /// <summary>The channel a keyless secondary borrows from, per firmware
+    /// <c>getKey()</c>. Looked up live so it follows role edits.</summary>
+    private ChannelConfig? PrimaryChannelConfig() =>
+        Tabs.OfType<ChannelTabViewModel>()
+            .FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)?.Config;
+
+    /// <summary>Wires a config to its siblings before it reaches a tab, so key
+    /// and hash resolution work the same on every path that later hands the
+    /// config to the decoder or encoder.</summary>
+    private ChannelTabViewModel NewChannelTab(ChannelConfig config)
+    {
+        config.PrimaryProvider = PrimaryChannelConfig;
+        return new ChannelTabViewModel(config);
     }
 
     /// <summary>Adds and persists a new secondary channel with an
@@ -458,7 +473,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             PositionPrecision = 0,
         };
         _channelStore.Upsert(config);
-        var tab = new ChannelTabViewModel(config);
+        var tab = NewChannelTab(config);
         // Keep channel tabs contiguous ahead of conversation tabs.
         int insertAt = Tabs.OfType<ChannelTabViewModel>().Count();
         Tabs.Insert(insertAt, tab);
@@ -541,8 +556,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     public ChannelConfig? FindChannelByName(string? name)
     {
-        if (string.IsNullOrEmpty(name)) return Tabs.OfType<ChannelTabViewModel>().FirstOrDefault()?.Config;
-        return Tabs.OfType<ChannelTabViewModel>()
+        // Disabled channels are skipped: callers use this to pick a channel to
+        // send on, and a disabled one has no key or hash to send with.
+        var candidates = Tabs.OfType<ChannelTabViewModel>().Where(t => !t.Config.IsDisabled);
+        if (string.IsNullOrEmpty(name)) return candidates.FirstOrDefault()?.Config;
+        return candidates
             .FirstOrDefault(t => string.Equals(t.Config.Name, name, StringComparison.OrdinalIgnoreCase))?.Config;
     }
 

@@ -2017,7 +2017,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private bool CanSendMessage() =>
         _core?.CanTransmit == true && IsRunning &&
-        SelectedTab is not null && !string.IsNullOrWhiteSpace(MessageText);
+        SelectedTab is not null && !string.IsNullOrWhiteSpace(MessageText) &&
+        // Nothing goes out on a disabled channel: firmware has no key or hash
+        // for one, so the frame would be unaddressable.
+        SelectedTab is not ChannelTabViewModel { Config.IsDisabled: true };
 
     partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
     partial void OnSelectedTabChanged(ITabItem? value)
@@ -2130,6 +2133,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // A channel's name or downlink flag decides which broker topics we
         // subscribe to, so the bridge has to re-evaluate its subscriptions.
         RefreshMqttBridge();
+        // Disabling the channel being composed on has to take the Send button
+        // with it.
+        SendMessageCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand]
@@ -2173,7 +2179,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// Ham mode deliberately doesn't clear anyone's keys, so this is how the
     /// conflict surfaces instead.</summary>
     private IEnumerable<ChannelConfig> EncryptedChannels() =>
-        AllChannelConfigs().Where(c => c.EffectiveKey.Length > 0);
+        AllChannelConfigs().Where(c => !c.IsDisabled && c.EffectiveKey.Length > 0);
 
     public bool HasLicensedEncryptedChannelWarning => MyIsLicensed && EncryptedChannels().Any();
 
@@ -2193,7 +2199,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!MyIsLicensed || frame.Length < MeshHeader.Size) return null;
         byte hash = frame[13];
         foreach (var c in AllChannelConfigs())
-            if (c.Hash == hash && c.EffectiveKey.Length > 0) return c.Name;
+            if (!c.IsDisabled && c.Hash == hash && c.EffectiveKey.Length > 0) return c.Name;
         return null;
     }
 

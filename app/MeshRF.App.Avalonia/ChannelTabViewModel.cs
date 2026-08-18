@@ -19,8 +19,14 @@ public partial class ChannelTabViewModel : ObservableObject, ITabItem
     public string DisplayName =>
         string.IsNullOrEmpty(Config.Name) ? $"Channel {Config.Index}" : Config.Name;
 
-    public string TabHeader =>
-        Config.Role == ChannelRole.Primary ? $"{DisplayName} ★" : DisplayName;
+    public string TabHeader => Config.Role switch
+    {
+        ChannelRole.Primary => $"{DisplayName} ★",
+        // A disabled channel keeps its tab and history but is inert on the air:
+        // it decodes nothing and can't be sent on, so say so in the header.
+        ChannelRole.Disabled => $"{DisplayName} (off)",
+        _ => DisplayName,
+    };
 
     public bool CanClose => false;
 

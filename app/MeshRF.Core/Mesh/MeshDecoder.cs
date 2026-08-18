@@ -378,17 +378,27 @@ public static class MeshDecoder
         // Hash collisions (two channels with the same computed byte) are handled
         // naturally: both candidates are tried in index order.
         var ordered = channels
-            .Where(c => c.Hash == header.ChannelHash)
+            .Where(c => !c.IsDisabled && c.Hash == header.ChannelHash)
             .ToList();
 
         foreach (var ch in ordered)
         {
             var key = ch.EffectiveKey;
-            if (key.Length != 16 && key.Length != 32) continue;
 
             byte[] plain;
-            try { plain = MeshCrypto.Ctr(cipher, key, header.From, header.PacketId); }
-            catch { continue; }
+            if (key.Length == 0)
+            {
+                // No PSK means no crypto, not "can't read it": firmware's
+                // encryptPacket() is a no-op for a zero-length key, so the
+                // frame carries the Data protobuf in the clear.
+                plain = cipher;
+            }
+            else if (key.Length is 16 or 32)
+            {
+                try { plain = MeshCrypto.Ctr(cipher, key, header.From, header.PacketId); }
+                catch { continue; }
+            }
+            else continue;
 
             if (TryParseData(plain, out var port, out var appPayload,
                              out var wantResp, out var reqId, out var replyId,

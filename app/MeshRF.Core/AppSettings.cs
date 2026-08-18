@@ -138,8 +138,9 @@ public sealed class AppSettings
     /// <summary>Self-reported firmware edition.</summary>
     public string UserFirmwareEdition { get; set; } = "VANILLA";
 
-    /// <summary>Rebroadcast mode for when TX is added (firmware
-    /// <c>Config.DeviceConfig.RebroadcastMode</c>).</summary>
+    /// <summary>Rebroadcast mode the relay applies to received traffic (firmware
+    /// <c>Config.DeviceConfig.RebroadcastMode</c>). Enforced by
+    /// <c>RelayPolicy.PassesRebroadcastPolicy</c>.</summary>
     public string RebroadcastMode { get; set; } = "ALL";
 
     /// <summary>Default hop limit for transmitted packets (firmware

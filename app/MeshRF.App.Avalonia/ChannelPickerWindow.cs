@@ -83,7 +83,9 @@ public sealed class ChannelPickerWindow : Window
     public static async Task<(ChannelConfig? Channel, uint? DmNodeNum)?> PickAsync(
         Window owner, RadioViewModel vm, string prompt = "Send waypoint on which channel?")
     {
-        var channels = vm.Tabs.OfType<ChannelTabViewModel>().ToList();
+        // A disabled channel has no key and no hash on the air, so it isn't a
+        // place anything can be sent.
+        var channels = vm.Tabs.OfType<ChannelTabViewModel>().Where(c => !c.Config.IsDisabled).ToList();
         var openDms = vm.Tabs.OfType<ConversationTabViewModel>().ToList();
         if (channels.Count == 0 && openDms.Count == 0)
         {

@@ -33,6 +33,22 @@ public sealed class ChannelConfig
 
     public ChannelRole Role { get; set; } = ChannelRole.Secondary;
 
+    /// <summary>
+    /// Firmware <c>getKey()</c> reports a disabled channel's key as invalid and
+    /// <c>generateHash()</c> returns -1 for it, so the channel matches no
+    /// incoming packet and carries no outgoing one. Callers must skip it rather
+    /// than reading <see cref="EffectiveKey"/>, which describes only the key.
+    /// </summary>
+    public bool IsDisabled => Role == ChannelRole.Disabled;
+
+    /// <summary>
+    /// Supplies the primary channel so a secondary that stores no PSK of its
+    /// own can borrow it, as firmware <c>getKey()</c> does. Wired by whoever
+    /// owns the channel set; on a standalone config it is null and no
+    /// inheritance happens.
+    /// </summary>
+    public Func<ChannelConfig?>? PrimaryProvider { get; set; }
+
     public byte PositionPrecision { get; set; } = 13;
     public bool UplinkEnabled     { get; set; }
     public bool DownlinkEnabled   { get; set; }
@@ -62,6 +78,9 @@ public sealed class ChannelConfig
     /// <item>single byte N (2..255) → default key with the last byte set to
     ///       <c>defaultLast + (N - 1)</c> (firmware <c>Channels::getKey</c>)</item>
     /// <item>length 16 or 32 → used verbatim</item>
+    /// <item>any other length → zero-padded up to the next AES size, because
+    ///       firmware pads rather than rejects and we have to match a node
+    ///       configured that way</item>
     /// </list>
     /// Returns an empty array when the channel is unencrypted.
     /// </summary>
@@ -69,6 +88,17 @@ public sealed class ChannelConfig
     {
         get
         {
+            // A secondary that stores no PSK is not unencrypted: firmware hands
+            // it the primary's key, and hashes it with that key too. Only a
+            // stored length of 0 inherits — a 1-byte 0x00 is the "no crypto"
+            // shorthand, which firmware checks after this branch.
+            if (Psk.Length == 0 && Role == ChannelRole.Secondary)
+            {
+                var primary = PrimaryProvider?.Invoke();
+                if (primary is not null && !ReferenceEquals(primary, this))
+                    return primary.EffectiveKey;
+            }
+
             if (Psk.Length == 1)
             {
                 byte index = Psk[0];
@@ -77,10 +107,24 @@ public sealed class ChannelConfig
                 key[^1] = (byte)(DefaultPsk[^1] + index - 1);
                 return key;
             }
+            // Firmware getKey() pads a short key with zeros to the next AES
+            // size instead of refusing it ("User provided a too short AES128
+            // key - padding"), so a channel configured that way is perfectly
+            // decodable on the mesh. Pad the same way or we'd skip it.
+            if (Psk.Length is > 1 and < 16) return Pad(16);
+            if (Psk.Length is > 16 and < 32) return Pad(32);
+
             // Return a copy, not the live backing array: callers that treat
             // this as "their" key (e.g. zeroing it after use) must not
             // corrupt the channel's actual stored PSK.
             return (byte[])Psk.Clone();
+
+            byte[] Pad(int size)
+            {
+                var padded = new byte[size];
+                Psk.AsSpan().CopyTo(padded);
+                return padded;
+            }
         }
     }
 

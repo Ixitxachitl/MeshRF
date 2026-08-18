@@ -41,10 +41,15 @@ public partial class ChannelSettingsWindow : Window
         w.MuteRtttlCheck.IsChecked = channel.MuteRtttl;
         w.UplinkCheck.IsChecked = channel.Config.UplinkEnabled;
         w.DownlinkCheck.IsChecked = channel.Config.DownlinkEnabled;
-        w.HashText.Text = $"hash 0x{channel.Config.Hash:X2}";
+        w.HashText.Text = HashLabel(channel.Config);
         w._loading = false;
         w.Show(owner);
     }
+
+    /// <summary>Firmware's generateHash() returns -1 for a disabled channel, so
+    /// there is no hash byte to show — nothing on the air can match it.</summary>
+    private static string HashLabel(ChannelConfig config) =>
+        config.IsDisabled ? "disabled — matches no traffic" : $"hash 0x{config.Hash:X2}";
 
     private static string PskToText(byte[] psk)
     {
@@ -53,16 +58,70 @@ public partial class ChannelSettingsWindow : Window
         return Convert.ToBase64String(psk);
     }
 
-    private static byte[]? PskFromText(string? text)
+    /// <summary>
+    /// Parses the PSK box into stored PSK bytes, or null when the text can't be
+    /// a PSK. <paramref name="message"/> carries the rejection reason, or a
+    /// warning about a key that parsed but offers no privacy.
+    ///
+    /// A single stored byte is Meshtastic's shorthand for the well-known default
+    /// key, and channel.proto defines it only for 0..10 ("shown to user as
+    /// simple1 through 10"). Firmware range-checks nothing: <c>getKey()</c>
+    /// expands any value up to 255 into the default key with its last byte
+    /// bumped, so a one-byte entry yields a channel that looks configured and
+    /// private while using a key published in the firmware source. We still
+    /// accept it — a monitor has to be able to match whatever a real node is
+    /// configured with, including out-of-spec values — but say what it is.
+    /// </summary>
+    private static byte[]? PskFromText(string? text, out string? message)
     {
+        message = null;
         var s = (text ?? string.Empty).Trim();
         if (s.Length == 0 || s.Equals("none", StringComparison.OrdinalIgnoreCase)) return Array.Empty<byte>();
         if (s.Equals("default", StringComparison.OrdinalIgnoreCase)) return new byte[] { 0x01 };
+
+        bool explicitHex = s.StartsWith("hex:", StringComparison.OrdinalIgnoreCase);
         if (s.StartsWith("base64:", StringComparison.OrdinalIgnoreCase)) s = s["base64:".Length..];
-        if (s.StartsWith("hex:", StringComparison.OrdinalIgnoreCase)) s = s["hex:".Length..];
-        try { return Convert.FromBase64String(s); } catch { }
-        try { return Convert.FromHexString(s); } catch { }
-        return null;
+        if (explicitHex) s = s["hex:".Length..];
+
+        // A bare 32- or 64-character hex key is also well-formed base64, and
+        // decoding it that way yields 24 or 48 meaningless bytes. Nobody pastes
+        // a base64 key that happens to be hex digits only, so read it as hex.
+        bool looksHex = s.Length is 32 or 64 && s.All(Uri.IsHexDigit);
+
+        byte[]? bytes = null;
+        if (!explicitHex && !looksHex)
+            try { bytes = Convert.FromBase64String(s); } catch { }
+        if (bytes is null)
+            try { bytes = Convert.FromHexString(s); } catch { }
+        if (bytes is null)
+        {
+            message = "PSK not saved — enter base64, hex, \"default\", or leave blank.";
+            return null;
+        }
+
+        switch (bytes.Length)
+        {
+            case 0:
+            case 16:
+            case 32:
+                return bytes;
+            // 0 is "no crypto" and 1 is what the Default key button writes.
+            case 1 when bytes[0] < 2:
+                return bytes;
+            case 1:
+                message = bytes[0] <= 10
+                    ? $"Saved — shorthand {bytes[0]} is the public default key with its last byte bumped, not a private key."
+                    : $"Saved — shorthand {bytes[0]} is outside the documented 0-10 range; firmware still expands it to the "
+                      + "public default key with its last byte bumped, not a private key.";
+                return bytes;
+            case > 32:
+                message = $"PSK not saved — a key can't exceed 32 bytes (got {bytes.Length}).";
+                return null;
+            default:
+                message = $"Saved — {bytes.Length} bytes is not an AES key size; firmware zero-pads it to "
+                        + $"{(bytes.Length < 16 ? 16 : 32)}, and so do we.";
+                return bytes;
+        }
     }
 
     // These write a complete, valid key, so they commit immediately rather than
@@ -93,10 +152,10 @@ public partial class ChannelSettingsWindow : Window
     {
         if (_loading || _channel is null || _viewModel is null) return;
 
-        var psk = PskFromText(PskBox.Text);
+        var psk = PskFromText(PskBox.Text, out var pskMessage);
         if (psk is null)
         {
-            StatusText.Text = "PSK not saved — enter base64, hex, \"default\", or leave blank.";
+            StatusText.Text = pskMessage;
             return;
         }
 
@@ -114,8 +173,9 @@ public partial class ChannelSettingsWindow : Window
         _viewModel.SaveChannelSettings(_channel);
 
         // The name feeds the hash, so it can change under an edit.
-        HashText.Text = $"hash 0x{_channel.Config.Hash:X2}";
-        // Clears a PSK rejection once the field parses again.
-        StatusText.Text = string.Empty;
+        HashText.Text = HashLabel(_channel.Config);
+        // Carries a warning about a key that saved but offers no privacy, and
+        // clears a PSK rejection once the field parses again.
+        StatusText.Text = pskMessage ?? string.Empty;
     }
 }
