@@ -15,7 +15,10 @@
              out and back rather than snapping, and it runs until the tab is
              selected and the view model clears TabNeedsAttention. -->
         <!-- Reaction chips are buttons but should read as inline tags, so the
-             stock button chrome is stripped back to a hover cue. -->
+             stock button chrome is stripped back to a hover cue. They sit on a
+             bubble rather than a panel, so the fill is the list background:
+             darker than either bubble tint, which is what makes a chip read as
+             set into the bubble instead of floating on it. -->
         <Style Selector="Button.reactionChip">
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="MinWidth" Value="0" />
@@ -24,11 +27,42 @@
         <Style Selector="Button.reactionChip /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="CornerRadius" Value="9" />
         </Style>
         <Style Selector="Button.reactionChip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource BrushHover}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        </Style>
+
+        <!-- Chat bubbles. Tint and border are set here rather than on the
+             template's Border so the .outgoing class can swap both, and hover
+             lifts the whole bubble as one target — it is what carries the
+             reply / react context menu. -->
+        <Style Selector="Border.bubble">
+            <Setter Property="Background" Value="{DynamicResource BrushBubbleIncoming}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBubbleIncomingBorder}" />
+        </Style>
+        <Style Selector="Border.bubble.outgoing">
+            <Setter Property="Background" Value="{DynamicResource BrushBubbleOutgoing}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBubbleOutgoingBorder}" />
+        </Style>
+        <Style Selector="Border.bubble:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+        </Style>
+
+        <!-- The message list is a transcript, not a picker: nothing acts on the
+             selected row, so the selection and hover fills are cleared and the
+             row padding goes to the bubble instead. Selection still works, it
+             just leaves no mark behind the bubble it would fight with. -->
+        <Style Selector="ListBox.chat">
+            <Setter Property="Padding" Value="4,2" />
+        </Style>
+        <Style Selector="ListBox.chat ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="ListBox.chat ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
         </Style>
 
         <!-- Channel / DM tab headers. Fluent's default is an underline cue with
@@ -113,10 +147,12 @@
         <!-- Shared by both channel and DM-conversation tab content templates
              (see TabControl.Resources below) so the message list markup,
              including its reply/react context menu, isn't duplicated. -->
-        <!-- Message row: [timestamp] [from] [body + reactions], three columns
-             with a monospace body. -->
+        <!-- Message bubble: an underlined sender · time header with the body,
+             delivery mark and reaction chips stacked beneath it. Every bubble is
+             left-aligned; outgoing traffic is told apart by its tint, not its
+             side. -->
         <DataTemplate x:Key="MessageListTemplate" x:DataType="mesh:ITabItem">
-            <ListBox ItemsSource="{Binding Messages}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
+            <ListBox Classes="chat" ItemsSource="{Binding Messages}"
                      local:AutoScrollBehavior.IsEnabled="{Binding #RootWindow.DataContext.AutoScroll}">
                 <!-- Not the default VirtualizingStackPanel. Message rows wrap to
                      different heights, so a virtualizing panel can only estimate
@@ -138,15 +174,19 @@
                 </ListBox.ItemsPanel>
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="mesh:ChannelMessage">
-                        <!-- Transparent background so the whole row is hit-testable:
-                             a Grid with no brush only reports hits on its children,
-                             which left the gaps between columns dead. -->
-                        <Grid ColumnDefinitions="Auto,Auto,*" Background="Transparent"
-                              ContextMenu="{DynamicResource MessageContextMenu}">
-                            <Grid.Resources>
+                        <!-- MaxWidth keeps a long message from stretching into a
+                             full-width paragraph; the bubble otherwise shrinks to
+                             its text. The squared bottom-left corner is the tail,
+                             pointing at the column every bubble hangs from. -->
+                        <Border Classes="bubble" Classes.outgoing="{Binding IsOutgoing}"
+                                HorizontalAlignment="Left" MaxWidth="620"
+                                Margin="2,3" Padding="10,5,12,7"
+                                CornerRadius="12,12,12,3" BorderThickness="1"
+                                ContextMenu="{DynamicResource MessageContextMenu}">
+                            <Border.Resources>
                                 <!-- Declared here rather than shared app-wide so each
-                                     row gets its own instance and {Binding} resolves
-                                     to that row's message. -->
+                                     bubble gets its own instance and {Binding} resolves
+                                     to that bubble's message. -->
                                 <ContextMenu x:Key="MessageContextMenu">
                                     <MenuItem Header="Reply"
                                               Command="{Binding #RootWindow.DataContext.ReplyToMessageCommand}"
@@ -155,23 +195,34 @@
                                     <Separator />
                                     <MenuItem Header="Copy message" Click="OnCopyMessage" />
                                 </ContextMenu>
-                            </Grid.Resources>
-                            <TextBlock Grid.Column="0" Text="{Binding TimePrefix}" FontSize="12"
-                                       Foreground="{DynamicResource BrushSubtle}" />
-                            <TextBlock Grid.Column="1" Margin="6,0" Text="{Binding FromId}" FontSize="12"
-                                       ToolTip.Tip="{Binding FromId}" />
-                            <StackPanel Grid.Column="2" Margin="0,0,0,2">
+                            </Border.Resources>
+                            <StackPanel>
+                                <!-- One underlined header line. The separator carries
+                                     the decoration too, so the rule runs unbroken
+                                     across the whole line. -->
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding FromId}" FontSize="12" FontWeight="Bold"
+                                               TextDecorations="Underline"
+                                               ToolTip.Tip="{Binding FromId}" />
+                                    <TextBlock Text=" · " FontSize="12" FontWeight="Bold"
+                                               TextDecorations="Underline"
+                                               Foreground="{DynamicResource BrushSubtle}" />
+                                    <TextBlock Text="{Binding TimeLabel}" FontSize="12" FontWeight="Bold"
+                                               TextDecorations="Underline"
+                                               Foreground="{DynamicResource BrushSubtle}" />
+                                </StackPanel>
                                 <!-- SelectableTextBlock handles its own pointer input
                                      for text selection and doesn't let the request
-                                     reach the Grid, so it carries the menu itself —
-                                     this is the part of the row people actually
+                                     reach the Border, so it carries the menu itself —
+                                     this is the part of the bubble people actually
                                      right-click. -->
                                 <SelectableTextBlock local:MarkdownText.Text="{Binding Text}"
                                                      local:MarkdownText.Suffix="{Binding DeliveryGlyph}"
                                                      local:MarkdownText.SuffixBrush="{Binding Delivery, Converter={StaticResource DeliveryMarkForeground}}"
-                                                     FontSize="12" TextWrapping="Wrap"
+                                                     Margin="0,2,0,0"
+                                                     FontSize="13" TextWrapping="Wrap"
                                                      ContextMenu="{DynamicResource MessageContextMenu}" />
-                                <ItemsControl ItemsSource="{Binding Reactions}" Margin="0,3,0,0"
+                                <ItemsControl ItemsSource="{Binding Reactions}" Margin="0,5,0,0"
                                               IsVisible="{Binding HasReactions}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -185,10 +236,8 @@
                                                  trip through the emoji picker. Tag carries the
                                                  message, which the reaction itself doesn't
                                                  reference. -->
-                                            <Button Classes="reactionChip" Margin="0,0,4,0" Padding="6,1"
-                                                    CornerRadius="8" FontSize="12"
-                                                    Background="{DynamicResource BrushPanelBackground}"
-                                                    BorderBrush="{DynamicResource BrushPanelBorder}"
+                                            <Button Classes="reactionChip" Margin="0,0,4,0" Padding="7,1"
+                                                    CornerRadius="9" FontSize="12"
                                                     BorderThickness="1"
                                                     Click="OnReactionChipTapped"
                                                     Tag="{Binding $parent[ListBoxItem].DataContext}"
@@ -199,7 +248,7 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </StackPanel>
-                        </Grid>
+                        </Border>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>

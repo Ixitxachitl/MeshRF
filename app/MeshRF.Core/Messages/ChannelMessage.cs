@@ -89,11 +89,22 @@ public partial class ChannelMessage : ObservableObject
     /// which is the best a monochrome line can do.</summary>
     private string DeliverySuffix => DeliveryGlyph.Length == 0 ? string.Empty : $"  {DeliveryGlyph}";
 
-    /// <summary>Timestamp column, in the unit-system-aware convention.</summary>
-    public string TimePrefix => $"[{UiFormats.Stamp(Timestamp)}]";
+    /// <summary>Timestamp shown in a bubble's header, in the unit-system-aware
+    /// convention. Unbracketed: the header is its own line, so the brackets
+    /// that once separated a timestamp column from the text are just noise.
+    ///
+    /// Today's traffic — nearly all of what a live session shows — carries the
+    /// time alone, since repeating the current date on every bubble says
+    /// nothing. Anything older keeps the full stamp, which is the only place
+    /// the day a message arrived is visible. The date is read when the header
+    /// renders, so a session left open past midnight keeps calling yesterday
+    /// "today" until something re-raises the binding.</summary>
+    public string TimeLabel => Timestamp.Date == DateTime.Today
+        ? UiFormats.Time(Timestamp)
+        : UiFormats.Stamp(Timestamp);
 
     /// <summary>Re-raises every binding on this bubble. Computed display
-    /// properties (the timestamp prefix follows the unit system) have no
+    /// properties (the timestamp label follows the unit system) have no
     /// notification of their own, so the unit-system owner calls this to make
     /// already-rendered rows re-read them.</summary>
     public void NotifyDisplayChanged() => OnPropertyChanged(string.Empty);

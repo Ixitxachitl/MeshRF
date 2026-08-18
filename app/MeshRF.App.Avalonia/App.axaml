@@ -29,6 +29,14 @@
              Lifted until the box is actually visible unselected. -->
         <SolidColorBrush x:Key="BrushTabBorder"          Color="#FF5F6266" />
         <SolidColorBrush x:Key="BrushPressed"             Color="#FF222222" />
+        <!-- Chat bubbles. Both sit above BrushPanelBackground (the message
+             list's own fill) so a bubble reads as a raised card; the outgoing
+             tint is the only cue that separates our traffic from the mesh's,
+             since every bubble is left-aligned. -->
+        <SolidColorBrush x:Key="BrushBubbleIncoming"      Color="#FF343A40" />
+        <SolidColorBrush x:Key="BrushBubbleIncomingBorder" Color="#FF454C53" />
+        <SolidColorBrush x:Key="BrushBubbleOutgoing"      Color="#FF294152" />
+        <SolidColorBrush x:Key="BrushBubbleOutgoingBorder" Color="#FF3B5F79" />
 
         <!-- Compact sliders. Avalonia's Fluent Slider is built for touch: its
              natural height is 50px (15px pre-margin + 20px thumb + 15px
