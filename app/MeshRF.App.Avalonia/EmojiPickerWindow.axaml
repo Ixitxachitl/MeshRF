@@ -6,6 +6,27 @@
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
+    <Window.Styles>
+        <!-- Fluent marks the selected category with a pipe, and lays it out
+             bottom-aligned inside the same box as the label rather than under
+             it, so at this app's 12px type the cue was drawn straight through
+             the descenders. The padding opens a strip below the label, and the
+             pipe is moved down into it.
+
+             By transform rather than by margin: the theme's template sets the
+             pipe's Margin itself, and a value set in a template outranks a
+             setter from outside it, so a Margin setter here is simply ignored.
+             A transform also keeps the move purely visual, leaving the header's
+             height to the padding. Part name and element type verified against
+             Avalonia.Themes.Fluent 12.1.1. -->
+        <Style Selector="TabItem">
+            <Setter Property="Padding" Value="8,3,8,8" />
+        </Style>
+        <Style Selector="TabItem /template/ Border#PART_SelectedPipe">
+            <Setter Property="RenderTransform" Value="translateY(6px)" />
+        </Style>
+    </Window.Styles>
+
     <DockPanel Margin="8">
         <TextBox DockPanel.Dock="Top" Name="SearchBox" PlaceholderText="Search…" Margin="0,0,0,6" />
         <TextBlock DockPanel.Dock="Bottom" Name="StatusText" Margin="2,4,0,0" FontSize="10" Opacity="0.6" />
