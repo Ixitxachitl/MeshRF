@@ -75,7 +75,16 @@ jobs:
       - name: Drop untrusted Homebrew taps (macOS)
         if: matrix.platform == 'macos'
         run: |
+          # Only taps nothing is installed from. brew rightly refuses to untap
+          # one that owns an installed formula (hashicorp/tap owns packer on
+          # this image, azure/bicep owns bicep), and asking it to anyway prints
+          # an error for something that was never a problem.
+          installed=$(brew list --full-name || true)
           for tap in $(brew tap | grep -v '^homebrew/'); do
+            if printf '%s\n' "$installed" | grep -q "^$tap/"; then
+              echo "Keeping $tap: the image has formulae installed from it"
+              continue
+            fi
             echo "Untapping $tap"
             brew untap "$tap" || true
           done
