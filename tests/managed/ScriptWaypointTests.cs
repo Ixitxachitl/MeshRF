@@ -120,6 +120,38 @@ public class ScriptWaypointTests
     }
 
     [Fact]
+    public void A_Waypoint_Can_Be_Addressed_To_A_Node()
+    {
+        var result = Parse("  - waypoint:\n      lat: home\n      expires: 1h\n      to: \"!a1b2c3d4\"\n");
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+
+        var engine = new ScriptEngine();
+        engine.Load([new ScriptFile("a.yaml", "a.yaml", "x", Enabled: true, result)], Noon);
+
+        var run = Assert.Single(engine.Tick(Noon.AddMinutes(11), Self));
+        Assert.Equal(0xa1b2c3d4u, run.Actions[0].ToNode);
+    }
+
+    [Fact]
+    public void A_Waypoint_Cannot_Name_A_Node_And_A_Channel_At_Once()
+    {
+        var result = Parse(
+            "  - waypoint:\n      lat: home\n      expires: 1h\n      to: \"!a1b2c3d4\"\n      channel: LongFast\n");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("not both", result.FirstError!.Value.Message);
+    }
+
+    [Fact]
+    public void A_Waypoints_To_Is_Rejected_When_It_Is_Not_A_Node_Id()
+    {
+        var result = Parse("  - waypoint:\n      lat: home\n      expires: 1h\n      to: \"Bob\"\n");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("is not a node id", result.FirstError!.Value.Message);
+    }
+
+    [Fact]
     public void A_Waypoint_Counts_As_Airtime()
     {
         var result = Parse("  - waypoint:\n      lat: home\n      expires: 1h\n");

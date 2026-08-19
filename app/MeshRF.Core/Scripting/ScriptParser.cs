@@ -36,7 +36,7 @@ public static class ScriptParser
 
     private static readonly string[] WaypointKeys =
         ["lat", "lon", "name", "description", "icon", "radius", "expires",
-         "notify_on_enter", "notify_on_exit", "channel", "lock_to_me"];
+         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me"];
 
     /// <summary>Comparators a require: may use. Exactly one per entry.</summary>
     private static readonly string[] RequireComparisons =
@@ -144,7 +144,7 @@ public static class ScriptParser
 
     private static readonly string[] SyncWaypointKeys =
         ["name", "description", "icon", "radius", "expires",
-         "notify_on_enter", "notify_on_exit", "channel", "lock_to_me"];
+         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me"];
 
     /// <summary>
     /// Parses a feed sync. Shares enabled:/alias: with a script so the library,
@@ -436,6 +436,10 @@ public static class ScriptParser
         // receives one should be able to clear it.
         bool lockToMe = ReadBool(map, "lock_to_me", problems) ?? false;
 
+        if (!TryReadDestination(map, (int)key.Start.Line, (int)key.Start.Column, "sync: waypoint",
+                                allowPlaceholder: false, problems, out var to, out var channel))
+            return null;
+
         return new ScriptWaypoint
         {
             Name = name,
@@ -445,7 +449,8 @@ public static class ScriptParser
             Expires = expires,
             NotifyOnEnter = notifyEnter,
             NotifyOnExit = notifyExit,
-            Channel = (ReadString(map, "channel", problems) ?? string.Empty).Trim(),
+            To = to,
+            Channel = channel,
             LockToMe = lockToMe,
         };
     }
@@ -1360,6 +1365,10 @@ public static class ScriptParser
             return null;
         }
 
+        if (!TryReadDestination(map, line, column, "waypoint", allowPlaceholder: true, problems,
+                                out var to, out var channel))
+            return null;
+
         return new ScriptAction
         {
             Kind = ScriptActionKind.Waypoint,
@@ -1376,10 +1385,62 @@ public static class ScriptParser
                 Expires = expires,
                 NotifyOnEnter = notifyEnter,
                 NotifyOnExit = notifyExit,
-                Channel = (ReadString(map, "channel", problems) ?? string.Empty).Trim(),
+                To = to,
+                Channel = channel,
                 LockToMe = ReadBool(map, "lock_to_me", problems) ?? true,
             },
         };
+    }
+
+    /// <summary>
+    /// Reads the <c>to:</c>/<c>channel:</c> pair off a waypoint mapping.
+    /// </summary>
+    /// <remarks>
+    /// A marker goes to one node or out on one channel, never both — the same
+    /// rule <c>send:</c> follows, and for the same reason: a frame carries one
+    /// destination and naming two says nothing about which was meant.
+    /// </remarks>
+    /// <param name="what">Which block is being parsed, so a message names the
+    /// key the user actually wrote.</param>
+    /// <param name="allowPlaceholder">Whether <c>to:</c> may hold a
+    /// placeholder. A script's waypoint resolves one when it fires; a feed's
+    /// markers are placed unprompted, so there is no message to read one from.
+    /// </param>
+    private static bool TryReadDestination(
+        YamlMappingNode map, int line, int column, string what, bool allowPlaceholder,
+        List<ScriptProblem> problems, out string to, out string channel)
+    {
+        to = (ReadString(map, "to", problems) ?? string.Empty).Trim();
+        channel = (ReadString(map, "channel", problems) ?? string.Empty).Trim();
+
+        if (to.Length > 0 && channel.Length > 0)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                $"{what}: has both to: and channel: — a marker goes to one node or out on one channel, not both"));
+            return false;
+        }
+        if (to.Length == 0) return true;
+
+        if (to.Contains('{'))
+        {
+            if (!allowPlaceholder)
+            {
+                problems.Add(ScriptProblem.Error(line, column,
+                    $"{what}: to: has to be a literal node id like !a1b2c3d4 — a feed places its markers " +
+                    "unprompted, so there is no message for a placeholder to come from"));
+                return false;
+            }
+            WarnUnknownPlaceholders(to, line, column, problems);
+            return true;
+        }
+        if (!LooksLikeNodeId(to))
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                $"{what}: to: '{to}' is not a node id — use the !a1b2c3d4 form" +
+                (allowPlaceholder ? ", or a placeholder like {from.id}" : string.Empty)));
+            return false;
+        }
+        return true;
     }
 
     /// <summary>Parses a <c>require:</c> action.</summary>

@@ -1,0 +1,64 @@
+# Relays !sos to an operator, wherever it was sent from.
+#
+# No credential needed, but two node ids below have to be changed to yours
+# before this does anything useful — search for !a1b2c3d4.
+#
+# This is the sample to read for answering somewhere other than where the
+# trigger arrived. reply: always answers in the conversation the message came
+# from, which is right for a signal report and wrong for this: an SOS on a
+# quiet channel should still reach the person who can act on it. send: and a
+# waypoint: to: are how a script names its own destination — a node id for one
+# person, channel: for one channel, and neither for the primary.
+#
+# The marker is addressed to the operator too. That is not privacy — it still
+# travels under the primary channel's key, so anyone in range can read it — it
+# just saves every other node on the mesh drawing a marker meant for one
+# person.
+
+enabled: false
+
+alias: Relay !sos to the operator
+
+trigger:
+  - command: sos
+
+condition:
+  # Anywhere: a channel, or a direct message. Someone in trouble should not
+  # have to remember which.
+  - scope: any
+
+action:
+  # Two answers to the same message, going to two different places.
+  #
+  # The acknowledgement goes back where it came from, so whoever sent it knows
+  # it was heard. reply: needs no destination for that.
+  - reply: "🆘 heard, {snr} dB over {hops} hops — relaying now"
+
+  # The relay goes to one node, whatever channel the SOS arrived on. {channel}
+  # in the text is what tells the operator where to answer.
+  - send:
+      to: "!a1b2c3d4"       # the operator's node — change this
+      text: "🆘 {from.long} ({from.id}) on {channel}: {args|default:no details}"
+
+  # And a marker at the sender's last reported position, addressed to the same
+  # node. when: because a node that has never sent a position has no
+  # coordinates to mark, and a waypoint at 0,0 is worse than none.
+  - waypoint:
+      lat: "{from.lat}"
+      lon: "{from.lon}"
+      name: "SOS: {from.short}"
+      description: "{args|default:no details}"
+      icon: "🆘"
+      expires: 6h
+      to: "!a1b2c3d4"       # the operator's node — change this
+    when:
+      value: "{from.lat}"
+      not_empty: true
+
+limits:
+  # Looser than the other samples on purpose. Someone repeating an SOS is not
+  # being chatty, and a minute between relays from the same node is enough to
+  # stop a stuck sender flooding the channel.
+  cooldown: 60s
+  per_node: true
+  max_per_hour: 20

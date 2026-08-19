@@ -22,6 +22,7 @@ want it again.
 | --- | --- | --- |
 | [ping.yaml](ping.yaml) | nothing | Answers `!ping` with a signal report. |
 | [test-hops.yaml](test-hops.yaml) | a channel named Test | Answers anything saying "test" there with a keycap emoji for the hop count. |
+| [sos.yaml](sos.yaml) | one node id | Relays `!sos` to an operator by DM, with a marker at the sender's last position, wherever the call came from. |
 | [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
 | [weather.yaml](weather.yaml) | OpenWeather key | Answers `!wx` with a report for where the sender is, or for a postcode or place they name. |
 | [lightning-sync.yaml](lightning-sync.yaml) | Xweather id + secret | Mirrors recent nearby strikes as point markers, retiring each as it ages out. |
@@ -42,6 +43,54 @@ moment, so its marker is placed once and never resent.
 Read a sync's header before enabling it: how many markers it can place depends
 on how busy the feed is, and a storm makes far more lightning than a fire
 season makes fires.
+
+## Answering somewhere else
+
+`reply:` answers in the conversation the trigger arrived on, which is right for
+a signal report and wrong for anything that has to reach a particular person or
+a particular channel. `send:` is the form that names its own destination:
+
+```yaml
+- send:
+    to: "{from.id}"       # one node — a literal !a1b2c3d4 works too
+    text: "…"
+    reply_link: true      # still threaded under the message that triggered it
+```
+
+```yaml
+- send:
+    channel: Alerts       # one channel, whatever the trigger arrived on
+    text: "…"
+```
+
+Use one of `to:` or `channel:`, never both. Neither means the primary, and
+`channel: primary` says so out loud — which is the only way to name the primary
+on a mesh running a default preset, since that channel has no name of its own.
+
+Waypoints take the same pair, in a script and in a sync alike, so a feed can go
+on its own channel or to one node instead of onto everyone's map:
+
+```yaml
+  waypoint:
+    name: "Fire: {item.name}"
+    channel: Alerts       # or   to: "!a1b2c3d4"   for one node
+```
+
+A marker addressed to a node still travels under the primary channel's key — the
+address only says who it is for, so it saves everyone else drawing it rather
+than keeping it from them. And a `channel:` naming something that does not exist
+falls back to the primary and says so in the log, which is worth reading for
+once after you change one.
+
+[sos.yaml](sos.yaml) is the sample that does all three at once.
+
+You do not have to look any of it up. Typing a `to:`, `from:`, `not_from:`,
+`channel:` or `credential:` value in the Scripts editor drops down what this
+node already knows — your configured channels, the nodes you have heard, and
+your stored credentials. Ctrl+Space asks for the list, Enter or Tab accepts it,
+Esc closes it. A node id is inserted quoted, and its name goes in after it as a
+comment, because `!a1b2c3d4` tells you nothing about whose radio it is when you
+come back to the script six months later.
 
 Start with `ping.yaml`. It needs no account and no network, so if it answers,
 the engine is armed and working and anything that goes wrong afterwards is the

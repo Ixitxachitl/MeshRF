@@ -5,6 +5,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using MeshRF.Channels;
 using MeshRF.Mesh;
+using MeshRF.Nodes;
 using MeshRF.Scripting;
 using MeshRF.Waypoints;
 
@@ -111,6 +112,43 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             if (ScriptsDryRun) return $"{armed} · {recent} · dry run, nothing is transmitted.";
             return $"{armed} · {recent}.";
         }
+    }
+
+    /// <summary>
+    /// The channels and nodes the editor offers where a script names one.
+    /// </summary>
+    /// <remarks>
+    /// Built on each request rather than cached: a node heard while the Scripts
+    /// window is open should be offerable without reopening it, and the lists
+    /// are small enough that walking them per keystroke costs nothing.
+    /// Most-recently-heard first, since the node someone is writing a script
+    /// about is almost always one they have just been talking to, and our own
+    /// node is left out — a script never answers itself.
+    /// </remarks>
+    public ScriptCompletionSource ScriptCompletions => new(
+        Channels: [.. Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => !t.Config.IsDisabled && t.Config.Name.Length > 0)
+            .Select(t => new ScriptSuggestion(
+                t.Config.Name,
+                t.Config.Role == ChannelRole.Primary ? "primary channel" : $"channel {t.Config.Index}"))],
+        Nodes: [.. _rxHost.Nodes
+            .Where(n => n.NodeNum != 0 && n.NodeNum != _rxHost.MyNodeNum)
+            .OrderByDescending(n => n.LastHeardEpoch)
+            .Take(200)
+            .Select(n => new ScriptSuggestion(
+                $"!{n.NodeNum:x8}", $"\"!{n.NodeNum:x8}\"", NodeNote(n), NoteInFile: true))],
+        Credentials: [.. ScriptCredentials.Select(c => c.Name).Where(n => n.Length > 0)]);
+
+    /// <summary>What a node id is, in the few words that fit beside it and in
+    /// the comment the editor writes after it.</summary>
+    private static string NodeNote(NodeRecord node)
+    {
+        var name = node.LongName.Length > 0 ? node.LongName
+                 : node.ShortName.Length > 0 ? node.ShortName
+                 : "unnamed";
+        return node.ShortName.Length > 0 && node.LongName.Length > 0
+            ? $"{name} ({node.ShortName})"
+            : name;
     }
 
     public event Action? ScriptsStatusChanged;
@@ -350,9 +388,12 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             return;
         }
 
-        var channel = sync.Waypoint.Channel.Length > 0
-            ? _rxHost.FindChannelByName(sync.Waypoint.Channel) ?? PrimaryChannel()
-            : PrimaryChannel();
+        // A literal id, guaranteed by the parser: a feed places its markers
+        // unprompted, so there is no message for a placeholder to come from.
+        var to = ScriptEngine.TryParseNodeId(sync.Waypoint.To);
+        var channel = to != 0
+            ? PrimaryChannel()
+            : ResolveScriptChannel(sync.Waypoint.Channel, "sync")?.Config;
         if (channel is null)
         {
             _rxHost.Log("sync: nothing sent — no channel to send on");
@@ -373,7 +414,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             geofenceRadiusM: action.IsRemoval ? 0 : sync.Waypoint.RadiusM,
             notifyOnEnter: !action.IsRemoval && sync.Waypoint.NotifyOnEnter,
             notifyOnExit: !action.IsRemoval && sync.Waypoint.NotifyOnExit,
-            to: 0xFFFFFFFFu,
+            to: to != 0 ? to : 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit,
             okToMqtt: OkToMqtt);
 
@@ -678,9 +719,13 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             }
         }
 
-        var channel = waypoint.Channel.Length > 0
-            ? _rxHost.FindChannelByName(waypoint.Channel) ?? PrimaryChannel()
-            : PrimaryChannel();
+        // A marker addressed to one node still travels under a channel's key —
+        // the address only says who it is for, so it saves everyone else
+        // drawing it rather than keeping it from them. The primary is what
+        // carries it, the same channel a scripted DM falls back to.
+        var channel = action.ToNode != 0
+            ? PrimaryChannel()
+            : ResolveScriptChannel(waypoint.Channel, "scripts")?.Config;
         if (channel is null)
         {
             _rxHost.Log("scripts: waypoint skipped — no channel to send it on");
@@ -711,7 +756,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             geofenceRadiusM: waypoint.RadiusM,
             notifyOnEnter: waypoint.NotifyOnEnter,
             notifyOnExit: waypoint.NotifyOnExit,
-            to: 0xFFFFFFFFu,
+            to: action.ToNode != 0 ? action.ToNode : 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit,
             okToMqtt: OkToMqtt);
 
@@ -790,18 +835,37 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             return (PrimaryChannel(), action.ToNode, conversation?.Messages);
         }
 
-        var named = action.ChannelName.Length > 0
-            ? Tabs.OfType<ChannelTabViewModel>()
-                  .FirstOrDefault(t => string.Equals(t.Config.Name, action.ChannelName, StringComparison.OrdinalIgnoreCase))
-            : null;
-
-        if (action.ChannelName.Length > 0 && named is null)
-        {
-            _rxHost.Log($"scripts: no channel named \"{action.ChannelName}\" — falling back to the primary");
-        }
-
-        var tab = named ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
-                        ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+        var tab = ResolveScriptChannel(action.ChannelName, "scripts");
         return (tab?.Config, 0xFFFFFFFFu, tab?.Messages);
+    }
+
+    /// <summary>
+    /// Turns a script's <c>channel:</c> name into the tab to send on, falling
+    /// back to the primary and saying so when the name matches nothing.
+    /// </summary>
+    /// <remarks>
+    /// The literal <c>primary</c> names the primary by role, which is the only
+    /// way to name it on a default mesh: a preset primary has no name of its
+    /// own, so no string would ever match it. A channel someone actually called
+    /// "primary" still wins, since that is a name they chose.
+    /// </remarks>
+    /// <param name="context">Log prefix, so a sync's fallback doesn't read as a
+    /// script's.</param>
+    private ChannelTabViewModel? ResolveScriptChannel(string name, string context)
+    {
+        var tabs = Tabs.OfType<ChannelTabViewModel>().ToList();
+        var primary = tabs.FirstOrDefault(t => t.Config.Role == ChannelRole.Primary) ?? tabs.FirstOrDefault();
+        if (name.Length == 0) return primary;
+
+        // Disabled channels are skipped: one has no key to send with, so
+        // matching its name would only produce a frame nobody can read.
+        var named = tabs.FirstOrDefault(
+            t => !t.Config.IsDisabled && string.Equals(t.Config.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (named is not null) return named;
+
+        if (string.Equals(name, "primary", StringComparison.OrdinalIgnoreCase)) return primary;
+
+        _rxHost.Log($"{context}: no channel named \"{name}\" — falling back to the primary");
+        return primary;
     }
 }

@@ -152,19 +152,57 @@
 
                 <Border Grid.Row="1" BorderThickness="1" CornerRadius="3"
                         BorderBrush="{DynamicResource BrushPanelBorder}">
-                    <TextBox Name="Editor"
-                             AcceptsReturn="True"
-                             AcceptsTab="False"
-                             FontFamily="Consolas"
-                             TextWrapping="NoWrap"
-                             VerticalAlignment="Stretch"
-                             VerticalContentAlignment="Top"
-                             Background="{DynamicResource BrushPanelBackground}"
-                             BorderThickness="0"
-                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             TextChanged="OnEditorTextChanged"
-                             KeyDown="OnEditorKeyDown" />
+                    <Panel>
+                        <TextBox Name="Editor"
+                                 AcceptsReturn="True"
+                                 AcceptsTab="False"
+                                 FontFamily="Consolas"
+                                 TextWrapping="NoWrap"
+                                 VerticalAlignment="Stretch"
+                                 VerticalContentAlignment="Top"
+                                 Background="{DynamicResource BrushPanelBackground}"
+                                 BorderThickness="0"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 TextChanged="OnEditorTextChanged"
+                                 KeyDown="OnEditorKeyDown" />
+
+                        <!-- Completion list. Anchored to the editor's top-left
+                             rather than to the caret's own control, because a
+                             TextBox has nothing to hang a popup off — the
+                             offsets are set from the caret position in
+                             code-behind, which is what puts the list under the
+                             line being typed. -->
+                        <Popup Name="CompletionPopup"
+                               PlacementTarget="{Binding #Editor}"
+                               Placement="AnchorAndGravity"
+                               PlacementAnchor="TopLeft"
+                               PlacementGravity="BottomRight"
+                               IsLightDismissEnabled="False"
+                               TakesFocusFromNativeControl="False">
+                            <Border BorderThickness="1" CornerRadius="3" MaxHeight="190" MaxWidth="420"
+                                    BorderBrush="{DynamicResource BrushPanelBorder}"
+                                    Background="{DynamicResource BrushPanelBackground}">
+                                <ListBox Name="CompletionList" Background="Transparent"
+                                         Focusable="False"
+                                         DoubleTapped="OnCompletionTapped">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="app:ScriptCompletionItem">
+                                            <Grid ColumnDefinitions="Auto,*" Margin="0,1">
+                                                <TextBlock Grid.Column="0" FontFamily="Consolas"
+                                                           Margin="0,0,10,0" Text="{Binding Label}" />
+                                                <TextBlock Grid.Column="1" FontSize="11"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource BrushSubtle}"
+                                                           Text="{Binding Note}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+                        </Popup>
+                    </Panel>
                 </Border>
 
                 <!-- Validation strip -->

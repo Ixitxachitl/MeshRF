@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -64,7 +65,12 @@ public partial class ScriptsWindow : Window
             Editor.Text = text;
             _suppressTextChanged = false;
             Editor.CaretIndex = 0;
+            CloseCompletion();
         };
+
+        // A list hanging over an editor nobody is typing in is just a panel in
+        // the way.
+        Editor.LostFocus += (_, _) => CloseCompletion();
 
         Closing += OnWindowClosing;
     }
@@ -253,12 +259,53 @@ public partial class ScriptsWindow : Window
         _model.IsDirty = !string.Equals(text, _model.OpenScript?.Text, StringComparison.Ordinal);
         _validateTimer.Stop();
         _validateTimer.Start();
+
+        // Offered as you type rather than only on request: the four keys this
+        // fires on all name something already configured, so there is nothing
+        // to guess and no reason to make anyone remember a shortcut to see it.
+        ShowCompletion();
     }
 
     private void OnEditorKeyDown(object? sender, KeyEventArgs e)
     {
+        // The completion list gets first refusal on the keys it needs, so Enter
+        // accepts a suggestion rather than breaking the line under it.
+        if (CompletionPopup.IsOpen)
+        {
+            switch (e.Key)
+            {
+                case Key.Escape:
+                    CloseCompletion();
+                    e.Handled = true;
+                    return;
+
+                case Key.Down:
+                    MoveCompletion(1);
+                    e.Handled = true;
+                    return;
+
+                case Key.Up:
+                    MoveCompletion(-1);
+                    e.Handled = true;
+                    return;
+
+                case Key.Enter:
+                case Key.Tab:
+                    AcceptCompletion();
+                    e.Handled = true;
+                    return;
+            }
+        }
+
         switch (e.Key)
         {
+            // Ctrl+Space asks for the list where it did not open on its own —
+            // on a value already typed in full, most usefully.
+            case Key.Space when e.KeyModifiers.HasFlag(KeyModifiers.Control):
+                ShowCompletion();
+                e.Handled = true;
+                break;
+
             case Key.Enter when !e.KeyModifiers.HasFlag(KeyModifiers.Shift):
                 ContinueLine();
                 e.Handled = true;
@@ -270,6 +317,116 @@ public partial class ScriptsWindow : Window
                 e.Handled = true;
                 break;
         }
+    }
+
+    // ----- completion ----------------------------------------------------------
+
+    /// <summary>What the open list would replace, so accepting a row knows
+    /// which characters it stands in for.</summary>
+    private ScriptCompletionResult? _completion;
+
+    /// <summary>
+    /// Offers the channels, nodes and credentials this radio knows about
+    /// wherever the caret sits in a value that names one.
+    /// </summary>
+    /// <remarks>
+    /// Suggested rather than validated, and only for the four keys that name
+    /// something already configured. A node id is eight hex digits with nothing
+    /// in it to say whose node it is, which is the whole reason this exists —
+    /// the name rides along as the note beside each row and, where the line has
+    /// room, as a comment written in after the value.
+    /// </remarks>
+    private void ShowCompletion()
+    {
+        _completion = ScriptCompletion.Suggest(
+            Editor.Text ?? string.Empty, Editor.CaretIndex, _model.Completions);
+
+        if (_completion is null)
+        {
+            CloseCompletion();
+            return;
+        }
+
+        CompletionList.ItemsSource = _completion.Suggestions.Select(s => new ScriptCompletionItem(s)).ToList();
+        CompletionList.SelectedIndex = 0;
+
+        if (CaretRect() is not { } caret)
+        {
+            CloseCompletion();
+            return;
+        }
+        // The bottom of the caret, so the list hangs under the line being
+        // typed rather than over it.
+        CompletionPopup.HorizontalOffset = caret.X;
+        CompletionPopup.VerticalOffset = caret.Bottom;
+        CompletionPopup.IsOpen = true;
+    }
+
+    private void CloseCompletion()
+    {
+        _completion = null;
+        CompletionPopup.IsOpen = false;
+    }
+
+    private void MoveCompletion(int delta)
+    {
+        int count = CompletionList.ItemCount;
+        if (count == 0) return;
+        // Wraps, so Up from the first row reaches the last without a long hold.
+        int next = (CompletionList.SelectedIndex + delta + count) % count;
+        CompletionList.SelectedIndex = next;
+        if (CompletionList.SelectedItem is { } item) CompletionList.ScrollIntoView(item);
+    }
+
+    private void OnCompletionTapped(object? sender, TappedEventArgs e) => AcceptCompletion();
+
+    /// <summary>Splices the selected value in over what has been typed, and
+    /// writes its note in as a comment when the line has nothing else on
+    /// it.</summary>
+    private void AcceptCompletion()
+    {
+        if (_completion is not { } completion ||
+            CompletionList.SelectedItem is not ScriptCompletionItem chosen)
+        {
+            CloseCompletion();
+            return;
+        }
+
+        var insert = chosen.Suggestion.Insert;
+        if (completion.AllowComment && chosen.Suggestion.NoteInFile && chosen.Note.Length > 0)
+            insert += $"   # {chosen.Note}";
+
+        // The popup goes first: replacing the text raises TextChanged, which
+        // would otherwise reopen the list on the value just accepted.
+        CloseCompletion();
+
+        Editor.SelectionStart = completion.Start;
+        Editor.SelectionEnd = completion.Start + completion.Length;
+        Editor.SelectedText = insert;
+        Editor.CaretIndex = completion.Start + insert.Length;
+        Editor.Focus();
+    }
+
+    /// <summary>
+    /// The caret's rectangle in the editor's own coordinates, for the popup to
+    /// hang under.
+    /// </summary>
+    /// <remarks>
+    /// Read off the text presenter's layout rather than computed from a
+    /// character width, so it stays right through scrolling and does not assume
+    /// the font is monospaced even though this one is.
+    /// </remarks>
+    private Rect? CaretRect()
+    {
+        if (Editor.GetVisualDescendants().OfType<TextPresenter>().FirstOrDefault() is not { } presenter ||
+            presenter.TextLayout is not { } layout)
+            return null;
+
+        var text = Editor.Text ?? string.Empty;
+        var local = layout.HitTestTextPosition(Math.Clamp(Editor.CaretIndex, 0, text.Length));
+        if (presenter.TranslatePoint(local.TopLeft, Editor) is not { } origin) return null;
+
+        return new Rect(origin, local.Size);
     }
 
     /// <summary>

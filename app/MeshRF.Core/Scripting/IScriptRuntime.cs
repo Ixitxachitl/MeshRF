@@ -38,4 +38,17 @@ public interface IScriptRuntime
 
     /// <summary>Persists credential edits.</summary>
     void SaveScriptCredentials();
+
+    /// <summary>
+    /// The channels and nodes this radio knows about, for the editor to offer
+    /// where a script names one.
+    /// </summary>
+    /// <remarks>
+    /// Read on each keystroke that opens the list rather than cached, since a
+    /// node heard while the window is open should be offerable straight away.
+    /// Without a runtime the window edits files with no radio behind them, and
+    /// there is nothing to suggest — hence
+    /// <see cref="ScriptCompletionSource.Empty"/>.
+    /// </remarks>
+    ScriptCompletionSource ScriptCompletions { get; }
 }

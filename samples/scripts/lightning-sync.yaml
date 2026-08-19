@@ -68,3 +68,13 @@ sync:
     # fifteen minutes and is retired then, so this only matters if the sync
     # stops running — in which case an hour-old strike is not worth keeping.
     expires: 1h
+
+    # Deliberately not the primary. Strikes arrive in bursts and are of
+    # interest to whoever is watching the weather rather than to the whole
+    # mesh, so they go on a channel people can opt into — change the name to
+    # one you have, or use   channel: primary   to put them in front of
+    # everyone, or   to: "!a1b2c3d4"   to send them to one node only.
+    #
+    # A name that matches no channel falls back to the primary and says so in
+    # the log, which is not what you want happening during a storm.
+    channel: Weather

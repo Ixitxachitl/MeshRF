@@ -56,7 +56,8 @@ public sealed record ResolvedAction(
         ScriptActionKind.Traceroute => $"traceroute to {nameOf(ToNode)}",
         ScriptActionKind.Http => $"{Http?.Method.ToString().ToUpperInvariant()} {expandedText}",
         ScriptActionKind.Waypoint =>
-            $"waypoint \"{expandedText}\"" +
+            $"waypoint \"{expandedText}\" to " +
+            $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}" +
             (Waypoint is { RadiusM: > 0 } fenced ? $" with a {fenced.RadiusM} m fence" : ""),
         ScriptActionKind.Require => $"require {Require?.Describe()}",
         ScriptActionKind.Delay => $"wait {Delay.TotalSeconds:0.#}s",

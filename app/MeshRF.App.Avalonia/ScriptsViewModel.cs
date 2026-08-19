@@ -69,6 +69,21 @@ public sealed partial class ScriptListItem : ObservableObject
     }
 }
 
+/// <summary>One row in the editor's completion list.</summary>
+public sealed class ScriptCompletionItem
+{
+    public ScriptCompletionItem(ScriptSuggestion suggestion)
+    {
+        Suggestion = suggestion;
+        Label = suggestion.Label;
+        Note = suggestion.Note;
+    }
+
+    public ScriptSuggestion Suggestion { get; }
+    public string Label { get; }
+    public string Note { get; }
+}
+
 /// <summary>A problem as the editor's list shows it.</summary>
 public sealed class ScriptProblemItem
 {
@@ -140,6 +155,11 @@ public sealed partial class ScriptsViewModel : ObservableObject
     }
 
     public string RuntimeStatus => _runtime?.ScriptsStatus ?? string.Empty;
+
+    /// <summary>What the editor offers where a script names a channel, a node
+    /// or a credential. Empty without a radio session, since there is then
+    /// nothing this node knows to suggest.</summary>
+    public ScriptCompletionSource Completions => _runtime?.ScriptCompletions ?? ScriptCompletionSource.Empty;
 
     /// <summary>The credential list the dialog edits, or null when the window
     /// was opened without a runtime.</summary>

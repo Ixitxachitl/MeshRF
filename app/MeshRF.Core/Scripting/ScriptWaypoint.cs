@@ -43,7 +43,22 @@ public sealed class ScriptWaypoint
 
     public bool NotifyOnExit { get; init; }
 
-    /// <summary>Channel to send on, or empty for the primary.</summary>
+    /// <summary>
+    /// Node to address the marker to, as <c>!a1b2c3d4</c> or a placeholder.
+    /// Empty broadcasts it on <see cref="Channel"/>.
+    /// </summary>
+    /// <remarks>
+    /// Mutually exclusive with <see cref="Channel"/>: a marker goes to one node
+    /// or out on one channel, the same rule <c>send:</c> follows. A directed
+    /// marker still travels under the primary channel's key — the address only
+    /// says who it is for, so this saves everyone else drawing it rather than
+    /// keeping it from them.
+    /// </remarks>
+    public string To { get; init; } = string.Empty;
+
+    /// <summary>Channel to send on, or empty for the primary. The literal
+    /// <c>primary</c> names it by role, for a mesh whose primary has no name of
+    /// its own.</summary>
     public string Channel { get; init; } = string.Empty;
 
     /// <summary>Only this node may edit or clear it. Keeps a script's markers

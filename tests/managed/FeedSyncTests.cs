@@ -104,6 +104,47 @@ public class FeedSyncTests
     }
 
     [Fact]
+    public void A_Sync_Can_Name_The_Channel_Its_Markers_Go_Out_On()
+    {
+        var parse = ScriptParser.Parse(Yaml.Replace("  waypoint:\n", "  waypoint:\n    channel: Fires\n"));
+
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        Assert.Equal("Fires", parse.Sync!.Waypoint.Channel);
+    }
+
+    [Fact]
+    public void A_Sync_Can_Address_Its_Markers_To_One_Node()
+    {
+        var parse = ScriptParser.Parse(
+            Yaml.Replace("  waypoint:\n", "  waypoint:\n    to: \"!a1b2c3d4\"\n"));
+
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        Assert.Equal("!a1b2c3d4", parse.Sync!.Waypoint.To);
+    }
+
+    [Fact]
+    public void A_Syncs_To_Cannot_Be_A_Placeholder()
+    {
+        // A feed places its markers unprompted, so there is no message for one
+        // to come from — it would expand to nothing on every poll.
+        var parse = ScriptParser.Parse(
+            Yaml.Replace("  waypoint:\n", "  waypoint:\n    to: \"{from.id}\"\n"));
+
+        Assert.False(parse.IsValid);
+        Assert.Contains("literal node id", parse.FirstError!.Value.Message);
+    }
+
+    [Fact]
+    public void A_Sync_Cannot_Name_A_Node_And_A_Channel_At_Once()
+    {
+        var parse = ScriptParser.Parse(
+            Yaml.Replace("  waypoint:\n", "  waypoint:\n    to: \"!a1b2c3d4\"\n    channel: Fires\n"));
+
+        Assert.False(parse.IsValid);
+        Assert.Contains("not both", parse.FirstError!.Value.Message);
+    }
+
+    [Fact]
     public void A_Sync_Without_Watch_Warns_That_Nothing_Will_Ever_Update()
     {
         var parse = ScriptParser.Parse(Yaml.Replace(

@@ -446,11 +446,24 @@ public sealed class ScriptEngine
                         0, string.Empty, 0, TimeSpan.Zero, action.Http);
 
             case ScriptActionKind.Waypoint:
-                return action.Waypoint is null
-                    ? null
-                    : new ResolvedAction(
-                        ScriptActionKind.Waypoint, action.Waypoint.Name,
-                        0, action.Waypoint.Channel, 0, TimeSpan.Zero, Waypoint: action.Waypoint);
+            {
+                if (action.Waypoint is not { } waypoint) return null;
+                uint marked = 0;
+                if (waypoint.To.Length > 0)
+                {
+                    var expanded = expansion.Expand(waypoint.To);
+                    marked = TryParseNodeId(expanded);
+                    if (marked == 0)
+                    {
+                        Diagnostic?.Invoke(
+                            $"script {fileName}: waypoint: skipped, to: \"{expanded}\" is not a node id");
+                        return null;
+                    }
+                }
+                return new ResolvedAction(
+                    ScriptActionKind.Waypoint, waypoint.Name,
+                    marked, waypoint.Channel, 0, TimeSpan.Zero, Waypoint: waypoint);
+            }
 
             case ScriptActionKind.Require:
                 return action.Require is null
