@@ -1,7 +1,7 @@
 [submodule "meshtastic-protobufs"]
 	path = third_party/meshtastic_protobufs
-	url = https://github.com/Ixitxachitl/meshtastic-protobufs.git
-	branch = games
+	url = https://github.com/meshtastic/protobufs.git
+	branch = master
 	shallow = true
 [submodule "third_party/hackrf"]
 	path = third_party/hackrf

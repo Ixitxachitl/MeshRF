@@ -336,11 +336,10 @@ Notes:
 - The autotools packages above are for vcpkg's own `libusb` port, which
   configures from source.
 - Meshtastic protobuf schemas are linked via git submodule at
-  `third_party/meshtastic_protobufs`, tracking the `games` branch of
-  [Ixitxachitl/meshtastic-protobufs](https://github.com/Ixitxachitl/meshtastic-protobufs/tree/games)
-  — a fork of upstream [meshtastic/protobufs](https://github.com/meshtastic/protobufs)
-  whose only addition is a set of game/leaderboard messages. Every other field
-  MeshRF uses (geofence, ATAK, etc.) is upstream Meshtastic.
+  `third_party/meshtastic_protobufs`, tracking `master` on upstream
+  [meshtastic/protobufs](https://github.com/meshtastic/protobufs) with no
+  local modifications. Every field MeshRF uses — geofence, ATAK and the rest —
+  is official Meshtastic.
 - Default development flow expects native `RelWithDebInfo` for practical SDR
   throughput.
 
@@ -355,8 +354,8 @@ For CLI/manual workflows, initialize linked dependencies after clone:
 git submodule update --init --recursive
 ```
 
-Update Meshtastic protobuf schemas later (pulls the latest commit on the
-fork's `games` branch, per `.gitmodules`):
+Update Meshtastic protobuf schemas later (pulls the latest commit on upstream
+`master`, per `.gitmodules`):
 
 ```powershell
 git submodule update --remote -- third_party/meshtastic_protobufs
@@ -483,9 +482,8 @@ This project is licensed under **GPL-3.0-or-later**. See [LICENSE](LICENSE).
 Upstream references influencing licensing and implementation include:
 
 - [gr-lora_sdr](https://github.com/tapparelj/gr-lora_sdr)
-- [meshtastic/protobufs](https://github.com/meshtastic/protobufs) (via the
-  [Ixitxachitl/meshtastic-protobufs](https://github.com/Ixitxachitl/meshtastic-protobufs/tree/games)
-  fork linked as `third_party/meshtastic_protobufs`)
+- [meshtastic/protobufs](https://github.com/meshtastic/protobufs) (linked as
+  `third_party/meshtastic_protobufs`)
 - [meshtastic/firmware](https://github.com/meshtastic/firmware)
 
 ## Disclaimer

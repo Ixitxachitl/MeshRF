@@ -304,10 +304,6 @@ public sealed class AppSettings
     public double? TelemetryHistoryPowerPaneHeight { get; set; }
     public bool IdentityExpanded { get; set; } = false;
 
-    /// <summary>Show the Snake/Tetris/Breakout/Chirpy Runner high-score
-    /// buttons on the primary channel tab. Off by default.</summary>
-    public bool ShowGameHighScores { get; set; } = false;
-
     public int SelectedChannelIndex { get; set; } = -1;
     public int LastSelectedChannelIndex { get; set; } = -1;
     public uint SelectedConversationNode { get; set; }
@@ -371,11 +367,6 @@ public sealed class AppSettings
     public List<double> WaypointColumnWidths { get; set; } = new();
     public List<double> NodeColumnWidths { get; set; } = new();
     public List<string> NodeColumnDisplayOrder { get; set; } = new();
-
-    public List<PersistedSnakeScore> SnakeHighScores { get; set; } = new();
-    public List<PersistedTetrisScore> TetrisHighScores { get; set; } = new();
-    public List<PersistedBreakoutScore> BreakoutHighScores { get; set; } = new();
-    public List<PersistedChirpyRunnerScore> ChirpyRunnerHighScores { get; set; } = new();
 
     private static readonly JsonSerializerOptions s_opts = new()
     {
@@ -502,38 +493,3 @@ public sealed class AppSettings
     }
 }
 
-/// <summary>One entry in the persisted snake high-score table.</summary>
-public sealed class PersistedSnakeScore
-{
-    public uint NodeNum { get; set; }
-    public string ShortName { get; set; } = string.Empty;
-    public uint Score { get; set; }
-    public uint ScoreId { get; set; }
-}
-
-/// <summary>One entry in the persisted Tetris high-score table.</summary>
-public sealed class PersistedTetrisScore
-{
-    public uint NodeNum { get; set; }
-    public string ShortName { get; set; } = string.Empty;
-    public uint Score { get; set; }
-    public uint ScoreId { get; set; }
-}
-
-/// <summary>One entry in the persisted Breakout high-score table.</summary>
-public sealed class PersistedBreakoutScore
-{
-    public uint NodeNum { get; set; }
-    public string ShortName { get; set; } = string.Empty;
-    public uint Score { get; set; }
-    public uint ScoreId { get; set; }
-}
-
-/// <summary>One entry in the persisted Chirpy Runner high-score table.</summary>
-public sealed class PersistedChirpyRunnerScore
-{
-    public uint NodeNum { get; set; }
-    public string ShortName { get; set; } = string.Empty;
-    public uint Score { get; set; }
-    public uint ScoreId { get; set; }
-}
