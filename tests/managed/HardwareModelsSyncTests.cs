@@ -7,13 +7,18 @@ using Xunit;
 namespace MeshRF.Tests;
 
 /// <summary>
-/// Guards against <see cref="HardwareModels"/> silently drifting from the
-/// Meshtastic <c>HardwareModel</c> enum in the linked protobuf submodule
-/// (third_party/meshtastic_protobufs). HardwareModels.cs is hand-maintained,
-/// not code-generated, so nothing else catches a submodule bump that adds,
-/// renumbers, or renames hardware models — this test parses the enum
-/// straight out of mesh.proto and diffs it against HardwareModels.cs.
+/// Checks that <see cref="HardwareModels"/> really does hand back everything
+/// <c>mesh.proto</c> declares.
 /// </summary>
+/// <remarks>
+/// It used to guard a hand-written table against the submodule, and failed
+/// exactly once for real before the table was replaced by reflection over the
+/// generated enum. Kept because it now checks the other half: this reads the
+/// enum out of the <c>.proto</c> as text, where HardwareModels reads it out of
+/// what protoc compiled, so the two only agree if every value carries the
+/// <c>OriginalName</c> the derivation depends on and the build is looking at
+/// the submodule it thinks it is.
+/// </remarks>
 public class HardwareModelsSyncTests
 {
     [Fact]
@@ -52,15 +57,16 @@ public class HardwareModelsSyncTests
         }
 
         Assert.True(missingFromCs.Count == 0,
-            "HardwareModels.cs is missing hardware model(s) present in mesh.proto: " +
+            "HardwareModels does not resolve hardware model(s) present in mesh.proto: " +
             string.Join(", ", missingFromCs) +
-            ". Re-sync the s_models table in HardwareModels.cs with the submodule's HardwareModel enum.");
+            ". The generated enum should carry these; check that the protobuf submodule and the compiled " +
+            "output are in step, and that protoc stamped them with OriginalName.");
         Assert.True(mismatched.Count == 0,
-            "HardwareModels.cs has id/name mismatches vs mesh.proto: " + string.Join(", ", mismatched));
+            "HardwareModels resolves names that disagree with mesh.proto: " + string.Join(", ", mismatched));
         Assert.True(staleInCs.Count == 0,
-            "HardwareModels.cs has entries not present (or renumbered) in mesh.proto: " +
+            "HardwareModels reports model(s) not present (or renumbered) in mesh.proto: " +
             string.Join(", ", staleInCs) +
-            ". Re-sync the s_models table in HardwareModels.cs with the submodule's HardwareModel enum.");
+            ". The compiled enum is ahead of the .proto being read here, which means a stale build.");
     }
 
     /// <summary>Walks up from the test binary's output directory to find the
