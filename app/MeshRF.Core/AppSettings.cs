@@ -135,8 +135,9 @@ public sealed class AppSettings
     /// <summary>Self-reported firmware version string.</summary>
     public string UserFirmwareVersion { get; set; } = "2.8.0";
 
-    /// <summary>Self-reported firmware edition.</summary>
-    public string UserFirmwareEdition { get; set; } = "VANILLA";
+    /// <summary>Self-reported firmware edition, named as mesh.proto's
+    /// <c>FirmwareEdition</c> spells it.</summary>
+    public string UserFirmwareEdition { get; set; } = MeshRF.Mesh.FirmwareEditions.Default;
 
     /// <summary>Rebroadcast mode the relay applies to received traffic (firmware
     /// <c>Config.DeviceConfig.RebroadcastMode</c>). Enforced by

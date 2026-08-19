@@ -551,9 +551,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private string _myFirmwareVersion = "2.8.0";
 
     [ObservableProperty]
-    private string _myFirmwareEdition = "VANILLA";
+    private string _myFirmwareEdition = FirmwareEditions.Default;
 
-    public string[] FirmwareEditionOptions { get; } = { "VANILLA", "PREMIUM" };
+    /// <summary>
+    /// Every edition mesh.proto declares, read out of the generated enum.
+    /// </summary>
+    /// <remarks>
+    /// This used to be a two-item literal offering a PREMIUM that appears in no
+    /// Meshtastic schema, so a saved "PREMIUM" is no longer accepted below and
+    /// falls back to VANILLA — which is what such a node would have been
+    /// claiming to be anyway.
+    /// </remarks>
+    public IReadOnlyList<string> FirmwareEditionOptions { get; } = FirmwareEditions.AllNames;
 
     [ObservableProperty]
     private string _rebroadcastMode = "All";

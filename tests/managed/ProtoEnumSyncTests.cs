@@ -7,19 +7,21 @@ using Xunit;
 namespace MeshRF.Tests;
 
 /// <summary>
-/// Checks that <see cref="HardwareModels"/> really does hand back everything
-/// <c>mesh.proto</c> declares.
+/// Checks that the lists MeshRF derives from generated protobuf enums really
+/// do hand back everything <c>mesh.proto</c> declares.
 /// </summary>
 /// <remarks>
-/// It used to guard a hand-written table against the submodule, and failed
-/// exactly once for real before the table was replaced by reflection over the
-/// generated enum. Kept because it now checks the other half: this reads the
-/// enum out of the <c>.proto</c> as text, where HardwareModels reads it out of
-/// what protoc compiled, so the two only agree if every value carries the
-/// <c>OriginalName</c> the derivation depends on and the build is looking at
-/// the submodule it thinks it is.
+/// Both of these used to be hand-written tables, and both were wrong: the
+/// hardware models sat a submodule bump behind, and the firmware editions
+/// offered a <c>PREMIUM</c> that appears in no Meshtastic schema. They are
+/// read out of the generated enums now, so what is left to check is the other
+/// half of the loop — this reads the enum out of the <c>.proto</c> as text
+/// where <see cref="ProtoEnums"/> reads it out of what protoc compiled, so the
+/// two agree only if every value carries the <c>OriginalName</c> the
+/// derivation depends on and the build is looking at the submodule it thinks
+/// it is.
 /// </remarks>
-public class HardwareModelsSyncTests
+public class ProtoEnumSyncTests
 {
     [Fact]
     public void MatchesProtobufHardwareModelEnum()
@@ -67,6 +69,44 @@ public class HardwareModelsSyncTests
             "HardwareModels reports model(s) not present (or renumbered) in mesh.proto: " +
             string.Join(", ", staleInCs) +
             ". The compiled enum is ahead of the .proto being read here, which means a stale build.");
+    }
+
+    [Fact]
+    public void MatchesProtobufFirmwareEditionEnum()
+    {
+        var protoNames = EnumEntries("FirmwareEdition")
+            .OrderBy(e => e.Id)
+            .Select(e => e.Name)
+            .ToArray();
+
+        Assert.Equal(protoNames, FirmwareEditions.AllNames);
+    }
+
+    [Fact]
+    public void PremiumIsNotAFirmwareEdition()
+    {
+        // The literal this list replaced offered VANILLA and PREMIUM. There has
+        // never been a PREMIUM in any Meshtastic schema, so nothing could have
+        // been running one — this pins that it does not come back.
+        Assert.DoesNotContain("PREMIUM", FirmwareEditions.AllNames);
+        Assert.Equal("VANILLA", FirmwareEditions.AllNames[0]);
+        Assert.Equal(FirmwareEditions.Default, FirmwareEditions.AllNames[0]);
+    }
+
+    /// <summary>The (number, name) pairs of one enum, read out of mesh.proto as
+    /// text so it is an independent reading from the compiled one.</summary>
+    private static List<(int Id, string Name)> EnumEntries(string enumName)
+    {
+        string protoPath = FindMeshProto();
+        string proto = File.ReadAllText(protoPath);
+
+        var enumMatch = Regex.Match(proto, $@"enum {enumName} \{{(.*?)\r?\n\}}", RegexOptions.Singleline);
+        Assert.True(enumMatch.Success, $"Could not find 'enum {enumName} {{ ... }}' in {protoPath}");
+
+        var entries = Regex.Matches(enumMatch.Groups[1].Value, @"(?m)^\s*([A-Z0-9_]+)\s*=\s*(\d+)\s*;");
+        Assert.True(entries.Count > 0, $"Found the {enumName} enum block in {protoPath} but no entries inside it.");
+
+        return entries.Select(m => (int.Parse(m.Groups[2].Value), m.Groups[1].Value)).ToList();
     }
 
     /// <summary>Walks up from the test binary's output directory to find the

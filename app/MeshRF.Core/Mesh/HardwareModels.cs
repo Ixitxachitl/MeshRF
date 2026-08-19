@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-using System.Reflection;
-using Google.Protobuf.Reflection;
-
 namespace MeshRF.Mesh;
 
 /// <summary>
@@ -11,11 +8,8 @@ namespace MeshRF.Mesh;
 /// </summary>
 /// <remarks>
 /// <para>Read out of the generated <see cref="Meshtastic.Protobufs.HardwareModel"/>
-/// rather than written out here. The submodule's schemas are compiled into this
-/// assembly, and protoc stamps every value with an
-/// <see cref="OriginalNameAttribute"/> carrying the name as the .proto spells
-/// it — which is exactly the string this class exists to hand out. A table
-/// repeating them could only ever agree with the enum or be wrong, and it was
+/// rather than written out here — see <see cref="ProtoEnums"/> for why. A table
+/// repeating the enum could only ever agree with it or be wrong, and it was
 /// wrong: a submodule bump added model 144 and the copy here sat at 143, so
 /// every node reporting one read as <c>UNKNOWN_144</c>.</para>
 /// <para>Regions and LoRa presets are still hand-written, and that is not the
@@ -26,25 +20,8 @@ namespace MeshRF.Mesh;
 /// </remarks>
 public static class HardwareModels
 {
-    /// <summary>
-    /// Every value of the generated enum, as (id, proto name), ordered by id.
-    /// </summary>
-    /// <remarks>
-    /// Reflection over the enum's fields rather than <c>Enum.GetValues</c>,
-    /// because the name wanted here is the <c>SEEED_WIO_TRACKER_L1_PRO_1W</c>
-    /// on the attribute, not the <c>SeeedWioTrackerL1Pro1W</c> protoc coins for
-    /// C#. A value protoc left unstamped is skipped rather than guessed at.
-    /// </remarks>
     private static readonly (int Id, string Name)[] s_models =
-        typeof(Meshtastic.Protobufs.HardwareModel)
-            .GetFields(BindingFlags.Public | BindingFlags.Static)
-            .Select(f => (
-                Id: (int)f.GetRawConstantValue()!,
-                Name: f.GetCustomAttribute<OriginalNameAttribute>()?.Name))
-            .Where(m => m.Name is not null)
-            .OrderBy(m => m.Id)
-            .Select(m => (m.Id, m.Name!))
-            .ToArray();
+        ProtoEnums.Entries<Meshtastic.Protobufs.HardwareModel>();
 
     private static readonly Dictionary<int, string> s_byId =
         s_models.ToDictionary(m => m.Id, m => m.Name);
