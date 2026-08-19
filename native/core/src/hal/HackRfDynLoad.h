@@ -9,7 +9,12 @@
 #include <cstdint>
 
 #if defined(_WIN32)
-#  define WIN32_LEAN_AND_MEAN
+// Guarded because the MSVC build already defines this on the command line
+// (see the root CMakeLists.txt); kept so the header still stands on its own
+// for a build that doesn't.
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
 #  include <windows.h>
 #endif
 

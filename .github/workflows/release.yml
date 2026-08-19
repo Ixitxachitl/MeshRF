@@ -66,6 +66,20 @@ jobs:
           sudo apt-get install -y ninja-build libhackrf-dev librtlsdr-dev libusb-1.0-0-dev \
                                   libudev-dev autoconf autoconf-archive automake libtool
 
+      # The runner image arrives with third-party taps we never install from
+      # (aws/tap at the time of writing), and Homebrew now prints a tap-trust
+      # warning naming them on every single invocation. Dropping them from this
+      # throwaway runner is quieter than exporting HOMEBREW_NO_REQUIRE_TAP_TRUST,
+      # which switches the check off wholesale and is on its way out. Everything
+      # installed below comes from homebrew/core, which is left alone.
+      - name: Drop untrusted Homebrew taps (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          for tap in $(brew tap | grep -v '^homebrew/'); do
+            echo "Untapping $tap"
+            brew untap "$tap" || true
+          done
+
       - name: Install native dependencies (macOS)
         if: matrix.platform == 'macos'
         run: brew install ninja hackrf librtlsdr libusb autoconf autoconf-archive automake libtool
