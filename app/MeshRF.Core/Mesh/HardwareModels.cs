@@ -155,6 +155,7 @@ public static class HardwareModels
         (141, "HELTEC_RC32"),
         (142, "HELTEC_RC52"),
         (143, "HELTEC_RCC6"),
+        (144, "SEEED_WIO_TRACKER_L1_PRO_1W"),
         (255, "PRIVATE_HW"),
     };
 
