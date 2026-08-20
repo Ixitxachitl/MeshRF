@@ -11,15 +11,26 @@
         Width="1280" Height="900">
 
     <Window.Styles>
-        <!-- The gap the channels/DMs divider is drawn into. It has to be the
-             TabItem's own margin: Fluent draws the selected tab's underline
-             across the whole TabItem and ignores its padding, so anything in
-             the header gets underlined with the title. A margin moves the tab
-             and its underline together and leaves space beside them. -->
+        <!-- The gap the channels/DMs divider is drawn into, and permission to
+             draw into it.
+
+             The tab's chrome — the LayoutRoot border styled below — is sized to
+             the whole TabItem, so a rule placed inside the header is enclosed by
+             the tab box rather than separating it from the one before. The gap
+             therefore has to come from the TabItem's own margin, which moves the
+             tab and its chrome together and leaves space beside them, and the
+             rule is drawn back into that space with a negative margin.
+
+             ClipToBounds goes with it: a TabItem clips by default, and this app
+             leaves it no horizontal padding to borrow (see the Padding below),
+             so the rule lands outside the tab's bounds and is clipped away
+             entirely. Only the tab that starts a group is unclipped. -->
         <Style Selector="TabItem" x:DataType="mesh:ITabItem">
             <Setter Property="Margin"
                     Value="{Binding StartsTabGroup,
                                     Converter={x:Static local:TabGroupMarginConverter.Instance}}" />
+            <Setter Property="ClipToBounds"
+                    Value="{Binding !StartsTabGroup}" />
         </Style>
 
         <!-- Unseen-activity pulse on a tab header. Alternating playback fades
