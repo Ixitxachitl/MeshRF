@@ -66,6 +66,28 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// first, in persisted order; conversations appended as they open).</summary>
     public ObservableCollection<ITabItem> Tabs { get; } = new();
 
+    /// <summary>
+    /// Marks the first conversation tab so the header strip can draw a rule
+    /// between the channels and the DMs.
+    /// </summary>
+    /// <remarks>
+    /// Driven off the collection rather than set at each of the half-dozen
+    /// places that add, remove or reorder a tab, so it cannot be forgotten at
+    /// one of them. Assignment is guarded on the current value because these
+    /// are observable properties and rewriting an unchanged one would notify
+    /// on every list change.
+    /// </remarks>
+    private void MarkTabGroups()
+    {
+        bool seen = false;
+        foreach (var tab in Tabs)
+        {
+            bool starts = !seen && tab is ConversationTabViewModel;
+            if (starts) seen = true;
+            if (tab.StartsTabGroup != starts) tab.StartsTabGroup = starts;
+        }
+    }
+
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
     public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
@@ -269,6 +291,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         _waypointStore = waypointStore;
         _messageStore = messageStore;
         MyNodeNum = myNodeNum;
+
+        Tabs.CollectionChanged += (_, _) => MarkTabGroups();
 
         LoadChannels();
         foreach (var wp in _waypointStore.All()) Waypoints.Add(wp);

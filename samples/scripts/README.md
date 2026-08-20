@@ -64,8 +64,10 @@ a particular channel. `send:` is the form that names its own destination:
 ```
 
 Use one of `to:` or `channel:`, never both. Neither means the primary, and
-`channel: primary` says so out loud — which is the only way to name the primary
-on a mesh running a default preset, since that channel has no name of its own.
+`channel: "{primary}"` says so out loud — which is the only way to name the
+primary on a mesh running a default preset, since that channel has no name of
+its own. The braces are what keep it unambiguous: a bare word in a `channel:`
+is always a channel name, even if that name is "primary".
 
 Waypoints take the same pair, in a script and in a sync alike, so a feed can go
 on its own channel or to one node instead of onto everyone's map:
@@ -73,7 +75,7 @@ on its own channel or to one node instead of onto everyone's map:
 ```yaml
   waypoint:
     name: "Fire: {item.name}"
-    channel: Alerts       # or   to: "!a1b2c3d4"   for one node
+    channel: Alerts       # or "{primary}", or to: "!a1b2c3d4" for one node
 ```
 
 A marker addressed to a node still travels under the primary channel's key — the

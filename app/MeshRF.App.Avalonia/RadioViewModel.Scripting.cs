@@ -847,10 +847,12 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     /// back to the primary and saying so when the name matches nothing.
     /// </summary>
     /// <remarks>
-    /// The literal <c>primary</c> names the primary by role, which is the only
-    /// way to name it on a default mesh: a preset primary has no name of its
-    /// own, so no string would ever match it. A channel someone actually called
-    /// "primary" still wins, since that is a name they chose.
+    /// <c>{primary}</c> names the primary by role, which is the only way to
+    /// name it on a default mesh: a preset primary has no name of its own, so
+    /// no string would ever match it. It is written as a placeholder, in the
+    /// braces the rest of the language reserves, precisely so it cannot
+    /// collide with a channel someone actually called "primary" — a bare word
+    /// is always a name and nothing else.
     /// </remarks>
     /// <param name="context">Log prefix, so a sync's fallback doesn't read as a
     /// script's.</param>
@@ -858,15 +860,13 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     {
         var tabs = Tabs.OfType<ChannelTabViewModel>().ToList();
         var primary = tabs.FirstOrDefault(t => t.Config.Role == ChannelRole.Primary) ?? tabs.FirstOrDefault();
-        if (name.Length == 0) return primary;
+        if (name.Length == 0 || ScriptChannels.IsPrimaryToken(name)) return primary;
 
         // Disabled channels are skipped: one has no key to send with, so
         // matching its name would only produce a frame nobody can read.
         var named = tabs.FirstOrDefault(
             t => !t.Config.IsDisabled && string.Equals(t.Config.Name, name, StringComparison.OrdinalIgnoreCase));
         if (named is not null) return named;
-
-        if (string.Equals(name, "primary", StringComparison.OrdinalIgnoreCase)) return primary;
 
         _rxHost.Log($"{context}: no channel named \"{name}\" — falling back to the primary");
         return primary;

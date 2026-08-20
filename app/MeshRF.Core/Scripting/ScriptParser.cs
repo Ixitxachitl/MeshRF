@@ -919,6 +919,7 @@ public static class ScriptParser
                 }
                 var to = ReadString(send, "to", problems) ?? string.Empty;
                 var channel = ReadString(send, "channel", problems) ?? string.Empty;
+                WarnBarePrimary(channel, line, column, "send", problems);
                 if (to.Length > 0 && channel.Length > 0)
                 {
                     problems.Add(ScriptProblem.Error(line, column,
@@ -1409,12 +1410,32 @@ public static class ScriptParser
     /// placeholder. A script's waypoint resolves one when it fires; a feed's
     /// markers are placed unprompted, so there is no message to read one from.
     /// </param>
+    /// <summary>
+    /// Catches the bare word where the role token was meant.
+    /// </summary>
+    /// <remarks>
+    /// <c>channel: primary</c> reads as a channel actually called "primary",
+    /// which is almost never what someone means and matches nothing on a mesh
+    /// that has no such channel. A warning rather than an error, because a
+    /// channel really can be named that and the file is then correct.
+    /// </remarks>
+    private static void WarnBarePrimary(
+        string channel, int line, int column, string what, List<ScriptProblem> problems)
+    {
+        if (!string.Equals(channel.Trim(), "primary", StringComparison.OrdinalIgnoreCase)) return;
+
+        problems.Add(ScriptProblem.Warning(line, column,
+            $"{what}: channel: primary names a channel actually called \"primary\". " +
+            $"To name the primary by role whatever it is called, write {ScriptChannels.PrimaryToken}."));
+    }
+
     private static bool TryReadDestination(
         YamlMappingNode map, int line, int column, string what, bool allowPlaceholder,
         List<ScriptProblem> problems, out string to, out string channel)
     {
         to = (ReadString(map, "to", problems) ?? string.Empty).Trim();
         channel = (ReadString(map, "channel", problems) ?? string.Empty).Trim();
+        WarnBarePrimary(channel, line, column, what, problems);
 
         if (to.Length > 0 && channel.Length > 0)
         {

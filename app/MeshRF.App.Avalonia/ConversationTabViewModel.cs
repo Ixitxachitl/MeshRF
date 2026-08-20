@@ -37,6 +37,9 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private bool _tabNeedsAttention;
 
+    [ObservableProperty]
+    private bool _startsTabGroup;
+
     public ConversationTabViewModel(uint nodeNum, string peerName,
                                     NodeStore? nodeStore = null,
                                     Func<Func<float, string>?>? temperatureFormatter = null,

@@ -20,6 +20,19 @@ public interface ITabItem
     /// are permanent and return false.</summary>
     bool CanClose { get; }
 
+    /// <summary>
+    /// Draw a separator to the left of this tab, because it is the first of a
+    /// different kind — the first conversation after the channels.
+    /// </summary>
+    /// <remarks>
+    /// A flag on the tab rather than a rule in the header template: the two
+    /// kinds share one <c>TabControl</c>, and a template has no way to ask
+    /// what came before it in the list. Recomputed whenever the tab list
+    /// changes, so it survives channels being added, DMs being closed and
+    /// either being dragged into a new order.
+    /// </remarks>
+    bool StartsTabGroup { get; set; }
+
     /// <summary>Messages shown in this tab, newest first.</summary>
     ObservableCollection<ChannelMessage> Messages { get; }
 }

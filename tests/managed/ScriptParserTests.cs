@@ -372,6 +372,31 @@ public class ScriptParserTests
         Assert.Equal(["Test", "Backup"], Assert.Single(many.Script!.Conditions).Values);
     }
 
+    [Theory]
+    [InlineData("action:\n  - send:\n      channel: primary\n      text: hi")]
+    [InlineData("action:\n  - waypoint:\n      lat: home\n      expires: 1h\n      channel: primary")]
+    public void The_Bare_Word_Primary_Warns_That_It_Names_A_Channel(string body)
+    {
+        // It used to be the role keyword. It now reads as a channel actually
+        // called "primary", which is almost never meant — a warning rather than
+        // an error, because a channel really can be named that.
+        var result = ScriptParser.Parse("trigger:\n  - command: ping\n" + body + "\n");
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        Assert.Contains(result.Problems, p => p.Message.Contains("{primary}"));
+    }
+
+    [Fact]
+    public void The_Primary_Token_Is_Accepted_Without_Complaint()
+    {
+        var result = ScriptParser.Parse(
+            "trigger:\n  - command: ping\naction:\n  - send:\n      channel: \"{primary}\"\n      text: hi\n");
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        Assert.Empty(result.Problems);
+        Assert.Equal("{primary}", result.Script!.Actions[0].Channel);
+    }
+
     [Fact]
     public void An_Empty_Not_Channel_Is_Rejected()
     {

@@ -80,7 +80,7 @@ public partial class ScriptHelpWindow : Window
         new("reply: \"text\"", "Answer in the conversation the trigger arrived on, threaded under the message. To answer somewhere else — another channel, or the sender of a channel message by DM — use send: instead."),
         new("send:", "Send somewhere specific. Takes the indented keys below."),
         new("  to: \"{from.id}\"", "Destination node. A node id, or a placeholder that becomes one."),
-        new("  channel: LongFast", "Destination channel instead of a node. Use one of to:/channel:, not both. Neither means the primary, and channel: primary says so out loud — the only way to name a primary that has no name of its own."),
+        new("  channel: LongFast", "Destination channel instead of a node. Use one of to:/channel:, not both. Neither means the primary, and channel: {primary} says so out loud — the only way to name a primary that has no name of its own. Braces, so it cannot be mistaken for a channel called \"primary\"."),
         new("  text: \"…\"", "The message body. Required."),
         new("  reply_link: true", "Thread the message under the one that triggered it."),
         new("http:", "Call a REST endpoint and keep the answer for a later action. Takes the indented keys below."),
@@ -111,7 +111,7 @@ public partial class ScriptHelpWindow : Window
         new("  expires: 1h", "How long it lasts. Without one it stays on everyone's map until cleared by hand, and the editor warns."),
         new("  notify_on_enter: true", "Alert receivers crossing into the fence. Needs a radius. Also notify_on_exit."),
         new("  to: \"{from.id}\"", "Address the marker to one node instead of broadcasting it. It still travels under the primary's key — the address saves everyone else drawing it rather than keeping it from them."),
-        new("  channel: LongFast", "Channel to broadcast on. Use one of to:/channel:, not both. Defaults to the primary, and channel: primary says so out loud."),
+        new("  channel: LongFast", "Channel to broadcast on. Use one of to:/channel:, not both. Defaults to the primary, and channel: {primary} says so out loud."),
         new("  lock_to_me: false", "Let others edit the marker. On by default, so a script's markers cannot be rewritten."),
         new("react: 👍", "Emoji tapback on the triggering message."),
         new("position: true", "Send this node's position."),
@@ -198,7 +198,7 @@ public partial class ScriptHelpWindow : Window
             description: "{item.data.acreage} acres"
             icon: "🔥"
             radius: 10mi
-            channel: primary   # or a name, or to: for one node
+            channel: "{primary}"   # or a name, or to: for one node
         """;
 
     public IReadOnlyList<HelpRow> Sync { get; } =
@@ -214,7 +214,7 @@ public partial class ScriptHelpWindow : Window
         new("watch: []", "Says the records never change — a lightning strike, not a fire. A marker is placed once and retired once, with nothing in between, and never refreshed. Different from leaving watch: out, which is only an omission and is warned about."),
         new("waypoint:", "The marker. Same keys as a script's, minus lat/lon — those come from the paths above — and its name and description are templates over {item.*}."),
         new("  expires:", "Usually omitted. A mirrored marker is retired when its record goes, not on a clock, so it does not need one."),
-        new("  channel: Fires", "Which channel the markers go out on. Defaults to the primary, and channel: primary says so out loud. A feed worth its own channel keeps a mesh's shared one clear."),
+        new("  channel: Fires", "Which channel the markers go out on. Defaults to the primary, and channel: {primary} says so out loud. A feed worth its own channel keeps a mesh's shared one clear."),
         new("  to: \"!a1b2c3d4\"", "Or address them to one node. A literal id only — a feed places its markers unprompted, so there is no message for a placeholder to come from."),
         new("  lock_to_me:", "Off by default here, unlike a script's waypoint. These are placed unattended and may outlive this node's interest, so whoever receives one should be able to clear it."),
     ];

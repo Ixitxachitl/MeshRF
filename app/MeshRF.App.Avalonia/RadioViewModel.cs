@@ -50,7 +50,23 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private readonly MeshRxRouter _rxRouter;
     private DateTime _lastTracerouteUtc = DateTime.MinValue;
     private DateTime _lastPositionRequestUtc = DateTime.MinValue;
-    private ITabItem? _previousTab;
+    /// <summary>
+    /// Tabs in the order they were last looked at, most recent first, so
+    /// closing a DM goes back where you came from.
+    /// </summary>
+    /// <remarks>
+    /// A list rather than one "previous", because closing several DMs in a row
+    /// should keep walking back rather than falling off after the first: the
+    /// tab you return to becomes the current one, and its own predecessor has
+    /// to still be known. Entries for closed tabs are skipped by the
+    /// still-present check rather than swept, since the list is a handful of
+    /// items.
+    /// </remarks>
+    private readonly List<ITabItem> _tabHistory = [];
+
+    /// <summary>How far back to remember. Deep enough to walk out of a run of
+    /// DMs, shallow enough that it never needs thinking about.</summary>
+    private const int TabHistoryDepth = 16;
 
     /// <summary>False until the constructor has finished loading every setting
     /// from disk. Gates <see cref="SaveSettings"/> so mid-construction property
@@ -2075,7 +2091,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Looking at the tab is what marks its activity seen; without this the
         // header would keep pulsing forever once anything arrived.
         if (value is not null) value.TabNeedsAttention = false;
-        if (value is not null) _previousTab = value;
+        if (value is not null)
+        {
+            _tabHistory.Remove(value);
+            _tabHistory.Insert(0, value);
+            if (_tabHistory.Count > TabHistoryDepth) _tabHistory.RemoveRange(TabHistoryDepth, _tabHistory.Count - TabHistoryDepth);
+        }
         if (value is ChannelTabViewModel ch) _lastSelectedChannelIndex = ch.Config.Index;
         SendMessageCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanRemoveSelectedChannel));
@@ -2190,13 +2211,20 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private void CloseTab(ITabItem? tab)
     {
         if (tab is not ConversationTabViewModel convo) return;
+
         if (ReferenceEquals(SelectedTab, convo))
         {
-            var restoreTo = _previousTab is not null && !ReferenceEquals(_previousTab, convo) && Tabs.Contains(_previousTab)
-                ? _previousTab
-                : Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
+            // Back to the last tab still open, DM or channel, rather than to
+            // whichever channel happens to be first — closing a conversation
+            // should put you where you were before it, not somewhere new.
+            var restoreTo = _tabHistory.FirstOrDefault(t => !ReferenceEquals(t, convo) && Tabs.Contains(t))
+                            ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
             if (restoreTo is not null) SelectedTab = restoreTo;
         }
+
+        // After the selection has moved, so the tab being closed is not the one
+        // just recorded as most recent.
+        _tabHistory.Remove(convo);
         _rxHost.CloseConversation(convo);
     }
 

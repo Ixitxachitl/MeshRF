@@ -65,12 +65,14 @@ sync:
 
     # Where the markers go. Named by role rather than by name, because a mesh
     # running a default preset has a primary with no name of its own — there
-    # would be no string to write here. A channel name works too, and is worth
-    # it if the mesh has one for alerts; to: "!a1b2c3d4" instead sends them to
-    # a single node, which is how a relay feeds one person's map without
-    # putting a marker on everyone's.
+    # would be no string to write here. The braces are what make it a role
+    # and not a name: a bare word is always a channel name, so a mesh with a
+    # channel called "primary" is never ambiguous. A channel name works too,
+    # and is worth it if the mesh has one for alerts; to: "!a1b2c3d4" instead
+    # sends them to a single node, which is how a relay feeds one person's map
+    # without putting a marker on everyone's.
     #
     # This is the one everybody shares, which is the point for a fire and is
     # not the point for most feeds. Read the note above about how many markers
     # a busy source produces before you leave it here.
-    channel: primary
+    channel: "{primary}"

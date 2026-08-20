@@ -36,7 +36,7 @@ public class ScriptCompletionTests
         var result = At("action:\n  - send:\n      channel: ");
 
         Assert.NotNull(result);
-        Assert.Equal(["primary", "LongFast", "Test"], result!.Suggestions.Select(s => s.Label));
+        Assert.Equal(["{primary}", "LongFast", "Test"], result!.Suggestions.Select(s => s.Label));
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class ScriptCompletionTests
         {
             var result = At(text);
             Assert.NotNull(result);
-            Assert.Equal("primary", result!.Suggestions[0].Label);
+            Assert.Equal(ScriptChannels.PrimaryToken, result!.Suggestions[0].Label);
         }
     }
 
@@ -178,7 +178,7 @@ public class ScriptCompletionTests
         // mean something on any mesh are still worth offering.
         const string text = "action:\n  - send:\n      channel: ";
         var channels = ScriptCompletion.Suggest(text, text.Length, ScriptCompletionSource.Empty);
-        Assert.Equal("primary", Assert.Single(channels!.Suggestions).Label);
+        Assert.Equal(ScriptChannels.PrimaryToken, Assert.Single(channels!.Suggestions).Label);
 
         const string node = "action:\n  - send:\n      to: ";
         var nodes = ScriptCompletion.Suggest(node, node.Length, ScriptCompletionSource.Empty);

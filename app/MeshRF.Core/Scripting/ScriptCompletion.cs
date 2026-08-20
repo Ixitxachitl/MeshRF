@@ -156,12 +156,12 @@ public static class ScriptCompletion
         // about the role.
         "channel" when section == "condition" => source.Channels,
 
-        // "primary" first everywhere else: it is the answer for a mesh running
-        // a default preset, whose primary has no name of its own to pick off
-        // the list.
+        // The role token first everywhere else: it is the answer for a mesh
+        // running a default preset, whose primary has no name of its own to
+        // pick off the list.
         "channel" =>
         [
-            new ScriptSuggestion("primary", "the primary channel, whatever it is named"),
+            new ScriptSuggestion(ScriptChannels.PrimaryToken, "the primary channel, whatever it is named"),
             .. source.Channels,
         ],
 

@@ -33,6 +33,9 @@ public partial class ChannelTabViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private bool _tabNeedsAttention;
 
+    [ObservableProperty]
+    private bool _startsTabGroup;
+
     /// <summary>Suppress the incoming-text ringtone for this channel. Persisted
     /// in settings.json's MutedRingtoneChannels, the same key MeshRF.App
     /// uses.</summary>
