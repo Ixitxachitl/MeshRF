@@ -92,7 +92,7 @@ public static class ScriptCompletion
         }
         if (!match.Success) return null;
 
-        var offered = For(match.Groups["key"].Value.ToLowerInvariant(), SectionAt(text, lineStart), source);
+        var offered = For(match.Groups["key"].Value.ToLowerInvariant(), source);
         if (offered is null || offered.Count == 0) return null;
 
         var value = match.Groups["value"].Value;
@@ -118,56 +118,19 @@ public static class ScriptCompletion
             AllowComment: text[caret..lineEnd].Trim().Length == 0);
     }
 
-    /// <summary>
-    /// The top-level block the caret sits in — <c>condition</c>, <c>action</c>
-    /// and so on — or empty above the first one.
-    /// </summary>
-    /// <remarks>
-    /// The nearest preceding line starting in column zero. YAML nests by
-    /// indentation, so a key at the margin is the section everything under it
-    /// belongs to, and that is all this needs to know.
-    /// </remarks>
-    private static string SectionAt(string text, int lineStart)
-    {
-        var before = text[..lineStart];
-        int from = before.Length;
-        while (from > 0)
-        {
-            int start = before.LastIndexOf('\n', from - 1) + 1;
-            var line = before[start..from].TrimEnd('\r');
-            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && line[0] != '#')
-            {
-                int colon = line.IndexOf(':');
-                if (colon > 0) return line[..colon].Trim().ToLowerInvariant();
-            }
-            if (start == 0) break;
-            from = start - 1;
-        }
-        return string.Empty;
-    }
-
     private static IReadOnlyList<ScriptSuggestion>? For(
-        string key, string section, ScriptCompletionSource source) => key switch
+        string key, ScriptCompletionSource source) => key switch
     {
-        // The primary is nameable by role only where a destination is chosen.
-        // A condition matches the name a message actually arrived on, so
-        // offering "primary" under condition: would suggest a line that
-        // silently matches nothing — scope: primary is the one that asks
-        // about the role.
-        "channel" when section == "condition" => source.Channels,
-
-        // The role token first everywhere else: it is the answer for a mesh
-        // running a default preset, whose primary has no name of its own to
-        // pick off the list.
-        "channel" =>
+        // The role token first: it is the answer for a mesh running a default
+        // preset, whose primary has no name of its own to pick off the list.
+        // Offered under a condition too, where it names the channel a message
+        // arrived on by role — the same meaning it has where a destination is
+        // chosen.
+        "channel" or "not_channel" =>
         [
             new ScriptSuggestion(ScriptChannels.PrimaryToken, "the primary channel, whatever it is named"),
             .. source.Channels,
         ],
-
-        // Only ever a condition, and matched against the arriving channel's
-        // name, so the role keyword would mean nothing here either.
-        "not_channel" => source.Channels,
 
         // {from.id} only here. from:/not_from: are matched against literal ids
         // by the engine, so a placeholder in one would never match anything.

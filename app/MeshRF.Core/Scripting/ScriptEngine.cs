@@ -290,16 +290,14 @@ public sealed class ScriptEngine
                 };
 
             case ScriptConditionKind.Channel:
-                return evt.Channel.Length > 0 &&
-                       condition.Values.Contains(evt.Channel, StringComparer.OrdinalIgnoreCase);
+                return evt.Channel.Length > 0 && NamesArrivingChannel(condition.Values, evt);
 
             case ScriptConditionKind.NotChannel:
                 // Vacuously true off-channel, the same way not_from: is with no
                 // sender: a direct message arrives on no channel at all, so it
                 // is not on the excluded one. channel: never matches a DM
                 // either, so the pair stays each other's inverse.
-                return evt.Channel.Length == 0 ||
-                       !condition.Values.Contains(evt.Channel, StringComparer.OrdinalIgnoreCase);
+                return evt.Channel.Length == 0 || !NamesArrivingChannel(condition.Values, evt);
 
             case ScriptConditionKind.From:
                 return evt.FromNode != 0 && MatchesNode(condition.Values, evt.FromNode);
@@ -332,6 +330,34 @@ public sealed class ScriptEngine
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Whether any of <paramref name="values"/> names the channel an event
+    /// arrived on — by name, or by role via <c>{primary}</c>.
+    /// </summary>
+    /// <remarks>
+    /// The role token means the same thing here as it does where a destination
+    /// is chosen, so one spelling covers both and a list can mix the two:
+    /// <c>channel: ["{primary}", Alerts]</c> is not expressible with
+    /// <c>scope:</c> at all. Against a single entry this is all but the same as
+    /// <c>scope: primary</c> — the difference is a legacy direct message, which
+    /// is encrypted with a channel key and so carries that channel's name;
+    /// <c>channel:</c> matches it, where <c>scope: primary</c> excludes every
+    /// direct message on purpose.
+    /// </remarks>
+    private static bool NamesArrivingChannel(IReadOnlyList<string> values, ScriptEvent evt)
+    {
+        foreach (var value in values)
+        {
+            if (ScriptChannels.IsPrimaryToken(value))
+            {
+                if (evt.IsPrimaryChannel) return true;
+                continue;
+            }
+            if (string.Equals(value, evt.Channel, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
     /// <summary>Half-open window. A window whose end is before its start wraps

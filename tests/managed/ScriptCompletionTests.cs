@@ -40,33 +40,23 @@ public class ScriptCompletionTests
     }
 
     [Fact]
-    public void A_Channel_Condition_Is_Not_Offered_The_Primary_Keyword()
+    public void A_Channel_Condition_Is_Offered_The_Primary_Token_Too()
     {
-        // "primary" names a channel by role only where a destination is
-        // chosen. A condition matches the name a message arrived on, so
-        // offering it here would suggest a line that silently matches nothing
-        // unless a channel is literally called "primary". scope: primary is
-        // the condition that asks about the role.
-        var result = At("trigger:\n  - command: ping\ncondition:\n  - channel: ");
-
-        Assert.NotNull(result);
-        Assert.Equal(["LongFast", "Test"], result!.Suggestions.Select(s => s.Label));
+        // It means the same thing in a condition as it does where a
+        // destination is chosen — the primary by role — so the list offers it
+        // in both places.
+        foreach (var key in new[] { "channel", "not_channel" })
+        {
+            var result = At($"trigger:\n  - command: ping\ncondition:\n  - {key}: ");
+            Assert.NotNull(result);
+            Assert.Equal([ScriptChannels.PrimaryToken, "LongFast", "Test"],
+                         result!.Suggestions.Select(s => s.Label));
+        }
     }
 
     [Fact]
-    public void Not_Channel_Is_Never_Offered_The_Primary_Keyword_Either()
+    public void A_Destination_Channel_Offers_It_As_Well()
     {
-        var result = At("trigger:\n  - command: ping\ncondition:\n  - not_channel: ");
-
-        Assert.NotNull(result);
-        Assert.Equal(["LongFast", "Test"], result!.Suggestions.Select(s => s.Label));
-    }
-
-    [Fact]
-    public void A_Destination_Channel_Still_Offers_The_Primary_Keyword()
-    {
-        // The same key, in the block where naming the primary by role is
-        // exactly the right answer.
         foreach (var text in new[]
                  {
                      "action:\n  - send:\n      channel: ",

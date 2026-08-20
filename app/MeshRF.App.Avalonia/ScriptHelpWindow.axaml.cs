@@ -64,7 +64,7 @@ public partial class ScriptHelpWindow : Window
     public IReadOnlyList<HelpRow> Conditions { get; } =
     [
         new("scope: direct", "Only direct messages. Also: channel, any, and primary for the primary channel whatever it is named."),
-        new("channel: [LongFast]", "Only these channels. One name or a list."),
+        new("channel: [LongFast]", "Only these channels. One name or a list. {primary} names the primary by role, so channel: \"{primary}\" is scope: primary — except that it also matches a legacy direct message, which carries the channel it was encrypted with. A list may mix the two: [\"{primary}\", Alerts]."),
         new("not_channel: [Test]", "Every channel except these. Direct messages arrive on no channel, so they are never excluded — use scope: with it to narrow that."),
         new("from: [\"!a1b2c3d4\"]", "Only these senders."),
         new("not_from: [\"!deadbeef\"]", "Never these senders."),

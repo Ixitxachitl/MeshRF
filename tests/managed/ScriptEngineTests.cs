@@ -145,6 +145,47 @@ public class ScriptEngineTests
     }
 
     [Fact]
+    public void The_Primary_Token_Names_The_Primary_By_Role_In_A_Condition()
+    {
+        var engine = Engine(
+            "trigger:\n  - command: ping\ncondition:\n  - channel: \"{primary}\"\naction:\n  - reply: \"pong\"\n");
+
+        // Whatever the primary happens to be called.
+        Assert.Single(engine.Evaluate(
+            Text("!ping", direct: false, channel: "LongFast") with { IsPrimaryChannel = true }));
+        Assert.Empty(engine.Evaluate(
+            Text("!ping", direct: false, channel: "Test") with { IsPrimaryChannel = false }));
+    }
+
+    [Fact]
+    public void A_Channel_List_May_Mix_The_Token_With_Names()
+    {
+        // The thing scope: cannot express at all: the primary plus a named
+        // channel, in one condition.
+        const string yaml =
+            "trigger:\n  - command: ping\ncondition:\n  - channel: [\"{primary}\", Backup]\naction:\n  - reply: \"p\"\n";
+
+        Assert.Single(Engine(yaml).Evaluate(
+            Text("!ping", direct: false, channel: "LongFast") with { IsPrimaryChannel = true }));
+        Assert.Single(Engine(yaml).Evaluate(
+            Text("!ping", direct: false, channel: "Backup") with { IsPrimaryChannel = false }));
+        Assert.Empty(Engine(yaml).Evaluate(
+            Text("!ping", direct: false, channel: "Test") with { IsPrimaryChannel = false }));
+    }
+
+    [Fact]
+    public void Not_Channel_Excludes_The_Primary_By_Role_Too()
+    {
+        var engine = Engine(
+            "trigger:\n  - command: ping\ncondition:\n  - not_channel: \"{primary}\"\naction:\n  - reply: \"p\"\n");
+
+        Assert.Empty(engine.Evaluate(
+            Text("!ping", direct: false, channel: "LongFast") with { IsPrimaryChannel = true }));
+        Assert.Single(engine.Evaluate(
+            Text("!ping", direct: false, channel: "Test") with { IsPrimaryChannel = false }));
+    }
+
+    [Fact]
     public void Not_Channel_Is_Vacuously_True_Off_Channel()
     {
         // A direct message arrives on no channel at all, so it is not on the
