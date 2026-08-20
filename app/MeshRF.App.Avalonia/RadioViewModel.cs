@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Avalonia.Collections;
+using Avalonia.Media;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -466,15 +467,24 @@ public partial class RadioViewModel : ObservableObject, IDisposable
           RadioDeviceKind.Sx1262 };
 
     /// <summary>
-    /// The receive toggle, as a transport glyph rather than a word.
+    /// The receive toggle, drawn rather than spelled: a triangle to start, a
+    /// square to stop.
     /// </summary>
     /// <remarks>
-    /// Plain shapes, not the ▶/⏹ emoji: those are colour glyphs, drawn from the
-    /// font's own artwork and immune to Foreground, so they would ignore the
-    /// theme and the disabled state alike — the same thing the Nodes table's 🔑
-    /// column ran into.
+    /// Geometry, not characters. ▶ (U+25B6) carries Emoji=Yes, so the app-wide
+    /// emoji fallback registered in Program.cs supplies it in colour wherever
+    /// the text font does not — while ■ (U+25A0) comes from the text font as a
+    /// plain shape. The pair came out as a colour play button beside a flat
+    /// square, and a colour glyph ignores Foreground, so it would not have
+    /// greyed with the button either. Shapes have neither problem, which is the
+    /// same reason the Nodes table badges its 🔑 with an Ellipse.
     /// </remarks>
-    public string ToggleButtonText => IsRunning ? "■" : "▶";
+    public Geometry ToggleButtonGeometry => IsRunning ? StopGlyph : PlayGlyph;
+
+    // Both on a 10x10 box so the two states have the same optical weight; the
+    // Path stretches them uniformly into the button.
+    private static readonly Geometry PlayGlyph = Geometry.Parse("M 0,0 L 10,5 L 0,10 Z");
+    private static readonly Geometry StopGlyph = Geometry.Parse("M 0,0 H 10 V 10 H 0 Z");
 
     /// <summary>What the glyph means, since a shape cannot say it itself.</summary>
     public string ToggleButtonTip => IsRunning ? "Stop the receiver" : "Start the receiver";
@@ -1779,7 +1789,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     partial void OnIsRunningChanged(bool value)
     {
-        OnPropertyChanged(nameof(ToggleButtonText));
+        OnPropertyChanged(nameof(ToggleButtonGeometry));
         OnPropertyChanged(nameof(ToggleButtonTip));
         OnPropertyChanged(nameof(CanSelectRxSampleRate));
         SendMessageCommand.NotifyCanExecuteChanged();

@@ -365,12 +365,19 @@
                 <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
                          FontSize="11" Width="100" Height="26" Margin="0,0,8,2" />
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
-                <!-- Square, so ▶ and ■ do not shift the toolbar as it toggles. -->
-                <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}"
+                <!-- Drawn, not typed: see ToggleButtonGeometry for why a ▶
+                     character came out as a colour emoji next to a flat ■.
+                     Square button, so neither state shifts the toolbar. -->
+                <Button Command="{Binding ToggleRxCommand}"
                         ToolTip.Tip="{Binding ToggleButtonTip}"
-                        FontSize="13" Height="26" Width="26" Padding="0"
+                        Height="26" Width="26" Padding="0"
                         HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                        Margin="0,0,10,2" />
+                        Margin="0,0,10,2">
+                    <Path Data="{Binding ToggleButtonGeometry}"
+                          Fill="{Binding $parent[Button].Foreground}"
+                          Width="9" Height="9" Stretch="Uniform"
+                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Button>
                 <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}" FontSize="11"
                            IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,2" />
             </WrapPanel>
