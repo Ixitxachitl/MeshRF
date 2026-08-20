@@ -70,9 +70,19 @@ public sealed class MapCanvas : Control
         ["Dark", "Light", "Light (CARTO)", "Voyager"];
 
     private const string DefaultTileTheme = "Dark";
-    private string _mapTileTheme = DefaultTileTheme;
 
-    private TileProvider CurrentTiles => _mapTileTheme switch
+    /// <summary>The tile theme is one app-wide preference, not a per-canvas
+    /// one: the picker lives on the main map, but every map drawn from this
+    /// control — the location history window included — has to follow it, both
+    /// when it opens and while it is open.</summary>
+    private static string s_mapTileTheme = DefaultTileTheme;
+
+    /// <summary>Raised on every canvas when the shared theme changes.
+    /// Instances subscribe only while attached to a visual tree, so a closed
+    /// window's canvas is not kept alive by this static.</summary>
+    private static event Action? TileThemeChanged;
+
+    private TileProvider CurrentTiles => s_mapTileTheme switch
     {
         "Light" => LightTiles,
         "Light (CARTO)" => LightCartoTiles,
@@ -215,12 +225,15 @@ public sealed class MapCanvas : Control
                 InvalidateVisual();
             });
         _renderThrottle.Start();
+        TileThemeChanged += ApplyTileTheme;
+        ApplyTileTheme();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
         _renderThrottle?.Stop();
+        TileThemeChanged -= ApplyTileTheme;
     }
 
     // Marker projection is rebuilt only when the data changes, never per
@@ -1072,7 +1085,16 @@ public sealed class MapCanvas : Control
 
     public void SetTileTheme(string theme)
     {
-        _mapTileTheme = theme;
+        if (string.Equals(s_mapTileTheme, theme, StringComparison.Ordinal)) return;
+        s_mapTileTheme = theme;
+        TileThemeChanged?.Invoke();
+    }
+
+    /// <summary>Redraws this canvas against the shared theme. Also run on
+    /// attach, since a canvas detached while the theme changed (an unselected
+    /// tab, a window not yet open) missed the notification.</summary>
+    private void ApplyTileTheme()
+    {
         AttributionChanged?.Invoke();
         InvalidateVisual();
     }
@@ -1151,8 +1173,7 @@ public sealed class MapCanvas : Control
         // A saved "Auto" (this app's old default, or MeshRF.App's) is no
         // longer an option here — fall back to Dark.
         var theme = settings.MapTileTheme;
-        _mapTileTheme = MapTileThemeOptions.Contains(theme) ? theme! : DefaultTileTheme;
-        AttributionChanged?.Invoke();
+        SetTileTheme(MapTileThemeOptions.Contains(theme) ? theme! : DefaultTileTheme);
 
         if (settings.MapCenterLat is double lat && settings.MapCenterLon is double lon
             && settings.MapZoom >= MinZoom && settings.MapZoom <= MaxZoom)
@@ -1171,9 +1192,9 @@ public sealed class MapCanvas : Control
         settings.MapCenterLon = _centerLon;
         settings.MapZoom = _zoom;
         settings.MapClusterNodes = _clusterNodes;
-        settings.MapTileTheme = _mapTileTheme;
+        settings.MapTileTheme = s_mapTileTheme;
     }
 
     public bool ClusterNodes => _clusterNodes;
-    public string TileTheme => _mapTileTheme;
+    public string TileTheme => s_mapTileTheme;
 }
