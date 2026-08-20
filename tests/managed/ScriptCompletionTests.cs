@@ -40,6 +40,47 @@ public class ScriptCompletionTests
     }
 
     [Fact]
+    public void A_Channel_Condition_Is_Not_Offered_The_Primary_Keyword()
+    {
+        // "primary" names a channel by role only where a destination is
+        // chosen. A condition matches the name a message arrived on, so
+        // offering it here would suggest a line that silently matches nothing
+        // unless a channel is literally called "primary". scope: primary is
+        // the condition that asks about the role.
+        var result = At("trigger:\n  - command: ping\ncondition:\n  - channel: ");
+
+        Assert.NotNull(result);
+        Assert.Equal(["LongFast", "Test"], result!.Suggestions.Select(s => s.Label));
+    }
+
+    [Fact]
+    public void Not_Channel_Is_Never_Offered_The_Primary_Keyword_Either()
+    {
+        var result = At("trigger:\n  - command: ping\ncondition:\n  - not_channel: ");
+
+        Assert.NotNull(result);
+        Assert.Equal(["LongFast", "Test"], result!.Suggestions.Select(s => s.Label));
+    }
+
+    [Fact]
+    public void A_Destination_Channel_Still_Offers_The_Primary_Keyword()
+    {
+        // The same key, in the block where naming the primary by role is
+        // exactly the right answer.
+        foreach (var text in new[]
+                 {
+                     "action:\n  - send:\n      channel: ",
+                     "action:\n  - waypoint:\n      channel: ",
+                     "sync:\n  waypoint:\n    channel: ",
+                 })
+        {
+            var result = At(text);
+            Assert.NotNull(result);
+            Assert.Equal("primary", result!.Suggestions[0].Label);
+        }
+    }
+
+    [Fact]
     public void A_Node_Offers_The_Sender_And_Every_Known_Node()
     {
         var result = At("action:\n  - send:\n      to: ");

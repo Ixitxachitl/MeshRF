@@ -72,6 +72,13 @@ public partial class ScriptsWindow : Window
         // the way.
         Editor.LostFocus += (_, _) => CloseCompletion();
 
+        // Both on the tunnel, so they run before the controls under them act:
+        // the TextBox would otherwise swallow the arrow keys, and a ListBoxItem
+        // would take focus off the editor on the way to being clicked.
+        Editor.AddHandler(InputElement.KeyDownEvent, OnEditorKeyDownPreview, RoutingStrategies.Tunnel);
+        CompletionList.AddHandler(
+            InputElement.PointerPressedEvent, OnCompletionPointerPressed, RoutingStrategies.Tunnel);
+
         Closing += OnWindowClosing;
     }
 
@@ -266,37 +273,46 @@ public partial class ScriptsWindow : Window
         ShowCompletion();
     }
 
+    /// <summary>
+    /// Gives the open completion list first refusal on the keys it drives.
+    /// </summary>
+    /// <remarks>
+    /// On the tunnel, not the bubble, because a TextBox handles the arrow keys
+    /// itself and marks them handled — a bubbling handler is never reached, so
+    /// Up and Down moved the caret instead of the highlight. Tunnelling runs
+    /// this before the control sees the key at all.
+    /// </remarks>
+    private void OnEditorKeyDownPreview(object? sender, KeyEventArgs e)
+    {
+        if (!CompletionPopup.IsOpen) return;
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                CloseCompletion();
+                e.Handled = true;
+                break;
+
+            case Key.Down:
+                MoveCompletion(1);
+                e.Handled = true;
+                break;
+
+            case Key.Up:
+                MoveCompletion(-1);
+                e.Handled = true;
+                break;
+
+            case Key.Enter:
+            case Key.Tab:
+                AcceptCompletion();
+                e.Handled = true;
+                break;
+        }
+    }
+
     private void OnEditorKeyDown(object? sender, KeyEventArgs e)
     {
-        // The completion list gets first refusal on the keys it needs, so Enter
-        // accepts a suggestion rather than breaking the line under it.
-        if (CompletionPopup.IsOpen)
-        {
-            switch (e.Key)
-            {
-                case Key.Escape:
-                    CloseCompletion();
-                    e.Handled = true;
-                    return;
-
-                case Key.Down:
-                    MoveCompletion(1);
-                    e.Handled = true;
-                    return;
-
-                case Key.Up:
-                    MoveCompletion(-1);
-                    e.Handled = true;
-                    return;
-
-                case Key.Enter:
-                case Key.Tab:
-                    AcceptCompletion();
-                    e.Handled = true;
-                    return;
-            }
-        }
-
         switch (e.Key)
         {
             // Ctrl+Space asks for the list where it did not open on its own —
@@ -378,7 +394,24 @@ public partial class ScriptsWindow : Window
         if (CompletionList.SelectedItem is { } item) CompletionList.ScrollIntoView(item);
     }
 
-    private void OnCompletionTapped(object? sender, TappedEventArgs e) => AcceptCompletion();
+    /// <summary>
+    /// Takes a suggestion on a single click.
+    /// </summary>
+    /// <remarks>
+    /// Handled on the way down, and marked handled, so the row never gets to
+    /// select itself or take focus: focus leaving the editor closes the list,
+    /// which used to beat the click to it. That is why nothing happened until
+    /// Tab was pressed instead.
+    /// </remarks>
+    private void OnCompletionPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if ((e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true)
+            is not { DataContext: ScriptCompletionItem item }) return;
+
+        CompletionList.SelectedItem = item;
+        AcceptCompletion();
+        e.Handled = true;
+    }
 
     /// <summary>Splices the selected value in over what has been typed, and
     /// writes its note in as a comment when the line has nothing else on

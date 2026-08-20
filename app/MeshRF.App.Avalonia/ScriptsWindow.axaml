@@ -183,9 +183,11 @@
                             <Border BorderThickness="1" CornerRadius="3" MaxHeight="190" MaxWidth="420"
                                     BorderBrush="{DynamicResource BrushPanelBorder}"
                                     Background="{DynamicResource BrushPanelBackground}">
+                                <!-- Not focusable, and clicks are taken on the
+                                     tunnel in code-behind, so choosing a row
+                                     never moves focus off the editor. -->
                                 <ListBox Name="CompletionList" Background="Transparent"
-                                         Focusable="False"
-                                         DoubleTapped="OnCompletionTapped">
+                                         Focusable="False">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate x:DataType="app:ScriptCompletionItem">
                                             <Grid ColumnDefinitions="Auto,*" Margin="0,1">

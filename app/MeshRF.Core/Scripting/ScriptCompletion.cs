@@ -92,7 +92,7 @@ public static class ScriptCompletion
         }
         if (!match.Success) return null;
 
-        var offered = For(match.Groups["key"].Value.ToLowerInvariant(), source);
+        var offered = For(match.Groups["key"].Value.ToLowerInvariant(), SectionAt(text, lineStart), source);
         if (offered is null || offered.Count == 0) return null;
 
         var value = match.Groups["value"].Value;
@@ -118,20 +118,55 @@ public static class ScriptCompletion
             AllowComment: text[caret..lineEnd].Trim().Length == 0);
     }
 
-    private static IReadOnlyList<ScriptSuggestion>? For(string key, ScriptCompletionSource source) => key switch
+    /// <summary>
+    /// The top-level block the caret sits in — <c>condition</c>, <c>action</c>
+    /// and so on — or empty above the first one.
+    /// </summary>
+    /// <remarks>
+    /// The nearest preceding line starting in column zero. YAML nests by
+    /// indentation, so a key at the margin is the section everything under it
+    /// belongs to, and that is all this needs to know.
+    /// </remarks>
+    private static string SectionAt(string text, int lineStart)
     {
-        // "primary" first: it is the answer for a mesh running a default
-        // preset, whose primary has no name of its own to pick off the list.
+        var before = text[..lineStart];
+        int from = before.Length;
+        while (from > 0)
+        {
+            int start = before.LastIndexOf('\n', from - 1) + 1;
+            var line = before[start..from].TrimEnd('\r');
+            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && line[0] != '#')
+            {
+                int colon = line.IndexOf(':');
+                if (colon > 0) return line[..colon].Trim().ToLowerInvariant();
+            }
+            if (start == 0) break;
+            from = start - 1;
+        }
+        return string.Empty;
+    }
+
+    private static IReadOnlyList<ScriptSuggestion>? For(
+        string key, string section, ScriptCompletionSource source) => key switch
+    {
+        // The primary is nameable by role only where a destination is chosen.
+        // A condition matches the name a message actually arrived on, so
+        // offering "primary" under condition: would suggest a line that
+        // silently matches nothing — scope: primary is the one that asks
+        // about the role.
+        "channel" when section == "condition" => source.Channels,
+
+        // "primary" first everywhere else: it is the answer for a mesh running
+        // a default preset, whose primary has no name of its own to pick off
+        // the list.
         "channel" =>
         [
             new ScriptSuggestion("primary", "the primary channel, whatever it is named"),
             .. source.Channels,
         ],
 
-        // No "primary" here: not_channel: is matched against the channel a
-        // message arrived on, and the primary-by-role keyword only means
-        // anything where a destination is chosen. scope: primary is the
-        // condition that asks about the role.
+        // Only ever a condition, and matched against the arriving channel's
+        // name, so the role keyword would mean nothing here either.
         "not_channel" => source.Channels,
 
         // {from.id} only here. from:/not_from: are matched against literal ids
