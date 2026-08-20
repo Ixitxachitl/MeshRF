@@ -79,6 +79,26 @@ public class DerivedNodeIdTests
     }
 
     [Fact]
+    public void Importing_A_Private_Key_Carries_The_Whole_Identity_With_It()
+    {
+        // Pasting a private key is still allowed, and is now the only way to
+        // land on a chosen node id: the public key is re-derived from it and
+        // the number from that, so importing a node's key adopts its identity
+        // whole rather than half of it.
+        var theirPrivate = Curve25519.GeneratePrivateKey();
+        var theirPublic = Curve25519.GetPublicKey(theirPrivate);
+        Assert.True(PkiNodeNumber.TryFromPublicKey(theirPublic, out var theirNodeNum));
+
+        // What the app does on a paste: re-derive the public key from the
+        // private one, then the number from that.
+        Assert.True(Curve25519.TryGetPublicKeyBase64(Convert.ToBase64String(theirPrivate), out var importedPublic));
+        Assert.True(PkiNodeNumber.TryFromPublicKey(Convert.FromBase64String(importedPublic), out var importedNodeNum));
+
+        Assert.Equal(Convert.ToBase64String(theirPublic), importedPublic);
+        Assert.Equal(theirNodeNum, importedNodeNum);
+    }
+
+    [Fact]
     public void A_Key_That_Is_Not_Thirty_Two_Bytes_Derives_Nothing()
     {
         // Which is what leaves the node number alone while a key field is
