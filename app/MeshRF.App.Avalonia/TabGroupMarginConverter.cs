@@ -24,9 +24,18 @@ public sealed class TabGroupMarginConverter : IValueConverter
 {
     public static readonly TabGroupMarginConverter Instance = new();
 
-    /// <summary>Wide enough for the rule to sit clear of the tabs either side.
-    /// The rule's own negative margin is set against this.</summary>
-    public const double GapWidth = 16;
+    /// <summary>
+    /// Wide enough for the rule to sit clear of the tabs either side, and odd
+    /// so that a one-pixel rule centred in it lands on a whole pixel.
+    /// </summary>
+    /// <remarks>
+    /// The rule's own left margin is the negative of this. A child laid out in
+    /// the zero-width slot a negative margin leaves ends up at
+    /// <c>margin / 2 - width / 2</c>, so margin = -gap puts a 1 px rule at
+    /// <c>-(gap + 1) / 2</c> — dead centre, with (gap - 1) / 2 either side.
+    /// Change one and the other has to follow.
+    /// </remarks>
+    public const double GapWidth = 17;
 
     private static readonly Thickness Gap = new(GapWidth, 0, 0, 0);
 

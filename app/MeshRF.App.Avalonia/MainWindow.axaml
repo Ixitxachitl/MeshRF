@@ -1214,10 +1214,14 @@
                                      negative margin puts it back out into the
                                      gap the TabItem's margin opens (see the
                                      TabItem style above): inside the tab it
-                                     would be drawn over by the selected tab's
-                                     underline, which spans the whole item. -->
+                                     would be enclosed by the tab's own box
+                                     rather than separating it from the one
+                                     before. The margin is the negative of
+                                     TabGroupMarginConverter.GapWidth, which is
+                                     what centres the rule in the gap — see the
+                                     arithmetic there. -->
                                 <StackPanel Orientation="Horizontal">
-                                <Rectangle Width="1" Margin="-9,3,0,3"
+                                <Rectangle Width="1" Margin="-17,3,0,3"
                                            IsVisible="{Binding StartsTabGroup}"
                                            Fill="{DynamicResource BrushTabBorder}" />
                                 <Border Padding="8,3" CornerRadius="3" Background="Transparent"
