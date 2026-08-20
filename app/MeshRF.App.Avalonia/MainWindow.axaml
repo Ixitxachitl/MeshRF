@@ -170,24 +170,17 @@
         <DataTemplate x:Key="MessageListTemplate" x:DataType="mesh:ITabItem">
             <ListBox Classes="chat" ItemsSource="{Binding Messages}"
                      local:AutoScrollBehavior.IsEnabled="{Binding #RootWindow.DataContext.AutoScroll}">
-                <!-- Not the default VirtualizingStackPanel. Message rows wrap to
-                     different heights, so a virtualizing panel can only estimate
-                     total extent from the rows it has realized. Adding a
-                     reaction chip makes one row taller, the estimate grows, and
-                     the unchanged scroll offset then lands on earlier content —
-                     the view appears to jump upward even though nothing asked it
-                     to scroll. A real panel measures every row, so the offset
-                     keeps meaning the same thing and a row growing below the
-                     viewport moves nothing above it.
-
-                     Affordable because the list is capped (MaxMessagesPerTab =
-                     500) and a TabControl only realizes the selected tab's
-                     content, so this is 500 rows at worst for one tab. -->
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
+                <!-- Deliberately left on the default VirtualizingStackPanel.
+                     This once carried a plain StackPanel, to stop the view
+                     jumping when a reaction chip made a row taller. Measured
+                     against Avalonia 12 with 500 rows, that trade no longer
+                     holds in either direction: a TabControl rebuilds its
+                     content on every switch, so a non-virtualizing panel
+                     realized all 500 rows each time and roughly doubled the
+                     cost of changing tabs — and it was the one that jumped,
+                     when the row that grew was above the viewport rather than
+                     below it. The virtualizing panel held the top row steady
+                     in both cases. -->
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="mesh:ChannelMessage">
                         <!-- MaxWidth keeps a long message from stretching into a
