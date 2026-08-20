@@ -354,6 +354,36 @@ public class ScriptParserTests
         Assert.Equal(expected, Assert.Single(result.Script!.Conditions).Scope);
     }
 
+    [Theory]
+    [InlineData("channel", ScriptConditionKind.Channel)]
+    [InlineData("not_channel", ScriptConditionKind.NotChannel)]
+    public void A_Channel_Condition_Takes_One_Name_Or_A_List(string key, ScriptConditionKind expected)
+    {
+        var one = ScriptParser.Parse(
+            $"trigger:\n  - command: ping\ncondition:\n  - {key}: Test\naction:\n  - reply: \"ok\"\n");
+        Assert.True(one.IsValid, one.FirstError?.ToString());
+        var condition = Assert.Single(one.Script!.Conditions);
+        Assert.Equal(expected, condition.Kind);
+        Assert.Equal(["Test"], condition.Values);
+
+        var many = ScriptParser.Parse(
+            $"trigger:\n  - command: ping\ncondition:\n  - {key}: [Test, Backup]\naction:\n  - reply: \"ok\"\n");
+        Assert.True(many.IsValid, many.FirstError?.ToString());
+        Assert.Equal(["Test", "Backup"], Assert.Single(many.Script!.Conditions).Values);
+    }
+
+    [Fact]
+    public void An_Empty_Not_Channel_Is_Rejected()
+    {
+        // Excluding nothing is not a condition, and silently matching
+        // everything is the wrong way to read a line someone meant to fill in.
+        var result = ScriptParser.Parse(
+            "trigger:\n  - command: ping\ncondition:\n  - not_channel: []\naction:\n  - reply: \"ok\"\n");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("needs at least one value", SingleError(result).Message);
+    }
+
     [Fact]
     public void A_Mistyped_Filter_Warns_And_Suggests_The_Real_One()
     {

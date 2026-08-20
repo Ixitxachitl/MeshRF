@@ -26,7 +26,8 @@ public static class ScriptParser
         ["text", "command", "new_node", "reaction", "every", "at"];
 
     private static readonly string[] ConditionKinds =
-        ["scope", "channel", "from", "not_from", "snr_above", "hops_below", "between", "favorite", "has_key"];
+        ["scope", "channel", "not_channel", "from", "not_from", "snr_above", "hops_below", "between",
+         "favorite", "has_key"];
 
     private static readonly string[] ActionKinds =
         ["reply", "send", "react", "position", "nodeinfo", "traceroute", "http", "waypoint", "require",
@@ -742,6 +743,7 @@ public static class ScriptParser
             }
 
             case "channel":
+            case "not_channel":
             case "from":
             case "not_from":
             {
@@ -765,6 +767,7 @@ public static class ScriptParser
                 var conditionKind = kind switch
                 {
                     "channel" => ScriptConditionKind.Channel,
+                    "not_channel" => ScriptConditionKind.NotChannel,
                     "from" => ScriptConditionKind.From,
                     _ => ScriptConditionKind.NotFrom,
                 };

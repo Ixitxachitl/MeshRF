@@ -293,6 +293,14 @@ public sealed class ScriptEngine
                 return evt.Channel.Length > 0 &&
                        condition.Values.Contains(evt.Channel, StringComparer.OrdinalIgnoreCase);
 
+            case ScriptConditionKind.NotChannel:
+                // Vacuously true off-channel, the same way not_from: is with no
+                // sender: a direct message arrives on no channel at all, so it
+                // is not on the excluded one. channel: never matches a DM
+                // either, so the pair stays each other's inverse.
+                return evt.Channel.Length == 0 ||
+                       !condition.Values.Contains(evt.Channel, StringComparer.OrdinalIgnoreCase);
+
             case ScriptConditionKind.From:
                 return evt.FromNode != 0 && MatchesNode(condition.Values, evt.FromNode);
 

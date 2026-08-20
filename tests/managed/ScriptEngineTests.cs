@@ -132,6 +132,53 @@ public class ScriptEngineTests
     }
 
     [Fact]
+    public void Not_Channel_Answers_Everywhere_Except_The_Named_Ones()
+    {
+        var engine = Engine(
+            "trigger:\n  - command: ping\ncondition:\n  - not_channel: [Test, Backup]\naction:\n  - reply: \"pong\"\n");
+
+        Assert.Single(engine.Evaluate(Text("!ping", direct: false, channel: "LongFast")));
+        Assert.Empty(engine.Evaluate(Text("!ping", direct: false, channel: "Test")));
+        // Case-insensitive, like channel:, since the name is matched against
+        // whatever was typed into channel Settings.
+        Assert.Empty(engine.Evaluate(Text("!ping", direct: false, channel: "backup")));
+    }
+
+    [Fact]
+    public void Not_Channel_Is_Vacuously_True_Off_Channel()
+    {
+        // A direct message arrives on no channel at all, so it is not on the
+        // excluded one — the same way not_from: holds for a timer with no
+        // sender. channel: never matches a DM either, so the two stay each
+        // other's inverse rather than both refusing it.
+        var engine = Engine(
+            "trigger:\n  - command: ping\ncondition:\n  - not_channel: [Test]\naction:\n  - reply: \"pong\"\n");
+
+        Assert.Single(engine.Evaluate(Text("!ping", direct: true, channel: "")));
+    }
+
+    [Fact]
+    public void Channel_And_Not_Channel_Are_Inverses_On_Channel_Traffic()
+    {
+        // A fresh engine per case: one script answering the same node three
+        // times in a row would be held back by its own per-node cooldown, and
+        // that would look like the condition deciding.
+        foreach (var channel in new[] { "Test", "LongFast", "Backup" })
+        {
+            var evt = Text("!ping", direct: false, channel: channel);
+
+            bool matchedOnly = Engine(
+                "trigger:\n  - command: ping\ncondition:\n  - channel: [Test]\naction:\n  - reply: \"p\"\n")
+                .Evaluate(evt).Count == 1;
+            bool matchedExcept = Engine(
+                "trigger:\n  - command: ping\ncondition:\n  - not_channel: [Test]\naction:\n  - reply: \"p\"\n")
+                .Evaluate(evt).Count == 1;
+
+            Assert.NotEqual(matchedOnly, matchedExcept);
+        }
+    }
+
+    [Fact]
     public void Snr_Threshold_Fails_Closed_When_The_Packet_Carried_None()
     {
         var engine = Engine(

@@ -128,6 +128,12 @@ public static class ScriptCompletion
             .. source.Channels,
         ],
 
+        // No "primary" here: not_channel: is matched against the channel a
+        // message arrived on, and the primary-by-role keyword only means
+        // anything where a destination is chosen. scope: primary is the
+        // condition that asks about the role.
+        "not_channel" => source.Channels,
+
         // {from.id} only here. from:/not_from: are matched against literal ids
         // by the engine, so a placeholder in one would never match anything.
         "to" =>

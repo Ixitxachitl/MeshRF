@@ -65,6 +65,7 @@ public partial class ScriptHelpWindow : Window
     [
         new("scope: direct", "Only direct messages. Also: channel, any, and primary for the primary channel whatever it is named."),
         new("channel: [LongFast]", "Only these channels. One name or a list."),
+        new("not_channel: [Test]", "Every channel except these. Direct messages arrive on no channel, so they are never excluded — use scope: with it to narrow that."),
         new("from: [\"!a1b2c3d4\"]", "Only these senders."),
         new("not_from: [\"!deadbeef\"]", "Never these senders."),
         new("snr_above: -12", "Only packets heard at better than this signal-to-noise ratio, in dB."),

@@ -93,6 +93,7 @@ public enum ScriptConditionKind
 {
     Scope,
     Channel,
+    NotChannel,
     From,
     NotFrom,
     SnrAbove,
@@ -121,7 +122,8 @@ public sealed class ScriptCondition
     public ScriptConditionKind Kind { get; init; }
     public ScriptScope Scope { get; init; }
 
-    /// <summary>Channel names, or node ids for from/not_from.</summary>
+    /// <summary>Channel names for channel/not_channel, or node ids for
+    /// from/not_from.</summary>
     public IReadOnlyList<string> Values { get; init; } = Array.Empty<string>();
 
     /// <summary>Threshold for snr_above / hops_below.</summary>
