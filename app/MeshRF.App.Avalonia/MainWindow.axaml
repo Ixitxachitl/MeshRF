@@ -11,28 +11,6 @@
         Width="1280" Height="900">
 
     <Window.Styles>
-        <!-- The gap the channels/DMs divider is drawn into, and permission to
-             draw into it.
-
-             The tab's chrome — the LayoutRoot border styled below — is sized to
-             the whole TabItem, so a rule placed inside the header is enclosed by
-             the tab box rather than separating it from the one before. The gap
-             therefore has to come from the TabItem's own margin, which moves the
-             tab and its chrome together and leaves space beside them, and the
-             rule is drawn back into that space with a negative margin.
-
-             ClipToBounds goes with it: a TabItem clips by default, and this app
-             leaves it no horizontal padding to borrow (see the Padding below),
-             so the rule lands outside the tab's bounds and is clipped away
-             entirely. Only the tab that starts a group is unclipped. -->
-        <Style Selector="TabItem" x:DataType="mesh:ITabItem">
-            <Setter Property="Margin"
-                    Value="{Binding StartsTabGroup,
-                                    Converter={x:Static local:TabGroupMarginConverter.Instance}}" />
-            <Setter Property="ClipToBounds"
-                    Value="{Binding !StartsTabGroup}" />
-        </Style>
-
         <!-- Unseen-activity pulse on a tab header. Alternating playback fades
              out and back rather than snapping, and it runs until the tab is
              selected and the view model clears TabNeedsAttention. -->
@@ -108,10 +86,26 @@
              each tab's outer padding stacked with its neighbour's, showing up
              as a visible gap between adjacent tab boxes rather than breathing
              room inside them. Vertical Padding stays for header height. -->
-        <Style Selector="TabItem">
+        <!-- One TabItem style, not two. A second block matching the same
+             selector wins on the setters it repeats regardless of which looks
+             more specific, and an earlier Margin binding was silently beaten
+             by the Margin="0" here — leaving no gap, so the divider landed on
+             the previous tab instead of between them.
+
+             Margin is what opens that gap, because the tab's chrome (the
+             LayoutRoot border styled below) is sized to the whole TabItem: a
+             rule placed inside the header would be enclosed by the tab box
+             rather than separating it from the one before. The rule is drawn
+             back out into the gap with a negative margin, and ClipToBounds
+             goes off for that one tab so the tab does not clip it away —
+             there is no horizontal Padding here for it to sit inside. -->
+        <Style Selector="TabItem" x:DataType="mesh:ITabItem">
             <Setter Property="Padding" Value="0,2" />
-            <Setter Property="Margin" Value="0" />
             <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin"
+                    Value="{Binding StartsTabGroup,
+                                    Converter={x:Static local:TabGroupMarginConverter.Instance}}" />
+            <Setter Property="ClipToBounds" Value="{Binding !StartsTabGroup}" />
         </Style>
         <!-- Fluent marks the selected tab with a coloured pipe pinned to the
              bottom edge of the header. With the shorter header this app uses it
