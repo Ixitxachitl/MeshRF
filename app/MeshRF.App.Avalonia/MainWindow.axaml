@@ -1063,6 +1063,32 @@
                         </DataGrid.ContextMenu>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Icon" Width="42" Binding="{Binding IconText}" />
+                            <!-- Whose lock, not merely whether there is one. 🔒 is a
+                                 colour-emoji glyph and ignores Foreground, so the state
+                                 rides on an overlaid Ellipse exactly as the Nodes table's
+                                 🔑 does — see the note there. -->
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="LockedTo">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="🔒" ToolTip.Tip="Locked to whoever placed it (green dot = ours, red dot = another node's). Nothing shown when anyone may edit it." />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="waypoints:WaypointRecord">
+                                        <Panel IsVisible="{Binding IsLocked}">
+                                            <TextBlock Text="🔒" />
+                                            <Ellipse Width="5" Height="5" Fill="#7BD88F"
+                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                     IsVisible="{Binding IsLockedToUs}"
+                                                     ToolTip.Tip="Locked to this node — you can edit it, and deleting it retires it on the mesh" />
+                                            <Ellipse Width="5" Height="5" Fill="#FF6B6B"
+                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                     IsVisible="{Binding IsLockedToAnother}"
+                                                     ToolTip.Tip="Locked to another node — it cannot be edited here, and deleting it only removes it from this list" />
+                                        </Panel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Type" Width="80" Binding="{Binding GeofenceKindText}" />
                             <DataGridTextColumn Header="Name" Width="2*" Binding="{Binding DisplayName}" />
                             <DataGridTextColumn Header="Description" Width="2*" Binding="{Binding Description}" />

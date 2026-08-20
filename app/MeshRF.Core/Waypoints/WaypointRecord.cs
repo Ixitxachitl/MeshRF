@@ -37,7 +37,44 @@ public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChange
     public int? AltitudeM { get; set; }
 
     public uint ExpireEpoch { get; set; }
+
+    /// <summary>
+    /// Node this waypoint is locked to, or 0 for one anybody may edit.
+    /// </summary>
+    /// <remarks>
+    /// Firmware honours the lock: only the node named here can change or
+    /// retire the marker, so a locked one belongs to whoever placed it for as
+    /// long as it lives.
+    /// </remarks>
     public uint LockedTo { get; set; }
+
+    /// <summary>
+    /// The node reading the list — us — so a row can say whether a lock is
+    /// ours without the view having to work it out per cell.
+    /// </summary>
+    /// <remarks>
+    /// Stamped by the host as records arrive and again when this node's
+    /// identity changes, rather than being read from ambient state, so the
+    /// lock columns stay testable without a radio.
+    /// </remarks>
+    public uint ViewerNodeNum { get; set; }
+
+    /// <summary>Whether the waypoint is locked to any node at all.</summary>
+    public bool IsLocked => LockedTo != 0;
+
+    /// <summary>Locked, and to us — we may edit it and retire it on the
+    /// mesh.</summary>
+    public bool IsLockedToUs => LockedTo != 0 && LockedTo == ViewerNodeNum;
+
+    /// <summary>
+    /// Locked to somebody else. It can be deleted from this node's own list,
+    /// but nothing is sent when it is: the owner keeps it, and an expiry we
+    /// broadcast for it would be ignored.
+    /// </summary>
+    public bool IsLockedToAnother => LockedTo != 0 && LockedTo != ViewerNodeNum;
+
+    /// <summary>Who the lock names, for a tooltip.</summary>
+    public string LockedToId => $"!{LockedTo:x8}";
 
     /// <summary>Circular geofence radius in meters. 0 = no circular geofence.</summary>
     public uint GeofenceRadius { get; set; }

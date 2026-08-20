@@ -104,6 +104,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void UpdateMyNodeNum(uint nodeNum)
     {
         MyNodeNum = nodeNum;
+        // Taking a new identity changes which waypoint locks are ours, so the
+        // rows have to be re-stamped and redrawn.
+        foreach (var wp in Waypoints)
+        {
+            wp.ViewerNodeNum = nodeNum;
+            wp.NotifyChanged();
+        }
         // Taking over a number we had already heard from: it is us now, so drop
         // the peer row. MarkNodeDirty stops maintaining it from here on, which
         // would otherwise leave it in the grid frozen at its last-heard state.
@@ -293,6 +300,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         MyNodeNum = myNodeNum;
 
         Tabs.CollectionChanged += (_, _) => MarkTabGroups();
+
+        // Every waypoint that arrives learns who is looking at it, so the lock
+        // column can tell our own locks from someone else's. Done from the
+        // collection rather than at each of the several places that add one.
+        Waypoints.CollectionChanged += (_, e) =>
+        {
+            foreach (var wp in e.NewItems?.OfType<WaypointRecord>() ?? [])
+                wp.ViewerNodeNum = MyNodeNum;
+        };
 
         LoadChannels();
         foreach (var wp in _waypointStore.All()) Waypoints.Add(wp);

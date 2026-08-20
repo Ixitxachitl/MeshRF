@@ -2581,6 +2581,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             }
         }
         ForgetWaypointLocal(wp);
+
+        // Worth saying out loud: a marker locked to someone else stays on their
+        // map and everyone else's. Nothing is broadcast for it, because an
+        // expiry from a node that does not hold the lock is ignored anyway.
+        if (lockedToOther)
+        {
+            StatusText = $"Removed \"{wp.DisplayName}\" from this list only — " +
+                         $"it is locked to {wp.LockedToId} and stays on the mesh.";
+        }
     }
 
     private void ForgetWaypointLocal(WaypointRecord wp)

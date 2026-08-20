@@ -671,6 +671,15 @@ public partial class MainWindow : Window
     private async void OnEditWaypoint(object? sender, RoutedEventArgs e)
     {
         if (WaypointsGridProxy.SelectedItem is not WaypointRecord wp) return;
+        // A lock belongs to whoever placed the marker: firmware ignores an edit
+        // from anyone else, so offering the dialog would only produce a change
+        // that silently does not take.
+        if (wp.IsLockedToAnother)
+        {
+            _viewModel.StatusText =
+                $"\"{wp.DisplayName}\" is locked to {wp.LockedToId} and cannot be edited here.";
+            return;
+        }
         var result = await WaypointEditWindow.EditAsync(this, wp, _viewModel.MyNodeNumber,
                                                         _viewModel.CurrentUnitSystem);
         if (result is null) return;
