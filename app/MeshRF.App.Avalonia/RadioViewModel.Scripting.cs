@@ -104,7 +104,10 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     {
         get
         {
-            if (_scriptEngine.ArmedCount == 0) return "No scripts are enabled.";
+            if (_scriptEngine.ArmedCount + _feedEngine.ArmedCount == 0) return "No scripts are enabled.";
+            // Said before the counts, because "3 scripts armed" beside a
+            // stopped receiver reads as though they are about to do something.
+            if (!IsRunning) return "The receiver is stopped, so nothing runs.";
             int fired = _scriptEngine.Limiter.FiredInLastHour(DateTimeOffset.Now);
             var armed = $"{_scriptEngine.ArmedCount} script{(_scriptEngine.ArmedCount == 1 ? "" : "s")} armed";
             var recent = $"{fired} run{(fired == 1 ? "" : "s")} in the last hour";
@@ -268,7 +271,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     /// </summary>
     private void OnScriptEvent(ScriptEvent evt)
     {
-        if (!ScriptsEnabled || _scriptEngine.ArmedCount == 0) return;
+        if (!IsRunning || !ScriptsEnabled || _scriptEngine.ArmedCount == 0) return;
 
         IReadOnlyList<ScriptRun> runs;
         try
@@ -286,28 +289,49 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         if (runs.Count > 0) RaiseScriptsStatusChanged();
     }
 
-    /// <summary>Scheduled triggers. Driven from <c>Poll</c>, alongside the
-    /// auto-report tick.</summary>
+    /// <summary>
+    /// Scheduled triggers and the feed mirrors. Driven from <c>Poll</c>,
+    /// alongside the auto-report tick.
+    /// </summary>
+    /// <remarks>
+    /// <para>Nothing automated runs while the receiver is stopped. A stopped
+    /// node is not on the air: it cannot hear the channel it would talk over,
+    /// its every:/at: beacons would be refused downstream anyway, and a feed
+    /// would spend real requests on an API to place markers nobody could be
+    /// sent. Stopping RX is the operator saying this node is off, and it should
+    /// mean that rather than "off except for the parts that do not transmit".
+    /// </para>
+    /// <para>Nothing catches up afterwards. A schedule reschedules from the
+    /// moment it fires, and a feed that was never polled is simply due, so
+    /// starting RX reads each mirror once rather than firing every beacon the
+    /// stopped hours would have.</para>
+    /// </remarks>
     private void TickScripts()
     {
-        if (!ScriptsEnabled || _scriptEngine.ArmedCount == 0) return;
+        if (!IsRunning || !ScriptsEnabled) return;
 
-        IReadOnlyList<ScriptRun> runs;
-        try
+        if (_scriptEngine.ArmedCount > 0)
         {
-            runs = _scriptEngine.Tick(
-                DateTimeOffset.Now,
-                BuildScriptSelf());
-        }
-        catch (Exception ex)
-        {
-            _rxHost.Log($"scripts: scheduled evaluation failed — {ex.Message}");
-            return;
+            IReadOnlyList<ScriptRun> runs;
+            try
+            {
+                runs = _scriptEngine.Tick(
+                    DateTimeOffset.Now,
+                    BuildScriptSelf());
+            }
+            catch (Exception ex)
+            {
+                _rxHost.Log($"scripts: scheduled evaluation failed — {ex.Message}");
+                return;
+            }
+
+            foreach (var run in runs) Start(run);
+            if (runs.Count > 0) RaiseScriptsStatusChanged();
         }
 
-        foreach (var run in runs) Start(run);
-        if (runs.Count > 0) RaiseScriptsStatusChanged();
-
+        // Outside the armed-scripts check on purpose: a folder holding only
+        // feed syncs arms no scripts at all, and used to leave every mirror
+        // unpolled for as long as that was true.
         TickFeeds();
     }
 

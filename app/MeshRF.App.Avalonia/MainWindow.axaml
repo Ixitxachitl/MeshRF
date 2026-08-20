@@ -365,7 +365,12 @@
                 <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
                          FontSize="11" Width="100" Height="26" Margin="0,0,8,2" />
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
-                <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}" FontSize="11" Height="26" Margin="0,0,10,2" />
+                <!-- Square, so ▶ and ■ do not shift the toolbar as it toggles. -->
+                <Button Content="{Binding ToggleButtonText}" Command="{Binding ToggleRxCommand}"
+                        ToolTip.Tip="{Binding ToggleButtonTip}"
+                        FontSize="13" Height="26" Width="26" Padding="0"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        Margin="0,0,10,2" />
                 <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}" FontSize="11"
                            IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,2" />
             </WrapPanel>

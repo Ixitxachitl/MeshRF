@@ -465,7 +465,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         { RadioDeviceKind.Null, RadioDeviceKind.HackRf, RadioDeviceKind.RtlSdr,
           RadioDeviceKind.Sx1262 };
 
-    public string ToggleButtonText => IsRunning ? "Stop RX" : "Start RX";
+    /// <summary>
+    /// The receive toggle, as a transport glyph rather than a word.
+    /// </summary>
+    /// <remarks>
+    /// Plain shapes, not the ▶/⏹ emoji: those are colour glyphs, drawn from the
+    /// font's own artwork and immune to Foreground, so they would ignore the
+    /// theme and the disabled state alike — the same thing the Nodes table's 🔑
+    /// column ran into.
+    /// </remarks>
+    public string ToggleButtonText => IsRunning ? "■" : "▶";
+
+    /// <summary>What the glyph means, since a shape cannot say it itself.</summary>
+    public string ToggleButtonTip => IsRunning ? "Stop the receiver" : "Start the receiver";
 
     /// <summary>Raised when a CRC-valid packet decodes, so the view can freeze
     /// a spectrogram of it (MeshRF.App's PacketDecoded).</summary>
@@ -1062,9 +1074,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // settle as failed, and an ack we still owe a peer is dropped rather
         // than left queued.
         _rxHost.SweepPendingAcks();
-        // Scheduled script triggers (every:/at:). Not gated here because a
-        // script's non-radio actions are still worth running; any send it
-        // attempts is refused downstream like every other transmit.
+        // Scheduled script triggers (every:/at:) and the feed mirrors. Gated on
+        // the receiver inside, like everything else that acts unprompted.
         TickScripts();
 
         // Both of these key the transmitter unprompted, so both wait for an
@@ -1769,8 +1780,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnIsRunningChanged(bool value)
     {
         OnPropertyChanged(nameof(ToggleButtonText));
+        OnPropertyChanged(nameof(ToggleButtonTip));
         OnPropertyChanged(nameof(CanSelectRxSampleRate));
         SendMessageCommand.NotifyCanExecuteChanged();
+        // Scripts and feed mirrors only run while the receiver does, so the
+        // Scripts window's status line changes meaning with it.
+        RaiseScriptsStatusChanged();
     }
 
     private void SaveSettings()
