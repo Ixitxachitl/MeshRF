@@ -510,8 +510,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<string> HwModelOptions { get; } = HardwareModels.AllNames;
 
-    [ObservableProperty]
-    private string _myNodeIdText = string.Empty;
+    /// <summary>
+    /// Our node id, as Meshtastic derives it from the public key.
+    /// </summary>
+    /// <remarks>
+    /// Read-only, and deliberately so. The identity chain runs private key →
+    /// public key → node number, each step a pure function of the one before,
+    /// and firmware checks the last of them: a node whose number does not hash
+    /// back to its key is the weak case the Nodes table flags with a red dot.
+    /// Letting the number be typed independently was the only way to end up
+    /// there on purpose. Change the key pair to change the id.
+    /// </remarks>
+    public string MyNodeIdText =>
+        _rxHost.MyNodeNum == 0 ? string.Empty : $"!{_rxHost.MyNodeNum:x8}";
 
     [ObservableProperty]
     private string _myLongName = "MeshRF";
@@ -757,11 +768,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // number with an unrelated key can never satisfy that check, which is
         // what HasDerivedNodeNumMatch reports on the node grid.
         //
-        // Gated on there being no key AND no node number, so an existing
-        // settings.json — including one written by MeshRF.App — is never
-        // re-minted. The names follow firmware's default: the node id's last
-        // four hex digits, as both "Meshtastic abcd" and the short name.
-        if (string.IsNullOrEmpty(savedUserPrivateKey) && _settings.UserNodeNum == 0)
+        // Gated on there being no usable key, because the node id is derived
+        // from one and there is nothing to derive from without it. That covers
+        // the first run, and also a settings.json carrying a node number that
+        // was never tied to a key — which used to be reachable by typing one
+        // in, and is the case this exists to close.
+        //
+        // The number itself is only written here on a true first run. Where one
+        // was already stored, the host starts on it and AdoptNodeNumFromKey
+        // moves it once the log exists, so the change is announced rather than
+        // appearing silently between sessions. Names are left alone unless
+        // unset; firmware's default is the id's last four hex digits, as both
+        // "Meshtastic abcd" and the short name.
+        if (!Curve25519.TryGetPublicKeyBase64(savedUserPrivateKey, out _))
         {
             var privateKey = Curve25519.GeneratePrivateKey();
             var publicKey = Curve25519.GetPublicKey(privateKey);
@@ -770,11 +789,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             {
                 savedUserPrivateKey = Convert.ToBase64String(privateKey);
                 savedUserPublicKey = Convert.ToBase64String(publicKey);
-                _settings.UserNodeNum = derivedNodeNum;
 
-                var suffix = $"{derivedNodeNum:x8}"[^4..];
-                savedUserLongName = $"Meshtastic {suffix}";
-                savedUserShortName = suffix;
+                if (_settings.UserNodeNum == 0)
+                {
+                    _settings.UserNodeNum = derivedNodeNum;
+
+                    var suffix = $"{derivedNodeNum:x8}"[^4..];
+                    savedUserLongName = $"Meshtastic {suffix}";
+                    savedUserShortName = suffix;
+                }
             }
         }
 
@@ -881,7 +904,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (MapNodeLabelModeOptions.Contains(savedMapNodeLabelMode))
             MapNodeLabelMode = savedMapNodeLabelMode;
 
-        MyNodeIdText = $"!{myNodeNum:x8}";
         MyLongName = string.IsNullOrEmpty(savedUserLongName) ? MyLongName : savedUserLongName;
         MyShortName = string.IsNullOrEmpty(savedUserShortName) ? MyShortName : savedUserShortName;
         MyRole = string.IsNullOrEmpty(savedUserRole) ? MyRole : savedUserRole;
@@ -1510,36 +1532,41 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnWaterfallAutoLevelsChanged(bool value) => SaveSettings();
     partial void OnPendingReplyPacketIdChanged(uint value) => OnPropertyChanged(nameof(HasPendingReply));
 
-    partial void OnMyNodeIdTextChanged(string value)
+    /// <summary>
+    /// Re-derives our node number from the current public key and adopts it.
+    /// </summary>
+    /// <remarks>
+    /// The one place the number is set, so it cannot drift from the key. A key
+    /// that is absent or not 32 bytes leaves the number alone — that is a field
+    /// mid-edit, not an instruction to change identity. So does a key that
+    /// hashes to 0 or the broadcast address, neither of which is addressable;
+    /// generating a fresh pair is the way out of that, and it is vanishingly
+    /// unlikely to be needed.
+    /// </remarks>
+    private void AdoptNodeNumFromKey()
     {
-        var parsed = ParseNodeId(value);
-        if (parsed != 0 && parsed != 0xFFFFFFFFu)
+        if (!PkiNodeNumber.TryFromPublicKey(TryParseKeyBase64(MyPublicKey), out var derived)) return;
+        if (derived == 0 || derived == 0xFFFFFFFFu)
         {
-            _rxHost.UpdateMyNodeNum(parsed);
-            _settings.UserNodeNum = parsed;
+            _rxHost.Log($"identity: this key derives {derived:x8}, which is not a usable node number — " +
+                        "generate a new key pair");
+            return;
         }
+        if (derived == _rxHost.MyNodeNum) return;
+
+        uint previous = _rxHost.MyNodeNum;
+        _rxHost.UpdateMyNodeNum(derived);
+        _settings.UserNodeNum = derived;
+        OnPropertyChanged(nameof(MyNodeIdText));
+        OnPropertyChanged(nameof(MyNodeNumber));
         OnPropertyChanged(nameof(MyMacAddress)); // derived from the node number
+        OnPropertyChanged(nameof(MyDisplayName));
+
+        if (previous != 0)
+            _rxHost.Log($"identity: node id is now !{derived:x8}, derived from the public key (was !{previous:x8})");
+
         SaveSettings();
         RefreshSelfNode();
-    }
-
-    private static uint ParseNodeId(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return 0;
-        var s = text.Trim();
-        if (s.StartsWith('!')) s = s[1..];
-        else if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
-        else if (uint.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var dec))
-            return dec;
-        return uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex) ? hex : 0;
-    }
-
-    [RelayCommand]
-    private void GenerateRandomNodeId()
-    {
-        uint id;
-        do { id = (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE); } while (id == 0 || id == 0xFFFFFFFFu);
-        MyNodeIdText = $"!{id:x8}";
     }
 
     [RelayCommand]
@@ -1601,7 +1628,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     // from it, so a key change has to reach the node store like any other
     // identity edit — otherwise the grid keeps reporting the old key's
     // derived-node-number match.
-    partial void OnMyPublicKeyChanged(string value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyPublicKeyChanged(string value)
+    {
+        // Before the save, so settings.json and the self node record are both
+        // written with the number this key actually derives.
+        AdoptNodeNumFromKey();
+        SaveSettings();
+        RefreshSelfNode();
+    }
 
     partial void OnMyPrivateKeyChanged(string value)
     {

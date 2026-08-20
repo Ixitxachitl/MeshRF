@@ -23,7 +23,8 @@ public partial class RadioViewModel
 
     /// <summary>MAC derived from the node number (<c>02:00:xx:xx:xx:xx</c>),
     /// matching the Meshtastic convention that the 32-bit node number is the
-    /// low four bytes. Read-only; set the node ID to change it.</summary>
+    /// low four bytes. Read-only, like the node id it comes from: the whole
+    /// chain hangs off the key pair.</summary>
     public string MyMacAddress
     {
         get
@@ -33,15 +34,6 @@ public partial class RadioViewModel
                 ? string.Empty
                 : $"02:00:{(n >> 24) & 0xFF:x2}:{(n >> 16) & 0xFF:x2}:{(n >> 8) & 0xFF:x2}:{n & 0xFF:x2}";
         }
-    }
-
-    /// <summary>Derives the node ID from the current public key the same way
-    /// Meshtastic firmware does, so a PKI-derived identity stays consistent.</summary>
-    [RelayCommand]
-    private void GenerateNodeIdFromKey()
-    {
-        if (!PkiNodeNumber.TryFromPublicKey(TryParseKeyBase64(MyPublicKey), out var nodeNum)) return;
-        MyNodeIdText = $"!{nodeNum:x8}";
     }
 
     /// <summary>Persists our own node record so the configured name resolves

@@ -13,15 +13,10 @@
         <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,4,0,4">
-                <Button DockPanel.Dock="Right" Content="Random" Margin="6,0,0,0" Padding="8,2"
-                        Command="{Binding GenerateRandomNodeIdCommand}" ToolTip.Tip="Generate a random node ID" />
-                <Button DockPanel.Dock="Right" Content="From Key" Margin="6,0,0,0" Padding="8,2"
-                        Command="{Binding GenerateNodeIdFromKeyCommand}"
-                        ToolTip.Tip="Derive the node ID from the current PKI public key the same way Meshtastic firmware does" />
-                <TextBox FontFamily="Consolas" ToolTip.Tip="!a1b2c3d4, 0xA1B2C3D4 or decimal"
-                         Text="{Binding MyNodeIdText}" />
-            </DockPanel>
+            <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
+                     Foreground="{DynamicResource BrushSubtle}"
+                     ToolTip.Tip="Derived from the public key, the way Meshtastic derives it. Generate a new key pair below to change it — a node number that does not hash back to its own key is the case the Nodes table flags as a mismatch."
+                     Text="{Binding MyNodeIdText}" />
 
             <TextBlock Grid.Row="1" Grid.Column="0" Text="MAC address" Margin="0,4,8,4" VerticalAlignment="Center" />
             <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
@@ -66,7 +61,7 @@
             <TextBlock Grid.Row="9" Grid.Column="0" Text="Private key" Margin="0,4,8,4" VerticalAlignment="Center" />
             <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,4,0,4">
                 <Button DockPanel.Dock="Right" Content="Generate" Margin="6,0,0,0" Padding="8,2"
-                        Command="{Binding GenerateKeyPairCommand}" ToolTip.Tip="Generate a new random key pair" />
+                        Command="{Binding GenerateKeyPairCommand}" ToolTip.Tip="Generate a new random key pair. This also changes the node ID, which is derived from it — the mesh will see a different node." />
                 <Button DockPanel.Dock="Right" Content="Show" Margin="6,0,0,0" Padding="8,2"
                         IsVisible="{Binding IsPrivateKeyHidden}"
                         Command="{Binding ToggleRevealPrivateKeyCommand}" ToolTip.Tip="Reveal the private key" />
