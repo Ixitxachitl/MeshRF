@@ -151,6 +151,12 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             : name;
     }
 
+    public void ResyncFeed(string fileName)
+    {
+        _feedEngine.Forget(fileName, DateTimeOffset.Now);
+        _rxHost.Log($"sync: {fileName} — memory cleared, everything it mirrors will be placed again");
+    }
+
     public event Action? ScriptsStatusChanged;
 
     private void RaiseScriptsStatusChanged()
@@ -167,6 +173,12 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     {
         _scriptEngine.Diagnostic += line => LogFromAnyThread($"scripts: {line}");
         _feedEngine.Diagnostic += line => LogFromAnyThread($"sync: {line}");
+        // Lets a feed notice a marker deleted from the waypoint list and put it
+        // back while the record is still live. Ours only: a waypoint id is a
+        // hash of the record's id, so another node's marker could in principle
+        // carry the same one.
+        _feedEngine.IsStillPlaced = waypointId =>
+            _rxHost.Waypoints.Any(w => w.WaypointId == waypointId && w.FromNode == _rxHost.MyNodeNum);
         _rxHost.ScriptSelfProvider = BuildScriptSelf;
         _rxHost.ScriptEventObserved = OnScriptEvent;
         _scriptHttp.Credentials = this;

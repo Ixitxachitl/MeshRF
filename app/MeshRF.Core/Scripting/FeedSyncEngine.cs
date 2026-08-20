@@ -39,6 +39,41 @@ public sealed class FeedSyncEngine
         _store?.Load();
     }
 
+    /// <summary>
+    /// Whether a marker this feed placed is still on our own map. Null means
+    /// do not ask, which is what the tests want.
+    /// </summary>
+    /// <remarks>
+    /// Without it the memory here is the only account of what is out there,
+    /// and deleting a mirrored marker by hand leaves the two disagreeing
+    /// forever: the record is still in the feed and unchanged, so nothing is
+    /// resent, and the marker never comes back. Reconciling against the map
+    /// rather than against memory alone is what makes a delete recoverable.
+    /// Nothing removes a waypoint on its own — an expired one stays in the
+    /// list marked so — so a missing marker means somebody meant it.
+    /// </remarks>
+    public Func<uint, bool>? IsStillPlaced { get; set; }
+
+    private bool StillPlaced(uint waypointId) => IsStillPlaced is not { } ask || ask(waypointId);
+
+    /// <summary>
+    /// Drops one feed's memory, so the next poll treats every record as new.
+    /// </summary>
+    /// <remarks>
+    /// The way back from a memory that has diverged from reality in a way the
+    /// presence check cannot see — markers cleared on the receiving nodes, say.
+    /// Also brings the feed's next poll forward, since asking for a resync and
+    /// then waiting a quarter of an hour reads as nothing having happened.
+    /// </remarks>
+    public void Forget(string fileName, DateTimeOffset now)
+    {
+        var feed = _feeds.FirstOrDefault(f => f.FileName == fileName);
+        if (feed is null) return;
+        feed.Seen.Clear();
+        feed.NextDue = now;
+        _store?.Save(feed.FileName, new Dictionary<string, FeedSyncMemory>(StringComparer.Ordinal));
+    }
+
     /// <summary>What was last sent for one record.</summary>
     private sealed class Tracked
     {
@@ -215,8 +250,12 @@ public sealed class FeedSyncEngine
                 present.Add(id);
 
                 // Declared immutable: already placed is already correct, and
-                // there is nothing a second send could say.
-                if (sync.Immutable && feed.Seen.ContainsKey(id)) continue;
+                // there is nothing a second send could say — unless the marker
+                // is no longer on our map, when placing it again is the only
+                // way back in step.
+                if (sync.Immutable && feed.Seen.TryGetValue(id, out var immutable) &&
+                    StillPlaced(immutable.WaypointId))
+                    continue;
 
                 var expansion = new ScriptExpansion(new ScriptEvent { Self = self, At = now }) { Item = raw };
                 var name = ScriptTemplate.ClampToPayload(expansion.Expand(sync.Waypoint.Name));
@@ -242,7 +281,11 @@ public sealed class FeedSyncEngine
 
                 bool changed = !string.Equals(tracked.Fingerprint, fingerprint, StringComparison.Ordinal);
                 bool stale = sync.Expires > TimeSpan.Zero && now - tracked.LastSent >= sync.Expires / 2;
-                if (!changed && !stale) continue;
+                // Deleted from our own list while the record is still live. A
+                // feed with no expires: has no refresh to catch this, so
+                // without the check the marker would never return.
+                bool missing = !StillPlaced(tracked.WaypointId);
+                if (!changed && !stale && !missing) continue;
 
                 tracked.Fingerprint = fingerprint;
                 tracked.LastSent = now;
@@ -251,7 +294,10 @@ public sealed class FeedSyncEngine
                 tracked.Name = name;
                 tracked.Description = description;
                 actions.Add(Build(
-                    changed ? FeedSyncActionKind.Update : FeedSyncActionKind.Refresh, id, tracked, sync, now));
+                    changed ? FeedSyncActionKind.Update
+                    : missing ? FeedSyncActionKind.Place
+                    : FeedSyncActionKind.Refresh,
+                    id, tracked, sync, now));
             }
         }
 

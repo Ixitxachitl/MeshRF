@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using MeshRF.Scripting;
 
 namespace MeshRF.AvaloniaApp;
@@ -33,6 +34,11 @@ public sealed partial class ScriptListItem : ObservableObject
     [ObservableProperty] private bool _hasError;
     [ObservableProperty] private bool _hasWarning;
 
+    /// <summary>Whether this file is a feed sync rather than a script — only a
+    /// sync has a memory of what it has placed, so only a sync can be
+    /// resynced.</summary>
+    [ObservableProperty] private bool _isSync;
+
     /// <summary>Bound to the row's checkbox. Writing it rewrites just the
     /// <c>enabled:</c> line in the file (see
     /// <see cref="ScriptLibrary.SetEnabled"/>), so comments survive.</summary>
@@ -47,6 +53,7 @@ public sealed partial class ScriptListItem : ObservableObject
         DisplayName = file.DisplayName;
 
         var parse = file.Parse;
+        IsSync = parse.IsSync;
         HasError = parse.HasErrors;
         HasWarning = !parse.HasErrors && parse.HasWarnings;
 
@@ -184,6 +191,7 @@ public sealed partial class ScriptsViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanDelete))]
+    [NotifyPropertyChangedFor(nameof(CanResync))]
     [NotifyPropertyChangedFor(nameof(CanMoveUp))]
     [NotifyPropertyChangedFor(nameof(CanMoveDown))]
     private ScriptListItem? _selectedScript;
@@ -222,6 +230,21 @@ public sealed partial class ScriptsViewModel : ObservableObject
         OpenScript is null ? string.Empty : $"{OpenScript.FileName}{(IsDirty ? " •" : "")}";
 
     public bool CanDelete => SelectedScript is not null;
+
+    /// <summary>A sync, and a runtime to tell about it. Editing files with no
+    /// radio session is fine; there is just no engine holding a memory.</summary>
+    public bool CanResync => HasRuntime && SelectedScript is { IsSync: true };
+
+    /// <summary>
+    /// Forgets what the selected feed has placed, so its next poll — now —
+    /// puts every marker back.
+    /// </summary>
+    [RelayCommand]
+    private void Resync()
+    {
+        if (SelectedScript is not { IsSync: true } item || _runtime is null) return;
+        _runtime.ResyncFeed(item.FileName);
+    }
     public bool CanMoveUp => SelectedScript is not null && Scripts.IndexOf(SelectedScript) > 0;
     public bool CanMoveDown => SelectedScript is not null && Scripts.IndexOf(SelectedScript) < Scripts.Count - 1;
 

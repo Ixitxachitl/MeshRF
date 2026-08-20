@@ -31,6 +31,18 @@ public interface IScriptRuntime
     /// changes anything.</summary>
     void ReloadScripts();
 
+    /// <summary>
+    /// Forgets what one feed sync has placed, so its next poll — brought
+    /// forward to now — treats every record as new and puts the markers back.
+    /// </summary>
+    /// <remarks>
+    /// For a memory that has drifted from what is actually on the maps in a
+    /// way nothing can detect: markers cleared on the receiving nodes, or a
+    /// feed whose ids changed under it. Markers deleted from this node's own
+    /// list are noticed without asking.
+    /// </remarks>
+    void ResyncFeed(string fileName);
+
     /// <summary>API keys scripts authenticate with, for the Credentials dialog
     /// to edit. Lives with the runtime rather than the library because the
     /// values are protected in settings, not in the script files.</summary>

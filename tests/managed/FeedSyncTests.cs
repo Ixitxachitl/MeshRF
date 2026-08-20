@@ -104,6 +104,89 @@ public class FeedSyncTests
     }
 
     [Fact]
+    public void A_Marker_Deleted_From_The_Map_Is_Placed_Again_While_The_Record_Lives()
+    {
+        // The reported case: a fire mirrored, its marker deleted by hand, the
+        // fire still burning and unchanged. Without a presence check the
+        // record is present, the fingerprint matches and nothing is ever
+        // resent, so the marker never comes back.
+        var engine = Armed();
+        var placed = new HashSet<uint>();
+        engine.IsStillPlaced = id => placed.Contains(id);
+
+        var action = Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+        Assert.Equal(FeedSyncActionKind.Place, action.Kind);
+        placed.Add(action.WaypointId);
+
+        // Nothing to do while it is still on the map.
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(15)));
+
+        placed.Remove(action.WaypointId);   // deleted from the waypoint list
+
+        var again = Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(30)));
+        Assert.Equal(FeedSyncActionKind.Place, again.Kind);
+        Assert.Equal(action.WaypointId, again.WaypointId);
+    }
+
+    [Fact]
+    public void An_Immutable_Feeds_Marker_Comes_Back_Too()
+    {
+        // watch: [] says a record never changes, so its marker is placed once
+        // and never resent. Deleting it by hand is still worth undoing.
+        var yaml = Yaml.Replace("  watch:\n    - data.acreage\n    - data.containment\n", "  watch: []\n");
+        var engine = Armed(yaml);
+        var placed = new HashSet<uint>();
+        engine.IsStillPlaced = id => placed.Contains(id);
+
+        var action = Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+        placed.Add(action.WaypointId);
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(15)));
+
+        placed.Remove(action.WaypointId);
+
+        Assert.Equal(FeedSyncActionKind.Place,
+            Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(30))).Kind);
+    }
+
+    [Fact]
+    public void Without_The_Presence_Check_Nothing_Changes()
+    {
+        // No hook wired is the tests' and the headless case: memory alone
+        // decides, exactly as before.
+        var engine = Armed();
+        engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon);
+
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(30)));
+    }
+
+    [Fact]
+    public void Forgetting_A_Feed_Places_Everything_Again()
+    {
+        var engine = Armed();
+        Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+        Assert.Empty(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(15)));
+
+        engine.Forget(FileName, Noon.AddMinutes(20));
+
+        var action = Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(20)));
+        Assert.Equal(FeedSyncActionKind.Place, action.Kind);
+    }
+
+    [Fact]
+    public void Forgetting_A_Feed_Brings_Its_Next_Poll_Forward()
+    {
+        // Asking for a resync and then waiting a quarter of an hour reads as
+        // nothing having happened.
+        var engine = Armed();
+        Assert.Single(engine.Due(Noon));                       // the first poll
+        Assert.Empty(engine.Due(Noon.AddMinutes(1)));          // not due again yet
+
+        engine.Forget(FileName, Noon.AddMinutes(1));
+
+        Assert.Single(engine.Due(Noon.AddMinutes(1)));
+    }
+
+    [Fact]
     public void A_Sync_Can_Name_The_Channel_Its_Markers_Go_Out_On()
     {
         var parse = ScriptParser.Parse(Yaml.Replace("  waypoint:\n", "  waypoint:\n    channel: Fires\n"));

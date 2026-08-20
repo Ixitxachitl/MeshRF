@@ -40,6 +40,13 @@
             <Button DockPanel.Dock="Left" Content="Delete" Padding="10,3" Margin="0,0,10,0"
                     IsEnabled="{Binding CanDelete}" Click="OnDelete"
                     ToolTip.Tip="Delete the selected script (asks first)" />
+            <!-- Only a feed sync has a memory of what it has placed, so this is
+                 hidden for a script rather than shown greyed: a button that can
+                 never apply to what is selected is noise. -->
+            <Button DockPanel.Dock="Left" Content="Resync" Padding="10,3" Margin="0,0,10,0"
+                    IsVisible="{Binding HasRuntime}" IsEnabled="{Binding CanResync}"
+                    Command="{Binding ResyncCommand}"
+                    ToolTip.Tip="Forget what this feed has placed and put every marker back on the next poll, which happens straight away. For markers cleared on the receiving nodes — ones deleted from this node's own list come back without asking." />
             <Button DockPanel.Dock="Left" Content="▲" Padding="10,3" Margin="0,0,4,0"
                     IsEnabled="{Binding CanMoveUp}" Click="OnMoveUp"
                     ToolTip.Tip="Run this script earlier when several are triggered at once" />
