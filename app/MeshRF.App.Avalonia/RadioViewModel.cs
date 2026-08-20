@@ -525,6 +525,40 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _myPrivateKey = string.Empty;
 
+    /// <summary>An XEdDSA signing keypair together with the base64 identity
+    /// private key it was derived from, so the derivation can be cached.</summary>
+    private sealed record XeddsaIdentity(string Source, byte[] PrivateKey, byte[] PublicKey);
+
+    private XeddsaIdentity _xeddsa =
+        new(string.Empty, Array.Empty<byte>(), Array.Empty<byte>());
+
+    /// <summary>
+    /// The Ed25519 keypair broadcasts we originate are signed with, so 2.8+
+    /// firmware peers show us as a verified (shield) node. Derived from our
+    /// X25519 identity key and cached against it — the derivation is a scalar
+    /// multiplication, too expensive to repeat per packet. Empty while the
+    /// identity key is absent or not 32 bytes, which the encoder reads as
+    /// "send unsigned".
+    /// </summary>
+    private XeddsaIdentity MyXeddsa
+    {
+        get
+        {
+            // Both reads are snapshots: transmits run off the UI thread, so
+            // re-reading MyPrivateKey after the comparison could pair a stale
+            // keypair with a fresh source string.
+            string source = MyPrivateKey;
+            var cached = _xeddsa;
+            if (string.Equals(cached.Source, source, StringComparison.Ordinal)) return cached;
+
+            var curve = TryParseKeyBase64(source);
+            var (priv, pub) = curve.Length == 32
+                ? MeshCrypto.DeriveXeddsaKeys(curve)
+                : (Array.Empty<byte>(), Array.Empty<byte>());
+            return _xeddsa = new XeddsaIdentity(source, priv, pub);
+        }
+    }
+
     [ObservableProperty]
     private string _myNodeStatus = string.Empty;
 
@@ -772,6 +806,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         foreach (var channelTab in Tabs.OfType<ChannelTabViewModel>())
             channelTab.MuteRtttl = _settings.MutedRingtoneChannels.Contains(channelTab.Config.Index);
         _rxRouter = new MeshRxRouter(_rxHost, _messageStore, new AvaloniaUiDispatcher());
+        // The router caches parsed sender keys, so a node that rotates its key
+        // would otherwise keep failing PKC decode against the old one.
+        _rxHost.StoredPublicKeyChanged = _rxRouter.InvalidateSenderPublicKeyCache;
         SelectedTab = Tabs.FirstOrDefault();
         // Contains() guards the same case the TX line below does, and one more:
         // settings written before Auto was dropped still say "Auto". Falling
@@ -1984,7 +2021,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             : MeshEncoder.EncodeTextMessage(
                 channel!, _rxHost.MyNodeNum, packetId, text, to: to,
                 hopLimit: (byte)HopLimit, wantAck: to != 0xFFFFFFFFu,
-                replyId: replyId, okToMqtt: OkToMqtt);
+                replyId: replyId, okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
         bool ok = await TransmitFrameAsync(frame);
         if (!ok)
@@ -2095,7 +2133,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, emoji,
-            to: to, replyId: target.PacketId, emoji: 1);
+            to: to, replyId: target.PacketId, emoji: 1,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
         if (await TransmitFrameAsync(frame))
         {
@@ -2313,7 +2352,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task RequestNewKeys(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
+        // Forgetting the key clears the mismatch flag with it, so whatever key
+        // the reply carries is accepted as the node's new one.
         _nodeStore.ClearPublicKey(node.NodeNum);
+        _rxRouter.InvalidateSenderPublicKeyCache(node.NodeNum);
+        _rxHost.MarkNodeDirty(node.NodeNum);
         await ExchangeNodeInfo(node);
     }
 
@@ -2335,6 +2378,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             publicKey: TryParseKeyBase64(MyPublicKey),
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey,
             isLicensed: MyIsLicensed, isUnmessagable: MyIsUnmessagable);
         StatusText = await TransmitFrameAsync(frame) ? "Sent NodeInfo." : "Transmit failed.";
     }
@@ -2358,7 +2402,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
             altitudeM: alt, precisionBits: channel.PositionPrecision,
             to: to ?? 0xFFFFFFFFu,
-            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
         if (await TransmitFrameAsync(frame))
         {
             StatusText = "Sent position.";
@@ -2397,7 +2442,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             airUtilTx: airUtilTx,
             uptimeSeconds: uptime,
             to: to ?? 0xFFFFFFFFu,
-            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
         if (await TransmitFrameAsync(frame))
         {
             StatusText = "Sent device metrics.";
@@ -2473,7 +2519,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             expireEpoch: wp.ExpireEpoch, lockedTo: wp.LockedTo, icon: wp.Icon,
             geofenceRadiusM: wp.GeofenceRadius,
             bboxWest: wp.BboxWest, bboxSouth: wp.BboxSouth, bboxEast: wp.BboxEast, bboxNorth: wp.BboxNorth,
-            notifyOnEnter: wp.NotifyOnEnter, notifyOnExit: wp.NotifyOnExit, notifyFavoritesOnly: wp.NotifyFavoritesOnly);
+            notifyOnEnter: wp.NotifyOnEnter, notifyOnExit: wp.NotifyOnExit, notifyFavoritesOnly: wp.NotifyFavoritesOnly,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
         StatusText = await TransmitFrameAsync(frame)
             ? $"Resent waypoint \"{wp.Name}\""
             : "Transmit failed (device cannot transmit).";
@@ -2498,7 +2545,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                     // dedicated delete message type).
                     var frame = MeshEncoder.EncodeWaypoint(channel, _rxHost.MyNodeNum, packetId, wp.WaypointId,
                         wp.Latitude, wp.Longitude, name: wp.Name, description: wp.Description,
-                        expireEpoch: 1, lockedTo: wp.LockedTo, icon: wp.Icon);
+                        expireEpoch: 1, lockedTo: wp.LockedTo, icon: wp.Icon,
+                        xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
                     await TransmitFrameAsync(frame);
                 }
                 catch { /* best-effort delete broadcast */ }
@@ -2530,7 +2578,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             expireEpoch: edit.ExpireEpoch, lockedTo: edit.LockedTo, icon: edit.Icon,
             geofenceRadiusM: edit.GeofenceRadius,
             bboxWest: edit.BboxWest, bboxSouth: edit.BboxSouth, bboxEast: edit.BboxEast, bboxNorth: edit.BboxNorth,
-            notifyOnEnter: edit.NotifyOnEnter, notifyOnExit: edit.NotifyOnExit, notifyFavoritesOnly: edit.NotifyFavoritesOnly);
+            notifyOnEnter: edit.NotifyOnEnter, notifyOnExit: edit.NotifyOnExit, notifyFavoritesOnly: edit.NotifyFavoritesOnly,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
         if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed (device cannot transmit)."; return false; }
 

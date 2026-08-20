@@ -173,6 +173,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// into the raw JSON feed.</summary>
     public Action<MeshHeader, MeshDecodeResult, long, float?, float?, byte, string>? DecodedPacketForFeed { get; set; }
 
+    /// <summary>Raised when a node's stored public key is replaced by a
+    /// different one. The router caches parsed sender keys for PKC decode, so
+    /// without this it would keep decrypting against the key that is no longer
+    /// on file. The owner holds the router, not this host.</summary>
+    public Action<uint>? StoredPublicKeyChanged { get; set; }
+
     /// <summary>
     /// Raised for anything an automation script could be triggered by: a text
     /// message, a tapback, or a node heard for the first time.
@@ -1057,6 +1063,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // cheaper 0-hop repeat.
         if (header.WantAck) AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: false));
 
+        // The sender's public key as it stood before this packet. Both the
+        // NodeInfo case (which has to notice a substituted key rather than
+        // absorb it) and the signature check after the switch need the key we
+        // already trusted, not the one this packet may be about to store.
+        string? knownKeyHex = NeedsStoredPublicKey(header, result) ? _nodeStore.Get(header.From)?.PublicKey : null;
+
         switch (result.Port)
         {
             case PortNum.TextMessage:
@@ -1078,6 +1090,19 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 // node whose very first packet is a NodeInfo can be noticed as
                 // new — and it is a common way to first hear one.
                 bool firstNodeInfo = IsFirstSighting(header.From);
+                string newKeyHex = result.User.PublicKey.Length == 32
+                    ? Convert.ToHexString(result.User.PublicKey)
+                    : string.Empty;
+                bool keyIsNew = newKeyHex.Length > 0
+                    && !string.Equals(knownKeyHex, newKeyHex, StringComparison.OrdinalIgnoreCase);
+                // A key that contradicts one we already hold is a substitution,
+                // not an update. The old key is kept and the node flagged, which
+                // is what turns the key badge red — silently adopting the new
+                // key is exactly how somebody would take over a conversation.
+                // "Request new keys" forgets the stored key, after which the
+                // next one heard is accepted normally.
+                bool keyMismatch = keyIsNew && !string.IsNullOrEmpty(knownKeyHex);
+                bool keyAccepted = keyIsNew && !keyMismatch;
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
@@ -1085,7 +1110,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     LongName = result.User.LongName,
                     ShortName = result.User.ShortName,
                     Role = string.IsNullOrEmpty(result.User.Role) ? "Client" : result.User.Role,
-                    PublicKey = result.User.PublicKey.Length == 32 ? Convert.ToHexString(result.User.PublicKey) : string.Empty,
+                    // Empty preserves whatever is on file (the upsert NULLIFs
+                    // it), which is how a mismatch keeps the old key.
+                    PublicKey = keyMismatch ? string.Empty : newKeyHex,
+                    // Only a NodeInfo that carried a key has anything to say
+                    // about the flag; null leaves it as it stands.
+                    KeyMismatch = newKeyHex.Length > 0 ? keyMismatch : (bool?)null,
                     IsUnmessagable = result.User.IsUnmessagable,
                     // is_licensed is a plain proto3 bool, so an unlicensed node
                     // simply omits it. Resolving absent to false here is what
@@ -1098,6 +1128,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     SnrDb = snrDb,
                     HopsAway = hopsAway,
                 });
+                if (keyMismatch)
+                    Log($"  {header.FromId}: KEY MISMATCH — the public key changed; keeping the one on file. " +
+                        "Right-click the node → Request new keys to accept the new one.");
+                if (keyAccepted) StoredPublicKeyChanged?.Invoke(header.From);
                 MarkNodeDirty(header.From);
                 // Raised after the upsert, so a greeting script sees the name
                 // and key this packet carried rather than a bare node id.
@@ -1180,6 +1214,66 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 HandleRouting(header, result);
                 break;
         }
+
+        TryVerifyXeddsaBroadcast(header, result, knownKeyHex);
+    }
+
+    /// <summary>A broadcast carrying a 64-byte <c>xeddsa_signature</c>
+    /// (<c>Data</c> field 10) — the only shape worth verifying.</summary>
+    private static bool IsSignedBroadcast(MeshHeader header, MeshDecodeResult result)
+        => header.IsBroadcast && result.DataField10.Length == MeshCrypto.XeddsaSignatureSize;
+
+    /// <summary>Whether handling this packet depends on the key already on file
+    /// for the sender: a NodeInfo advertisement (key substitution) or a signed
+    /// broadcast (signature verification).</summary>
+    private static bool NeedsStoredPublicKey(MeshHeader header, MeshDecodeResult result)
+        => IsSignedBroadcast(header, result)
+           || (result.Port == PortNum.NodeInfo && result.User is not null && result.AppPayload.Length > 0);
+
+    /// <summary>
+    /// Verifies a signed broadcast against the sender's X25519 public key and,
+    /// on success, records the node as a verified signer — the shield column,
+    /// and the mirror of firmware's per-node <c>HAS_XEDDSA_SIGNED</c> bit.
+    ///
+    /// For a NODEINFO_APP broadcast the key carried in that same packet is
+    /// preferred over the one on file: that is firmware's first-contact
+    /// bootstrap, where trust comes from a single self-consistent signed
+    /// NodeInfo with no prior key exchange. A carried key that contradicts one
+    /// we already stored is not used — a substituted key never vouches for
+    /// itself — leaving the stored key to verify against, which it won't.
+    /// </summary>
+    /// <param name="knownKeyHex">The sender's stored public key as it stood
+    /// before this packet was applied to the node store.</param>
+    private void TryVerifyXeddsaBroadcast(MeshHeader header, MeshDecodeResult result, string? knownKeyHex)
+    {
+        if (!IsSignedBroadcast(header, result)) return;
+
+        byte[]? senderCurvePublicKey = null;
+        if (result.Port == PortNum.NodeInfo && result.User is { PublicKey.Length: 32 } user)
+        {
+            bool contradictsStored = !string.IsNullOrEmpty(knownKeyHex)
+                && !string.Equals(knownKeyHex, Convert.ToHexString(user.PublicKey), StringComparison.OrdinalIgnoreCase);
+            if (!contradictsStored) senderCurvePublicKey = user.PublicKey;
+        }
+        senderCurvePublicKey ??= TryParseHex(knownKeyHex);
+        if (senderCurvePublicKey.Length != 32) return;
+
+        if (!MeshCrypto.XeddsaVerify(header.From, header.PacketId, (uint)result.Port,
+                                     result.AppPayload, result.DataField10, senderCurvePublicKey))
+            return;
+
+        if (_nodeStore.Get(header.From)?.HasXeddsaSigned != true)
+            Log($"  {header.FromId}: XEdDSA signature verified — marking as a verified signer.");
+
+        _nodeStore.SetXeddsaSigned(header.From, true);
+        MarkNodeDirty(header.From);
+    }
+
+    private static byte[] TryParseHex(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return Array.Empty<byte>();
+        try { return Convert.FromHexString(hex.Trim()); }
+        catch { return Array.Empty<byte>(); }
     }
 
     /// <summary>

@@ -261,7 +261,8 @@ public partial class RadioViewModel
         channel ??= PrimaryChannel();
         if (channel is null) return;
         var frame = MeshEncoder.EncodeNodeStatus(channel, _rxHost.MyNodeNum, NextPacketId(),
-            MyNodeStatus.Trim(), to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            MyNodeStatus.Trim(), to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
         StatusText = await TransmitFrameAsync(frame) ? "Sent node status." : "Transmit failed.";
     }
 
@@ -286,7 +287,8 @@ public partial class RadioViewModel
             temperatureC: weather.TemperatureC,
             relativeHumidityPct: weather.RelativeHumidityPct,
             barometricPressureHpa: weather.BarometricPressureHpa,
-            to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
         if (await TransmitFrameAsync(frame))
         {
             StatusText = "Sent environment metrics.";
@@ -319,7 +321,8 @@ public partial class RadioViewModel
 
         var frame = MeshEncoder.EncodeTelemetryAirQualityMetrics(channel, _rxHost.MyNodeNum, NextPacketId(),
             pm25Standard: aq.Pm25Standard, pm100Standard: aq.Pm100Standard,
-            to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+            to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
         if (await TransmitFrameAsync(frame))
         {
             StatusText = "Sent air quality metrics.";

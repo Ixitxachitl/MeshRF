@@ -384,7 +384,8 @@ public partial class RadioViewModel
                 notifyFavoritesOnly: notifyFavoritesOnly,
                 to: to ?? 0xFFFFFFFFu,
                 hopLimit: (byte)HopLimit,
-                okToMqtt: OkToMqtt);
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
             if (!await TransmitFrameAsync(frame))
             {

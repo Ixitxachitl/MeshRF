@@ -360,7 +360,8 @@ public partial class RadioViewModel
 
         var frame = MeshEncoder.Encode(targetChannel, _rxHost.MyNodeNum, cmd.To ?? 0xFFFFFFFFu,
             NextPacketId(), port, payload,
-            hopLimit: cmd.HopLimit ?? (byte)HopLimit, okToMqtt: OkToMqtt);
+            hopLimit: cmd.HopLimit ?? (byte)HopLimit, okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
         _rxHost.Log($"  MQTT JSON command '{cmd.Type}' -> {targetChannel.Name}");
         TransmitBackground(frame);

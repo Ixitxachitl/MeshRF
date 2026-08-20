@@ -416,7 +416,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             notifyOnExit: !action.IsRemoval && sync.Waypoint.NotifyOnExit,
             to: to != 0 ? to : 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit,
-            okToMqtt: OkToMqtt);
+            okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
         if (!await TransmitFrameAsync(frame))
         {
@@ -651,7 +652,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 if (channel is null) return;
                 var packetId = NextPacketId();
                 var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, action.Text,
-                    to: to, replyId: action.ReplyId, emoji: 1);
+                    to: to, replyId: action.ReplyId, emoji: 1,
+                    xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
                 if (await TransmitFrameAsync(frame))
                     _rxHost.PersistOutgoingReaction(to, packetId, action.ReplyId, action.Text, channel.Name);
                 break;
@@ -758,7 +760,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             notifyOnExit: waypoint.NotifyOnExit,
             to: action.ToNode != 0 ? action.ToNode : 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit,
-            okToMqtt: OkToMqtt);
+            okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
         if (!await TransmitFrameAsync(frame))
         {
