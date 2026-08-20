@@ -11,6 +11,17 @@
         Width="1280" Height="900">
 
     <Window.Styles>
+        <!-- The gap the channels/DMs divider is drawn into. It has to be the
+             TabItem's own margin: Fluent draws the selected tab's underline
+             across the whole TabItem and ignores its padding, so anything in
+             the header gets underlined with the title. A margin moves the tab
+             and its underline together and leaves space beside them. -->
+        <Style Selector="TabItem" x:DataType="mesh:ITabItem">
+            <Setter Property="Margin"
+                    Value="{Binding StartsTabGroup,
+                                    Converter={x:Static local:TabGroupMarginConverter.Instance}}" />
+        </Style>
+
         <!-- Unseen-activity pulse on a tab header. Alternating playback fades
              out and back rather than snapping, and it runs until the tab is
              selected and the view model clears TabNeedsAttention. -->
@@ -1192,16 +1203,16 @@
                                      notices the chrome is gone. Owning the element makes
                                      it independent of the theme's internals. -->
                                 <!-- The rule between the channels and the DMs
-                                     rides on the first conversation tab rather
-                                     than sitting between two tabs, because the
-                                     two kinds share one TabControl and its
-                                     items are the only thing a template can
-                                     reach. Margins are all positive: a
-                                     negative one pulled the rule onto the
-                                     previous tab's border instead of into the
-                                     gap. -->
+                                     rides on the first conversation tab, since
+                                     the two kinds share one TabControl and its
+                                     items are all a template can reach. The
+                                     negative margin puts it back out into the
+                                     gap the TabItem's margin opens (see the
+                                     TabItem style above): inside the tab it
+                                     would be drawn over by the selected tab's
+                                     underline, which spans the whole item. -->
                                 <StackPanel Orientation="Horizontal">
-                                <Rectangle Width="1" Margin="4,2,8,2"
+                                <Rectangle Width="1" Margin="-9,3,0,3"
                                            IsVisible="{Binding StartsTabGroup}"
                                            Fill="{DynamicResource BrushTabBorder}" />
                                 <Border Padding="8,3" CornerRadius="3" Background="Transparent"
