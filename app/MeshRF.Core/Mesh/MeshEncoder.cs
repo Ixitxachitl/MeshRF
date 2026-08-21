@@ -312,6 +312,35 @@ public static class MeshEncoder
                   wantResponse: true, okToMqtt: okToMqtt);
 
     /// <summary>
+    /// The lat/lon a given precision would actually put on the air, as the
+    /// i32 1e-7-degree pair the protobuf carries: keep the top N bits, then
+    /// re-centre in the masked cell. 0 and 32 pass through unchanged.
+    /// </summary>
+    public static (int LatitudeI, int LongitudeI) QuantizePosition(
+        double latitude, double longitude, byte precisionBits)
+    {
+        int latI = (int)Math.Round(latitude / 1e-7);
+        int lonI = (int)Math.Round(longitude / 1e-7);
+        if (precisionBits == 0 || precisionBits >= 32) return (latI, lonI);
+
+        latI = (int)((uint)latI & (uint.MaxValue << (32 - precisionBits)));
+        lonI = (int)((uint)lonI & (uint.MaxValue << (32 - precisionBits)));
+        latI += 1 << (31 - precisionBits);
+        lonI += 1 << (31 - precisionBits);
+        return (latI, lonI);
+    }
+
+    /// <summary>The same, back in degrees — what a receiver would plot, and
+    /// so what movement has to be judged against when deciding whether a
+    /// position is worth re-sending.</summary>
+    public static (double Latitude, double Longitude) ApplyPositionPrecision(
+        double latitude, double longitude, byte precisionBits)
+    {
+        var (latI, lonI) = QuantizePosition(latitude, longitude, precisionBits);
+        return (latI * 1e-7, lonI * 1e-7);
+    }
+
+    /// <summary>
     /// Broadcast our location (POSITION_APP <c>Position</c> protobuf). The
     /// channel's <paramref name="precisionBits"/> fuzzes the transmitted
     /// coordinates exactly like firmware <c>applyPositionPrecision</c>: keep the
@@ -343,16 +372,7 @@ public static class MeshEncoder
                 "Location sharing is disabled (precision 0); nothing to transmit.");
         if (precisionBits > 32) precisionBits = 32;
 
-        int latI = (int)Math.Round(latitude / 1e-7);
-        int lonI = (int)Math.Round(longitude / 1e-7);
-
-        if (precisionBits < 32)
-        {
-            latI = (int)((uint)latI & (uint.MaxValue << (32 - precisionBits)));
-            lonI = (int)((uint)lonI & (uint.MaxValue << (32 - precisionBits)));
-            latI += 1 << (31 - precisionBits);
-            lonI += 1 << (31 - precisionBits);
-        }
+        var (latI, lonI) = QuantizePosition(latitude, longitude, precisionBits);
 
         var pos = new ProtoWriter();
         pos.WriteFixed32Field(1, (uint)latI);                 // latitude_i (sfixed32)

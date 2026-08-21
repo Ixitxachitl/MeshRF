@@ -1034,9 +1034,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         GpsSerialPort = savedGpsSerialPort;
         GpsBaudRateText = savedGpsBaudRate > 0 ? savedGpsBaudRate.ToString(CultureInfo.InvariantCulture) : string.Empty;
         GpsSmartPosition = savedGpsSmartPosition;
-        // In metres, like the geofence radius below it, and re-expressed by
-        // OnUnitSystemNameChanged if the saved unit system is imperial.
-        GpsSmartPositionMinMoveInput = savedGpsSmartPositionMinMove.ToString(CultureInfo.InvariantCulture);
+        // In the units in force at this point — metric, since the saved unit
+        // system is applied below — and re-expressed by OnUnitSystemNameChanged
+        // when it is. Written through the same helper as the auto-report
+        // threshold so neither depends on where in the load it sits.
+        GpsSmartPositionMinMoveInput = DisplayUnits.FormatShortDistanceInput(
+            savedGpsSmartPositionMinMove, CurrentUnitSystem);
         GpsSmartPositionMinSeconds = Math.Max(0, savedGpsSmartPositionMinSeconds);
         if (UnitSystems.Contains(savedUnitSystem)) UnitSystemName = savedUnitSystem;
         if (RingtoneModes.Contains(savedRingtoneMode)) RingtoneMode = savedRingtoneMode;
@@ -1861,6 +1864,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             HomeAltitudeText, _inputUnitSystem, CurrentUnitSystem);
         GpsSmartPositionMinMoveInput = DisplayUnits.ConvertShortDistanceText(
             GpsSmartPositionMinMoveInput, _inputUnitSystem, CurrentUnitSystem);
+        AutoReportPositionSmartMinMoveInput = DisplayUnits.ConvertShortDistanceText(
+            AutoReportPositionSmartMinMoveInput, _inputUnitSystem, CurrentUnitSystem);
         _inputUnitSystem = CurrentUnitSystem;
         // Skipped mid-construction: nothing is rendered yet, and the
         // constructor refreshes once after the load instead.
@@ -1873,6 +1878,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(NodeDistanceUnitShort));
         OnPropertyChanged(nameof(WaypointGeofenceRadiusLabel));
         OnPropertyChanged(nameof(GpsSmartPositionMinMoveLabel));
+        OnPropertyChanged(nameof(AutoReportPositionSmartMinMoveLabel));
         SaveSettings();
     }
 
@@ -2600,6 +2606,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (await TransmitFrameAsync(frame))
         {
             StatusText = "Sent position.";
+            // Smart broadcast measures movement from what the mesh was last
+            // told, at the precision it was told it in — not from the fix the
+            // GPS last produced.
+            var (sentLat, sentLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.PositionPrecision);
+            MarkPositionBroadcast(sentLat, sentLon);
             // Only on a successful send: a refused transmit never went on the
             // air, so recording it would put a point in our track that no peer
             // ever heard.

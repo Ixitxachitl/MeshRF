@@ -212,6 +212,13 @@ public sealed class AppSettings
     public bool AutoReportPositionEnabled { get; set; } = false;
     public int AutoReportPositionSeconds { get; set; } = 3600;
 
+    // Firmware's position_broadcast_smart_enabled and its two thresholds, with
+    // the same defaults (on, 100 m, 5 min): an extra position send when we have
+    // actually moved, on top of the interval above rather than instead of it.
+    public bool AutoReportPositionSmartEnabled { get; set; } = true;
+    public uint AutoReportPositionSmartMinMoveMeters { get; set; } = 100;
+    public int AutoReportPositionSmartMinSeconds { get; set; } = 300;
+
     public bool AutoReportDeviceMetricsEnabled { get; set; } = false;
     public int AutoReportDeviceMetricsSeconds { get; set; } = 3600;
 

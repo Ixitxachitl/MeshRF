@@ -10,7 +10,7 @@
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID" Margin="0,4,8,4" VerticalAlignment="Center" />
             <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
@@ -181,56 +181,73 @@
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="22" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="22" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <!-- Firmware's position_broadcast_smart_enabled, and only meaningful
+                 alongside the interval above: it adds early sends, it does not
+                 replace the schedule. -->
+            <TextBlock Grid.Row="22" Grid.Column="0" Text="Smart broadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="22" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
+                        IsEnabled="{Binding AutoReportPositionEnabled}">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportPositionSmartEnabled}"
+                          ToolTip.Tip="Send a position ahead of the schedule once you have actually moved — firmware's position_broadcast_smart_enabled. It adds sends, it never delays the scheduled one." />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="{Binding AutoReportPositionSmartMinMoveLabel}" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinMoveInput}"
+                         ToolTip.Tip="How far to have moved since the last position sent, measured at the precision the channel actually transmits — firmware's broadcast_smart_minimum_distance. Default 100 m." />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Min gap" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinSeconds}"
+                         ToolTip.Tip="Shortest time between sends, so a fast mover cannot flood the channel — firmware's broadcast_smart_minimum_interval_secs. Default 300 sec." />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="23" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="23" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportDeviceMetricsEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="23" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="23" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="24" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportEnvironmentMetricsEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="24" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="25" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportAirQualityMetricsEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="25" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="26" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="26" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeStatusEnabled}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="26" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="27" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AutoReportLastSentSummary}"
                        ToolTip.Tip="Last successful auto-send times for NodeInfo, Position, Device Metrics, Environment Metrics, Air Quality, and Status." />
 
-            <TextBlock Grid.Row="27" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="27" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="28" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="28" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding WeatherTelemetryStatus}"
                        ToolTip.Tip="Live status of weather fetches used for environment telemetry (Open-Meteo)." />
 
-            <TextBlock Grid.Row="28" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="28" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="29" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="29" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AirQualityTelemetryStatus}"
                        ToolTip.Tip="Live status of air quality fetches used for air quality telemetry (Open-Meteo AQ API)." />
 
-            <TextBlock Grid.Row="29" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+            <TextBlock Grid.Row="30" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource BrushSubtle}"
                        Text="Relay routing rebroadcasts other nodes' traffic after a contention delay, following the role and rebroadcast mode above. It needs a TX-capable device, and stays off entirely while the Routing box is unchecked." />
         </Grid>

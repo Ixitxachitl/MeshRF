@@ -84,6 +84,36 @@ public class SmartPositionFilterTests
     }
 
     [Fact]
+    public void WouldTakeLeavesTheReferenceAlone()
+    {
+        var filter = new SmartPositionFilter();
+        filter.Mark(Lat, Lon, T0);
+
+        // Asked twice with nothing marked in between, the answer is the same
+        // both times — which is what lets a caller ask, then fail to act.
+        Assert.True(filter.WouldTake(North(500), Lon, T0.AddSeconds(30), MinMove, Gap, out _));
+        Assert.True(filter.WouldTake(North(500), Lon, T0.AddSeconds(30), MinMove, Gap, out _));
+
+        // ShouldTake does move it, so the same fix no longer qualifies.
+        Assert.True(filter.ShouldTake(North(500), Lon, T0.AddSeconds(30), MinMove, Gap, out _));
+        Assert.False(filter.WouldTake(North(500), Lon, T0.AddSeconds(60), MinMove, Gap, out _));
+    }
+
+    [Fact]
+    public void MarkSuppliesTheReferenceWithoutAsking()
+    {
+        var filter = new SmartPositionFilter();
+        Assert.False(filter.HasReference);
+
+        // The transmit side sets its reference from what went on the air,
+        // which may have been sent on a schedule rather than because it moved.
+        filter.Mark(Lat, Lon, T0);
+        Assert.True(filter.HasReference);
+        Assert.False(filter.WouldTake(North(1), Lon, T0.AddHours(1), MinMove, Gap, out _));
+        Assert.True(filter.WouldTake(North(500), Lon, T0.AddHours(1), MinMove, Gap, out _));
+    }
+
+    [Fact]
     public void ZeroThresholdsTakeEveryFix()
     {
         var filter = new SmartPositionFilter();

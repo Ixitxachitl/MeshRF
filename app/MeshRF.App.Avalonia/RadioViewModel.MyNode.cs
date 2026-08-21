@@ -369,6 +369,22 @@ public partial class RadioViewModel
     [ObservableProperty] private int _autoReportNodeInfoSeconds = 3600;
     [ObservableProperty] private bool _autoReportPositionEnabled;
     [ObservableProperty] private int _autoReportPositionSeconds = 3600;
+
+    /// <summary>Firmware's <c>position_broadcast_smart_enabled</c>: send a
+    /// position early when we have moved, without disturbing the interval.</summary>
+    [ObservableProperty] private bool _autoReportPositionSmartEnabled = true;
+
+    /// <summary><c>broadcast_smart_minimum_distance</c>, in the display units.</summary>
+    [ObservableProperty] private string _autoReportPositionSmartMinMoveInput = "100";
+
+    /// <summary><c>broadcast_smart_minimum_interval_secs</c>.</summary>
+    [ObservableProperty] private int _autoReportPositionSmartMinSeconds = 300;
+
+    public string AutoReportPositionSmartMinMoveLabel =>
+        $"Min move ({DisplayUnits.ShortDistanceUnitShort(CurrentUnitSystem)})";
+
+    internal uint AutoReportPositionSmartMinMoveMeters =>
+        DisplayUnits.ParseShortDistanceInput(AutoReportPositionSmartMinMoveInput, CurrentUnitSystem) ?? 0u;
     [ObservableProperty] private bool _autoReportDeviceMetricsEnabled;
     [ObservableProperty] private int _autoReportDeviceMetricsSeconds = 3600;
     [ObservableProperty] private bool _autoReportEnvironmentMetricsEnabled;
@@ -411,6 +427,10 @@ public partial class RadioViewModel
 
     partial void OnAutoReportNodeInfoSecondsChanged(int value) { _nextNodeInfoUtc = Next(AutoReportNodeInfoEnabled, value); SaveSettings(); }
     partial void OnAutoReportPositionSecondsChanged(int value) { _nextPositionUtc = Next(AutoReportPositionEnabled, value); SaveSettings(); }
+
+    partial void OnAutoReportPositionSmartEnabledChanged(bool value) => SaveSettings();
+    partial void OnAutoReportPositionSmartMinMoveInputChanged(string value) => SaveSettings();
+    partial void OnAutoReportPositionSmartMinSecondsChanged(int value) => SaveSettings();
     partial void OnAutoReportDeviceMetricsSecondsChanged(int value) { _nextDeviceMetricsUtc = Next(AutoReportDeviceMetricsEnabled, value); SaveSettings(); }
     partial void OnAutoReportEnvironmentMetricsSecondsChanged(int value) { _nextEnvironmentMetricsUtc = Next(AutoReportEnvironmentMetricsEnabled, value); SaveSettings(); }
     partial void OnAutoReportAirQualityMetricsSecondsChanged(int value) { _nextAirQualityMetricsUtc = Next(AutoReportAirQualityMetricsEnabled, value); SaveSettings(); }
@@ -422,6 +442,14 @@ public partial class RadioViewModel
         AutoReportNodeInfoSeconds = Clamp(_settings.AutoReportNodeInfoSeconds);
         AutoReportPositionEnabled = _settings.AutoReportPositionEnabled;
         AutoReportPositionSeconds = Clamp(_settings.AutoReportPositionSeconds);
+        AutoReportPositionSmartEnabled = _settings.AutoReportPositionSmartEnabled;
+        // Written in the units in force right now rather than in metres for
+        // OnUnitSystemNameChanged to convert: this load runs after the saved
+        // unit system has been applied, so there is no later conversion to
+        // ride on and a stored 100 m would sit under an "(ft)" label.
+        AutoReportPositionSmartMinMoveInput = DisplayUnits.FormatShortDistanceInput(
+            _settings.AutoReportPositionSmartMinMoveMeters, CurrentUnitSystem);
+        AutoReportPositionSmartMinSeconds = Math.Max(0, _settings.AutoReportPositionSmartMinSeconds);
         AutoReportDeviceMetricsEnabled = _settings.AutoReportDeviceMetricsEnabled;
         AutoReportDeviceMetricsSeconds = Clamp(_settings.AutoReportDeviceMetricsSeconds);
         AutoReportEnvironmentMetricsEnabled = _settings.AutoReportEnvironmentMetricsEnabled;
@@ -445,6 +473,9 @@ public partial class RadioViewModel
         s.AutoReportNodeInfoSeconds = Clamp(AutoReportNodeInfoSeconds);
         s.AutoReportPositionEnabled = AutoReportPositionEnabled;
         s.AutoReportPositionSeconds = Clamp(AutoReportPositionSeconds);
+        s.AutoReportPositionSmartEnabled = AutoReportPositionSmartEnabled;
+        s.AutoReportPositionSmartMinMoveMeters = AutoReportPositionSmartMinMoveMeters;
+        s.AutoReportPositionSmartMinSeconds = Math.Max(0, AutoReportPositionSmartMinSeconds);
         s.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
         s.AutoReportDeviceMetricsSeconds = Clamp(AutoReportDeviceMetricsSeconds);
         s.AutoReportEnvironmentMetricsEnabled = AutoReportEnvironmentMetricsEnabled;
@@ -453,6 +484,46 @@ public partial class RadioViewModel
         s.AutoReportAirQualityMetricsSeconds = Clamp(AutoReportAirQualityMetricsSeconds);
         s.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
         s.AutoReportNodeStatusSeconds = Clamp(AutoReportNodeStatusSeconds);
+    }
+
+    /// <summary>Tracks the position we last put on the air, so movement can be
+    /// judged against what the mesh actually believes rather than against the
+    /// last fix the GPS happened to produce.</summary>
+    private readonly SmartPositionFilter _positionBroadcast = new();
+
+    /// <summary>Called after every position transmit, scheduled or not.</summary>
+    private void MarkPositionBroadcast(double latitude, double longitude) =>
+        _positionBroadcast.Mark(latitude, longitude, DateTime.UtcNow);
+
+    /// <summary>
+    /// Firmware's <c>position_broadcast_smart_enabled</c>: whether we have
+    /// moved far enough, long enough after the last send, to put a position out
+    /// ahead of the schedule.
+    /// </summary>
+    /// <remarks>
+    /// Distance is measured between the coordinates as they would be
+    /// transmitted, not as they were measured — a channel that fuzzes position
+    /// to a few hundred metres puts every smaller move in the same cell, and
+    /// re-sending an identical pair of numbers is airtime for nothing. That is
+    /// what firmware compares too (computeImpreciseLatLon before the distance).
+    ///
+    /// With nothing sent yet there is no reference to have moved from, and the
+    /// interval owns the first send.
+    /// </remarks>
+    private bool SmartPositionBroadcastDue()
+    {
+        if (!AutoReportPositionSmartEnabled || !_positionBroadcast.HasReference) return false;
+        if (!TryGetHomeLocation(out double lat, out double lon)) return false;
+
+        var channel = PrimaryChannel();
+        if (channel is null || channel.PositionPrecision == 0) return false;
+
+        var (sendLat, sendLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.PositionPrecision);
+        return _positionBroadcast.WouldTake(
+            sendLat, sendLon, DateTime.UtcNow,
+            AutoReportPositionSmartMinMoveMeters,
+            TimeSpan.FromSeconds(Math.Max(0, AutoReportPositionSmartMinSeconds)),
+            out _);
     }
 
     private void UpdateAutoReportSummary()
@@ -487,7 +558,13 @@ public partial class RadioViewModel
                 { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
 
-            if (AutoReportPositionEnabled && DateTime.UtcNow >= _nextPositionUtc)
+            // Two ways a position goes out: the interval is up, or smart
+            // broadcast says we have moved far enough since the last one to be
+            // worth an early send. An early send restarts the interval, as it
+            // does in firmware — the point is a fresh position on the mesh, and
+            // one that just went out is fresh however it was triggered.
+            if (AutoReportPositionEnabled &&
+                (DateTime.UtcNow >= _nextPositionUtc || SmartPositionBroadcastDue()))
             {
                 _nextPositionUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportPositionSeconds));
                 await SendSelfPositionCommand.ExecuteAsync(null);
