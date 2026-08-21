@@ -147,6 +147,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public Func<float, string>? FormatPressure { get; set; }
     public Func<int, string>? FormatAltitude { get; set; }
 
+    /// <summary>Raised after a history row is persisted, so an open history
+    /// window can show it without being reopened. Carries the row rather than
+    /// just the node number: the view models hold display points built from it,
+    /// and re-reading the store for one new row would be a query per packet.</summary>
+    public event Action<uint, NodeLocationHistoryRecord>? LocationHistoryRecorded;
+    public event Action<uint, NodeTelemetryHistoryRecord>? TelemetryHistoryRecorded;
+
     byte[] IMeshRxHost.MyPrivateKeyBytes => MyPrivateKeyProvider?.Invoke() ?? Array.Empty<byte>();
     IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
@@ -279,7 +286,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         var timestamp = rxEpoch > 0
             ? DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime
             : DateTime.UtcNow;
-        _nodeStore.AddTelemetryHistory(TelemetryHistoryFactory.Build(nodeNum, timestamp, telemetry));
+        var record = TelemetryHistoryFactory.Build(nodeNum, timestamp, telemetry);
+        long id = _nodeStore.AddTelemetryHistory(record);
+        TelemetryHistoryRecorded?.Invoke(nodeNum, record with { Id = id });
     }
 
     /// <summary>Stored public key for a peer, as hex; empty when unknown.</summary>
@@ -1207,10 +1216,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     AltitudeM = result.Position.AltitudeM,
                 });
                 if (positionChanged)
-                    _nodeStore.AddLocationHistory(
-                        header.From,
-                        DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime,
+                {
+                    var when = DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime;
+                    long id = _nodeStore.AddLocationHistory(
+                        header.From, when,
                         result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM);
+                    LocationHistoryRecorded?.Invoke(header.From, new NodeLocationHistoryRecord(
+                        id, header.From, when,
+                        result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM));
+                }
                 EvaluateGeofenceCrossing(header.From, result.Position.Latitude, result.Position.Longitude);
                 MarkNodeDirty(header.From);
                 break;
@@ -1611,7 +1625,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // Same "only when it moved" rule the receive path uses: position is
         // re-sent on a timer, and storing every repeat would bury real movement.
         if (moved)
-            _nodeStore.AddLocationHistory(MyNodeNum, now.UtcDateTime, latitude, longitude, altitudeM);
+        {
+            long id = _nodeStore.AddLocationHistory(MyNodeNum, now.UtcDateTime, latitude, longitude, altitudeM);
+            LocationHistoryRecorded?.Invoke(MyNodeNum, new NodeLocationHistoryRecord(
+                id, MyNodeNum, now.UtcDateTime, latitude, longitude, altitudeM));
+        }
 
         EvaluateGeofenceCrossing(MyNodeNum, latitude, longitude);
         MarkNodeDirty(MyNodeNum);

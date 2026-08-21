@@ -915,6 +915,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.AckRequested += SendAck;
         _rxHost.RoutingReplyReceived += CancelAckRetransmit;
         _rxHost.DecodedPacketForFeed += AppendDecodedPacketJson;
+        _rxHost.LocationHistoryRecorded += OnLocationHistoryRecorded;
+        _rxHost.TelemetryHistoryRecorded += OnTelemetryHistoryRecorded;
         _rxHost.SelectedTabProvider = () => SelectedTab;
         // Relaying is opt-in via the Routing checkbox; the scheduler is only
         // consulted when RoutingRelayEnabled is on (see RelayContextProvider).

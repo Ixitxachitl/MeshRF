@@ -235,15 +235,23 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     }
 
     /// <summary>Appends a newly received telemetry row (already persisted).</summary>
+    /// <remarks>
+    /// Ignored until the history has been loaded. The row is in the store
+    /// already, so a load that has not happened yet will pick it up — whereas
+    /// adding it to an empty list now would have the load duplicate it.
+    /// </remarks>
     public void AppendTelemetryRecord(NodeTelemetryHistoryRecord record)
     {
+        if (!_historyLoaded) return;
         AddTelemetryPoint(TelemetryHistoryPointFactory.FromRecord(record, _temperatureFormatter?.Invoke(), _pressureFormatter?.Invoke()));
         RaiseHistoryFlags();
     }
 
     /// <summary>Appends a newly received position (already persisted).</summary>
+    /// <remarks>Same not-yet-loaded rule as <see cref="AppendTelemetryRecord"/>.</remarks>
     public void AppendLocationRecord(NodeLocationHistoryRecord record)
     {
+        if (!_historyLoaded) return;
         LocationHistory.Add(new LocationHistoryPoint(
             record.Latitude, record.Longitude, record.AltitudeM,
             record.AltitudeM is int alt ? FormatAltitude(alt) : string.Empty,

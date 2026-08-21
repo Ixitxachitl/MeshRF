@@ -62,22 +62,95 @@ public partial class RadioViewModel
     /// <summary>How we're labelled in message and reaction attributions.</summary>
     public string MyDisplayName => _rxHost.NodeDisplayName(_rxHost.MyNodeNum);
 
+    /// <summary>
+    /// Detached history view models, one per node, kept only as long as
+    /// something still holds them.
+    /// </summary>
+    /// <remarks>
+    /// Weakly, so this does not accumulate a full loaded history for every node
+    /// whose track was ever glanced at. The open window is the strong reference
+    /// — it is the DataContext — so an entry lives exactly as long as the
+    /// window that needs it, and reopening after a close simply builds a new
+    /// one and reloads.
+    /// </remarks>
+    private readonly Dictionary<uint, WeakReference<ConversationTabViewModel>> _detachedHistory = new();
+
     /// <summary>A conversation view model to render history against. Reuses the
     /// open DM tab when there is one so the window and the tab share state;
-    /// otherwise builds a detached one, which is how history is shown for a
-    /// node with no conversation — including our own.</summary>
+    /// otherwise a detached one, which is how history is shown for a node with
+    /// no conversation — including our own.</summary>
+    /// <remarks>
+    /// The detached one is reused rather than rebuilt per call, because live
+    /// updates are routed to it by node number: a fresh instance per open would
+    /// leave the window bound to a view model nothing is feeding.
+    /// </remarks>
     public ConversationTabViewModel HistoryConversationFor(uint nodeNum)
     {
+        // A conversation tab is preferred for a new window, so the window and
+        // the tab share one set of history. Any detached view model already
+        // handed out is deliberately left registered: a window opened before
+        // the tab existed is still on screen and still has to fill in.
         var existing = Tabs.OfType<ConversationTabViewModel>().FirstOrDefault(c => c.NodeNum == nodeNum);
         if (existing is not null) return existing;
 
-        return new ConversationTabViewModel(
+        if (_detachedHistory.TryGetValue(nodeNum, out var slot) && slot.TryGetTarget(out var cached))
+            return cached;
+
+        var convo = new ConversationTabViewModel(
             nodeNum,
             nodeNum == _rxHost.MyNodeNum ? (MyLongName ?? "Me") : _rxHost.NodeDisplayName(nodeNum),
             _nodeStore,
             () => FormatTemperature,
             () => (Func<float, string>)(hpa => $"{hpa:0.0} hPa"),
             () => (Func<int, string>)(m => DisplayUnits.FormatAltitude(m, CurrentUnitSystem)));
+
+        _detachedHistory[nodeNum] = new WeakReference<ConversationTabViewModel>(convo);
+        return convo;
+    }
+
+    /// <summary>
+    /// Every view model showing this node's history: the conversation tab if
+    /// one is open, and the detached one if a history window is up without a
+    /// tab. Both can exist, and neither need.
+    /// </summary>
+    private IEnumerable<ConversationTabViewModel> HistoryViewsFor(uint nodeNum)
+    {
+        var tab = Tabs.OfType<ConversationTabViewModel>().FirstOrDefault(c => c.NodeNum == nodeNum);
+        if (tab is not null) yield return tab;
+
+        if (_detachedHistory.TryGetValue(nodeNum, out var slot))
+        {
+            if (slot.TryGetTarget(out var detached))
+            {
+                if (!ReferenceEquals(detached, tab)) yield return detached;
+            }
+            else
+            {
+                // The window that held it has closed.
+                _detachedHistory.Remove(nodeNum);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Routes a newly stored history row to whatever is displaying it, so an
+    /// open history window fills in as packets arrive instead of showing
+    /// whatever was there when it opened.
+    /// </summary>
+    /// <remarks>
+    /// Marshalled to the UI thread: these arrive on the decode path, and the
+    /// collections on the other end are bound to a grid, a graph and a map.
+    /// </remarks>
+    private void OnLocationHistoryRecorded(uint nodeNum, NodeLocationHistoryRecord record) =>
+        OnUiThread(() => { foreach (var view in HistoryViewsFor(nodeNum)) view.AppendLocationRecord(record); });
+
+    private void OnTelemetryHistoryRecorded(uint nodeNum, NodeTelemetryHistoryRecord record) =>
+        OnUiThread(() => { foreach (var view in HistoryViewsFor(nodeNum)) view.AppendTelemetryRecord(record); });
+
+    private static void OnUiThread(Action action)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) action();
+        else Dispatcher.UIThread.Post(action);
     }
 
     // ----- USB serial GPS -----
