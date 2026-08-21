@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -449,52 +448,22 @@ public sealed class AppSettings
         }
     }
 
-    // Secrets at rest — private key and MQTT password. Windows uses DPAPI
-    // (CurrentUser scope); entropy is a fixed app-specific constant, not a
-    // secret — it just scopes the protected blob to this app. Elsewhere,
-    // MachineBoundSecret provides AES-GCM under a machine/user-derived key:
-    // weaker than DPAPI (see its remarks) but no longer plaintext. Both paths
-    // treat unrecognized stored values as legacy plaintext, so existing
-    // settings files keep working and encrypt on the next save.
+    // Secrets at rest. The mechanism and its caveats live in
+    // Security.SecretProtection, which the channel store shares; the entropy
+    // values below are not secrets, they just scope each protected blob to one
+    // kind of secret so a stored MQTT password cannot be handed to the
+    // private-key parser.
     private static readonly byte[] s_privateKeyEntropy = Encoding.UTF8.GetBytes("MeshRF.UserPrivateKey.v1");
     private static readonly byte[] s_mqttPasswordEntropy = Encoding.UTF8.GetBytes("MeshRF.MqttPassword.v1");
     private static readonly byte[] s_scriptCredentialEntropy = Encoding.UTF8.GetBytes("MeshRF.ScriptCredential.v1");
 
     private static string SecretKeyDir => Path.GetDirectoryName(SettingsPath)!;
 
-    private static string ProtectSecretText(string plain, byte[] entropy, bool base64)
-    {
-        if (string.IsNullOrEmpty(plain)) return string.Empty;
-        if (!OperatingSystem.IsWindows()) return Security.MachineBoundSecret.Protect(plain, SecretKeyDir);
-        try
-        {
-            var bytes = base64 ? Convert.FromBase64String(plain) : Encoding.UTF8.GetBytes(plain);
-            var protectedBytes = ProtectedData.Protect(bytes, entropy, DataProtectionScope.CurrentUser);
-            return Convert.ToBase64String(protectedBytes);
-        }
-        catch
-        {
-            return plain;
-        }
-    }
+    private static string ProtectSecretText(string plain, byte[] entropy, bool base64) =>
+        Security.SecretProtection.ProtectText(plain, entropy, SecretKeyDir, base64);
 
-    private static string UnprotectSecretText(string onDisk, byte[] entropy, bool base64)
-    {
-        if (string.IsNullOrEmpty(onDisk)) return string.Empty;
-        if (!OperatingSystem.IsWindows()) return Security.MachineBoundSecret.Unprotect(onDisk, SecretKeyDir);
-        try
-        {
-            var blob = Convert.FromBase64String(onDisk);
-            var bytes = ProtectedData.Unprotect(blob, entropy, DataProtectionScope.CurrentUser);
-            return base64 ? Convert.ToBase64String(bytes) : Encoding.UTF8.GetString(bytes);
-        }
-        catch
-        {
-            // Not a DPAPI blob for this app/user (legacy plaintext, or a
-            // different user/machine) — treat as plaintext.
-            return onDisk;
-        }
-    }
+    private static string UnprotectSecretText(string onDisk, byte[] entropy, bool base64) =>
+        Security.SecretProtection.UnprotectText(onDisk, entropy, SecretKeyDir, base64);
 
     private void NormalizeUnitSystem()
     {

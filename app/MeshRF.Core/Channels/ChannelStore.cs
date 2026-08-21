@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Text;
+using MeshRF.Security;
 using Microsoft.Data.Sqlite;
 
 namespace MeshRF.Channels;
@@ -35,6 +37,7 @@ public sealed class ChannelStore : IDisposable
 
     public ChannelStore(string dbPath)
     {
+        _secretKeyDir = Path.GetDirectoryName(Path.GetFullPath(dbPath)) ?? ".";
         _conn = new SqliteConnection($"Data Source={dbPath}");
         _conn.Open();
         using (var wal = _conn.CreateCommand())
@@ -43,6 +46,7 @@ public sealed class ChannelStore : IDisposable
             wal.ExecuteNonQuery();
         }
         EnsureSchema();
+        ProtectStoredKeys();
     }
 
     private void EnsureSchema()
@@ -84,7 +88,7 @@ public sealed class ChannelStore : IDisposable
                 """;
             cmd.Parameters.AddWithValue("$idx",  c.Index);
             cmd.Parameters.AddWithValue("$name", c.Name);
-            cmd.Parameters.AddWithValue("$psk",  c.Psk);
+            cmd.Parameters.AddWithValue("$psk",  ProtectPsk(c.Psk));
             cmd.Parameters.AddWithValue("$role", (int)c.Role);
             cmd.Parameters.AddWithValue("$pp",   c.PositionPrecision);
             cmd.Parameters.AddWithValue("$up",   c.UplinkEnabled   ? 1 : 0);
@@ -121,12 +125,20 @@ public sealed class ChannelStore : IDisposable
             using var rd = cmd.ExecuteReader();
             while (rd.Read())
             {
+                bool recovered = TryUnprotectPsk((byte[])rd.GetValue(2), out var psk);
                 list.Add(new ChannelConfig
                 {
                     Index             = rd.GetInt32(0),
                     Name              = rd.GetString(1),
-                    Psk               = (byte[])rd.GetValue(2),
-                    Role              = (ChannelRole)rd.GetInt32(3),
+                    Psk               = psk,
+                    // A key we cannot decrypt is a key we do not have. Disabled
+                    // rather than empty: an empty PSK on a primary means "no
+                    // encryption", so falling back to it would quietly put this
+                    // channel's traffic on the air in the clear. Disabled
+                    // matches nothing and carries nothing, and the channel
+                    // dialog says so, which is the state to be in until the key
+                    // is entered again.
+                    Role              = recovered ? (ChannelRole)rd.GetInt32(3) : ChannelRole.Disabled,
                     PositionPrecision = (byte)rd.GetInt32(4),
                     UplinkEnabled     = rd.GetInt32(5) != 0,
                     DownlinkEnabled   = rd.GetInt32(6) != 0,
@@ -134,6 +146,64 @@ public sealed class ChannelStore : IDisposable
             }
         }
         return list;
+    }
+
+    // Channel keys at rest. A PSK is what makes a channel private, so it gets
+    // the same treatment as the private key and the MQTT password: DPAPI on
+    // Windows, MachineBoundSecret elsewhere. The entropy scopes the blob to
+    // this one kind of secret.
+    private static readonly byte[] PskEntropy = Encoding.UTF8.GetBytes("MeshRF.ChannelPsk.v1");
+
+    // The salt file lives beside the database it protects, so a store opened
+    // on a test path does not reach into the user's real data directory.
+    private readonly string _secretKeyDir;
+
+    private byte[] ProtectPsk(byte[] psk) =>
+        SecretProtection.ProtectBytes(psk, PskEntropy, _secretKeyDir);
+
+    private bool TryUnprotectPsk(byte[] stored, out byte[] psk) =>
+        SecretProtection.TryUnprotectBytes(stored, PskEntropy, _secretKeyDir, out psk);
+
+    /// <summary>
+    /// Re-writes any channel still holding a plaintext key, once, at startup.
+    /// </summary>
+    /// <remarks>
+    /// Without this a key written before protection existed stays readable
+    /// until someone happens to edit that channel — which for a channel that
+    /// works is never.
+    /// </remarks>
+    private void ProtectStoredKeys()
+    {
+        List<(int Index, byte[] Psk)> plain = new();
+        lock (_gate)
+        {
+            using var read = _conn.CreateCommand();
+            read.CommandText = "SELECT idx, psk FROM channels";
+            using var rd = read.ExecuteReader();
+            while (rd.Read())
+            {
+                var stored = (byte[])rd.GetValue(1);
+                if (stored.Length > 0 && !SecretProtection.IsProtected(stored))
+                    plain.Add((rd.GetInt32(0), stored));
+            }
+        }
+
+        if (plain.Count == 0) return;
+
+        lock (_gate)
+        {
+            using var tx = _conn.BeginTransaction();
+            foreach (var (index, psk) in plain)
+            {
+                using var cmd = _conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = "UPDATE channels SET psk = $psk WHERE idx = $idx";
+                cmd.Parameters.AddWithValue("$psk", ProtectPsk(psk));
+                cmd.Parameters.AddWithValue("$idx", index);
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
     }
 
     private void ThrowIfDisposed()

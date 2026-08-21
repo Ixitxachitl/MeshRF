@@ -24,10 +24,16 @@
                   SelectionChanged="OnFieldChanged" />
 
         <TextBlock Grid.Row="2" Grid.Column="0" Text="PSK" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <!-- Masked by default. A channel key is the whole of that channel's
+             privacy, and this dialog gets opened in front of other people and
+             on shared screens. -->
         <TextBox Name="PskBox" Grid.Row="2" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas"
-                 LostFocus="OnFieldChanged"
+                 LostFocus="OnFieldChanged" PasswordChar="●"
+                 RevealPassword="{Binding #PskReveal.IsChecked}"
                  ToolTip.Tip="Empty = the primary's key on a secondary, no encryption on the primary. AQ== = default key, or paste base64/hex" />
         <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Margin="8,4,0,4" Spacing="4">
+            <ToggleButton Name="PskReveal" Content="Show" Padding="8,2"
+                          ToolTip.Tip="Show the key in the clear" />
             <Button Content="Default" Padding="8,2" Click="OnUseDefaultKey" />
             <Button Content="Rnd 16" Padding="8,2" Click="OnRandom16" />
             <Button Content="Rnd 32" Padding="8,2" Click="OnRandom32" />
