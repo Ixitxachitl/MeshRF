@@ -1203,10 +1203,14 @@
                                       Margin="4,0,0,0" VerticalAlignment="Center"
                                       IsChecked="{Binding AutoScroll}"
                                       ToolTip.Tip="Keep the newest message in view" />
+                        <!-- Click rather than the command directly: removing a
+                             channel is confirmed first, and a dialog needs an
+                             owning window. Enablement is bound separately, so
+                             it still greys out on the primary. -->
                         <Button DockPanel.Dock="Right" Width="22" Height="22" Padding="0" Margin="4,0,0,0"
                                 Content="&#x2212;" FontSize="13" VerticalAlignment="Center"
                                 IsEnabled="{Binding CanRemoveSelectedChannel}"
-                                Command="{Binding RemoveSelectedChannelCommand}"
+                                Click="OnRemoveChannel"
                                 ToolTip.Tip="Remove selected channel" />
                         <Button DockPanel.Dock="Right" Width="22" Height="22" Padding="0"
                                 Content="+" FontSize="13" VerticalAlignment="Center"

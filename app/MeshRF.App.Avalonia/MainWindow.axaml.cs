@@ -781,6 +781,41 @@ public partial class MainWindow : Window
         convo.ClearMessagesCommand.Execute(null);
     }
 
+    /// <summary>
+    /// The Channels "−" button. Confirmation lives here rather than in the view
+    /// model command because a dialog needs an owning window.
+    /// </summary>
+    /// <remarks>
+    /// Worth asking about even though it is one small button: it sits beside
+    /// "+", it acts on whichever tab happens to be selected rather than on
+    /// something the click identified, and what goes with the channel is its
+    /// key — which, being encrypted at rest, exists nowhere else unless it was
+    /// written down.
+    /// </remarks>
+    private async void OnRemoveChannel(object? sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.CanRemoveSelectedChannel) return;
+        if (_viewModel.SelectedTab is not ChannelTabViewModel channel) return;
+
+        var name = string.IsNullOrWhiteSpace(channel.Config.Name)
+            ? $"channel {channel.Config.Index}"
+            : channel.Config.Name;
+
+        if (!await ConfirmDialog.ConfirmAsync(this, "Remove channel",
+                $"Remove {name}? Its key goes with it, so unless you have that written down "
+                + "somewhere this cannot be undone.",
+                confirmText: "Remove"))
+            return;
+
+        // The prompt is modal to the user, but an arriving message or a script
+        // can still move the selection while it is open, and the command acts
+        // on whatever is selected. Put it back, so what gets removed is the
+        // channel the prompt named.
+        if (!_viewModel.Tabs.Contains(channel)) return;
+        _viewModel.SelectedTab = channel;
+        _viewModel.RemoveSelectedChannelCommand.Execute(null);
+    }
+
     private async void OnCopyLog(object? sender, RoutedEventArgs e)
     {
         var text = string.Join(Environment.NewLine, _viewModel.LogLines);
