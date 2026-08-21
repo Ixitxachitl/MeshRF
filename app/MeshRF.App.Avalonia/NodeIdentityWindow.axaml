@@ -109,8 +109,13 @@
                     <TextBox Grid.Column="1" Margin="4,0,0,0" FontFamily="Consolas" PlaceholderText="9600"
                              Text="{Binding GpsBaudRateText}" ToolTip.Tip="Optional baud override; blank = auto-detect" />
                 </Grid>
-                <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
-                           Foreground="{DynamicResource BrushSubtle}" Text="{Binding GpsStatus}" />
+                <!-- Fixed to the two lines the status is written as. Letting
+                     it size to its content moves every row below it whenever a
+                     coordinate changes width, which is once a second. -->
+                <TextBlock Margin="0,4,0,0" Height="30" TextWrapping="Wrap"
+                           MaxLines="2" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource BrushSubtle}" Text="{Binding GpsStatus}"
+                           ToolTip.Tip="{Binding GpsStatus}" />
             </StackPanel>
 
             <!-- Row 14 sits under Location source because it only governs the

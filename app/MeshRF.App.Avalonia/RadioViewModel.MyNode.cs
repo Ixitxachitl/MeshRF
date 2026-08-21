@@ -151,12 +151,15 @@ public partial class RadioViewModel
                 out double movedMeters);
 
             if (!take)
-                holdNote = "  (holding — " +
-                           DisplayUnits.FormatShortDistance(movedMeters, CurrentUnitSystem) +
-                           " from the last taken)";
+                holdNote = "  (holding, moved " +
+                           DisplayUnits.FormatShortDistance(movedMeters, CurrentUnitSystem) + ")";
         }
 
-        GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}" +
+        // Two lines, always: the port on the first and the reading on the
+        // second. One long line re-wraps as the numbers change width, which
+        // shoves every row under it up and down once a second.
+        GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud\n" +
+                    $"{fix.Latitude:F6}, {fix.Longitude:F6}" +
                     (fix.AltitudeM is int a
                         ? $"  alt {DisplayUnits.FormatAltitude(a, CurrentUnitSystem)}" : string.Empty) +
                     holdNote;

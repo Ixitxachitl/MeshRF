@@ -332,7 +332,24 @@ public sealed class UsbSerialGpsService : IDisposable
         return true;
     }
 
-    private void PublishStatus(string status) => StatusChanged?.Invoke(status);
+    private string _lastStatus = string.Empty;
+
+    /// <summary>
+    /// Announces a status, unless it is the one already announced.
+    /// </summary>
+    /// <remarks>
+    /// "Receiving fixes" is published for every NMEA sentence parsed — once a
+    /// second, or more. Repeating it is not news, and a subscriber that writes
+    /// its own line in between (the settings window does) ends up alternating
+    /// between two strings of different lengths, which reads as a flicker and
+    /// re-wraps the panel under it on every fix.
+    /// </remarks>
+    private void PublishStatus(string status)
+    {
+        if (status == _lastStatus) return;
+        _lastStatus = status;
+        StatusChanged?.Invoke(status);
+    }
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken token)
     {
