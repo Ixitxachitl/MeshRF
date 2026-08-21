@@ -1,6 +1,8 @@
 ﻿// SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using Avalonia.Collections;
 using Avalonia.Media;
@@ -78,6 +80,48 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public ObservableCollection<NodeRecord> Nodes => _rxHost.Nodes;
     public ObservableCollection<WaypointRecord> Waypoints => _rxHost.Waypoints;
     public ObservableCollection<string> LogLines => _rxHost.LogLines;
+
+    /// <summary>The log panel's contents as one block of text.</summary>
+    /// <remarks>
+    /// The panel shows a single SelectableTextBlock rather than a list of them
+    /// so a selection can run across lines and be copied. Kept in step with
+    /// <see cref="LogLines"/> incrementally — appending a line and dropping the
+    /// oldest are both edits at one end, so neither has to re-join the whole
+    /// buffer.
+    /// </remarks>
+    [ObservableProperty]
+    private string _logText = string.Empty;
+
+    private readonly StringBuilder _logTextBuffer = new();
+
+    private void OnLogLinesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        switch (e.Action)
+        {
+            case NotifyCollectionChangedAction.Add when e.NewItems is not null:
+                foreach (string line in e.NewItems)
+                {
+                    if (_logTextBuffer.Length > 0) _logTextBuffer.Append('\n');
+                    _logTextBuffer.Append(line);
+                }
+                break;
+
+            // Only ever the oldest lines, trimmed off the front by
+            // AvaloniaMeshRxHost.Log — each one plus the newline that followed
+            // it.
+            case NotifyCollectionChangedAction.Remove when e.OldItems is not null:
+                foreach (string line in e.OldItems)
+                    _logTextBuffer.Remove(0, Math.Min(_logTextBuffer.Length, line.Length + 1));
+                break;
+
+            default:
+                _logTextBuffer.Clear();
+                _logTextBuffer.Append(string.Join('\n', LogLines));
+                break;
+        }
+
+        LogText = _logTextBuffer.ToString();
+    }
 
     [ObservableProperty]
     private ITabItem? _selectedTab;
@@ -831,6 +875,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             ? _settings.UserNodeNum
             : (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE);
         _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum, savedOpenConversations);
+        _rxHost.LogLines.CollectionChanged += OnLogLinesChanged;
         _rxHost.OpenConversationsChanged += SaveOpenConversations;
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
         _rxHost.IncomingChannelMessage += PlayIncomingRingtone;

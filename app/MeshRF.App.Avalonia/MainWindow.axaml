@@ -1404,8 +1404,20 @@
                                     ToolTip.Tip="Every decoded packet as JSON" />
                             <TextBlock Text="Log" FontWeight="Bold" Margin="4,0,0,0" VerticalAlignment="Center" />
                         </DockPanel>
-                        <ListBox ItemsSource="{Binding LogLines}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" FontSize="11"
-                                 local:AutoScrollBehavior.IsEnabled="{Binding LogAutoScroll}" />
+                        <!-- One text block, not a row per line: a selection has
+                             to be able to run across lines so a few of them can
+                             be copied out. Long lines wrap instead of running
+                             off the right edge. -->
+                        <Border Background="{DynamicResource BrushPanelBackground}"
+                                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                            <ScrollViewer x:Name="LogScroll" Padding="4,2"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <SelectableTextBlock x:Name="LogView" Text="{Binding LogText}" TextWrapping="Wrap"
+                                                     FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
+                                                     FontSize="11" />
+                            </ScrollViewer>
+                        </Border>
                     </DockPanel>
                 </Grid>
             </Grid>

@@ -82,6 +82,16 @@ public partial class MainWindow : Window
 
         _viewModel.PacketDecoded += OnPacketDecoded;
 
+        // The log panel is a single text block rather than a list, so there is
+        // no item to scroll into view — follow the text itself.
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(RadioViewModel.LogText)
+                              or nameof(RadioViewModel.LogAutoScroll))
+                TailLog();
+        };
+        Opened += (_, _) => TailLog();
+
         // Capture layout while the visual tree is still alive; Closed fires
         // after teardown, when the grids' measured sizes are gone.
         Closing += (_, _) => SaveLayout();
@@ -90,6 +100,18 @@ public partial class MainWindow : Window
             _spectrumTimer.Stop();
             _viewModel.Dispose();
         };
+    }
+
+    /// <summary>
+    /// Keeps the newest log line in view, unless something is selected — a
+    /// selection is on its way to the clipboard, and dragging the view out from
+    /// under it while lines keep arriving makes it impossible to finish.
+    /// </summary>
+    private void TailLog()
+    {
+        if (!_viewModel.LogAutoScroll) return;
+        if (LogView.SelectionStart != LogView.SelectionEnd) return;
+        Dispatcher.UIThread.Post(() => LogScroll.ScrollToEnd(), DispatcherPriority.Background);
     }
 
     private void PullSpectrum()
