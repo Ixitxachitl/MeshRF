@@ -113,6 +113,22 @@
                            Foreground="{DynamicResource BrushSubtle}" Text="{Binding GpsStatus}" />
             </StackPanel>
 
+            <!-- Row 14 sits under Location source because it only governs the
+                 serial GPS: the manual boxes are typed, not streamed. -->
+            <TextBlock Grid.Row="14" Grid.Column="0" Text="Smart position" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="14" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
+                        IsEnabled="{Binding IsUsbSerialLocationSource}">
+                <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding GpsSmartPosition}"
+                          ToolTip.Tip="Only take a fix that is both far enough from the last one taken and long enough after it. A receiver reports every second and wanders while standing still; without this the marker twitches in place and the settings file is rewritten all day." />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="{Binding GpsSmartPositionMinMoveLabel}" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinMoveInput}"
+                         ToolTip.Tip="How far the receiver must have moved since the last fix taken. Distance accumulates, so a slow walk still gets there." />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Min gap" />
+                <TextBox Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinSeconds}"
+                         ToolTip.Tip="Shortest time between two fixes being taken, measured from the last one taken." />
+                <TextBlock VerticalAlignment="Center" Text="sec" />
+            </StackPanel>
+
             <TextBlock Grid.Row="15" Grid.Column="0" Text="{Binding HomeAltitudeLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
             <Grid Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
                   IsEnabled="{Binding IsManualLocationSource}">

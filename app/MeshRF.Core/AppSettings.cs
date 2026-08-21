@@ -268,6 +268,13 @@ public sealed class AppSettings
     public string GpsSerialPort { get; set; } = string.Empty;
     public int GpsBaudRate { get; set; }
 
+    // Smart position: how much of a serial GPS's stream reaches the stored
+    // position and the map. On by default — an NMEA receiver reports every
+    // second whether or not it has moved.
+    public bool GpsSmartPosition { get; set; } = true;
+    public uint GpsSmartPositionMinMoveMeters { get; set; } = 10;
+    public int GpsSmartPositionMinSeconds { get; set; } = 30;
+
     // -- Main window geometry / layout -------------------------------------
 
     public double? WindowLeft { get; set; }

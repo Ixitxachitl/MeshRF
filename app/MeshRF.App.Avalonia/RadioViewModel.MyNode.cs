@@ -83,6 +83,11 @@ public partial class RadioViewModel
     // ----- USB serial GPS -----
 
     private readonly UsbSerialGpsService _gpsService = new();
+    private readonly SmartPositionFilter _smartPosition = new();
+
+    /// <summary>Drops the reference fix, so the next one through is taken as
+    /// it stands. Called whenever the thresholds or the source change.</summary>
+    private void ResetSmartPosition() => _smartPosition.Reset();
 
     [ObservableProperty] private string _gpsStatus = "Manual location selected.";
 
@@ -106,6 +111,7 @@ public partial class RadioViewModel
     {
         var options = BuildGpsOptions();
         _gpsService.UpdateOptions(options);
+        ResetSmartPosition();
 
         if (IsUsbSerialLocationSource)
         {
@@ -121,12 +127,41 @@ public partial class RadioViewModel
         }
     }
 
+    /// <summary>
+    /// Takes a fix from the receiver, subject to the smart-position filter.
+    /// </summary>
+    /// <remarks>
+    /// The status line reports every fix, taken or held: it is what says the
+    /// receiver is alive, and a held one still carries how far it has drifted,
+    /// which is what the thresholds have to be set against. Only a taken fix
+    /// reaches the position boxes — writing those persists the settings file
+    /// and re-renders the map, and the receiver publishes every second.
+    /// </remarks>
     private void ApplyGpsFix(GpsFix fix)
     {
+        bool take = true;
+        string holdNote = string.Empty;
+
+        if (GpsSmartPosition && IsUsbSerialLocationSource)
+        {
+            take = _smartPosition.ShouldTake(
+                fix.Latitude, fix.Longitude, DateTime.UtcNow,
+                GpsSmartPositionMinMoveMeters,
+                TimeSpan.FromSeconds(Math.Max(0, GpsSmartPositionMinSeconds)),
+                out double movedMeters);
+
+            if (!take)
+                holdNote = "  (holding — " +
+                           DisplayUnits.FormatShortDistance(movedMeters, CurrentUnitSystem) +
+                           " from the last taken)";
+        }
+
         GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}" +
                     (fix.AltitudeM is int a
-                        ? $"  alt {DisplayUnits.FormatAltitude(a, CurrentUnitSystem)}" : string.Empty);
-        if (!IsUsbSerialLocationSource) return;
+                        ? $"  alt {DisplayUnits.FormatAltitude(a, CurrentUnitSystem)}" : string.Empty) +
+                    holdNote;
+
+        if (!take || !IsUsbSerialLocationSource) return;
 
         HomeLatitudeText = fix.Latitude.ToString("F6", CultureInfo.InvariantCulture);
         HomeLongitudeText = fix.Longitude.ToString("F6", CultureInfo.InvariantCulture);

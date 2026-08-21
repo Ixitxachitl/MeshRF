@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.Channels;
+using MeshRF.Location;
 using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
@@ -714,6 +715,25 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _gpsBaudRateText = string.Empty;
 
+    /// <summary>Thin the serial GPS stream down to fixes that mean something.
+    /// See <see cref="SmartPositionFilter"/> for what "something" is.</summary>
+    [ObservableProperty]
+    private bool _gpsSmartPosition = true;
+
+    /// <summary>How far the receiver must have moved, in the display units —
+    /// the same convention as the waypoint geofence radius beside it.</summary>
+    [ObservableProperty]
+    private string _gpsSmartPositionMinMoveInput = "10";
+
+    [ObservableProperty]
+    private int _gpsSmartPositionMinSeconds = 30;
+
+    public string GpsSmartPositionMinMoveLabel =>
+        $"Min move ({DisplayUnits.ShortDistanceUnitShort(CurrentUnitSystem)})";
+
+    internal uint GpsSmartPositionMinMoveMeters =>
+        DisplayUnits.ParseShortDistanceInput(GpsSmartPositionMinMoveInput, CurrentUnitSystem) ?? 0u;
+
     // ----- Display units -----
 
     public string[] UnitSystems { get; } = { "Metric", "Imperial" };
@@ -824,6 +844,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedRoutingRelayEnabled = _settings.RoutingRelayEnabled;
         var savedHomeLocationSource = _settings.HomeLocationSource;
         var savedGpsSerialPort = _settings.GpsSerialPort;
+        var savedGpsSmartPosition = _settings.GpsSmartPosition;
+        var savedGpsSmartPositionMinMove = _settings.GpsSmartPositionMinMoveMeters;
+        var savedGpsSmartPositionMinSeconds = _settings.GpsSmartPositionMinSeconds;
         var savedGpsBaudRate = _settings.GpsBaudRate;
         var savedUnitSystem = _settings.UnitSystem;
         var savedRingtoneMode = _settings.RingtoneMode;
@@ -1010,6 +1033,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (HomeLocationSourceOptions.Contains(savedHomeLocationSource)) HomeLocationSource = savedHomeLocationSource;
         GpsSerialPort = savedGpsSerialPort;
         GpsBaudRateText = savedGpsBaudRate > 0 ? savedGpsBaudRate.ToString(CultureInfo.InvariantCulture) : string.Empty;
+        GpsSmartPosition = savedGpsSmartPosition;
+        // In metres, like the geofence radius below it, and re-expressed by
+        // OnUnitSystemNameChanged if the saved unit system is imperial.
+        GpsSmartPositionMinMoveInput = savedGpsSmartPositionMinMove.ToString(CultureInfo.InvariantCulture);
+        GpsSmartPositionMinSeconds = Math.Max(0, savedGpsSmartPositionMinSeconds);
         if (UnitSystems.Contains(savedUnitSystem)) UnitSystemName = savedUnitSystem;
         if (RingtoneModes.Contains(savedRingtoneMode)) RingtoneMode = savedRingtoneMode;
         RingtoneVolume = savedRingtoneVolume;
@@ -1770,6 +1798,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnGpsSerialPortChanged(string value) { ApplyLocationSource(startOrStop: true); SaveSettings(); }
     partial void OnGpsBaudRateTextChanged(string value) { ApplyLocationSource(startOrStop: true); SaveSettings(); }
 
+    // Each of these changes what counts as a fix worth taking, so the fix
+    // already on screen is no longer a reference the new setting was measured
+    // against — start again from the next one.
+    partial void OnGpsSmartPositionChanged(bool value) { ResetSmartPosition(); SaveSettings(); }
+    partial void OnGpsSmartPositionMinMoveInputChanged(string value) { ResetSmartPosition(); SaveSettings(); }
+    partial void OnGpsSmartPositionMinSecondsChanged(int value) { ResetSmartPosition(); SaveSettings(); }
+
     partial void OnHomeLocationSourceChanged(string value)
     {
         OnPropertyChanged(nameof(IsUsbSerialLocationSource));
@@ -1824,6 +1859,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             WaypointGeofenceRadiusInput, _inputUnitSystem, CurrentUnitSystem);
         HomeAltitudeText = DisplayUnits.ConvertAltitudeText(
             HomeAltitudeText, _inputUnitSystem, CurrentUnitSystem);
+        GpsSmartPositionMinMoveInput = DisplayUnits.ConvertShortDistanceText(
+            GpsSmartPositionMinMoveInput, _inputUnitSystem, CurrentUnitSystem);
         _inputUnitSystem = CurrentUnitSystem;
         // Skipped mid-construction: nothing is rendered yet, and the
         // constructor refreshes once after the load instead.
@@ -1835,6 +1872,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HomeAltitudeLabel));
         OnPropertyChanged(nameof(NodeDistanceUnitShort));
         OnPropertyChanged(nameof(WaypointGeofenceRadiusLabel));
+        OnPropertyChanged(nameof(GpsSmartPositionMinMoveLabel));
         SaveSettings();
     }
 
@@ -1932,6 +1970,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.HomeLocationSource = HomeLocationSource;
         _settings.GpsSerialPort = GpsSerialPort;
         _settings.GpsBaudRate = int.TryParse(GpsBaudRateText, out var baud) ? baud : 0;
+        _settings.GpsSmartPosition = GpsSmartPosition;
+        _settings.GpsSmartPositionMinMoveMeters = GpsSmartPositionMinMoveMeters;
+        _settings.GpsSmartPositionMinSeconds = Math.Max(0, GpsSmartPositionMinSeconds);
         _settings.RingtoneMode = RingtoneMode;
         _settings.RingtoneVolume = (int)Math.Round(RingtoneVolume);
         _settings.RingtoneRtttl = RingtoneRtttl;

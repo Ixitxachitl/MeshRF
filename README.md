@@ -143,7 +143,9 @@ stays hidden and the first device found is used.
 - Device metrics and environment metrics display.
 - Channel utilization and TX airtime surfaced in the UI.
 - OpenStreetMap-based map view with clustering and location history support.
-- Home location from manual map selection or USB serial GPS source.
+- Home location from manual map selection or USB serial GPS source, with a
+  smart-position filter so a receiver reporting every second only moves the
+  marker when it has actually moved.
 - Filtering for nodes, telemetry presence, ignore state, and position-history
   presence.
 - Configurable map node label modes.
