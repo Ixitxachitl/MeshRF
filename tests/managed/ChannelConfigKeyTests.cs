@@ -26,6 +26,20 @@ public class ChannelConfigKeyTests
         Assert.Equal(ChannelConfig.DefaultPsk, WithPsk(0x01).EffectiveKey);
     }
 
+    [Fact]
+    public void SpellingTheDefaultKeyOutMatchesItsShorthand()
+    {
+        // The Default button writes the full sixteen bytes rather than AQ==.
+        // Both forms have to key and hash identically or pressing it would
+        // silently move the channel off the traffic it was matching.
+        var shorthand = WithPsk(0x01);
+        var spelledOut = WithPsk(ChannelConfig.DefaultPsk);
+
+        Assert.Equal(shorthand.EffectiveKey, spelledOut.EffectiveKey);
+        Assert.Equal(shorthand.Hash, spelledOut.Hash);
+        Assert.True(spelledOut.UsesDefaultKey);
+    }
+
     [Theory]
     [InlineData(0x02, 0x02)] // documented simple2
     [InlineData(0x0A, 0x0A)] // documented simple10

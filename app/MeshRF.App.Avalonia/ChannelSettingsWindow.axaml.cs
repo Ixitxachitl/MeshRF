@@ -162,7 +162,22 @@ public partial class ChannelSettingsWindow : Window
 
     // These write a complete, valid key, so they commit immediately rather than
     // waiting for focus to leave the box.
-    private void OnUseDefaultKey(object? sender, RoutedEventArgs e) { PskBox.Text = "default"; Apply(); }
+    /// <summary>
+    /// Puts the well-known default key in the box, spelled out.
+    /// </summary>
+    /// <remarks>
+    /// It used to write the word "default", which the parser understands but
+    /// nobody can compare against anything. Every other key in this box is real
+    /// base64, and a key you can read is a key you can check against what
+    /// another node is using. Stored as the full sixteen bytes rather than the
+    /// AQ== shorthand: the hash is taken over the expanded key either way, so
+    /// the channel matches exactly the same traffic.
+    /// </remarks>
+    private void OnUseDefaultKey(object? sender, RoutedEventArgs e)
+    {
+        PskBox.Text = Convert.ToBase64String(ChannelConfig.DefaultPsk);
+        Apply();
+    }
     private void OnRandom16(object? sender, RoutedEventArgs e) { PskBox.Text = Convert.ToBase64String(ChannelConfig.NewRandomPsk(16)); Apply(); }
     private void OnRandom32(object? sender, RoutedEventArgs e) { PskBox.Text = Convert.ToBase64String(ChannelConfig.NewRandomPsk(32)); Apply(); }
 
