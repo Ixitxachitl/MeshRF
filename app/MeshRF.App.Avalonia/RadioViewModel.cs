@@ -2504,13 +2504,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (node is null || IsSelf(node) || !CanTransmit) return;
         await RequestLocation(node);
         var channel = PrimaryChannel();
-        if (channel is null || channel.PositionPrecision == 0) return;
+        if (channel is null || channel.EffectivePositionPrecision == 0) return;
         if (_settings.HomeLatitude is not double lat || _settings.HomeLongitude is not double lon) return;
         try
         {
             var packetId = NextPacketId();
             var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, packetId, lat, lon,
-                altitudeM: _settings.HomeAltitude, precisionBits: channel.PositionPrecision, to: node.NodeNum);
+                altitudeM: _settings.HomeAltitude, precisionBits: channel.EffectivePositionPrecision,
+                to: node.NodeNum);
             await TransmitFrameAsync(frame);
         }
         catch { /* precision 0 or similar — best-effort */ }
@@ -2590,7 +2591,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
         channel ??= PrimaryChannel();
         if (channel is null) return;
-        if (channel.PositionPrecision == 0) { StatusText = "Location sharing is disabled on this channel."; return; }
+        if (channel.EffectivePositionPrecision == 0) { StatusText = "Location sharing is disabled on this channel."; return; }
         if (!double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ||
             !double.TryParse(HomeLongitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lon))
         {
@@ -2599,7 +2600,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
         int? alt = HomeAltitudeMeters;
         var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
-            altitudeM: alt, precisionBits: channel.PositionPrecision,
+            altitudeM: alt, precisionBits: channel.EffectivePositionPrecision,
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
@@ -2609,7 +2610,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             // Smart broadcast measures movement from what the mesh was last
             // told, at the precision it was told it in — not from the fix the
             // GPS last produced.
-            var (sentLat, sentLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.PositionPrecision);
+            var (sentLat, sentLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.EffectivePositionPrecision);
             MarkPositionBroadcast(sentLat, sentLon);
             // Only on a successful send: a refused transmit never went on the
             // air, so recording it would put a point in our track that no peer

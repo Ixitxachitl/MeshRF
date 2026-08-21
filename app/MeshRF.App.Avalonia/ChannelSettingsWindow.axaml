@@ -43,6 +43,11 @@
                 </DataTemplate>
             </ComboBox.ItemTemplate>
         </ComboBox>
+        <!-- Says why the finer settings are missing when the key is a public
+             one; blank and collapsed otherwise. -->
+        <TextBlock Name="PrecisionNote" Grid.Row="3" Grid.Column="2" Margin="8,4,0,4"
+                   VerticalAlignment="Center" MaxWidth="260" TextWrapping="Wrap"
+                   FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
 
         <TextBlock Grid.Row="4" Grid.Column="0" Text="Mute ringtone" Margin="0,4,8,4" VerticalAlignment="Center" />
         <CheckBox Name="MuteRtttlCheck" Grid.Row="4" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"

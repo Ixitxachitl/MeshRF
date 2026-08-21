@@ -50,6 +50,14 @@ public sealed class ChannelConfig
     public Func<ChannelConfig?>? PrimaryProvider { get; set; }
 
     public byte PositionPrecision { get; set; } = 13;
+
+    /// <summary>
+    /// What <see cref="PositionPrecision"/> is allowed to mean on the air.
+    /// Every transmit path reads this rather than the raw setting, so a
+    /// precise position cannot leave on a channel anyone can decrypt — see
+    /// <see cref="PositionPrecisionPolicy"/>.
+    /// </summary>
+    public byte EffectivePositionPrecision => PositionPrecisionPolicy.EffectiveFor(this);
     public bool UplinkEnabled     { get; set; }
     public bool DownlinkEnabled   { get; set; }
 

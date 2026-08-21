@@ -23,7 +23,6 @@ public partial class ChannelSettingsWindow : Window
         InitializeComponent();
         _loading = true;
         RoleCombo.ItemsSource = Enum.GetValues<ChannelRole>();
-        PrecisionCombo.ItemsSource = DisplayUnits.BuildPositionPrecisionOptions(UnitSystem.Metric);
         _loading = false;
     }
 
@@ -36,14 +35,51 @@ public partial class ChannelSettingsWindow : Window
         w.NameBox.Text = channel.Config.Name;
         w.RoleCombo.SelectedItem = channel.Config.Role;
         w.PskBox.Text = PskToText(channel.Config.Psk);
-        var options = (IReadOnlyList<PositionPrecisionOption>)w.PrecisionCombo.ItemsSource!;
-        w.PrecisionCombo.SelectedItem = options.FirstOrDefault(o => o.Bits == channel.Config.PositionPrecision) ?? options[0];
+        w.RefreshPrecisionOptions();
         w.MuteRtttlCheck.IsChecked = channel.MuteRtttl;
         w.UplinkCheck.IsChecked = channel.Config.UplinkEnabled;
         w.DownlinkCheck.IsChecked = channel.Config.DownlinkEnabled;
         w.HashText.Text = HashLabel(channel.Config);
         w._loading = false;
         w.Show(owner);
+    }
+
+    /// <summary>
+    /// Offers only the precisions this channel's key allows, and selects what
+    /// it is actually set to.
+    /// </summary>
+    /// <remarks>
+    /// A channel anyone can decrypt is a channel anyone can read a position
+    /// off, so firmware caps those at PositionPrecisionPolicy.MaxOnPublicKey on
+    /// the way out. Offering the finer settings anyway would let someone pick
+    /// "Precise", see it saved, and believe it — the transmit path would quietly
+    /// send something coarser. Better that the choice is never on the menu, and
+    /// the line underneath says why.
+    /// </remarks>
+    private void RefreshPrecisionOptions()
+    {
+        if (_channel is null) return;
+
+        bool wasLoading = _loading;
+        _loading = true;
+
+        byte ceiling = PositionPrecisionPolicy.CeilingFor(_channel.Config);
+        var units = _viewModel?.CurrentUnitSystem ?? UnitSystem.Metric;
+        var options = DisplayUnits.BuildPositionPrecisionOptions(units)
+                                  .Where(o => o.Bits <= ceiling)
+                                  .ToList();
+
+        PrecisionCombo.ItemsSource = options;
+        byte current = Math.Min(_channel.Config.PositionPrecision, ceiling);
+        PrecisionCombo.SelectedItem = options.FirstOrDefault(o => o.Bits == current) ?? options[0];
+
+        PrecisionNote.Text = ceiling < 32
+            ? "Anyone can decrypt this channel, so location is capped at "
+              + $"{options[^1].Label.Replace("Within ", string.Empty)}. Set a key of your own for finer sharing."
+            : string.Empty;
+        PrecisionNote.IsVisible = ceiling < 32;
+
+        _loading = wasLoading;
     }
 
     /// <summary>Firmware's generateHash() returns -1 for a disabled channel, so
@@ -164,6 +200,11 @@ public partial class ChannelSettingsWindow : Window
         _channel.Config.Psk = psk;
         if (PrecisionCombo.SelectedItem is PositionPrecisionOption precision)
             _channel.Config.PositionPrecision = precision.Bits;
+        // The key that just landed decides the ceiling, so clamp before saving
+        // rather than storing a setting the transmit path would refuse anyway.
+        byte ceiling = PositionPrecisionPolicy.CeilingFor(_channel.Config);
+        if (_channel.Config.PositionPrecision > ceiling)
+            _channel.Config.PositionPrecision = ceiling;
         _channel.Config.UplinkEnabled = UplinkCheck.IsChecked == true;
         _channel.Config.DownlinkEnabled = DownlinkCheck.IsChecked == true;
         // Mute lives on the tab, not the ChannelConfig — it's a local
@@ -174,6 +215,9 @@ public partial class ChannelSettingsWindow : Window
 
         // The name feeds the hash, so it can change under an edit.
         HashText.Text = HashLabel(_channel.Config);
+        // A key edit can move the ceiling either way, so the picker is rebuilt
+        // against the key that was just saved.
+        RefreshPrecisionOptions();
         // Carries a warning about a key that saved but offers no privacy, and
         // clears a PSK rejection once the field parses again.
         StatusText.Text = pskMessage ?? string.Empty;

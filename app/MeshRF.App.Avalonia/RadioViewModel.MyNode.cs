@@ -203,11 +203,11 @@ public partial class RadioViewModel
                     break;
 
                 case PortNum.Position:
-                    if (channel.PositionPrecision == 0) return;
+                    if (channel.EffectivePositionPrecision == 0) return;
                     if (!TryGetHomeLocation(out double lat, out double lon)) return;
                     int? alt = HomeAltitudeMeters;
                     var position = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
-                        altitudeM: alt, precisionBits: channel.PositionPrecision,
+                        altitudeM: alt, precisionBits: channel.EffectivePositionPrecision,
                         to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
                     TransmitBackground(position);
                     break;
@@ -519,9 +519,9 @@ public partial class RadioViewModel
         if (!TryGetHomeLocation(out double lat, out double lon)) return false;
 
         var channel = PrimaryChannel();
-        if (channel is null || channel.PositionPrecision == 0) return false;
+        if (channel is null || channel.EffectivePositionPrecision == 0) return false;
 
-        var (sendLat, sendLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.PositionPrecision);
+        var (sendLat, sendLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.EffectivePositionPrecision);
         return _positionBroadcast.WouldTake(
             sendLat, sendLon, DateTime.UtcNow,
             AutoReportPositionSmartMinMoveMeters,
