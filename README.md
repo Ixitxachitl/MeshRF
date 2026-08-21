@@ -11,7 +11,7 @@ provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 A CH341+SX1262 USB stick can also be used for either direction, on its own or
 alongside an SDR — see [SX1262 USB sticks](#sx1262-usb-sticks).
 
-Current release line: **v2.1.8**
+Current release line: **v2.1.9**
 
 <img width="1547" height="990" alt="image" src="https://github.com/user-attachments/assets/ba593234-2b41-4b29-85e2-f85aba94e5fe" />
 
