@@ -29,9 +29,10 @@ public class ChannelConfigKeyTests
     [Fact]
     public void SpellingTheDefaultKeyOutMatchesItsShorthand()
     {
-        // The Default button writes the full sixteen bytes rather than AQ==.
-        // Both forms have to key and hash identically or pressing it would
-        // silently move the channel off the traffic it was matching.
+        // AQ== is what this app and the other Meshtastic apps show, but a
+        // channel imported from somewhere else can carry the sixteen bytes
+        // spelled out. The two have to key and hash identically, or the same
+        // channel written two ways would match different traffic.
         var shorthand = WithPsk(0x01);
         var spelledOut = WithPsk(ChannelConfig.DefaultPsk);
 

@@ -30,7 +30,7 @@
         <TextBox Name="PskBox" Grid.Row="2" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas"
                  LostFocus="OnFieldChanged" PasswordChar="●"
                  RevealPassword="{Binding #PskReveal.IsChecked}"
-                 ToolTip.Tip="Empty = the primary's key on a secondary, no encryption on the primary. Otherwise paste base64 or hex — or press Default for the well-known public key" />
+                 ToolTip.Tip="Empty = the primary's key on a secondary, no encryption on the primary. AQ== = the default public key, as the other Meshtastic apps write it. Otherwise paste base64 or hex" />
         <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Margin="8,4,0,4" Spacing="4">
             <ToggleButton Name="PskReveal" Content="Show" Padding="8,2"
                           ToolTip.Tip="Show the key in the clear" />

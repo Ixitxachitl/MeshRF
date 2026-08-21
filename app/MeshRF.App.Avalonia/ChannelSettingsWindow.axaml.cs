@@ -162,20 +162,19 @@ public partial class ChannelSettingsWindow : Window
 
     // These write a complete, valid key, so they commit immediately rather than
     // waiting for focus to leave the box.
-    /// <summary>
-    /// Puts the well-known default key in the box, spelled out.
-    /// </summary>
+    /// <summary>Puts the default key in the box the way the rest of Meshtastic
+    /// writes it.</summary>
     /// <remarks>
     /// It used to write the word "default", which the parser understands but
-    /// nobody can compare against anything. Every other key in this box is real
-    /// base64, and a key you can read is a key you can check against what
-    /// another node is using. Stored as the full sixteen bytes rather than the
-    /// AQ== shorthand: the hash is taken over the expanded key either way, so
-    /// the channel matches exactly the same traffic.
+    /// which compares against nothing. AQ== — base64 of the single byte 0x01 —
+    /// is what the phone and web apps show for this key, so a channel here can
+    /// be checked against the same channel there by reading both. Spelling the
+    /// sixteen bytes out instead would be the same key and the same channel
+    /// hash, but it would not look like it beside another app.
     /// </remarks>
     private void OnUseDefaultKey(object? sender, RoutedEventArgs e)
     {
-        PskBox.Text = Convert.ToBase64String(ChannelConfig.DefaultPsk);
+        PskBox.Text = Convert.ToBase64String(new byte[] { 0x01 });
         Apply();
     }
     private void OnRandom16(object? sender, RoutedEventArgs e) { PskBox.Text = Convert.ToBase64String(ChannelConfig.NewRandomPsk(16)); Apply(); }
