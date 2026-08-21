@@ -143,7 +143,8 @@ public partial class RadioViewModel
         if (n.Latitude is double lat && n.Longitude is double lon)
             sb.Append('\n').Append(lat.ToString("F5", CultureInfo.InvariantCulture))
               .Append(", ").Append(lon.ToString("F5", CultureInfo.InvariantCulture));
-        if (n.AltitudeM is int alt) sb.Append("  ").Append(alt).Append(" m");
+        if (n.AltitudeM is int alt)
+            sb.Append("  ").Append(DisplayUnits.FormatAltitude(alt, CurrentUnitSystem));
         if (n.SnrDb is float snr) sb.Append("\nSNR ").Append(snr.ToString("0.0", CultureInfo.InvariantCulture)).Append(" dB");
         if (n.BatteryPct is byte batt) sb.Append("\nBattery ").Append(batt).Append('%');
         if (n.HopsAway is byte hops) sb.Append("\nHops ").Append(hops);

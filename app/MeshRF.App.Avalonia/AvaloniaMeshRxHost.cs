@@ -145,6 +145,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// view model, which holds the unit setting.</summary>
     public Func<float, string>? FormatTemperature { get; set; }
     public Func<float, string>? FormatPressure { get; set; }
+    public Func<int, string>? FormatAltitude { get; set; }
 
     byte[] IMeshRxHost.MyPrivateKeyBytes => MyPrivateKeyProvider?.Invoke() ?? Array.Empty<byte>();
     IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
@@ -633,7 +634,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // location/telemetry history; the formatters keep its display strings
         // on the app's unit setting.
         var convo = new ConversationTabViewModel(nodeNum, NodeDisplayName(nodeNum),
-                                                 _nodeStore, () => FormatTemperature, () => FormatPressure)
+                                                 _nodeStore, () => FormatTemperature, () => FormatPressure,
+                                                 () => FormatAltitude)
         {
             Node = _nodeStore.Get(nodeNum),
         };

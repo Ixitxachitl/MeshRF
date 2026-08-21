@@ -583,8 +583,7 @@ public partial class RadioViewModel
             NumOnlineLocalNodes = (uint)numOnlineLocalNodes,
             HasOptedReportLocation = true,
         };
-        if (int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int alt))
-            report.Altitude = alt;
+        if (HomeAltitudeMeters is int alt) report.Altitude = alt;
 
         var envelope = new ServiceEnvelope
         {

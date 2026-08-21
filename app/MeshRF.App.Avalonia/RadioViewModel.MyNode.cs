@@ -76,7 +76,8 @@ public partial class RadioViewModel
             nodeNum == _rxHost.MyNodeNum ? (MyLongName ?? "Me") : _rxHost.NodeDisplayName(nodeNum),
             _nodeStore,
             () => FormatTemperature,
-            () => (Func<float, string>)(hpa => $"{hpa:0.0} hPa"));
+            () => (Func<float, string>)(hpa => $"{hpa:0.0} hPa"),
+            () => (Func<int, string>)(m => DisplayUnits.FormatAltitude(m, CurrentUnitSystem)));
     }
 
     // ----- USB serial GPS -----
@@ -123,13 +124,14 @@ public partial class RadioViewModel
     private void ApplyGpsFix(GpsFix fix)
     {
         GpsStatus = $"USB GPS: {fix.PortName} @ {fix.BaudRate} baud  {fix.Latitude:F6}, {fix.Longitude:F6}" +
-                    (fix.AltitudeM is int a ? $"  alt {a} m" : string.Empty);
+                    (fix.AltitudeM is int a
+                        ? $"  alt {DisplayUnits.FormatAltitude(a, CurrentUnitSystem)}" : string.Empty);
         if (!IsUsbSerialLocationSource) return;
 
         HomeLatitudeText = fix.Latitude.ToString("F6", CultureInfo.InvariantCulture);
         HomeLongitudeText = fix.Longitude.ToString("F6", CultureInfo.InvariantCulture);
         if (fix.AltitudeM is int alt)
-            HomeAltitudeText = alt.ToString(CultureInfo.InvariantCulture);
+            HomeAltitudeText = DisplayUnits.FormatAltitudeInput(alt, CurrentUnitSystem);
     }
 
     // ----- Weather / air quality sources -----
@@ -165,8 +167,7 @@ public partial class RadioViewModel
                 case PortNum.Position:
                     if (channel.PositionPrecision == 0) return;
                     if (!TryGetHomeLocation(out double lat, out double lon)) return;
-                    int? alt = int.TryParse(HomeAltitudeText, NumberStyles.Integer,
-                                            CultureInfo.InvariantCulture, out var a) ? a : null;
+                    int? alt = HomeAltitudeMeters;
                     var position = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
                         altitudeM: alt, precisionBits: channel.PositionPrecision,
                         to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);

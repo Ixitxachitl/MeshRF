@@ -19,6 +19,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     // and history loads lazily, by which point they exist.
     private readonly Func<Func<float, string>?>? _temperatureFormatter;
     private readonly Func<Func<float, string>?>? _pressureFormatter;
+    private readonly Func<Func<int, string>?>? _altitudeFormatter;
     private bool _historyLoaded;
 
     public uint NodeNum { get; }
@@ -43,13 +44,15 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     public ConversationTabViewModel(uint nodeNum, string peerName,
                                     NodeStore? nodeStore = null,
                                     Func<Func<float, string>?>? temperatureFormatter = null,
-                                    Func<Func<float, string>?>? pressureFormatter = null)
+                                    Func<Func<float, string>?>? pressureFormatter = null,
+                                    Func<Func<int, string>?>? altitudeFormatter = null)
     {
         NodeNum = nodeNum;
         _peerName = peerName;
         _nodeStore = nodeStore;
         _temperatureFormatter = temperatureFormatter;
         _pressureFormatter = pressureFormatter;
+        _altitudeFormatter = altitudeFormatter;
     }
 
     partial void OnPeerNameChanged(string value) => OnPropertyChanged(nameof(TabHeader));
@@ -141,13 +144,19 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
             if (n.HopsAway is byte hops) Add("Hops away", hops.ToString());
             if (n.Latitude is double lat && n.Longitude is double lon)
                 Add("Position", $"{lat:0.#####}, {lon:0.#####}");
-            if (n.AltitudeM is int altM) Add("Altitude", $"{altM} m");
+            if (n.AltitudeM is int altM) Add("Altitude", FormatAltitude(altM));
             if (n.LastHeardEpoch > 0)
                 Add("Last heard", UiFormats.Stamp(
                     DateTimeOffset.FromUnixTimeSeconds(n.LastHeardEpoch).LocalDateTime));
         }
         OnPropertyChanged(nameof(HasTelemetry));
     }
+
+    /// <summary>Altitudes are stored in metres and shown in the app's unit
+    /// system. Falls back to metres only when no formatter was supplied, which
+    /// is the detached-view-model case in tests.</summary>
+    private string FormatAltitude(int altitudeM) =>
+        _altitudeFormatter?.Invoke()?.Invoke(altitudeM) ?? $"{altitudeM} m";
 
     private static string FormatUptime(uint seconds)
     {
@@ -195,7 +204,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
         foreach (var row in _nodeStore.LocationHistory(NodeNum))
             LocationHistory.Add(new LocationHistoryPoint(
                 row.Latitude, row.Longitude, row.AltitudeM,
-                row.AltitudeM is int alt ? $"{alt} m" : string.Empty,
+                row.AltitudeM is int alt ? FormatAltitude(alt) : string.Empty,
                 row.TimestampUtc)
             { Id = row.Id });
 
@@ -237,7 +246,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     {
         LocationHistory.Add(new LocationHistoryPoint(
             record.Latitude, record.Longitude, record.AltitudeM,
-            record.AltitudeM is int alt ? $"{alt} m" : string.Empty,
+            record.AltitudeM is int alt ? FormatAltitude(alt) : string.Empty,
             record.TimestampUtc)
         { Id = record.Id });
         RaiseHistoryFlags();

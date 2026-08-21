@@ -139,4 +139,28 @@ public class DisplayUnitsTests
         Assert.Equal("100 m", DisplayUnits.FormatAltitude(100, UnitSystem.Metric));
         Assert.Equal("328 ft", DisplayUnits.FormatAltitude(100, UnitSystem.Imperial));
     }
+
+    [Fact]
+    public void AltitudeInput_RoundTripsThroughTheDisplayedUnit()
+    {
+        // The My Node altitude box is labelled "Alt (ft)" in imperial, so what
+        // is typed there is feet — everything downstream wants metres.
+        Assert.Equal("328", DisplayUnits.FormatAltitudeInput(100, UnitSystem.Imperial));
+        Assert.Equal("100", DisplayUnits.FormatAltitudeInput(100, UnitSystem.Metric));
+        Assert.Equal(100, DisplayUnits.ParseAltitudeInput("328", UnitSystem.Imperial));
+        Assert.Equal(100, DisplayUnits.ParseAltitudeInput("100", UnitSystem.Metric));
+        Assert.Null(DisplayUnits.ParseAltitudeInput("  ", UnitSystem.Imperial));
+    }
+
+    [Fact]
+    public void ConvertAltitudeText_ReExpressesWhatIsAlreadyTyped()
+    {
+        Assert.Equal("328", DisplayUnits.ConvertAltitudeText("100", UnitSystem.Metric, UnitSystem.Imperial));
+        Assert.Equal("100", DisplayUnits.ConvertAltitudeText("328", UnitSystem.Imperial, UnitSystem.Metric));
+        // Same system, or nothing typed: left exactly as it was.
+        Assert.Equal("100", DisplayUnits.ConvertAltitudeText("100", UnitSystem.Metric, UnitSystem.Metric));
+        Assert.Equal("", DisplayUnits.ConvertAltitudeText("", UnitSystem.Metric, UnitSystem.Imperial));
+        // Unparseable text is the user's, not ours to rewrite.
+        Assert.Equal("abc", DisplayUnits.ConvertAltitudeText("abc", UnitSystem.Metric, UnitSystem.Imperial));
+    }
 }

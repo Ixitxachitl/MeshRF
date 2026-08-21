@@ -158,6 +158,15 @@ public static class DisplayUnits
         return FormatShortDistanceInput(meters, toUnits);
     }
 
+    /// <summary>Re-expresses a typed altitude when the unit system changes, so
+    /// 100 m becomes 328 rather than being reread as 100 ft.</summary>
+    public static string ConvertAltitudeText(string? text, UnitSystem fromUnits, UnitSystem toUnits)
+    {
+        if (fromUnits == toUnits || string.IsNullOrWhiteSpace(text)) return text ?? string.Empty;
+        if (ParseAltitudeInput(text, fromUnits) is not int meters) return text;
+        return FormatAltitudeInput(meters, toUnits);
+    }
+
     public static double ConvertDistanceInputToKm(double distance, UnitSystem unitSystem) =>
         IsImperial(unitSystem) ? distance * KmPerMile : distance;
 

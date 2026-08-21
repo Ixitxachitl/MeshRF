@@ -740,7 +740,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public bool UseMiles => UseImperial;
 
     /// <summary>Altitude field label, unit-aware like MeshRF.App's.</summary>
-    public string HomeAltitudeLabel => CurrentUnitSystem == UnitSystem.Imperial ? "Alt (ft)" : "Alt (m)";
+    public string HomeAltitudeLabel => $"Alt ({DisplayUnits.AltitudeUnitShort(CurrentUnitSystem)})";
+
+    /// <summary>The typed home altitude in metres, which is the unit every
+    /// consumer of it wants — the settings file, the position encoder, and the
+    /// MQTT map report all carry metres. The text box itself holds whatever the
+    /// label says, so it is converted here rather than at each call site.</summary>
+    private int? HomeAltitudeMeters =>
+        DisplayUnits.ParseAltitudeInput(HomeAltitudeText, CurrentUnitSystem);
 
     /// <summary>Placeholder for the node list's max-distance filter box.</summary>
     public string NodeDistanceUnitShort => DisplayUnits.DistanceUnitShort(CurrentUnitSystem);
@@ -906,6 +913,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         InitMqtt();
         _rxHost.FormatTemperature = FormatTemperature;
         _rxHost.FormatPressure = hpa => $"{hpa:0.0} hPa";
+        _rxHost.FormatAltitude = m => DisplayUnits.FormatAltitude(m, CurrentUnitSystem);
         // Restore per-channel ringtone mutes. The channel tabs exist by now
         // (the host loads them in its constructor), and MutedRingtoneChannels
         // is the same settings.json key MeshRF.App writes.
@@ -991,6 +999,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         IgnoreMqtt = savedIgnoreMqtt;
         HomeLatitudeText = savedHomeLatitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
         HomeLongitudeText = savedHomeLongitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
+        // Written in metres, then re-expressed by OnUnitSystemNameChanged below
+        // if the saved unit system is imperial.
         HomeAltitudeText = savedHomeAltitude?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
 
         if (!string.IsNullOrEmpty(savedFirmwareVersion)) MyFirmwareVersion = savedFirmwareVersion;
@@ -1027,6 +1037,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Everything is loaded — from here on property changes may persist.
         _settingsLoaded = true;
         SaveSettings();
+
+        // The restored DM tabs built their snapshot panels inside the host
+        // constructor — before the formatters above were attached and before
+        // the saved unit system was read — so those panels are holding metric
+        // strings. Rebuild them now that both are in place. OnUnitSystemName-
+        // Changed skips this while loading, and cannot cover the case where the
+        // saved system equals the default and its setter never fires.
+        RefreshUnitDependentDisplays();
 
         // Arms the band check against whatever region was restored. Set here
         // rather than at the field so the region loaded above counts as the
@@ -1804,9 +1822,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // 100 m radius becomes 328 ft rather than being reread as 100 ft.
         WaypointGeofenceRadiusInput = DisplayUnits.ConvertShortDistanceText(
             WaypointGeofenceRadiusInput, _inputUnitSystem, CurrentUnitSystem);
+        HomeAltitudeText = DisplayUnits.ConvertAltitudeText(
+            HomeAltitudeText, _inputUnitSystem, CurrentUnitSystem);
         _inputUnitSystem = CurrentUnitSystem;
-        // Skipped mid-construction: nothing is rendered yet, and the explicit
-        // UiFormats sync after settings load covers the initial state.
+        // Skipped mid-construction: nothing is rendered yet, and the
+        // constructor refreshes once after the load instead.
         if (_settingsLoaded) RefreshUnitDependentDisplays();
         OnPropertyChanged(nameof(CurrentUnitSystem));
         OnPropertyChanged(nameof(UseImperial));
@@ -1948,7 +1968,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.IgnoreMqtt = IgnoreMqtt;
         _settings.HomeLatitude = double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ? lat : null;
         _settings.HomeLongitude = double.TryParse(HomeLongitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lon) ? lon : null;
-        _settings.HomeAltitude = int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var alt) ? alt : null;
+        _settings.HomeAltitude = HomeAltitudeMeters;
         SaveMqttSettings(_settings);
     }
 
@@ -2530,7 +2550,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             StatusText = "Set your home location in My Node → Configure first.";
             return;
         }
-        int? alt = int.TryParse(HomeAltitudeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var a) ? a : null;
+        int? alt = HomeAltitudeMeters;
         var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
             altitudeM: alt, precisionBits: channel.PositionPrecision,
             to: to ?? 0xFFFFFFFFu,
