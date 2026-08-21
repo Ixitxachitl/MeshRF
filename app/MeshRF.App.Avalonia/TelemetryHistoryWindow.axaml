@@ -12,6 +12,9 @@
         <DockPanel Grid.Row="0" Margin="0,0,0,4">
             <Button DockPanel.Dock="Right" Content="Clear" Padding="8,2"
                     Click="OnClear" />
+            <ToggleButton x:Name="AutoScrollToggle" DockPanel.Dock="Right" Content="Auto-scroll"
+                          Padding="8,2" Margin="16,0,4,0" IsChecked="True"
+                          ToolTip.Tip="Keep the newest sample in view" />
             <TextBlock Text="{Binding TabHeader}" FontWeight="SemiBold" VerticalAlignment="Center" />
         </DockPanel>
 
@@ -29,7 +32,8 @@
             <DataGrid Grid.Row="0" Grid.Column="2" x:Name="DeviceGrid"
                       ItemsSource="{Binding DeviceTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal"
-                      SelectionMode="Extended" KeyDown="OnGridKeyDown">
+                      SelectionMode="Extended" KeyDown="OnGridKeyDown"
+                      local:DataGridAutoScrollBehavior.IsEnabled="{Binding #AutoScrollToggle.IsChecked}">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="Delete selected" />
@@ -58,7 +62,8 @@
             <DataGrid Grid.Row="2" Grid.Column="2" x:Name="EnvironmentGrid"
                       ItemsSource="{Binding EnvironmentalTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal"
-                      SelectionMode="Extended" KeyDown="OnGridKeyDown">
+                      SelectionMode="Extended" KeyDown="OnGridKeyDown"
+                      local:DataGridAutoScrollBehavior.IsEnabled="{Binding #AutoScrollToggle.IsChecked}">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="Delete selected" />
@@ -78,7 +83,8 @@
             <DataGrid Grid.Row="4" Grid.Column="2" x:Name="AirQualityGrid"
                       ItemsSource="{Binding AirQualityTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal"
-                      SelectionMode="Extended" KeyDown="OnGridKeyDown">
+                      SelectionMode="Extended" KeyDown="OnGridKeyDown"
+                      local:DataGridAutoScrollBehavior.IsEnabled="{Binding #AutoScrollToggle.IsChecked}">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="Delete selected" />
@@ -99,7 +105,8 @@
             <DataGrid Grid.Row="6" Grid.Column="2" x:Name="PowerGrid"
                       ItemsSource="{Binding PowerTelemetryHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="Horizontal"
-                      SelectionMode="Extended" KeyDown="OnGridKeyDown">
+                      SelectionMode="Extended" KeyDown="OnGridKeyDown"
+                      local:DataGridAutoScrollBehavior.IsEnabled="{Binding #AutoScrollToggle.IsChecked}">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="Delete selected" />
