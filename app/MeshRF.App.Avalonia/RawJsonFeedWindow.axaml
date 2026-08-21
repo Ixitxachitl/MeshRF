@@ -22,33 +22,57 @@
             <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Decoded Packet JSON Feed" />
         </DockPanel>
 
-        <!-- Selection never scrolls: clicking a header should expand that row
-             where it sits, not drag the list to centre the row on it. -->
-        <ListBox x:Name="JsonList" Grid.Row="1"
-                 ItemsSource="{Binding DecodedPacketJsonEntries}"
-                 AutoScrollToSelectedItem="False"
-                 HorizontalAlignment="Stretch">
-            <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="local:DecodedPacketJsonEntry">
-                    <!-- Collapsed by default: the feed is scanned by header, and
-                         each body is a full packet dump. IsExpanded is bound so
-                         the open state rides on the entry — the list recycles
-                         rows, so state left on the Expander would show up on
-                         whatever packet scrolls into that row next. -->
-                    <Expander Margin="0,0,0,4" IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
-                              HorizontalAlignment="Stretch">
-                        <Expander.Header>
-                            <TextBlock FontFamily="Consolas" TextWrapping="Wrap" Text="{Binding Header}" />
-                        </Expander.Header>
-                        <Border Margin="8,4,0,0" Padding="6"
-                                Background="{DynamicResource BrushPanelBackground}"
-                                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-                            <SelectableTextBlock FontFamily="Consolas" FontSize="11"
-                                                 TextWrapping="Wrap" Text="{Binding DisplayJson}" />
-                        </Border>
-                    </Expander>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+        <!-- Built like the node list's Filters dropdown rather than as a list of
+             Expanders: a plain ToggleButton header over a Border that appears
+             when it is checked. Fluent's Expander header is a fixed-height
+             ToggleButton, so a wrapped packet summary was clipped, and the
+             ListBox around them virtualised — with rows that change height when
+             opened, its estimated extent moved under the scrollbar on every
+             expand and every trim. A non-virtualising ItemsControl in one
+             ScrollViewer has an exact extent, which is what lets the offset
+             below be corrected precisely. -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+            <ScrollViewer x:Name="JsonScroll" Padding="4,3"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="JsonList" ItemsSource="{Binding DecodedPacketJsonEntries}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:DecodedPacketJsonEntry">
+                            <!-- Collapsed by default: the feed is scanned by header,
+                                 and each body is a full packet dump. IsExpanded is
+                                 bound so the open state rides on the entry, not on
+                                 the row that happens to show it. -->
+                            <StackPanel Margin="0,0,0,3">
+                                <ToggleButton HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                              Padding="4,2" IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                              IsCheckedChanged="OnEntryExpansionChanged">
+                                    <DockPanel>
+                                        <Panel DockPanel.Dock="Right" Margin="6,0,0,0">
+                                            <TextBlock Text="▾" FontSize="9" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource BrushSubtle}"
+                                                       IsVisible="{Binding !IsExpanded}" />
+                                            <TextBlock Text="▴" FontSize="9" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource BrushSubtle}"
+                                                       IsVisible="{Binding IsExpanded}" />
+                                        </Panel>
+                                        <TextBlock FontFamily="Consolas" FontSize="11" TextWrapping="Wrap"
+                                                   Text="{Binding Header}" />
+                                    </DockPanel>
+                                </ToggleButton>
+                                <Border IsVisible="{Binding IsExpanded}"
+                                        Margin="10,3,0,4" Padding="6"
+                                        Background="{DynamicResource BrushAppBackground}"
+                                        BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+                                    <SelectableTextBlock FontFamily="Consolas" FontSize="11"
+                                                         TextWrapping="Wrap" Text="{Binding DisplayJson}" />
+                                </Border>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
     </Grid>
 </Window>

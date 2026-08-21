@@ -118,28 +118,6 @@
             <Setter Property="Background" Value="#FF2F5D8A" />
         </Style>
 
-        <!-- Expander headers (the raw JSON feed rows). Same fix as the
-             waypoint and filter dropdowns: the header is a themed ToggleButton
-             whose hover/pressed states live on Border#ToggleButtonBackground
-             inside its own template, so the generic ToggleButton styles above
-             never reach it and it fell back to the stock light brushes. -->
-        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground">
-            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-        </Style>
-        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pressed /template/ Border#ToggleButtonBackground">
-            <Setter Property="Background" Value="{DynamicResource BrushPressed}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-        </Style>
-        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
-        </Style>
-        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ExpandCollapseChevronBorder">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Path#ExpandCollapseChevron">
-            <Setter Property="Stroke" Value="{DynamicResource BrushAppForeground}" />
-        </Style>
         <Style Selector="ComboBox">
             <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
             <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
@@ -182,22 +160,6 @@
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
-        <!-- Fluent's Expander is touch-sized (tall header, wide padding) and
-             left-aligns its content. Compact the header and let the expanded
-             content fill the panel width. -->
-        <Style Selector="Expander">
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        </Style>
-        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Height" Value="22" />
-            <Setter Property="Padding" Value="4,0" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
-        </Style>
         <!-- Fluent's DatePicker/TimePicker are touch-sized: a ~32px segmented
              bar with wide padding. Compact them to the app's control height so
              the waypoint composer doesn't give two rows of chrome to a date.
