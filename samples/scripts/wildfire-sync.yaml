@@ -23,7 +23,11 @@ alias: Watch Duty fires
 sync:
   every: 15m
 
-  url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
+  # wildfire, not *: the feed also carries "location" records — evacuation
+  # points, shelters, mask distribution — which have no acreage or
+  # containment, so the name and description below would read as a fire
+  # with neither.
+  url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=wildfire"
   # Required: the endpoint refuses a request without them.
   headers:
     Accept: "application/json, text/plain, */*"
