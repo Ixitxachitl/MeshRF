@@ -9,6 +9,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using MeshRF.Nodes;
 using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
@@ -946,6 +947,14 @@ public sealed class MapCanvas : Control
     /// the edit dialog needs a parent window, which the host owns.</summary>
     public event Action<WaypointRecord>? RequestEditWaypoint;
 
+    /// <summary>"Delete" was chosen on a waypoint marker. Raised rather than
+    /// run straight off the menu so the same confirmation the waypoints grid
+    /// asks gets asked here, which needs a parent window the host owns.</summary>
+    public event Action<WaypointRecord>? RequestDeleteWaypoint;
+
+    /// <summary>"Delete" was chosen on a node marker, for the same reason.</summary>
+    public event Action<NodeRecord>? RequestDeleteNode;
+
     // -- Marker context menu ------------------------------------------------
 
     /// <summary>
@@ -967,17 +976,21 @@ public sealed class MapCanvas : Control
 
             var edit = new MenuItem { Header = "Edit…" };
             edit.Click += (_, _) => RequestEditWaypoint?.Invoke(wp);
+            var delete = new MenuItem { Header = "Delete" };
+            delete.Click += (_, _) => RequestDeleteWaypoint?.Invoke(wp);
             return Menu(
                 edit,
                 Item("Resend", _vm.ResendWaypointCommand, wp),
                 new Separator(),
-                Item("Delete", _vm.DeleteWaypointCommand, wp));
+                delete);
         }
 
         if (mk.NodeNum is not uint nodeNum) return null;
         var node = _vm.FilteredNodes.FirstOrDefault(n => n.NodeNum == nodeNum);
         if (node is null) return null;
 
+        var deleteNode = new MenuItem { Header = "Delete" };
+        deleteNode.Click += (_, _) => RequestDeleteNode?.Invoke(node);
         return Menu(
             Item("Message", _vm.MessageNodeCommand, node),
             new Separator(),
@@ -992,7 +1005,7 @@ public sealed class MapCanvas : Control
             Item("Toggle ignore", _vm.ToggleIgnoreNodeCommand, node),
             Item("Toggle favorite", _vm.ToggleFavoriteNodeCommand, node),
             new Separator(),
-            Item("Delete", _vm.DeleteNodeCommand, node));
+            deleteNode);
     }
 
     private static ContextMenu Menu(params Control[] items)

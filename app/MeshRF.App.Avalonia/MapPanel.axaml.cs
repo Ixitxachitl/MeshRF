@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using MeshRF.Nodes;
 using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
@@ -32,6 +33,8 @@ public partial class MapPanel : UserControl
         };
         Canvas.RequestSendWaypoint += OnRequestSendWaypoint;
         Canvas.RequestEditWaypoint += OnRequestEditWaypoint;
+        Canvas.RequestDeleteWaypoint += OnRequestDeleteWaypoint;
+        Canvas.RequestDeleteNode += OnRequestDeleteNode;
     }
 
     /// <summary>"Edit…" on a waypoint marker's context menu. Same dialog and
@@ -45,6 +48,29 @@ public partial class MapPanel : UserControl
                                                        _viewModel.CurrentUnitSystem);
         if (result is null) return;
         await _viewModel.UpdateWaypointAsync(wp, result);
+    }
+
+    /// <summary>"Delete" on a waypoint marker's context menu. Asks the same
+    /// question the waypoints grid asks, warning when this node cannot retire
+    /// the marker on the mesh.</summary>
+    private async void OnRequestDeleteWaypoint(WaypointRecord wp)
+    {
+        if (_viewModel is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        if (!await DeleteConfirm.WaypointsAsync(owner, _viewModel, [wp])) return;
+        await _viewModel.DeleteWaypointCommand.ExecuteAsync(wp);
+    }
+
+    /// <summary>"Delete" on a node marker's context menu, asking what the node
+    /// list asks.</summary>
+    private async void OnRequestDeleteNode(NodeRecord node)
+    {
+        if (_viewModel is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        if (!await DeleteConfirm.NodesAsync(owner, [node])) return;
+        _viewModel.DeleteNodeCommand.Execute(node);
     }
 
     /// <summary>Binds the panel to the view model and restores saved map
