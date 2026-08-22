@@ -956,6 +956,7 @@ public static class ScriptParser
                     problems.Add(ScriptProblem.Error(line, column, "react: needs an emoji"));
                     return null;
                 }
+                WarnUnknownPlaceholders(emoji, line, column, problems);
                 return new ScriptAction { Kind = ScriptActionKind.React, Text = emoji, Line = line };
             }
 

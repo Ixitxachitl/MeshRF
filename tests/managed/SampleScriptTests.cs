@@ -94,12 +94,13 @@ public class SampleScriptTests
     public void The_Test_Channel_Sample_Answers_With_A_Hop_Keycap()
     {
         // The one sample whose whole output is a placeholder: if the keycap
-        // filter ever stopped resolving, the script would broadcast the literal
+        // filter ever stopped resolving, the script would send the literal
         // "{hops|keycap}" and still look valid to every test above.
         var engine = Armed("test-hops.yaml");
 
         var run = Assert.Single(engine.Evaluate(Heard("Anyone up for a test?", "Test", hops: 1)));
         var action = Assert.Single(run.Actions);
+        Assert.Equal(ScriptActionKind.React, action.Kind);
         Assert.Equal("1️⃣", run.Expansion.ExpandMessage(action.Text));
 
         // The word, not any word containing it, and the Test channel only.

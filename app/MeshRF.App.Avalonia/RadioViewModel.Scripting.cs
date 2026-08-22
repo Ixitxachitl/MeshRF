@@ -684,14 +684,22 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
 
             case ScriptActionKind.React:
             {
-                var (channel, to, _) = ResolveDestination(action);
+                var (channel, to, messages) = ResolveDestination(action);
                 if (channel is null) return;
+                if (text.Length == 0)
+                {
+                    _rxHost.Log("scripts: nothing sent — the tapback came out empty once filled in");
+                    return;
+                }
                 var packetId = NextPacketId();
-                var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, action.Text,
+                var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text,
                     to: to, replyId: action.ReplyId, emoji: 1,
                     xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
                 if (await TransmitFrameAsync(frame))
-                    _rxHost.PersistOutgoingReaction(to, packetId, action.ReplyId, action.Text, channel.Name);
+                {
+                    EchoReaction(messages, action.ReplyId, text);
+                    _rxHost.PersistOutgoingReaction(to, packetId, action.ReplyId, text, channel.Name);
+                }
                 break;
             }
 
@@ -847,6 +855,24 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         if (preview.Length > 80) preview = preview[..80] + "...";
         if (preview.Length == 0) preview = "(empty)";
         return $"replying to {_rxHost.NodeDisplayName(evt.FromNode)}: \"{preview}\"";
+    }
+
+    /// <summary>
+    /// Shows a scripted tapback on the message it answers, the way the React…
+    /// menu does for one sent by hand.
+    /// </summary>
+    /// <remarks>
+    /// The glyph is on the air and in the message store either way; without
+    /// this it simply never appeared on screen, so nothing but the log said the
+    /// script had reacted. The target is missing when the script answered a
+    /// channel with no tab open, which is not an error — the tapback shows up
+    /// when that conversation is next replayed from the store.
+    /// </remarks>
+    private void EchoReaction(ObservableCollection<ChannelMessage>? messages, uint replyId, string emoji)
+    {
+        if (messages is null || replyId == 0) return;
+        var target = messages.FirstOrDefault(m => m.PacketId == replyId);
+        target?.AddReaction(emoji, _rxHost.NodeDisplayName(_rxHost.MyNodeNum));
     }
 
     private static bool TryCoordinate(string text, double limit, out double value) =>

@@ -595,6 +595,28 @@ public class ScriptEngineTests
     }
 
     [Fact]
+    public void A_React_Glyph_Is_A_Template_Like_Any_Other_Message()
+    {
+        var engine = Engine(
+            """
+            trigger:
+              - text: "test"
+            action:
+              - react: "{hops|keycap}"
+            """);
+
+        var run = Assert.Single(engine.Evaluate(Text("test", hops: 2)));
+        var action = Assert.Single(run.Actions);
+        Assert.Equal(ScriptActionKind.React, action.Kind);
+
+        // The engine hands the template back untouched; the runtime expands it
+        // on the way to the air, exactly as it does a reply.
+        var glyph = run.Expansion.ExpandMessage(action.Text);
+        Assert.Equal("2️⃣", glyph);
+        Assert.Contains(glyph, action.Describe(_ => "node", glyph));
+    }
+
+    [Fact]
     public void An_Overlong_Reply_Is_Clamped_To_What_The_Radio_Carries()
     {
         var engine = Engine(

@@ -21,7 +21,7 @@ want it again.
 | Script | Needs | What it does |
 | --- | --- | --- |
 | [ping.yaml](ping.yaml) | nothing | Answers `!ping` with a signal report. |
-| [test-hops.yaml](test-hops.yaml) | a channel named Test | Answers anything saying "test" there with a keycap emoji for the hop count. |
+| [test-hops.yaml](test-hops.yaml) | a channel named Test | Reacts to anything saying "test" there with a keycap emoji for the hop count. |
 | [sos.yaml](sos.yaml) | one node id | Relays `!sos` to an operator by DM, with a marker at the sender's last position, wherever the call came from. |
 | [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
 | [weather.yaml](weather.yaml) | OpenWeather key | Answers `!wx` with a report for where the sender is, or for a postcode or place they name. |

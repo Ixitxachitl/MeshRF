@@ -50,7 +50,7 @@ public sealed record ResolvedAction(
         ScriptActionKind.Reply or ScriptActionKind.Send =>
             $"{(Kind == ScriptActionKind.Reply ? "reply" : "send")} to " +
             $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}: \"{expandedText}\"",
-        ScriptActionKind.React => $"react {Text} to packet {ReplyId:x8}",
+        ScriptActionKind.React => $"react {expandedText} to packet {ReplyId:x8}",
         ScriptActionKind.Position => $"send position to {nameOf(ToNode)}",
         ScriptActionKind.NodeInfo => $"send node info to {nameOf(ToNode)}",
         ScriptActionKind.Traceroute => $"traceroute to {nameOf(ToNode)}",

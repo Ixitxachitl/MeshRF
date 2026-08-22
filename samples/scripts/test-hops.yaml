@@ -1,4 +1,4 @@
-# Answers anything saying "test" on the Test channel with a hop-count keycap.
+# Reacts to anything saying "test" on the Test channel with a hop-count keycap.
 #
 # A range check you can read at a glance: whoever sent it gets back 0️⃣ if you
 # heard them directly, 1️⃣ if one node relayed it, and so on. Nothing to
@@ -6,7 +6,7 @@
 
 enabled: false
 
-alias: Answer "test" on Test with a hop-count keycap
+alias: React to "test" on Test with a hop-count keycap
 
 trigger:
   # The word on its own, not any word containing it, so "latest" is left alone.
@@ -20,10 +20,11 @@ condition:
   - channel: Test
 
 action:
-  # Reply-linked, so clients thread the answer under the message it counted.
-  # The keycap filter turns the count into 0️⃣ … 🔟; {hops} on its own is the
-  # plain number.
-  - reply: "{hops|keycap}"
+  # A tapback rather than a message: it lands on the message it counted instead
+  # of adding a line to the channel, which is the whole point when the same word
+  # is being sent over and over. The keycap filter turns the count into
+  # 0⃣ … 🔟; {hops} on its own is the plain number.
+  - react: "{hops|keycap}"
 
 limits:
   # A minute per node. Range testing means sending the same word repeatedly from

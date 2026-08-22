@@ -113,7 +113,7 @@ public partial class ScriptHelpWindow : Window
         new("  to: \"{from.id}\"", "Address the marker to one node instead of broadcasting it. It still travels under the primary's key — the address saves everyone else drawing it rather than keeping it from them."),
         new("  channel: LongFast", "Channel to broadcast on. Use one of to:/channel:, not both. Defaults to the primary, and channel: {primary} says so out loud."),
         new("  lock_to_me: false", "Let others edit the marker. On by default, so a script's markers cannot be rewritten."),
-        new("react: 👍", "Emoji tapback on the triggering message."),
+        new("react: 👍", "Emoji tapback on the triggering message. Takes placeholders like reply: does, so react: \"{hops|keycap}\" tapbacks the hop count."),
         new("position: true", "Send this node's position."),
         new("nodeinfo: true", "Send this node's name, hardware and public key."),
         new("traceroute: true", "Request the route to the triggering node."),
