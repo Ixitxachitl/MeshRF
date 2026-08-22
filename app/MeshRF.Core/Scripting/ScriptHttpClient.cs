@@ -56,8 +56,19 @@ public sealed class ScriptHttpClient : IDisposable
         // left open and cancellation does the work. Compression is on because
         // responses are read over someone's metered connection as often as not,
         // and the cap on how much is read applies after decoding either way.
+        //
+        // Redirects are not followed. .NET's default is to chase up to fifty of
+        // them, which is invisible from here and which a metered API still
+        // charges for: one poll becomes fifty requests and the result reports
+        // the final 200 as though nothing had happened. Refusing them keeps one
+        // call worth exactly one request, and makes a redirect something the
+        // user is told about rather than billed for.
         _http = client ?? new HttpClient(
-            new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+            new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.All,
+                AllowAutoRedirect = false,
+            })
         {
             Timeout = Timeout.InfiniteTimeSpan,
         };
@@ -152,6 +163,17 @@ public sealed class ScriptHttpClient : IDisposable
                 .ConfigureAwait(false);
 
             int status = (int)response.StatusCode;
+
+            // Ahead of the body, which a redirect does not meaningfully have.
+            // The address it points at is the whole of what is worth saying.
+            if (status is >= 300 and < 400)
+            {
+                var location = response.Headers.Location?.ToString() ?? string.Empty;
+                return ScriptHttpResult.Failed(status, location.Length > 0
+                    ? $"the server redirected to {location} — point url: there instead"
+                    : "the server sent a redirect without saying where to");
+            }
+
             var (text, truncated) = await ReadCappedAsync(response, timeout.Token).ConfigureAwait(false);
 
             if (truncated)
