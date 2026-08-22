@@ -88,7 +88,15 @@ public sealed class WaypointStore : IDisposable
         alter.ExecuteNonQuery();
     }
 
-    /// <summary>Insert or update a waypoint from the same sender/id pair.</summary>
+    /// <summary>Insert or update a waypoint from the same sender/id pair,
+    /// stamping <see cref="WaypointRecord.Id"/> with the row it landed on.</summary>
+    /// <remarks>
+    /// The row id is read back rather than discarded because it is the record's
+    /// identity everywhere else: the list deletes and edits by it, and the map
+    /// hit-tests by it. A record built from a packet has none until its row
+    /// exists, and a whole session's worth sharing a default 0 makes every one
+    /// of those match the first arrival instead of itself.
+    /// </remarks>
     public void Upsert(WaypointRecord rec)
     {
         ThrowIfDisposed();
@@ -129,7 +137,8 @@ public sealed class WaypointStore : IDisposable
                     bbox_north            = excluded.bbox_north,
                     notify_on_enter       = excluded.notify_on_enter,
                     notify_on_exit        = excluded.notify_on_exit,
-                    notify_favorites_only = excluded.notify_favorites_only;
+                    notify_favorites_only = excluded.notify_favorites_only
+                RETURNING id;
                 """;
             cmd.Parameters.AddWithValue("$from", rec.FromNode);
             cmd.Parameters.AddWithValue("$wid", rec.WaypointId);
@@ -152,7 +161,7 @@ public sealed class WaypointStore : IDisposable
             cmd.Parameters.AddWithValue("$nen", rec.NotifyOnEnter);
             cmd.Parameters.AddWithValue("$nex", rec.NotifyOnExit);
             cmd.Parameters.AddWithValue("$nfav", rec.NotifyFavoritesOnly);
-            cmd.ExecuteNonQuery();
+            if (cmd.ExecuteScalar() is { } id) rec.Id = Convert.ToInt64(id);
         }
     }
 
