@@ -648,18 +648,11 @@ public partial class MainWindow : Window
         var nodes = NodesGridProxy.SelectedItems.OfType<NodeRecord>().ToList();
         if (nodes.Count == 0) return;
 
-        string message = nodes.Count == 1
-            ? $"Delete node \"{NodeLabel(nodes[0])}\"?\n\nThis removes it from the node list. It cannot be undone."
-            : $"Delete {nodes.Count} nodes?\n\nThis removes them from the node list. It cannot be undone.";
-        if (!await ConfirmDialog.ConfirmAsync(this, nodes.Count == 1 ? "Delete node" : "Delete nodes", message))
-            return;
+        if (!await DeleteConfirm.NodesAsync(this, nodes)) return;
 
         foreach (var node in nodes)
             _viewModel.DeleteNodeCommand.Execute(node);
     }
-
-    private static string NodeLabel(NodeRecord node) =>
-        string.IsNullOrEmpty(node.LongName) ? node.DisplayId : node.LongName;
 
     private async void OnDeleteWaypoints(object? sender, RoutedEventArgs e) => await ConfirmAndDeleteWaypointsAsync();
 
@@ -675,52 +668,12 @@ public partial class MainWindow : Window
         var waypoints = WaypointsGridProxy.SelectedItems.OfType<WaypointRecord>().ToList();
         if (waypoints.Count == 0) return;
 
-        string message = waypoints.Count == 1
-            ? $"Delete waypoint \"{waypoints[0].DisplayName}\"?"
-            : $"Delete {waypoints.Count} waypoints?";
-
-        // A delete leaves as a past-dated expiry, which is what clears the
-        // marker on everyone else's map. When there is nothing to send that
-        // with, this is the only chance to say so: once the record is gone
-        // from here there is nothing left to send it from either.
-        var silent = _viewModel.SilentDeletions(waypoints);
-        message += SilentDeleteWarning(silent.OffAir.Count, waypoints.Count,
-                                       "This node is not transmitting");
-        message += SilentDeleteWarning(silent.Unchannelled.Count, waypoints.Count,
-                                       "There is no enabled channel left to send the expiry on");
-
-        message += "\n\nThis cannot be undone.";
-
-        if (!await ConfirmDialog.ConfirmAsync(this, waypoints.Count == 1 ? "Delete waypoint" : "Delete waypoints", message))
-            return;
+        if (!await DeleteConfirm.WaypointsAsync(this, _viewModel, waypoints)) return;
 
         // Sequential, not fire-and-forget: DeleteWaypoint transmits an expire
         // broadcast per waypoint, so overlapping them would race the radio.
         foreach (var wp in waypoints)
             await _viewModel.DeleteWaypointCommand.ExecuteAsync(wp);
-    }
-
-    /// <summary>
-    /// A sentence naming how many of the selection go quietly, or nothing when
-    /// none of them do.
-    /// </summary>
-    /// <param name="silent">How many will not be announced.</param>
-    /// <param name="selected">How many are being deleted in all.</param>
-    /// <param name="cause">What stops the announcement, as a clause that can
-    /// start a sentence.</param>
-    private static string SilentDeleteWarning(int silent, int selected, string cause)
-    {
-        if (silent == 0) return string.Empty;
-
-        // A pronoun only reads right when the warning covers the whole
-        // selection; short of that the count has to say which part it means.
-        // Either way what follows agrees with how many go quietly, not with
-        // how many were picked.
-        string subject = silent == selected ? (silent == 1 ? "it" : "they") : $"{silent} of them";
-        string stays = silent == 1
-            ? "It stays on every other map that holds it."
-            : "They stay on every other map that holds them.";
-        return $"\n\n{cause}, so {subject} will not be marked expired on the mesh. {stays}";
     }
 
     private void OnOpenRingtoneSettings(object? sender, RoutedEventArgs e) =>
