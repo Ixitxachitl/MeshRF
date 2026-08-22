@@ -2733,14 +2733,67 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             : "Transmit failed (device cannot transmit).";
     }
 
+    private bool IsLockedToAnother(WaypointRecord wp) =>
+        wp.LockedTo != 0 && wp.LockedTo != _rxHost.MyNodeNum;
+
+    private static bool HasLapsed(WaypointRecord wp) =>
+        wp.ExpireEpoch != 0 && wp.ExpireEpoch != WaypointRecord.NeverExpiresEpoch
+        && wp.ExpireEpoch < DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+    /// <summary>
+    /// Whether deleting this waypoint is announced on the mesh, radio
+    /// permitting.
+    /// </summary>
+    /// <remarks>
+    /// One locked to another node is not ours to retire — an expiry from a node
+    /// that does not hold the lock is ignored — and one that has already lapsed
+    /// is off every map that holds it, so neither loses anything by going
+    /// quietly. An active one of our own does.
+    /// </remarks>
+    private bool IsOursToRetire(WaypointRecord wp) => !IsLockedToAnother(wp) && !HasLapsed(wp);
+
+    /// <summary>
+    /// Waypoints whose deletion would be announced on the mesh but will not
+    /// be, split by what stops it.
+    /// </summary>
+    /// <param name="OffAir">Nothing is going out at all — no TX-capable
+    /// device, no identity to send as, or the receiver is stopped.</param>
+    /// <param name="Unchannelled">On the air, but the channel the waypoint
+    /// arrived on is gone or disabled, so there is nothing to send the expiry
+    /// with.</param>
+    /// <remarks>
+    /// Two lists rather than a reason per waypoint because the causes do not
+    /// mix: off the air, nothing is sent whatever channel a waypoint names.
+    /// </remarks>
+    public sealed record SilentDeleteSet(
+        IReadOnlyList<WaypointRecord> OffAir,
+        IReadOnlyList<WaypointRecord> Unchannelled)
+    {
+        public int Count => OffAir.Count + Unchannelled.Count;
+    }
+
+    /// <summary>Which of these would go quietly, and why.</summary>
+    /// <remarks>
+    /// Deleting one of these is local and silent: it goes from this list and
+    /// stays on every other map that holds it, with nothing later to retire it,
+    /// since the record is gone from here and cannot be re-sent. Worth saying
+    /// before the delete rather than after, which is why this is asked of the
+    /// view model rather than worked out from it.
+    /// </remarks>
+    public SilentDeleteSet SilentDeletions(IEnumerable<WaypointRecord> waypoints)
+    {
+        var ours = waypoints.Where(IsOursToRetire).ToList();
+        return CanTransmit
+            ? new SilentDeleteSet([], ours.Where(w => _rxHost.FindChannelByName(w.Channel) is null).ToList())
+            : new SilentDeleteSet(ours, []);
+    }
+
     [RelayCommand]
     private async Task DeleteWaypoint(WaypointRecord? wp)
     {
         if (wp is null) return;
-        bool lockedToOther = wp.LockedTo != 0 && wp.LockedTo != _rxHost.MyNodeNum;
-        bool expired = wp.ExpireEpoch != 0 && wp.ExpireEpoch != WaypointRecord.NeverExpiresEpoch
-                       && wp.ExpireEpoch < DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        if (!lockedToOther && !expired && CanTransmit)
+        bool lockedToOther = IsLockedToAnother(wp);
+        if (IsOursToRetire(wp) && CanTransmit)
         {
             var channel = _rxHost.FindChannelByName(wp.Channel);
             if (channel is not null)
