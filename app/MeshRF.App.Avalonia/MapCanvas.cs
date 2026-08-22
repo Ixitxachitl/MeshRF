@@ -110,6 +110,14 @@ public sealed class MapCanvas : Control
     private static readonly ConcurrentQueue<string> s_memCacheOrder = new();
     private readonly HashSet<string> _tilesInFlight = new(StringComparer.Ordinal);
 
+    // A failed tile is cached nowhere, so without this it is re-requested by the
+    // very next render — several times a second while nodes are arriving — and a
+    // provider that is rate-limiting us gets hammered precisely when it has
+    // asked us to stop. Static like the caches: the backoff belongs to the tile
+    // rather than to whichever canvas asked for it first.
+    private static readonly FetchBackoff s_tileBackoff =
+        new(TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(10));
+
     private static HttpClient CreateHttpClient()
     {
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
@@ -424,6 +432,7 @@ public sealed class MapCanvas : Control
 
     private void RequestTile(string key, TileProvider provider, int x, int y, int zoom)
     {
+        if (!s_tileBackoff.ShouldTry(key, DateTimeOffset.UtcNow)) return;
         if (!_tilesInFlight.Add(key)) return;
         _ = LoadTileAsync(key, provider, x, y, zoom);
     }
@@ -434,6 +443,7 @@ public sealed class MapCanvas : Control
         {
             var bmp = await Task.Run(() => GetTileBitmapAsync(provider, x, y, zoom)).ConfigureAwait(true);
             if (bmp is null) return;
+            s_tileBackoff.Succeeded(key);
             if (s_memCache.TryAdd(key, bmp))
             {
                 s_memCacheOrder.Enqueue(key);
@@ -445,7 +455,9 @@ public sealed class MapCanvas : Control
             }
             InvalidateVisual();
         }
-        catch { /* tile fetch failed; leave the background showing */ }
+        // The tile is left out of both caches, so a retry once the backoff has
+        // elapsed refetches rather than serving nothing.
+        catch { s_tileBackoff.Failed(key, DateTimeOffset.UtcNow); }
         finally { _tilesInFlight.Remove(key); }
     }
 
