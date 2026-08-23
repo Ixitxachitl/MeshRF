@@ -25,7 +25,7 @@ want it again.
 | [sos.yaml](sos.yaml) | one node id | Relays `!sos` to an operator by DM, with a marker at the sender's last position, wherever the call came from. |
 | [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
 | [weather.yaml](weather.yaml) | OpenWeather key | Answers `!wx` with a report for where the sender is, or for a postcode or place they name. |
-| [lightning-sync.yaml](lightning-sync.yaml) | Xweather id + secret | Mirrors recent nearby strikes as point markers, retiring each as it ages out. |
+| [lightning-sync.yaml](lightning-sync.yaml) | Xweather id + secret, on a paid plan | Mirrors recent nearby strikes as point markers, retiring each as it ages out. |
 | [wildfire-sync.yaml](wildfire-sync.yaml) | nothing | Mirrors *every* nearby Watch Duty fire, keeping markers in step as they change and retiring them when they go out. |
 
 The last two are **feed syncs** rather than a script: instead of answering an
@@ -43,6 +43,13 @@ moment, so its marker is placed once and never resent.
 Read a sync's header before enabling it: how many markers it can place depends
 on how busy the feed is, and a storm makes far more lightning than a fire
 season makes fires.
+
+Xweather's free tier will not sustain the lightning sync. It bills in accesses
+rather than requests and a lightning request costs about ten of them, so the
+free 15,000 are gone in under a week at the five-minute poll the sample ships
+with. It is enough to confirm the script works, not to leave running — and when
+the allowance goes, the map cannot tell you, because no strikes returned looks
+exactly like no strikes in the sky.
 
 ## Answering somewhere else
 

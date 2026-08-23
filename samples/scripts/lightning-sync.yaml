@@ -6,6 +6,22 @@
 #   Parameter      client_id        Value      your Xweather client id
 #   2nd parameter  client_secret    2nd value  your Xweather client secret
 #
+# Xweather's free tier is not adequate for sustained lightning tracking. The
+# allowance is counted in accesses rather than requests, and a lightning request
+# costs about ten of them. At the every: below that is 288 requests a day, near
+# enough 2,900 accesses, so the free tier's 15,000 are gone in under a week —
+# and that is this script alone, before anything else on the account asks for
+# weather. It is enough to point this at the API and confirm the paths resolve.
+# It is not enough to leave running.
+#
+# What makes running out worse than an ordinary outage is that the map cannot
+# say it happened: no strikes returned looks exactly like no strikes in the sky.
+# The markers already placed either sit out their hour or retire at once,
+# depending on the shape of the error body, and either way the map quietly stops
+# tracking the storm you are watching it for. The log is the only place the
+# failure shows — check it there rather than waiting for markers. Weather you
+# intend to rely on means a paid plan.
+#
 # Each strike is a single point — no geofence, because a strike is a place
 # something happened rather than an area to be warned about entering.
 #
