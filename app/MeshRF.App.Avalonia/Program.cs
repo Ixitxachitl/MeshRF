@@ -8,8 +8,20 @@ namespace MeshRF.AvaloniaApp;
 internal static class Program
 {
     [STAThread]
-    public static void Main(string[] args) => BuildAvaloniaApp()
-        .StartWithClassicDesktopLifetime(args);
+    public static void Main(string[] args)
+    {
+        // Before Avalonia, and before anything reads settings.json: a second
+        // instance must not get far enough to write it.
+        if (!SingleInstance.TryAcquire(out var raisedRunningInstance))
+        {
+            Console.Error.WriteLine(raisedRunningInstance
+                ? "MeshRF is already running — brought its window to the front."
+                : "MeshRF is already running.");
+            return;
+        }
+
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>()
         .UsePlatformDetect()
