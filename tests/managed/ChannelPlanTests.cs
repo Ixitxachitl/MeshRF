@@ -161,6 +161,34 @@ public class ChannelPlanTests
         Assert.Equal(923.375, ChannelPlan.FrequencyMHz(Region.JP, LoraPreset.LongFast, 12), precision: 4);
     }
 
+    [Theory]
+    // The power_limit column of RDEF() in RadioInterface.cpp, spot-checked
+    // across the spread: the ISM maximum, the two 433 regions that sit far
+    // below it, JP's 13, and NZ_865's 36 — the only limit above 30, and so the
+    // only one no stick here can reach.
+    [InlineData(Region.US, 30)]
+    [InlineData(Region.JP, 13)]
+    [InlineData(Region.EU_433, 10)]
+    [InlineData(Region.EU_868, 27)]
+    [InlineData(Region.CN, 19)]
+    [InlineData(Region.ANZ_433, 14)]
+    [InlineData(Region.NZ_865, 36)]
+    [InlineData(Region.LORA_24, 10)]
+    public void PowerLimitMatchesFirmware(Region region, int dbm)
+    {
+        Assert.Equal(dbm, ChannelPlan.PowerLimitDbm(region));
+    }
+
+    [Fact]
+    public void EveryRegionDeclaresAPowerLimit()
+    {
+        // Firmware reads 0 as "no limit declared" and falls back to 17 dBm.
+        // No row in regions[] is 0 today, so a 0 here means a region was added
+        // to the table without its limit rather than a region that has none.
+        foreach (var region in Enum.GetValues<Region>())
+            Assert.True(ChannelPlan.PowerLimitDbm(region) > 0, $"{region} has no power limit");
+    }
+
     [Fact]
     public void SlotCountRoundsRatherThanTruncating()
     {

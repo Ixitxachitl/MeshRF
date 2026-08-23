@@ -83,11 +83,14 @@ public static class ChannelPlan
     private static readonly RegionProfile ProfileHam100KHz  = new(0.0, 0.01875);
 
     /// <summary>One row of firmware's <c>regions[]</c>.</summary>
+    /// <param name="PowerLimitDbm">Firmware's <c>powerLimit</c>: the region's
+    /// transmit ceiling in dBm. 0 means the region declares none.</param>
     /// <param name="OverrideSlot">Firmware's <c>overrideSlot</c>: 0 selects the
     /// channel-name hash, a positive value pins that 1-based slot.</param>
     private readonly record struct RegionInfo(
         double FreqStartMHz,
         double FreqEndMHz,
+        int PowerLimitDbm,
         RegionProfile Profile,
         bool WideLora,
         LoraPreset DefaultPreset,
@@ -95,42 +98,42 @@ public static class ChannelPlan
 
     private static RegionInfo Info(Region region) => region switch
     {
-        Region.US         => new(902.0,   928.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.EU_433     => new(433.0,   434.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.EU_868     => new(869.4,   869.65,  ProfileEu868,     false, LoraPreset.LongFast,   0),
-        Region.EU_866     => new(865.6,   867.6,   ProfileLite,      false, LoraPreset.LiteFast,   0),
-        Region.EU_N_868   => new(869.4,   869.65,  ProfileNarrow,    false, LoraPreset.NarrowSlow, 1),
-        Region.CN         => new(470.0,   510.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.JP         => new(920.5,   923.5,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.ANZ        => new(915.0,   928.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.ANZ_433    => new(433.05,  434.79,  ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.RU         => new(868.7,   869.2,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.KR         => new(920.0,   923.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.TW         => new(920.0,   925.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.IN         => new(865.0,   867.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.NZ_865     => new(864.0,   868.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.TH         => new(920.0,   925.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.UA_433     => new(433.0,   434.7,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.MY_433     => new(433.0,   435.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.MY_919     => new(919.0,   924.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.SG_923     => new(917.0,   925.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.PH_433     => new(433.0,   434.7,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.PH_868     => new(868.0,   869.4,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.PH_915     => new(915.0,   918.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.KZ_433     => new(433.075, 434.775, ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.KZ_863     => new(863.0,   868.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.NP_865     => new(865.0,   868.0,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.BR_902     => new(902.0,   907.5,   ProfileStd,       false, LoraPreset.LongFast,   0),
-        Region.ITU1_2M    => new(144.0,   146.0,   ProfileHam20KHz,  false, LoraPreset.TinyFast,   26),
-        Region.ITU2_2M    => new(144.0,   148.0,   ProfileHam20KHz,  false, LoraPreset.TinyFast,   51),
-        Region.ITU3_2M    => new(144.0,   148.0,   ProfileHam20KHz,  false, LoraPreset.TinyFast,   33),
-        Region.ITU2_125CM => new(220.0,   225.0,   ProfileHam100KHz, false, LoraPreset.NarrowSlow, 37),
-        Region.ITU1_70CM  => new(430.0,   440.0,   ProfileHam100KHz, false, LoraPreset.NarrowSlow, 37),
-        Region.ITU2_70CM  => new(420.0,   450.0,   ProfileHam100KHz, false, LoraPreset.NarrowSlow, 137),
-        Region.ITU3_70CM  => new(430.0,   450.0,   ProfileHam100KHz, false, LoraPreset.NarrowSlow, 37),
-        Region.LORA_24    => new(2400.0,  2483.5,  ProfileStd,       true,  LoraPreset.LongFast,   0),
-        Region.UNSET      => new(902.0,   928.0,   ProfileUndef,     false, LoraPreset.LongFast,   0),
-        _                 => new(902.0,   928.0,   ProfileUndef,     false, LoraPreset.LongFast,   0),
+        Region.US         => new(902.0,   928.0,   30, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.EU_433     => new(433.0,   434.0,   10, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.EU_868     => new(869.4,   869.65,  27, ProfileEu868,     false, LoraPreset.LongFast,   0),
+        Region.EU_866     => new(865.6,   867.6,   27, ProfileLite,      false, LoraPreset.LiteFast,   0),
+        Region.EU_N_868   => new(869.4,   869.65,  27, ProfileNarrow,    false, LoraPreset.NarrowSlow, 1),
+        Region.CN         => new(470.0,   510.0,   19, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.JP         => new(920.5,   923.5,   13, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.ANZ        => new(915.0,   928.0,   30, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.ANZ_433    => new(433.05,  434.79,  14, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.RU         => new(868.7,   869.2,   20, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.KR         => new(920.0,   923.0,   23, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.TW         => new(920.0,   925.0,   27, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.IN         => new(865.0,   867.0,   30, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.NZ_865     => new(864.0,   868.0,   36, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.TH         => new(920.0,   925.0,   27, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.UA_433     => new(433.0,   434.7,   10, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.MY_433     => new(433.0,   435.0,   20, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.MY_919     => new(919.0,   924.0,   27, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.SG_923     => new(917.0,   925.0,   20, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.PH_433     => new(433.0,   434.7,   10, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.PH_868     => new(868.0,   869.4,   14, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.PH_915     => new(915.0,   918.0,   24, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.KZ_433     => new(433.075, 434.775, 10, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.KZ_863     => new(863.0,   868.0,   30, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.NP_865     => new(865.0,   868.0,   30, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.BR_902     => new(902.0,   907.5,   30, ProfileStd,       false, LoraPreset.LongFast,   0),
+        Region.ITU1_2M    => new(144.0,   146.0,   30, ProfileHam20KHz,  false, LoraPreset.TinyFast,   26),
+        Region.ITU2_2M    => new(144.0,   148.0,   30, ProfileHam20KHz,  false, LoraPreset.TinyFast,   51),
+        Region.ITU3_2M    => new(144.0,   148.0,   30, ProfileHam20KHz,  false, LoraPreset.TinyFast,   33),
+        Region.ITU2_125CM => new(220.0,   225.0,   30, ProfileHam100KHz, false, LoraPreset.NarrowSlow, 37),
+        Region.ITU1_70CM  => new(430.0,   440.0,   30, ProfileHam100KHz, false, LoraPreset.NarrowSlow, 37),
+        Region.ITU2_70CM  => new(420.0,   450.0,   30, ProfileHam100KHz, false, LoraPreset.NarrowSlow, 137),
+        Region.ITU3_70CM  => new(430.0,   450.0,   30, ProfileHam100KHz, false, LoraPreset.NarrowSlow, 37),
+        Region.LORA_24    => new(2400.0,  2483.5,  10, ProfileStd,       true,  LoraPreset.LongFast,   0),
+        Region.UNSET      => new(902.0,   928.0,   30, ProfileUndef,     false, LoraPreset.LongFast,   0),
+        _                 => new(902.0,   928.0,   30, ProfileUndef,     false, LoraPreset.LongFast,   0),
     };
 
     public static RegionRange Range(Region region)
@@ -138,6 +141,15 @@ public static class ChannelPlan
         var info = Info(region);
         return new(info.FreqStartMHz, info.FreqEndMHz);
     }
+
+    /// <summary>
+    /// The region's transmit ceiling in dBm — firmware's <c>powerLimit</c>,
+    /// applied in <c>limitPower()</c> and <c>applyModemConfig()</c>. 0 means
+    /// the region declares no limit; no region currently does. Firmware treats
+    /// this as power at the antenna port, so antenna gain is the operator's to
+    /// account for, and exempts licensed (amateur) operation from it.
+    /// </summary>
+    public static int PowerLimitDbm(Region region) => Info(region).PowerLimitDbm;
 
     /// <summary>True for the 2.4 GHz SX128x regions, whose presets use scaled
     /// bandwidths.</summary>

@@ -204,6 +204,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// transmitting 8 dB hotter than the UI says.</summary>
     public bool ShowSx1262BoardPrompt => IsTxSx1262 && !IsSx1262BoardChosen;
 
+    /// <summary>Shown when the region, not the board, is what the power slider
+    /// stops at: a ceiling below what the stick can do needs a reason.</summary>
+    public bool ShowSx1262PowerCap =>
+        IsTxSx1262 && IsSx1262BoardChosen && Sx1262MaxPowerDbm < _boardMaxPowerDbm;
+
+    public string Sx1262PowerCapText => $"{SelectedRegion} limit {Sx1262MaxPowerDbm} dBm";
+
     /// <summary>Shown only for the MeshToad, whose PA can pull ~900 mA on
     /// transmit — more than a USB 2.0 port is obliged to supply.</summary>
     public bool ShowSx1262PowerWarning =>
@@ -322,8 +329,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     /// <summary>Antenna-port transmit power in dBm for the SX1262 stick. Unlike
     /// <see cref="TxGainDb"/> (a HackRF VGA setting) this is real radiated
-    /// power, so it is bounded by the selected board rather than a fixed
-    /// range.</summary>
+    /// power, so it is bounded by the selected board and by the region's
+    /// regulatory ceiling rather than a fixed range.</summary>
     [ObservableProperty]
     private int _sx1262TxPowerDbm = 22;
 
@@ -332,6 +339,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private int _sx1262MaxPowerDbm = 22;
+
+    /// <summary>What the board alone allows. <see cref="Sx1262MaxPowerDbm"/> is
+    /// this lowered to the region's limit, so the board's own maximum has to be
+    /// kept to restore on a move to a more permissive region.</summary>
+    private int _boardMaxPowerDbm = 22;
 
     [ObservableProperty]
     private bool _dcBlockEnable = true;
@@ -1132,10 +1144,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 RefreshSx1262Serials();
                 var (min, max) = _core.TxPowerRangeDbm;
                 Sx1262MinPowerDbm = min;
-                Sx1262MaxPowerDbm = max;
+                _boardMaxPowerDbm = max;
                 // Read back what the core actually accepted, so the slider
                 // shows the clamped value rather than the request.
                 Sx1262TxPowerDbm = _core.TxPowerDbm;
+                // After the readback, not before: the saved power predates this
+                // run's region, and the region's ceiling is the lower of the two
+                // authorities.
+                ApplyRegionPowerLimit();
             }
             ApplyGains();
             ApplyTxAncillary();
@@ -1407,6 +1423,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // device was selected would otherwise leave a stale value.
         if (value == RadioDeviceKind.Sx1262)
         {
+            // Before the push, not after: a board chosen in an earlier session
+            // raises no board-changed event here, so this is the only place the
+            // region's ceiling reaches a stick that was selected mid-session.
+            ApplyRegionPowerLimit();
             ApplySx1262Power();
             RefreshSx1262Serials();
         }
@@ -1415,6 +1435,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowSx1262SerialPicker));
         OnPropertyChanged(nameof(ShowSx1262BoardPrompt));
         OnPropertyChanged(nameof(ShowSx1262PowerWarning));
+        OnPropertyChanged(nameof(ShowSx1262PowerCap));
         OnPropertyChanged(nameof(ShowSx1262BandWarning));
         // Send is gated on CanTransmit, which this switch can flip in either
         // direction — an SX1262 that opened makes it true where a bare TX
@@ -1434,11 +1455,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             {
                 var (min, max) = _core.TxPowerRangeDbm;
                 Sx1262MinPowerDbm = min;
-                Sx1262MaxPowerDbm = max;
+                _boardMaxPowerDbm = max;
                 // Moving from a MeshToad to a MeshStick has to pull an
                 // out-of-range 30 dBm back down, or the slider would sit past
-                // its own maximum.
+                // its own maximum. The region's ceiling applies on top of that.
                 Sx1262TxPowerDbm = Math.Clamp(Sx1262TxPowerDbm, min, max);
+                ApplyRegionPowerLimit();
                 ApplySx1262Power();
             }
             SendMessageCommand.NotifyCanExecuteChanged();
@@ -1446,6 +1468,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsSx1262BoardChosen));
         OnPropertyChanged(nameof(ShowSx1262BoardPrompt));
         OnPropertyChanged(nameof(ShowSx1262PowerWarning));
+        OnPropertyChanged(nameof(ShowSx1262PowerCap));
         SaveSettings();
     }
 
@@ -1465,6 +1488,24 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _core.TxPowerDbm = (sbyte)Math.Clamp(Sx1262TxPowerDbm, -128, 127);
         var applied = _core.TxPowerDbm;
         if (applied != Sx1262TxPowerDbm) Sx1262TxPowerDbm = applied;
+    }
+
+    /// <summary>Lowers the power slider to the selected region's ceiling,
+    /// mirroring firmware's <c>limitPower()</c> and the clamp at the top of
+    /// <c>applyModemConfig()</c> — including the exemption for licensed
+    /// operation, and firmware's habit of writing the clamped value back to
+    /// the config rather than remembering the request.</summary>
+    private void ApplyRegionPowerLimit()
+    {
+        var limit = ChannelPlan.PowerLimitDbm(SelectedRegion);
+        var max = limit > 0 && !MyIsLicensed
+            ? Math.Min(_boardMaxPowerDbm, limit)
+            : _boardMaxPowerDbm;
+        Sx1262MaxPowerDbm = max;
+        // The setter carries the new value down to the core.
+        if (Sx1262TxPowerDbm > max) Sx1262TxPowerDbm = max;
+        OnPropertyChanged(nameof(ShowSx1262PowerCap));
+        OnPropertyChanged(nameof(Sx1262PowerCapText));
     }
 
     partial void OnSelectedRxSampleRateChanged(SampleRateOption? value)
@@ -1581,6 +1622,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
         RebuildSlots(snapToDefault: true);
         ApplyTxBandLimits();
+        ApplyRegionPowerLimit();
         // A move to a band that doesn't touch the one we were operating in has
         // to be confirmed. Only once the constructor has established a starting
         // band: restoring a saved region is not a change. Nothing to confirm
@@ -1735,6 +1777,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyIsLicensedChanged(bool value)
     {
+        // Firmware exempts licensed operation from the regional power limit, so
+        // the ceiling moves in both directions with this checkbox.
+        ApplyRegionPowerLimit();
         SaveSettings();
         RefreshSelfNode();
         OnPropertyChanged(nameof(LicensedEncryptedChannelWarning));

@@ -461,6 +461,14 @@
                     <TextBlock Width="48" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
                                IsVisible="{Binding IsSx1262BoardChosen}"
                                Text="{Binding Sx1262TxPowerDbm, StringFormat='{}{0} dBm'}" />
+                    <!-- Only when the region is the binding ceiling: a slider
+                         that stops 9 dB below the board's maximum otherwise
+                         looks like a bug. -->
+                    <TextBlock FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
+                               Foreground="#888888"
+                               IsVisible="{Binding ShowSx1262PowerCap}"
+                               Text="{Binding Sx1262PowerCapText}"
+                               ToolTip.Tip="Meshtastic firmware clamps transmit power to this regional limit, and MeshRF does the same. The limit is power at the antenna port, so antenna gain is yours to account for. Licensed (ham) operation lifts it — the checkbox is in Node identity." />
                     <TextBlock FontSize="11" VerticalAlignment="Center" Margin="0,0,8,2"
                                Foreground="#FFE0A030"
                                IsVisible="{Binding ShowSx1262BoardPrompt}"
