@@ -296,6 +296,8 @@ public sealed class AppSettings
     public double? MainLeftBottomPaneStar { get; set; }
     public double? MainRightTopPaneStar { get; set; }
     public double? MainRightBottomPaneStar { get; set; }
+    public double? NodesPaneStar { get; set; }
+    public double? WaypointsPaneStar { get; set; }
     public double? SpectrumTopPaneStar { get; set; }
     public double? SpectrumBottomPaneStar { get; set; }
     public double? LastPacketPanelWidth { get; set; }
@@ -374,6 +376,7 @@ public sealed class AppSettings
     public string NodeSortMemberPath { get; set; } = string.Empty;
     public bool NodeSortDescending { get; set; } = false;
     public string MapNodeLabelMode { get; set; } = "Node Number";
+    public string MapMarkerFilter { get; set; } = "Nodes and waypoints";
     public string NodeFilterDistanceKm { get; set; } = string.Empty;
     public string NodeFilterMaxAgeMinutes { get; set; } = string.Empty;
 

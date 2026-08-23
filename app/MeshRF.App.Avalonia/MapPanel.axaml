@@ -79,6 +79,12 @@
                           ItemsSource="{Binding MapNodeLabelModeOptions}"
                           SelectedItem="{Binding MapNodeLabelMode, Mode=TwoWay}"
                           ToolTip.Tip="Label shown on map markers; falls back to node number when data is unavailable" />
+                <TextBlock Text="Show" FontSize="11" Margin="0,6,0,3" Foreground="#DDDDDD" />
+                <ComboBox x:Name="MarkerFilterCombo" Height="24" FontSize="11"
+                          HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding MapMarkerFilterOptions}"
+                          SelectedItem="{Binding MapMarkerFilter, Mode=TwoWay}"
+                          ToolTip.Tip="Which markers the map draws. Your own location is always shown." />
                 <TextBlock Text="Map tiles" FontSize="11" Margin="0,6,0,3" Foreground="#DDDDDD" />
                 <ComboBox x:Name="MapTileThemeCombo" Height="24" FontSize="11"
                           HorizontalAlignment="Stretch"

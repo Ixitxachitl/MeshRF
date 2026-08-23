@@ -600,7 +600,15 @@
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                               Background="{DynamicResource BrushSplitter}" />
 
-                <Grid Grid.Row="2" Margin="0,3,0,0" RowDefinitions="Auto,Auto,Auto,2*,5,Auto,1*">
+                <Grid x:Name="NodesWaypointsGrid" Grid.Row="2" Margin="0,3,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="2*" MinHeight="80" />
+                        <RowDefinition Height="5" />
+                        <RowDefinition Height="1*" MinHeight="80" />
+                    </Grid.RowDefinitions>
                     <!-- Compact My Node bar — opens the identity settings dialog. -->
                     <Border Grid.Row="0" Margin="0,0,0,4" Padding="6,4"
                             Background="{DynamicResource BrushPanelBackground}"
@@ -649,7 +657,8 @@
                     </Border>
 
                     <StackPanel Grid.Row="2">
-                        <TextBlock Margin="4,0,0,4" FontWeight="Bold" Text="{Binding NodesHeader}" />
+                        <TextBlock Margin="4,0,0,4" FontWeight="Bold" Text="{Binding NodesHeader}"
+                                   ToolTip.Tip="Online = heard in the last 2 hours, counted across every known node rather than just the filtered ones" />
 
                         <!-- Node list filter bar. -->
                         <Border Margin="0,0,0,3" Padding="4,3"
@@ -1056,63 +1065,69 @@
                     <GridSplitter Grid.Row="4" Height="5" HorizontalAlignment="Stretch"
                                   Background="{DynamicResource BrushSplitter}" />
 
-                    <TextBlock Grid.Row="5" Margin="4,3,0,4" FontWeight="Bold"
-                               Text="{Binding Waypoints.Count, StringFormat='Waypoints ({0})'}" />
-                    <DataGrid Grid.Row="6" x:Name="WaypointsGridProxy" ItemsSource="{Binding Waypoints}"
-                              AutoGenerateColumns="False" IsReadOnly="True"
-                              GridLinesVisibility="Horizontal"
-                              CanUserSortColumns="True" CanUserResizeColumns="True"
-                              SelectionMode="Extended"
-                              KeyDown="OnWaypointsGridKeyDown">
-                        <DataGrid.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="Edit..." Click="OnEditWaypoint" />
-                                <MenuItem Header="Resend"
-                                          Command="{Binding #RootWindow.DataContext.ResendWaypointCommand}"
-                                          CommandParameter="{Binding #WaypointsGridProxy.SelectedItem}" />
-                                <Separator />
-                                <MenuItem Header="Delete" Click="OnDeleteWaypoints" InputGesture="Delete" />
-                            </ContextMenu>
-                        </DataGrid.ContextMenu>
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Icon" Width="42" Binding="{Binding IconText}" />
-                            <!-- Whose lock, not merely whether there is one. 🔒 is a
-                                 colour-emoji glyph and ignores Foreground, so the state
-                                 rides on an overlaid Ellipse exactly as the Nodes table's
-                                 🔑 does — see the note there. -->
-                            <DataGridTemplateColumn Width="Auto" SortMemberPath="LockedTo">
-                                <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="🔒" ToolTip.Tip="Locked to whoever placed it (green dot = ours, red dot = another node's). Nothing shown when anyone may edit it." />
-                                </DataGridTemplateColumn.Header>
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate x:DataType="waypoints:WaypointRecord">
-                                        <Panel IsVisible="{Binding IsLocked}">
-                                            <TextBlock Text="🔒" />
-                                            <Ellipse Width="5" Height="5" Fill="#7BD88F"
-                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
-                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                                     IsVisible="{Binding IsLockedToUs}"
-                                                     ToolTip.Tip="Locked to this node — you can edit it, and deleting it retires it on the mesh" />
-                                            <Ellipse Width="5" Height="5" Fill="#FF6B6B"
-                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
-                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                                     IsVisible="{Binding IsLockedToAnother}"
-                                                     ToolTip.Tip="Locked to another node — it cannot be edited here, and deleting it only removes it from this list" />
-                                        </Panel>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Type" Width="80" Binding="{Binding GeofenceKindText}" />
-                            <DataGridTextColumn Header="Name" Width="2*" Binding="{Binding DisplayName}" />
-                            <DataGridTextColumn Header="Description" Width="2*" Binding="{Binding Description}" />
-                            <DataGridTextColumn Header="From" Width="96" Binding="{Binding FromId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
-                            <DataGridTextColumn Header="Lat" Width="88" Binding="{Binding Latitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
-                            <DataGridTextColumn Header="Lon" Width="88" Binding="{Binding Longitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
-                            <DataGridTextColumn Header="Status" Width="74" Binding="{Binding ExpiryStatus}" />
-                            <DataGridTextColumn Header="Expires" Width="132" Binding="{Binding ExpireTime, Converter={x:Static local:UiStampConverter.Instance}}" />
-                            <DataGridTextColumn Header="Heard" Width="156" Binding="{Binding RxTime, Converter={x:Static local:UiStampConverter.Instance}}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <!-- The count label rides inside the waypoint row rather than
+                         in an Auto row of its own: a GridSplitter resizes the two
+                         definitions either side of it, so a separate label row is
+                         what the drag would fight against instead of the table. -->
+                    <DockPanel Grid.Row="5">
+                        <TextBlock DockPanel.Dock="Top" Margin="4,3,0,4" FontWeight="Bold"
+                                   Text="{Binding Waypoints.Count, StringFormat='Waypoints ({0})'}" />
+                        <DataGrid x:Name="WaypointsGridProxy" ItemsSource="{Binding Waypoints}"
+                                  AutoGenerateColumns="False" IsReadOnly="True"
+                                  GridLinesVisibility="Horizontal"
+                                  CanUserSortColumns="True" CanUserResizeColumns="True"
+                                  SelectionMode="Extended"
+                                  KeyDown="OnWaypointsGridKeyDown">
+                            <DataGrid.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Edit..." Click="OnEditWaypoint" />
+                                    <MenuItem Header="Resend"
+                                              Command="{Binding #RootWindow.DataContext.ResendWaypointCommand}"
+                                              CommandParameter="{Binding #WaypointsGridProxy.SelectedItem}" />
+                                    <Separator />
+                                    <MenuItem Header="Delete" Click="OnDeleteWaypoints" InputGesture="Delete" />
+                                </ContextMenu>
+                            </DataGrid.ContextMenu>
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Icon" Width="42" Binding="{Binding IconText}" />
+                                <!-- Whose lock, not merely whether there is one. 🔒 is a
+                                     colour-emoji glyph and ignores Foreground, so the state
+                                     rides on an overlaid Ellipse exactly as the Nodes table's
+                                     🔑 does — see the note there. -->
+                                <DataGridTemplateColumn Width="Auto" SortMemberPath="LockedTo">
+                                    <DataGridTemplateColumn.Header>
+                                        <TextBlock Text="🔒" ToolTip.Tip="Locked to whoever placed it (green dot = ours, red dot = another node's). Nothing shown when anyone may edit it." />
+                                    </DataGridTemplateColumn.Header>
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate x:DataType="waypoints:WaypointRecord">
+                                            <Panel IsVisible="{Binding IsLocked}">
+                                                <TextBlock Text="🔒" />
+                                                <Ellipse Width="5" Height="5" Fill="#7BD88F"
+                                                         Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
+                                                         HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                         IsVisible="{Binding IsLockedToUs}"
+                                                         ToolTip.Tip="Locked to this node — you can edit it, and deleting it retires it on the mesh" />
+                                                <Ellipse Width="5" Height="5" Fill="#FF6B6B"
+                                                         Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
+                                                         HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                         IsVisible="{Binding IsLockedToAnother}"
+                                                         ToolTip.Tip="Locked to another node — it cannot be edited here, and deleting it only removes it from this list" />
+                                            </Panel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Type" Width="80" Binding="{Binding GeofenceKindText}" />
+                                <DataGridTextColumn Header="Name" Width="2*" Binding="{Binding DisplayName}" />
+                                <DataGridTextColumn Header="Description" Width="2*" Binding="{Binding Description}" />
+                                <DataGridTextColumn Header="From" Width="96" Binding="{Binding FromId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                                <DataGridTextColumn Header="Lat" Width="88" Binding="{Binding Latitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                                <DataGridTextColumn Header="Lon" Width="88" Binding="{Binding Longitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
+                                <DataGridTextColumn Header="Status" Width="74" Binding="{Binding ExpiryStatus}" />
+                                <DataGridTextColumn Header="Expires" Width="132" Binding="{Binding ExpireTime, Converter={x:Static local:UiStampConverter.Instance}}" />
+                                <DataGridTextColumn Header="Heard" Width="156" Binding="{Binding RxTime, Converter={x:Static local:UiStampConverter.Instance}}" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
                 </Grid>
             </Grid>
 

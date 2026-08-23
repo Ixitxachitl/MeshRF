@@ -36,8 +36,10 @@ public partial class RadioViewModel
     // ----- Marker projection -----
 
     /// <summary>Home (if set) plus every filtered node with a position plus
-    /// every known waypoint. Node markers honour the same filter as the node
-    /// grid, so hiding a node there hides its marker too.</summary>
+    /// every known waypoint, narrowed by <see cref="MapMarkerFilter"/>. Node
+    /// markers honour the same filter as the node grid, so hiding a node there
+    /// hides its marker too. Home is always drawn: it is the map's reference
+    /// point, not one of the two marker kinds being filtered.</summary>
     public IReadOnlyList<MapMarker> GetMapMarkers()
     {
         var list = new List<MapMarker>();
@@ -45,14 +47,16 @@ public partial class RadioViewModel
         if (TryGetHomeLocation(out double hlat, out double hlon))
             list.Add(new MapMarker(hlat, hlon, GetLocationMarkerLabel(), "Location", IsHome: true));
 
-        foreach (var n in FilteredNodes)
+        IEnumerable<NodeRecord> nodes = ShowNodesOnMap ? FilteredNodes : [];
+        foreach (var n in nodes)
         {
             if (n.Latitude is not double lat || n.Longitude is not double lon) continue;
             list.Add(new MapMarker(lat, lon, GetMapNodeLabel(n), BuildNodeTooltip(n),
                                    IsHome: false, NodeNum: n.NodeNum));
         }
 
-        foreach (var wp in Waypoints)
+        IEnumerable<WaypointRecord> waypoints = ShowWaypointsOnMap ? Waypoints : [];
+        foreach (var wp in waypoints)
         {
             list.Add(new MapMarker(
                 wp.Latitude,
@@ -77,6 +81,25 @@ public partial class RadioViewModel
         string.IsNullOrWhiteSpace(MyShortName)
             ? (string.IsNullOrWhiteSpace(MyLongName) ? "Location" : MyLongName)
             : MyShortName;
+
+    // ----- Marker filter -----
+
+    public IReadOnlyList<string> MapMarkerFilterOptions { get; } =
+        ["Nodes and waypoints", "Nodes only", "Waypoints only"];
+
+    public const string DefaultMapMarkerFilter = "Nodes and waypoints";
+
+    [ObservableProperty]
+    private string _mapMarkerFilter = DefaultMapMarkerFilter;
+
+    private bool ShowNodesOnMap => MapMarkerFilter != "Waypoints only";
+    private bool ShowWaypointsOnMap => MapMarkerFilter != "Nodes only";
+
+    partial void OnMapMarkerFilterChanged(string value)
+    {
+        SaveSettings();
+        RaiseMapDataChanged();
+    }
 
     // ----- Map label mode -----
 

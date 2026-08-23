@@ -827,6 +827,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedWaterfallRowsPerSecond = _settings.WaterfallRowsPerSecond;
         var savedWaterfallColormap = _settings.WaterfallColormap;
         var savedMapNodeLabelMode = _settings.MapNodeLabelMode;
+        var savedMapMarkerFilter = _settings.MapMarkerFilter;
         var savedOpenConversations = _settings.OpenConversations?.ToList() ?? new List<uint>();
         // Identity fields (My Node dialog) — also snapshotted here, not read
         // directly further down, for the same reason as everything above:
@@ -1015,6 +1016,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             WaterfallColormap = cmap;
         if (MapNodeLabelModeOptions.Contains(savedMapNodeLabelMode))
             MapNodeLabelMode = savedMapNodeLabelMode;
+        if (MapMarkerFilterOptions.Contains(savedMapMarkerFilter))
+            MapMarkerFilter = savedMapMarkerFilter;
 
         MyLongName = string.IsNullOrEmpty(savedUserLongName) ? MyLongName : savedUserLongName;
         MyShortName = string.IsNullOrEmpty(savedUserShortName) ? MyShortName : savedUserShortName;
@@ -1191,6 +1194,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // A map report is published straight to the broker and never goes over
         // the air, so it needs neither a TX-capable device nor a receiver.
         TickMapReport();
+        // Nodes age out of the "online" tally without anything being received.
+        TickOnlineNodeCount();
         // Ahead of the running check because neither transmits: a message sent
         // just before RX was stopped still deserves to stop saying nothing and
         // settle as failed, and an ack we still owe a peer is dropped rather
@@ -2033,6 +2038,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.MutedRingtoneChannels = Tabs.OfType<ChannelTabViewModel>()
             .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
         _settings.MapNodeLabelMode = MapNodeLabelMode;
+        _settings.MapMarkerFilter = MapMarkerFilter;
         StoreAutoReportSettings(_settings);
         _settings.ScriptsEnabled = ScriptsEnabled;
         _settings.ScriptsDryRun = ScriptsDryRun;

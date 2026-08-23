@@ -28,6 +28,9 @@ public partial class MainWindow
                       settings.MainLeftTopPaneStar, settings.MainLeftBottomPaneStar);
         ApplyStarPair(RightPaneGrid.RowDefinitions[0], RightPaneGrid.RowDefinitions[2],
                       settings.MainRightTopPaneStar, settings.MainRightBottomPaneStar);
+        // Nodes/waypoints grid: row 3 = nodes, row 5 = waypoints, row 4 the splitter.
+        ApplyStarPair(NodesWaypointsGrid.RowDefinitions[3], NodesWaypointsGrid.RowDefinitions[5],
+                      settings.NodesPaneStar, settings.WaypointsPaneStar);
         ApplyStarPair(SpectrumLayoutGrid.RowDefinitions[0], SpectrumLayoutGrid.RowDefinitions[2],
                       settings.SpectrumTopPaneStar, settings.SpectrumBottomPaneStar);
         // Messages grid: row 1 = chat area (tabs + reply banner + composer),
@@ -182,6 +185,11 @@ public partial class MainWindow
                      out var rightTop, out var rightBottom);
         settings.MainRightTopPaneStar = rightTop;
         settings.MainRightBottomPaneStar = rightBottom;
+
+        SaveStarPair(NodesWaypointsGrid.RowDefinitions[3], NodesWaypointsGrid.RowDefinitions[5],
+                     out var nodesStar, out var waypointsStar);
+        settings.NodesPaneStar = nodesStar;
+        settings.WaypointsPaneStar = waypointsStar;
 
         SaveStarPair(SpectrumLayoutGrid.RowDefinitions[0], SpectrumLayoutGrid.RowDefinitions[2],
                      out var specTop, out var specBottom);

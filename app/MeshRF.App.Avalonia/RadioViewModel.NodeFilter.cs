@@ -65,11 +65,45 @@ public partial class RadioViewModel
     [ObservableProperty] private string _nodeCh3VoltageFilter = "Any";
     [ObservableProperty] private string _nodeCh3CurrentFilter = "Any";
 
+    /// <summary>How recently a node must have been heard to count as online.</summary>
+    public static readonly TimeSpan NodeOnlineWindow = TimeSpan.FromHours(2);
+
+    private int _onlineNodeCount;
+    private long _onlineCountStampSeconds;
+
     /// <summary>Label for the node pane header: shows the filtered count when
-    /// a filter is narrowing the list.</summary>
+    /// a filter is narrowing the list, and how many nodes are online. The
+    /// online tally counts every known node, not just the visible ones — it
+    /// reports the state of the mesh, which the grid's filters don't change.</summary>
     public string NodesHeader => FilteredNodes.Count == Nodes.Count
-        ? $"Nodes ({Nodes.Count})"
-        : $"Nodes ({FilteredNodes.Count} of {Nodes.Count})";
+        ? $"Nodes ({Nodes.Count}, {_onlineNodeCount} online)"
+        : $"Nodes ({FilteredNodes.Count} of {Nodes.Count}, {_onlineNodeCount} online)";
+
+    /// <summary>Recount the online nodes, raising the header only when the
+    /// tally actually moved.</summary>
+    private void RefreshOnlineNodeCount()
+    {
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        _onlineCountStampSeconds = now;
+        long cutoff = now - (long)NodeOnlineWindow.TotalSeconds;
+
+        int online = 0;
+        foreach (var n in Nodes)
+            if (n.LastHeardEpoch > 0 && n.LastHeardEpoch >= cutoff) online++;
+
+        if (online == _onlineNodeCount) return;
+        _onlineNodeCount = online;
+        OnPropertyChanged(nameof(NodesHeader));
+    }
+
+    /// <summary>Poll hook. A node also falls out of the window by the clock
+    /// alone, so the tally is rechecked on a slow cadence rather than only
+    /// when the node list changes.</summary>
+    internal void TickOnlineNodeCount()
+    {
+        if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - _onlineCountStampSeconds < 5) return;
+        RefreshOnlineNodeCount();
+    }
 
     private void HookNodeFilter()
     {
@@ -174,6 +208,7 @@ public partial class RadioViewModel
         FilteredNodes.Clear();
         foreach (var n in Nodes)
             if (PassesFilter(n)) FilteredNodes.Add(n);
+        RefreshOnlineNodeCount();
         OnPropertyChanged(nameof(NodesHeader));
         // The map draws FilteredNodes, so hiding a node here hides its marker.
         // Raised once per rebuild rather than per item — the collection is
