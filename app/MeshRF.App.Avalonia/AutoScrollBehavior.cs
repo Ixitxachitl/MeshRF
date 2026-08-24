@@ -189,104 +189,97 @@ public static class AutoScrollBehavior
     }
 
     /// <summary>
-    /// Pins <paramref name="message"/> to the screen position it already
-    /// occupies, across the layout its growth is about to cause.
+    /// Keeps <paramref name="message"/> at the screen position it occupied
+    /// before the layout its growth is about to cause.
     /// </summary>
     /// <remarks>
     /// A virtualizing panel estimates its total extent from the heights of the
     /// rows it has realized, so one row growing re-estimates every row still
-    /// virtualized. Measured on a 500-message list, two chips on one message
-    /// moved the extent by nine thousand pixels — enough that the view slid
-    /// away from what the reader was looking at, and enough that scrolling to
-    /// the end instead landed on the newest message with the reacted one gone
-    /// off the top.
+    /// virtualized and can slide the viewport thousands of pixels off the
+    /// content it was showing — traced live, one chip on a 423-message list
+    /// moved the anchored row by 4315 pixels.
     ///
-    /// So neither end of the list is the anchor: the message that changed is.
-    /// Its offset within the viewport is read now, before the layout, and put
-    /// back afterwards — which leaves the reader exactly where they were,
-    /// whether they were at the bottom or a hundred messages back.
+    /// Restoring the position is done in two stages because the two failure
+    /// modes need opposite medicine. While the row is off screen, its measured
+    /// drift lives in estimate-space — a revision that wrote that number into
+    /// the offset oscillated +4315, −1076, +3652 against the re-estimates and
+    /// ended clamped at the bottom — so the only move made is ScrollIntoView,
+    /// the panel's own convergent routine. Once the row overlaps the viewport
+    /// the remaining error is bounded by one screen, small enough that an
+    /// offset write only realizes neighbours; it is applied in passes that
+    /// must strictly shrink the error, and the first pass that doesn't stops
+    /// the hold — visibly close and stationary beats fighting the panel.
     /// </remarks>
     private static void HoldInView(ListBox list, ChannelMessage message)
     {
         if (Holding.Contains(list)) return;
 
-        var scroll = ScrollOf(list);
-        if (scroll is null) return;
-
         int index = IndexOf(list, message);
         if (index < 0) return;
 
-        // No container means the message is virtualized away — it isn't on
-        // screen, so there is nothing to hold and the reader sees no jump.
-        var before = TopOf(list, index, scroll);
-        if (before is null) return;
+        // Only a message the reader could see is worth following: growth of an
+        // off-screen row moves nothing they are looking at, and an ACK for
+        // something two hundred rows up must not haul the view to it.
+        var top = TopOf(list, index);
+        if (top is null || !IsOnScreen(list, index)) return;
 
         Holding.Add(list);
-        HoldPass(list, scroll, index, before.Value, passes: 3, token: Claim(list));
+        HoldPass(list, index, wantTop: top.Value, prevError: double.PositiveInfinity, passes: 5, token: Claim(list));
     }
 
-    private static void HoldPass(ListBox list, ScrollViewer scroll, int index, double top, int passes, int token)
+    private static void HoldPass(ListBox list, int index, double wantTop, double prevError, int passes, int token)
     {
         Dispatcher.UIThread.Post(() =>
         {
-            if (!StillOwns(list, token)) { Holding.Remove(list); return; }
+            if (!StillOwns(list, token) || passes <= 0) { Holding.Remove(list); return; }
 
-            var now = TopOf(list, index, scroll);
-            if (now is null)
+            if (!IsOnScreen(list, index))
             {
-                // The re-estimate carried the anchored row clean out of the
-                // realized range — a chip on the newest message at the bottom
-                // does this, sliding the content thousands of pixels. Bring the
-                // row back the panel's own way; the next pass measures where it
-                // landed and restores its exact prior position.
-                try { list.ScrollIntoView(index); } catch { /* torn down */ }
-                if (passes <= 1) { Holding.Remove(list); return; }
-                HoldPass(list, scroll, index, top, passes - 1, token);
+                // Estimate-space: the only safe move is the panel's own. It
+                // lands the row at a viewport edge; the next pass walks it
+                // back to where it was.
+                try { list.ScrollIntoView(index); } catch { /* torn down mid-post */ }
+                HoldPass(list, index, wantTop, double.PositiveInfinity, passes - 1, token);
                 return;
             }
 
-            double drift = now.Value - top;
+            var now = TopOf(list, index);
+            var scroll = ScrollOf(list);
+            if (now is null || scroll is null) { Holding.Remove(list); return; }
 
-            if (Math.Abs(drift) > 0.5) ScrollBy(scroll, drift);
+            double delta = now.Value - wantTop;
 
-            // Settled, or out of passes. Either way this is the last look, so
-            // make the anchored message whole if its new chips hang below the
-            // fold — holding its top would otherwise leave the reader pinned to
-            // a reaction they can't see.
-            if (Math.Abs(drift) <= 0.5 || passes <= 1)
-            {
-                RevealBottom(list, scroll, index);
-                Holding.Remove(list);
-                return;
-            }
+            // In place (within a pixel), or a pass that failed to shrink the
+            // error — the latter is the panel answering back, and pressing on
+            // is what once oscillated to the bottom. The row is visible and
+            // near its old position either way.
+            if (Math.Abs(delta) <= 1 || Math.Abs(delta) >= prevError) { Holding.Remove(list); return; }
 
-            HoldPass(list, scroll, index, top, passes - 1, token);
+            double limit = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
+            scroll.Offset = new Vector(scroll.Offset.X, Math.Clamp(scroll.Offset.Y + delta, 0, limit));
+            HoldPass(list, index, wantTop, Math.Abs(delta), passes - 1, token);
         }, DispatcherPriority.Background);
     }
 
-    /// <summary>Scrolls the least amount that brings the anchored message's
-    /// lower edge inside the viewport, and nothing if it already is.</summary>
-    private static void RevealBottom(ListBox list, ScrollViewer scroll, int index)
+    /// <summary>Whether a row's container is realized and overlaps the
+    /// viewport at all. Containers are realized well past the viewport, so
+    /// realized alone does not mean the reader can see it — or that its
+    /// measured position is trustworthy.</summary>
+    private static bool IsOnScreen(ListBox list, int index)
     {
-        if (list.ContainerFromIndex(index) is not { } container) return;
-        if (container.TranslatePoint(default, scroll) is not { } origin) return;
+        if (list.ContainerFromIndex(index) is not { } container) return false;
+        if (ScrollOf(list) is not { } scroll) return false;
+        if (container.TranslatePoint(default, scroll) is not { } origin) return false;
 
-        double overflow = origin.Y + container.Bounds.Height - scroll.Viewport.Height;
-        // Never at the cost of the message's own top: a bubble taller than the
-        // viewport is read from the top down.
-        if (overflow > 0.5 && overflow < origin.Y) ScrollBy(scroll, overflow);
+        return origin.Y + container.Bounds.Height > 0 && origin.Y < scroll.Viewport.Height;
     }
 
-    private static void ScrollBy(ScrollViewer scroll, double delta)
-    {
-        double limit = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
-        scroll.Offset = new Vector(scroll.Offset.X, Math.Clamp(scroll.Offset.Y + delta, 0, limit));
-    }
-
-    /// <summary>Where a realized row's top edge sits within the viewport, or
-    /// null when the row isn't realized.</summary>
-    private static double? TopOf(ListBox list, int index, ScrollViewer scroll) =>
-        list.ContainerFromIndex(index)?.TranslatePoint(default, scroll)?.Y;
+    /// <summary>Where a row's top edge sits relative to the viewport, or null
+    /// when the row isn't realized.</summary>
+    private static double? TopOf(ListBox list, int index) =>
+        ScrollOf(list) is { } scroll
+            ? list.ContainerFromIndex(index)?.TranslatePoint(default, scroll)?.Y
+            : null;
 
     private static int IndexOf(ListBox list, ChannelMessage message)
     {
