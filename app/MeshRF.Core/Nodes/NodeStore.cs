@@ -418,6 +418,24 @@ public sealed class NodeStore : IDisposable
         }
     }
 
+    /// <summary>Store the status a NODE_STATUS_APP packet carried, verbatim.
+    /// The packet is the node's whole status, so an empty one clears it —
+    /// firmware's <c>NodeDB::setNodeStatus</c> overwrites the same way.
+    /// <see cref="Upsert"/> cannot do this, since it reads an empty status as
+    /// "unchanged" so that NodeInfo and telemetry writes leave it alone.</summary>
+    public void SetNodeStatus(uint nodeNum, string status)
+    {
+        ThrowIfDisposed();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE nodes SET node_status = $status WHERE node_num = $node_num";
+            cmd.Parameters.AddWithValue("$node_num", nodeNum);
+            cmd.Parameters.AddWithValue("$status", status ?? string.Empty);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
     /// <summary>Touch last-heard / RSSI / SNR for an existing or new node.
     /// <paramref name="seenViaMqtt"/> is the transport of this sighting and
     /// overwrites the stored flag either way — callers always know it.</summary>

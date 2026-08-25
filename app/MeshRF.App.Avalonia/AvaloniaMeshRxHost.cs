@@ -1262,6 +1262,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     TelemetryReplyRequested?.Invoke(header.From, result.ChannelName, t.PresentVariants);
                 break;
 
+            case PortNum.NodeStatus when result.StatusMessage is not null:
+                // The router has already recorded the sighting, so the row
+                // exists for this to update.
+                _nodeStore.SetNodeStatus(header.From, result.StatusMessage.Status);
+                MarkNodeDirty(header.From);
+                break;
+
             case PortNum.Traceroute:
                 HandleTraceroute(header, result);
                 break;
