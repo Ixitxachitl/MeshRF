@@ -1000,7 +1000,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Status" Width="2*" SortMemberPath="NodeStatus">
+                            <DataGridTemplateColumn Header="Status" Width="*" SortMemberPath="NodeStatus">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding NodeStatus}"

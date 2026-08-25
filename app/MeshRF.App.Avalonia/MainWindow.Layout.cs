@@ -93,14 +93,19 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>Restore saved pixel widths onto the grid's columns, in order.</summary>
+    /// <summary>Restore saved widths onto the grid's columns, in order. A
+    /// column declared star-sized stays star-sized, with the saved width as
+    /// its weight: the proportion the user dragged survives while the column
+    /// still follows the pane, where a pixel width would freeze it.</summary>
     private static void ApplyColumnWidths(DataGrid grid, List<double>? widths)
     {
         if (widths is null) return;
         for (int i = 0; i < widths.Count && i < grid.Columns.Count; i++)
         {
-            if (widths[i] > 0)
-                grid.Columns[i].Width = new DataGridLength(widths[i], DataGridLengthUnitType.Pixel);
+            if (widths[i] <= 0) continue;
+            var column = grid.Columns[i];
+            column.Width = new DataGridLength(widths[i],
+                column.Width.IsStar ? DataGridLengthUnitType.Star : DataGridLengthUnitType.Pixel);
         }
     }
 
