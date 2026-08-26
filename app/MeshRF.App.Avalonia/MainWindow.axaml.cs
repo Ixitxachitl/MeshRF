@@ -73,6 +73,11 @@ public partial class MainWindow : Window
         // Restore window geometry / splitter proportions before first show.
         ApplyLayout(AppSettings.Load());
 
+        // Coming up on defaults after a crash looks like the app threw the
+        // settings away; say which of the two it was instead.
+        if (AppSettings.LastLoadWarning is { } settingsWarning)
+            _viewModel.StatusText = settingsWarning;
+
         _spectrumTimer = new DispatcherTimer(DispatcherPriority.Render)
         {
             Interval = TimeSpan.FromMilliseconds(16), // ~60 Hz — matches the native pull-rate assumption above.
@@ -94,11 +99,20 @@ public partial class MainWindow : Window
 
         // Capture layout while the visual tree is still alive; Closed fires
         // after teardown, when the grids' measured sizes are gone.
-        Closing += (_, _) => SaveLayout();
+        Closing += (_, _) =>
+        {
+            StopLayoutAutoSave();
+            SaveLayout();
+        };
         Closed += (_, _) =>
         {
             _spectrumTimer.Stop();
             _viewModel.Dispose();
+
+            // Settings are written by a background task. Without waiting for it
+            // here the process can end with the session's last save — the
+            // layout above among it — still queued in memory.
+            AppSettings.FlushPendingWrites(TimeSpan.FromSeconds(3));
         };
     }
 

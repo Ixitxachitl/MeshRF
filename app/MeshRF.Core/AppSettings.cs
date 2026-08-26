@@ -389,40 +389,83 @@ public sealed class AppSettings
         WriteIndented = true,
     };
 
+    /// <summary>Redirects the settings file, so the persistence can be
+    /// exercised against a temp directory instead of the real profile. The app
+    /// never sets it; left null, everything lands where it always did.</summary>
+    public static string? PathOverride { get; set; }
+
     public static string SettingsPath
     {
         get
         {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "MeshRF");
+            string dir = PathOverride is { Length: > 0 } custom
+                ? Path.GetDirectoryName(custom)!
+                : Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "MeshRF");
             Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "settings.json");
+            return PathOverride is { Length: > 0 } path ? path : Path.Combine(dir, "settings.json");
         }
     }
 
+    /// <summary>Path of the copy left behind by the last successful write of
+    /// <paramref name="path"/>. It is a whole file by construction, so it is
+    /// what a settings.json that will not parse gets recovered from.</summary>
+    private static string BackupPathFor(string path) => path + ".bak";
+
+    /// <summary>Set when <see cref="Load"/> could not read the settings file,
+    /// so the app can say so rather than silently coming up on defaults.</summary>
+    public static string? LastLoadWarning { get; private set; }
+
     public static AppSettings Load()
     {
+        var path = SettingsPath;
+        if (TryLoad(path, out var settings))
+        {
+            LastLoadWarning = null;
+            return settings;
+        }
+
+        // Unreadable settings.json. The backup is the copy that was whole when
+        // this file replaced it, so falling back to it costs at most the newest
+        // change — against coming up on defaults, which loses the window
+        // layout, the radio setup and every stored secret at once.
+        if (TryLoad(BackupPathFor(path), out var recovered))
+        {
+            LastLoadWarning = "settings.json could not be read; recovered the previous copy.";
+            try { File.Copy(BackupPathFor(path), path, overwrite: true); } catch { /* recovery is best-effort */ }
+            return recovered;
+        }
+
+        // No file at all is a first run, not a fault.
+        LastLoadWarning = File.Exists(path)
+            ? "settings.json could not be read and no usable backup was found; starting from defaults."
+            : null;
+        return new AppSettings();
+    }
+
+    private static bool TryLoad(string path, out AppSettings settings)
+    {
+        settings = new AppSettings();
         try
         {
-            var path = SettingsPath;
-            if (!File.Exists(path)) return new AppSettings();
+            if (!File.Exists(path)) return false;
             var json = File.ReadAllText(path);
-            var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
-            settings.NormalizeUnitSystem();
-            settings.UserPrivateKey = UnprotectSecretText(settings.UserPrivateKeyOnDisk, s_privateKeyEntropy, base64: true);
-            settings.MqttPassword = UnprotectSecretText(settings.MqttPasswordOnDisk, s_mqttPasswordEntropy, base64: false);
-            foreach (var credential in settings.ScriptCredentials)
+            if (JsonSerializer.Deserialize<AppSettings>(json) is not { } loaded) return false;
+            loaded.NormalizeUnitSystem();
+            loaded.UserPrivateKey = UnprotectSecretText(loaded.UserPrivateKeyOnDisk, s_privateKeyEntropy, base64: true);
+            loaded.MqttPassword = UnprotectSecretText(loaded.MqttPasswordOnDisk, s_mqttPasswordEntropy, base64: false);
+            foreach (var credential in loaded.ScriptCredentials)
             {
                 credential.Value = UnprotectSecretText(credential.ValueOnDisk, s_scriptCredentialEntropy, base64: false);
                 credential.Value2 = UnprotectSecretText(credential.Value2OnDisk, s_scriptCredentialEntropy, base64: false);
             }
-            return settings;
+            settings = loaded;
+            return true;
         }
         catch
         {
-            // Corrupt or unreadable — fall back to defaults rather than crashing.
-            return new AppSettings();
+            return false;
         }
     }
 
@@ -438,16 +481,100 @@ public sealed class AppSettings
                 credential.ValueOnDisk = ProtectSecretText(credential.Value, s_scriptCredentialEntropy, base64: false);
                 credential.Value2OnDisk = ProtectSecretText(credential.Value2, s_scriptCredentialEntropy, base64: false);
             }
-            var json = JsonSerializer.Serialize(this, s_opts);
-            _ = Task.Run(() =>
-            {
-                try { File.WriteAllText(SettingsPath, json); }
-                catch { }
-            });
+            QueueWrite(JsonSerializer.Serialize(this, s_opts));
         }
         catch
         {
             // Persistence failures are non-fatal.
+        }
+    }
+
+    // -- Writing ------------------------------------------------------------
+    //
+    // One writer at a time, and every write lands whole. Saves come from all
+    // over the app and off several threads, and each one carries the entire
+    // object: overlapping writes fight over the same handle, and a write
+    // interrupted part-way leaves a settings.json that parses as nothing at all.
+
+    private static readonly object s_writeGate = new();
+    private static (string Path, string Json)? s_pending;
+    private static bool s_writing;
+    private static Task s_writer = Task.CompletedTask;
+
+    /// <summary>Hands the serialized settings to the background writer. A save
+    /// queued while another is in flight replaces any save still waiting: they
+    /// each carry the whole object, so only the newest is worth writing. The
+    /// destination is resolved here rather than in the writer, so a save always
+    /// lands where the file was when it was asked for.</summary>
+    private static void QueueWrite(string json)
+    {
+        lock (s_writeGate)
+        {
+            s_pending = (SettingsPath, json);
+            if (s_writing) return;
+            s_writing = true;
+            s_writer = Task.Run(DrainWrites);
+        }
+    }
+
+    private static void DrainWrites()
+    {
+        while (true)
+        {
+            (string Path, string Json) write;
+            lock (s_writeGate)
+            {
+                if (s_pending is not { } queued) { s_writing = false; return; }
+                write = queued;
+                s_pending = null;
+            }
+            try { WriteAtomic(write.Path, write.Json); } catch { /* persistence failures are non-fatal */ }
+        }
+    }
+
+    /// <summary>Blocks until queued saves have reached the disk. Called on the
+    /// way out, so the last change of a session is not still sitting in memory
+    /// when the process ends.</summary>
+    public static void FlushPendingWrites(TimeSpan timeout)
+    {
+        Task writer;
+        lock (s_writeGate) writer = s_writer;
+        try { writer.Wait(timeout); } catch { /* nothing useful to do if it will not finish */ }
+    }
+
+    /// <summary>Writes the whole file somewhere else, forces it down to the
+    /// disk, and only then swaps it into place, keeping what it replaced as the
+    /// backup. A crash can cost the newest save; it cannot leave a half-written
+    /// settings.json behind.</summary>
+    private static void WriteAtomic(string path, string json)
+    {
+        string tmp = path + ".tmp";
+
+        using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+        {
+            writer.Write(json);
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+        }
+
+        if (!File.Exists(path))
+        {
+            File.Move(tmp, path);
+            return;
+        }
+
+        try
+        {
+            File.Replace(tmp, path, BackupPathFor(path), ignoreMetadataErrors: true);
+        }
+        catch (Exception ex) when (ex is IOException or PlatformNotSupportedException or UnauthorizedAccessException)
+        {
+            // Replace wants both files on one volume and a filesystem that
+            // supports it. Where that does not hold, keep the backup by hand and
+            // take the ordinary overwrite.
+            try { File.Copy(path, BackupPathFor(path), overwrite: true); } catch { /* best-effort */ }
+            File.Move(tmp, path, overwrite: true);
         }
     }
 

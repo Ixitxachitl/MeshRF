@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.ComponentModel;
 using System.Globalization;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -15,6 +16,14 @@ namespace MeshRF.AvaloniaApp;
 public partial class MainWindow
 {
     private bool _layoutApplied;
+
+    /// <summary>Periodic layout save, so the layout does not depend on the app
+    /// being closed properly to survive.</summary>
+    private DispatcherTimer? _layoutAutoSave;
+
+    /// <summary>Layout as it was at the last save, so the autosave writes only
+    /// when something has actually moved.</summary>
+    private string _savedLayoutSignature = string.Empty;
 
     /// <summary>Restore window size/position/state and splitter proportions.
     /// Called once, before the window is shown.</summary>
@@ -55,6 +64,7 @@ public partial class MainWindow
         NodesGridProxy.Sorting += OnNodesGridSorting;
 
         _layoutApplied = true;
+        StartLayoutAutoSave();
     }
 
     private string? _pendingNodeSortPath;
@@ -152,7 +162,8 @@ public partial class MainWindow
         return false;
     }
 
-    /// <summary>Persist window geometry and splitter proportions. Called on close.</summary>
+    /// <summary>Persist window geometry and splitter proportions. Called on
+    /// close and from the autosave tick.</summary>
     private void SaveLayout()
     {
         if (!_layoutApplied) return; // Never persist a layout we never applied.
@@ -161,7 +172,51 @@ public partial class MainWindow
         // different slice of the same file, and the view model may have saved
         // since. (MeshRF.App's SaveLayout does the same.)
         var settings = AppSettings.Load();
+        CaptureLayout(settings);
+        _savedLayoutSignature = LayoutSignature();
+        settings.Save();
+    }
 
+    /// <summary>
+    /// Writes the layout out again when it has moved since the last save.
+    /// Closing is the only other thing that saves it, and a machine that dies
+    /// with the app running never reaches Closing: without this, a crash that
+    /// has nothing to do with this app costs a whole session of splitter,
+    /// column and map adjustments.
+    /// </summary>
+    private void SaveLayoutIfChanged()
+    {
+        if (!_layoutApplied) return;
+        if (LayoutSignature() == _savedLayoutSignature) return;
+        SaveLayout();
+    }
+
+    /// <summary>The layout as it stands, captured onto a throwaway settings
+    /// object. Comparing it against the last saved one keeps the autosave off
+    /// the disk while nothing is being dragged, and it covers whatever
+    /// <see cref="CaptureLayout"/> writes without a second list to keep in
+    /// step with it.</summary>
+    private string LayoutSignature()
+    {
+        var probe = new AppSettings();
+        CaptureLayout(probe);
+        return JsonSerializer.Serialize(probe);
+    }
+
+    private void StartLayoutAutoSave()
+    {
+        _savedLayoutSignature = LayoutSignature();
+        _layoutAutoSave ??= new DispatcherTimer(
+            TimeSpan.FromSeconds(20), DispatcherPriority.Background, (_, _) => SaveLayoutIfChanged());
+        _layoutAutoSave.Start();
+    }
+
+    private void StopLayoutAutoSave() => _layoutAutoSave?.Stop();
+
+    /// <summary>Reads the live layout out of the visual tree onto
+    /// <paramref name="settings"/>. Everything else on it is left alone.</summary>
+    private void CaptureLayout(AppSettings settings)
+    {
         // While maximized, Width/Height report the maximized size; FrameSize
         // isn't the restore size either. Only record geometry when normal, so
         // un-maximizing next launch restores the user's real window size.
@@ -216,8 +271,6 @@ public partial class MainWindow
         if (string.IsNullOrEmpty(sortPath)) (sortPath, sortDescending) = _lastNodeSort;
         settings.NodeSortMemberPath = sortPath;
         settings.NodeSortDescending = sortDescending;
-
-        settings.Save();
     }
 
     private static void ApplyStarPair(DefinitionBase first, DefinitionBase second, double? firstStar, double? secondStar)
