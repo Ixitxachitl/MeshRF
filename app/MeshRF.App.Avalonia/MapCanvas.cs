@@ -39,9 +39,19 @@ public sealed class MapCanvas : Control
 
     // -- Tile providers -----------------------------------------------------
 
+    /// <summary>A raster basemap. <paramref name="Invert"/>,
+    /// <paramref name="HueRotate"/> and <paramref name="Saturation"/> turn a
+    /// light tileset into a dark one: inverting alone leaves water orange and
+    /// parks magenta, so the hue is rotated back a half turn and the result
+    /// desaturated to settle the palette.</summary>
     private readonly record struct TileProvider(
         string Id, string UrlTemplate, string Subdomains, string Attribution,
-        double Brightness = 1.0, double Gamma = 1.0);
+        double Brightness = 1.0, double Gamma = 1.0,
+        bool Invert = false, double HueRotate = 0.0, double Saturation = 1.0)
+    {
+        public bool NeedsPostProcess =>
+            Brightness != 1.0 || Gamma != 1.0 || Invert || HueRotate != 0.0 || Saturation != 1.0;
+    }
 
     private const string GestureHint =
         "  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location";
@@ -50,25 +60,32 @@ public sealed class MapCanvas : Control
         "osm", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "abc",
         "© OpenStreetMap contributors" + GestureHint);
 
-    private static readonly TileProvider LightCartoTiles = new(
-        "cartopositron", "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png", "abcd",
-        "© OpenStreetMap · © CARTO" + GestureHint);
+    // ArcGIS tile services take the row before the column — /tile/{z}/{y}/{x}
+    // — and publish no {s} subdomain pool, so Subdomains is empty.
+    private const string EsriRoot = "https://server.arcgisonline.com/ArcGIS/rest/services/";
+    private const string EsriPath = "/MapServer/tile/{z}/{y}/{x}";
 
-    private static readonly TileProvider VoyagerTiles = new(
-        "cartovoyager", "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png", "abcd",
-        "© OpenStreetMap · © CARTO" + GestureHint);
+    private static readonly TileProvider StreetTiles = new(
+        "esristreet", EsriRoot + "World_Street_Map" + EsriPath, "",
+        "© Esri · HERE · Garmin · USGS · © OpenStreetMap contributors" + GestureHint);
 
+    private static readonly TileProvider SatelliteTiles = new(
+        "esriimagery", EsriRoot + "World_Imagery" + EsriPath, "",
+        "© Esri · Maxar · Earthstar Geographics" + GestureHint);
+
+    /// <summary>Esri's Canvas basemaps stop at zoom 16 and serve a "Map data
+    /// not yet available" placeholder above it, so the dark map is OSM's own
+    /// tiles inverted: they carry full detail across the whole zoom range and
+    /// need no key.</summary>
     private static readonly TileProvider DarkTiles = new(
-        "cartodark", "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", "abcd",
-        "© OpenStreetMap · © CARTO" + GestureHint,
-        // Gamma lifts the low-contrast CARTO dark palette so roads and labels
-        // read clearly while the dark background survives.
-        Gamma: 1.8);
+        "osmdark", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "abc",
+        "© OpenStreetMap contributors" + GestureHint,
+        Brightness: 0.85, Invert: true, HueRotate: 180.0, Saturation: 0.6);
 
     /// <summary>No "Auto" entry, unlike MeshRF.App: that option exists to
     /// follow a light/dark app theme, and this app's shell is always dark.</summary>
     public static readonly IReadOnlyList<string> MapTileThemeOptions =
-        ["Dark", "Light", "Light (CARTO)", "Voyager"];
+        ["Dark", "Light", "Street", "Satellite"];
 
     private const string DefaultTileTheme = "Dark";
 
@@ -86,8 +103,8 @@ public sealed class MapCanvas : Control
     private TileProvider CurrentTiles => s_mapTileTheme switch
     {
         "Light" => LightTiles,
-        "Light (CARTO)" => LightCartoTiles,
-        "Voyager" => VoyagerTiles,
+        "Street" => StreetTiles,
+        "Satellite" => SatelliteTiles,
         _ => DarkTiles,
     };
 
@@ -109,6 +126,10 @@ public sealed class MapCanvas : Control
     private static readonly ConcurrentDictionary<string, Bitmap> s_memCache = new();
     private static readonly ConcurrentQueue<string> s_memCacheOrder = new();
     private readonly HashSet<string> _tilesInFlight = new(StringComparer.Ordinal);
+
+    private static readonly string[] RetiredProviderIds =
+        ["cartodark", "cartopositron", "cartovoyager", "esridark", "esrilight"];
+    private static int s_retiredSweepStarted;
 
     // A failed tile is cached nowhere, so without this it is re-requested by the
     // very next render — several times a second while nodes are arriving — and a
@@ -189,6 +210,27 @@ public sealed class MapCanvas : Control
         ClipToBounds = true;
         Focusable = true;
         try { System.IO.Directory.CreateDirectory(s_cacheDir); } catch { /* cache is best-effort */ }
+        SweepRetiredProviderTiles();
+    }
+
+    /// <summary>Tiles cached under a provider the app no longer offers are dead
+    /// bytes, and a well-travelled map leaves thousands of them. Swept once per
+    /// process, off the UI thread since the delete count is unbounded.</summary>
+    private static void SweepRetiredProviderTiles()
+    {
+        if (Interlocked.Exchange(ref s_retiredSweepStarted, 1) != 0) return;
+        Task.Run(() =>
+        {
+            foreach (var prefix in RetiredProviderIds)
+            {
+                try
+                {
+                    foreach (var f in System.IO.Directory.EnumerateFiles(s_cacheDir, prefix + "_*.png"))
+                        try { System.IO.File.Delete(f); } catch { /* in use, or gone already */ }
+                }
+                catch { /* cache is best-effort */ }
+            }
+        });
     }
 
     public void Attach(RadioViewModel vm)
@@ -471,11 +513,13 @@ public sealed class MapCanvas : Control
         }
         else
         {
-            // Rotate across the provider's tile subdomains.
+            // Rotate across the provider's tile subdomains, where it has a
+            // pool; providers serving one host leave Subdomains empty.
             var subs = provider.Subdomains;
-            var server = subs[(x + y) % subs.Length];
-            var url = provider.UrlTemplate
-                .Replace("{s}", server.ToString())
+            var url = provider.UrlTemplate;
+            if (subs.Length > 0)
+                url = url.Replace("{s}", subs[(x + y) % subs.Length].ToString());
+            url = url
                 .Replace("{z}", zoom.ToString(CultureInfo.InvariantCulture))
                 .Replace("{x}", x.ToString(CultureInfo.InvariantCulture))
                 .Replace("{y}", y.ToString(CultureInfo.InvariantCulture));
@@ -486,27 +530,39 @@ public sealed class MapCanvas : Control
 
         using var ms = new System.IO.MemoryStream(bytes);
         var bmp = new Bitmap(ms);
-        if (provider.Brightness == 1.0 && provider.Gamma == 1.0) return bmp;
+        if (!provider.NeedsPostProcess) return bmp;
 
-        using (bmp) return PostProcessTile(bmp, provider.Brightness, provider.Gamma);
+        using (bmp) return PostProcessTile(bmp, provider);
     }
 
-    /// <summary>Gamma-corrects then brightness-scales each RGB channel. Gamma
-    /// &gt; 1 raises midtones so the CARTO dark basemap's roads and labels read
-    /// clearly without blowing out bright areas.</summary>
-    private static unsafe Bitmap PostProcessTile(Bitmap src, double brightness, double gamma)
+    /// <summary>Recolours a tile so a provider's palette suits the app: invert
+    /// flips a light tileset dark, the hue rotation and saturation settle the
+    /// colours that inversion throws off, and gamma/brightness set the final
+    /// level. Skipped entirely unless the provider asks for it.</summary>
+    private static unsafe Bitmap PostProcessTile(Bitmap src, TileProvider provider)
     {
         var size = src.PixelSize;
         var target = new WriteableBitmap(size, src.Dpi, PixelFormat.Bgra8888, AlphaFormat.Premul);
 
-        var lut = new byte[256];
-        double gammaInv = (gamma > 0.0 && gamma != 1.0) ? 1.0 / gamma : 1.0;
+        // Channel value after inversion, before the colour matrix.
+        var pre = new double[256];
+        for (int i = 0; i < 256; i++)
+        {
+            double v = i / 255.0;
+            pre[i] = provider.Invert ? 1.0 - v : v;
+        }
+
+        // Brightness and gamma fold into one lookup over the matrix output.
+        var post = new byte[256];
+        double gammaInv = (provider.Gamma > 0.0 && provider.Gamma != 1.0) ? 1.0 / provider.Gamma : 1.0;
         for (int i = 0; i < 256; i++)
         {
             double v = i / 255.0;
             if (gammaInv != 1.0) v = Math.Pow(v, gammaInv);
-            lut[i] = (byte)Math.Min(255.0, v * brightness * 255.0);
+            post[i] = (byte)Math.Clamp(v * provider.Brightness * 255.0, 0.0, 255.0);
         }
+
+        var m = ColorMatrix(provider.HueRotate, provider.Saturation);
 
         using (var fb = target.Lock())
         {
@@ -519,14 +575,51 @@ public sealed class MapCanvas : Control
                 for (int col = 0; col < size.Width; col++)
                 {
                     byte* px = line + col * 4;
-                    px[0] = lut[px[0]]; // B
-                    px[1] = lut[px[1]]; // G
-                    px[2] = lut[px[2]]; // R
+                    double b = pre[px[0]], g = pre[px[1]], r = pre[px[2]];
+
+                    double nr = m[0] * r + m[1] * g + m[2] * b;
+                    double ng = m[3] * r + m[4] * g + m[5] * b;
+                    double nb = m[6] * r + m[7] * g + m[8] * b;
+
+                    px[0] = post[(int)Math.Clamp(nb * 255.0, 0.0, 255.0)];
+                    px[1] = post[(int)Math.Clamp(ng * 255.0, 0.0, 255.0)];
+                    px[2] = post[(int)Math.Clamp(nr * 255.0, 0.0, 255.0)];
                     // alpha (px[3]) untouched
                 }
             }
         }
         return target;
+    }
+
+    /// <summary>Row-major 3x3 combining a hue rotation with a saturation
+    /// scale, both as defined by the CSS filter effects colour matrices, so the
+    /// numbers match what the same filter chain produces in a browser.</summary>
+    private static double[] ColorMatrix(double hueDegrees, double saturation)
+    {
+        double c = Math.Cos(hueDegrees * Math.PI / 180.0);
+        double s = Math.Sin(hueDegrees * Math.PI / 180.0);
+        double[] hue =
+        [
+            0.213 + c * 0.787 - s * 0.213, 0.715 - c * 0.715 - s * 0.715, 0.072 - c * 0.072 + s * 0.928,
+            0.213 - c * 0.213 + s * 0.143, 0.715 + c * 0.285 + s * 0.140, 0.072 - c * 0.072 - s * 0.283,
+            0.213 - c * 0.213 - s * 0.787, 0.715 - c * 0.715 + s * 0.715, 0.072 + c * 0.928 + s * 0.072,
+        ];
+        double k = saturation;
+        double[] sat =
+        [
+            0.213 + 0.787 * k, 0.715 - 0.715 * k, 0.072 - 0.072 * k,
+            0.213 - 0.213 * k, 0.715 + 0.285 * k, 0.072 - 0.072 * k,
+            0.213 - 0.213 * k, 0.715 - 0.715 * k, 0.072 + 0.928 * k,
+        ];
+
+        // sat * hue: the hue rotation applies first.
+        var m = new double[9];
+        for (int r = 0; r < 3; r++)
+            for (int col = 0; col < 3; col++)
+                m[r * 3 + col] = sat[r * 3] * hue[col]
+                               + sat[r * 3 + 1] * hue[3 + col]
+                               + sat[r * 3 + 2] * hue[6 + col];
+        return m;
     }
 
     // -- Markers ------------------------------------------------------------
