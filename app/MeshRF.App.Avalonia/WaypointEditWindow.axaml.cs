@@ -47,7 +47,18 @@ public partial class WaypointEditWindow : Window
     public WaypointEditWindow()
     {
         InitializeComponent();
+
+        // Neither checkbox owns the notify flags, so the panel follows both.
+        // Load assigns these, which raises the same event, so the state a
+        // waypoint is opened with lands here too.
+        UseGeofenceBox.IsCheckedChanged += (_, _) => SyncGeofenceNotifyEnabled();
+        UseBoundingBoxBox.IsCheckedChanged += (_, _) => SyncGeofenceNotifyEnabled();
+        SyncGeofenceNotifyEnabled();
     }
+
+    private void SyncGeofenceNotifyEnabled() =>
+        GeofenceNotifyPanel.IsEnabled =
+            UseGeofenceBox.IsChecked == true || UseBoundingBoxBox.IsChecked == true;
 
     /// <summary>Opens the editor for a waypoint and applies what comes back.
     /// Every way in — either grid, the map's marker menu, a double-click on
@@ -217,8 +228,13 @@ public partial class WaypointEditWindow : Window
             ? _lockedToOther
             : LockToMeBox.IsChecked == true ? _myNodeNum : 0;
 
-        // The notify flags only mean something alongside a geofence.
+        // The notify flags only mean something alongside a geofence of either
+        // shape, and favorites-only only narrows an alert that is being raised
+        // at all. The official Android client normalises them the same way
+        // before sending.
         bool hasGeofence = geofenceRadius > 0 || bboxWest is not null;
+        bool notifyOnEnter = hasGeofence && NotifyOnEnterBox.IsChecked == true;
+        bool notifyOnExit = hasGeofence && NotifyOnExitBox.IsChecked == true;
 
         _result = new WaypointEditResult(
             NameBox.Text?.Trim() ?? string.Empty,
@@ -229,9 +245,9 @@ public partial class WaypointEditWindow : Window
             lockedTo,
             geofenceRadius,
             bboxWest, bboxSouth, bboxEast, bboxNorth,
-            hasGeofence && NotifyOnEnterBox.IsChecked == true,
-            hasGeofence && NotifyOnExitBox.IsChecked == true,
-            hasGeofence && NotifyFavoritesOnlyBox.IsChecked == true);
+            notifyOnEnter,
+            notifyOnExit,
+            (notifyOnEnter || notifyOnExit) && NotifyFavoritesOnlyBox.IsChecked == true);
         Close();
     }
 

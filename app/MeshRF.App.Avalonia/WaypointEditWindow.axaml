@@ -62,10 +62,6 @@
                         <TextBox Name="GeofenceRadiusBox" Width="80"
                                  ToolTip.Tip="Circular geofence radius, in your selected display units. Sent as metres, which is what Waypoint.geofence_radius carries." />
                     </StackPanel>
-                    <CheckBox Name="NotifyOnEnterBox" Content="Notify on enter" />
-                    <CheckBox Name="NotifyOnExitBox" Content="Notify on exit" />
-                    <CheckBox Name="NotifyFavoritesOnlyBox" Content="Favorites only"
-                              ToolTip.Tip="Only raise enter/exit notifications for nodes marked as favorites (per receiver)" />
                 </StackPanel>
 
                 <CheckBox Name="UseBoundingBoxBox" Content="Add bounding box geofence"
@@ -81,6 +77,15 @@
                     <TextBlock Grid.Row="2" Grid.Column="1" Text="North" FontSize="11" Margin="4,0,0,0" />
                     <TextBox Grid.Row="3" Grid.Column="1" Name="BboxNorthBox" Margin="4,0,0,0" />
                 </Grid>
+
+                <!-- After both fences, and enabled by either: the flags are the
+                     waypoint's, not the circle's. -->
+                <StackPanel Name="GeofenceNotifyPanel" Orientation="Vertical" Spacing="2">
+                    <CheckBox Name="NotifyOnEnterBox" Content="Notify on enter" />
+                    <CheckBox Name="NotifyOnExitBox" Content="Notify on exit" />
+                    <CheckBox Name="NotifyFavoritesOnlyBox" Content="Favorites only"
+                              ToolTip.Tip="Only raise enter/exit notifications for nodes marked as favorites (per receiver)" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

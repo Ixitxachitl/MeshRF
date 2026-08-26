@@ -287,9 +287,26 @@ public partial class RadioViewModel
               $"NE {n.ToString("F4", CultureInfo.InvariantCulture)}, {e.ToString("F4", CultureInfo.InvariantCulture)}"
             : "No box picked.";
 
+    /// <summary>True once the composer has a geofence of either shape. The
+    /// notify flags belong to the waypoint's geofence rather than to one shape
+    /// of it — Waypoint.notify_on_enter/exit read on "the circular radius
+    /// and/or the bounding box" — so a box on its own arms them just as a
+    /// radius does.</summary>
+    public bool WaypointHasGeofence => UseWaypointGeofence || UseWaypointBoundingBox;
+
     partial void OnIsPickingWaypointBoundingBoxChanged(bool value) => RaiseMapDataChanged();
-    partial void OnUseWaypointBoundingBoxChanged(bool value) => RaiseMapDataChanged();
-    partial void OnUseWaypointGeofenceChanged(bool value) => RaiseMapDataChanged();
+
+    partial void OnUseWaypointBoundingBoxChanged(bool value)
+    {
+        OnPropertyChanged(nameof(WaypointHasGeofence));
+        RaiseMapDataChanged();
+    }
+
+    partial void OnUseWaypointGeofenceChanged(bool value)
+    {
+        OnPropertyChanged(nameof(WaypointHasGeofence));
+        RaiseMapDataChanged();
+    }
 
     /// <summary>Completes a two-corner pick into a normalised west/south/east/
     /// north box and leaves picking mode.</summary>
@@ -392,11 +409,14 @@ public partial class RadioViewModel
                 bboxWest = bw; bboxSouth = bs; bboxEast = be; bboxNorth = bn;
             }
 
-            // The notify flags only mean something alongside a geofence.
+            // The notify flags only mean something alongside a geofence of
+            // either shape, and favorites-only only narrows an alert that is
+            // being raised at all. The official Android client normalises them
+            // the same way before sending.
             bool hasGeofence = geofenceRadius > 0 || bboxWest is not null;
             bool notifyOnEnter = hasGeofence && WaypointNotifyOnEnter;
             bool notifyOnExit = hasGeofence && WaypointNotifyOnExit;
-            bool notifyFavoritesOnly = hasGeofence && WaypointNotifyFavoritesOnly;
+            bool notifyFavoritesOnly = (notifyOnEnter || notifyOnExit) && WaypointNotifyFavoritesOnly;
 
             var frame = MeshEncoder.EncodeWaypoint(
                 selectedChannel, _rxHost.MyNodeNum, packetId, waypointId, lat, lon,

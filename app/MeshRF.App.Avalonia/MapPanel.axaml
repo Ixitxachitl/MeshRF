@@ -167,10 +167,6 @@
                             <TextBox Width="80" Text="{Binding WaypointGeofenceRadiusInput, Mode=TwoWay}"
                                      ToolTip.Tip="Circular geofence radius, in your selected display units. Sent as metres, which is what Waypoint.geofence_radius carries." />
                         </StackPanel>
-                        <CheckBox Content="Notify on enter" IsChecked="{Binding WaypointNotifyOnEnter, Mode=TwoWay}" />
-                        <CheckBox Content="Notify on exit" IsChecked="{Binding WaypointNotifyOnExit, Mode=TwoWay}" />
-                        <CheckBox Content="Favorites only" IsChecked="{Binding WaypointNotifyFavoritesOnly, Mode=TwoWay}"
-                                  ToolTip.Tip="Only raise enter/exit notifications for nodes marked as favorites (per receiver)" />
                     </StackPanel>
 
                     <CheckBox Content="Add bounding box geofence" Margin="0,6,0,0"
@@ -185,6 +181,16 @@
                         <TextBlock Text="{Binding WaypointBoundingBoxSummary}" TextWrapping="Wrap" />
                         <Button Content="Clear box" HorizontalAlignment="Left"
                                 Command="{Binding ClearWaypointBoundingBoxCommand}" />
+                    </StackPanel>
+
+                    <!-- After both fences, and enabled by either: the flags are
+                         the waypoint's, not the circle's. -->
+                    <StackPanel Orientation="Vertical" Margin="0,6,0,0" Spacing="2"
+                                IsEnabled="{Binding WaypointHasGeofence}">
+                        <CheckBox Content="Notify on enter" IsChecked="{Binding WaypointNotifyOnEnter, Mode=TwoWay}" />
+                        <CheckBox Content="Notify on exit" IsChecked="{Binding WaypointNotifyOnExit, Mode=TwoWay}" />
+                        <CheckBox Content="Favorites only" IsChecked="{Binding WaypointNotifyFavoritesOnly, Mode=TwoWay}"
+                                  ToolTip.Tip="Only raise enter/exit notifications for nodes marked as favorites (per receiver)" />
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
