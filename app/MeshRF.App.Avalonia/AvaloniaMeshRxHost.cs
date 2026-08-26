@@ -346,7 +346,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         var deferred = new Dictionary<ChannelTabViewModel, List<MessageRecord>>();
         foreach (var m in _messageStore.TextHistory())
         {
-            if (m.ToNode != 0xFFFFFFFFu) continue; // DMs are rebuilt separately below.
+            // A geofence note is addressed to us rather than to the broadcast
+            // address, so it needs letting into the room on its own terms.
+            bool channelNote = IsChannelNote(m);
+            if (!channelNote && m.ToNode != 0xFFFFFFFFu) continue; // DMs are rebuilt separately below.
             var tab = ResolveChannelTab(m.Channel);
             if (tab is null) continue;
 
@@ -357,7 +360,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 list.Add(m);
                 continue;
             }
-            tab.Messages.Add(BuildHistoryMessage(m, tab.Messages));
+
+            var replayed = BuildHistoryMessage(m, tab.Messages);
+            if (channelNote) replayed.FromId = GeofenceNoteLabel;
+            tab.Messages.Add(replayed);
         }
         foreach (var (tab, reactions) in deferred)
             ApplyHistoryReactions(tab.Messages, reactions);
@@ -390,6 +396,20 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// their quoted context the same way live ones are.</summary>
     private ChannelMessage BuildHistoryMessage(MessageRecord m, IList<ChannelMessage> existing) =>
         m.ReplyId != 0 ? BuildReplyLinkedMessage(m, existing) : ToChannelMessage(m);
+
+    /// <summary>Sender label on a geofence crossing, live and replayed alike.
+    /// The row carries the channel it was posted into, not the fence, so a
+    /// waypoint's own name could not survive a restart — and it is already in
+    /// the alert's text.</summary>
+    private const string GeofenceNoteLabel = "Geofence";
+
+    /// <summary>True for a note this app wrote into a channel rather than into
+    /// a conversation — today, a geofence crossing. Conversation notes carry
+    /// the peer or us in from_node; these carry nobody.</summary>
+    private static bool IsChannelNote(MessageRecord m) =>
+        m.PortNum == MessageStore.ConversationNotePort
+        && m.FromNode == 0
+        && !string.IsNullOrWhiteSpace(m.Channel);
 
     private void ApplyHistoryReactions(ObservableCollection<ChannelMessage> messages, List<MessageRecord> reactions)
     {
@@ -1571,16 +1591,20 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         string text = $"{NodeDisplayName(nodeNum)} {(entered ? "entered" : "exited")} geofence \"{wp.DisplayName}\"";
         Log($"  geofence: {text}");
 
+        // Stored before the room is resolved: the crossing happened whether or
+        // not there is a tab open to show it in, and a return here used to take
+        // the record with it.
+        PersistChannelNote(wp.Channel, text);
+
         if (ResolveChannelTab(wp.Channel) is not { } chanTab) return;
 
         chanTab.Messages.Add(new ChannelMessage
         {
-            FromId = string.IsNullOrWhiteSpace(wp.Name) ? "Geofence" : wp.Name,
+            FromId = GeofenceNoteLabel,
             Text = text,
         });
         while (chanTab.Messages.Count > MaxMessagesPerTab) chanTab.Messages.RemoveAt(0);
         MarkTabNeedsAttention(chanTab);
-        PersistChannelNote(wp.Channel, text);
 
         if (!chanTab.MuteRtttl && !IsNodeIgnored(nodeNum) && !IsNodeRtttlMuted(nodeNum))
             GeofenceCrossed?.Invoke();

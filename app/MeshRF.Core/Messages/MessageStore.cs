@@ -189,9 +189,16 @@ public sealed class MessageStore : IDisposable
     }
 
     /// <summary>
-    /// All decoded text messages (portnum 1), oldest first, for rebuilding the
-    /// channel chat rooms and direct-message conversation tabs on startup.
+    /// All decoded text messages (portnum 1) and app-written notes, oldest
+    /// first, for rebuilding the channel chat rooms and direct-message
+    /// conversation tabs on startup.
     /// </summary>
+    /// <remarks>
+    /// Notes are included for the same reason <see cref="Conversation"/>
+    /// includes them: a geofence crossing is written on the note port, so a
+    /// query for portnum 1 alone rebuilds the room without the alerts that were
+    /// posted into it.
+    /// </remarks>
     public IReadOnlyList<MessageRecord> TextHistory(int limit = 5000)
     {
         ThrowIfDisposed();
@@ -202,11 +209,12 @@ public sealed class MessageStore : IDisposable
             cmd.CommandText = """
                 SELECT * FROM (
                     SELECT * FROM messages
-                    WHERE portnum = 1 AND decrypted = 1
+                    WHERE portnum IN (1, $note) AND decrypted = 1
                     ORDER BY rx_epoch DESC, id DESC
                     LIMIT $n
                 ) ORDER BY rx_epoch ASC, id ASC;
                 """;
+            cmd.Parameters.AddWithValue("$note", ConversationNotePort);
             cmd.Parameters.AddWithValue("$n", limit);
             using var rd = cmd.ExecuteReader();
             while (rd.Read()) list.Add(Read(rd));
@@ -279,16 +287,24 @@ public sealed class MessageStore : IDisposable
         return list;
     }
 
-    /// <summary>Delete the broadcast text messages stored for one channel.</summary>
+    /// <summary>Delete the broadcast text messages stored for one channel,
+    /// along with the app-written notes posted into it — those are addressed to
+    /// us rather than to the broadcast address, so they need naming
+    /// separately.</summary>
     public void ClearChannel(string channel)
     {
         ThrowIfDisposed();
         lock (_gate)
         {
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText =
-                "DELETE FROM messages WHERE portnum = 1 AND channel = $c AND to_node = 4294967295";
+            cmd.CommandText = """
+                DELETE FROM messages
+                WHERE channel = $c
+                  AND ((portnum = 1 AND to_node = 4294967295)
+                    OR (portnum = $note AND from_node = 0));
+                """;
             cmd.Parameters.AddWithValue("$c", channel ?? string.Empty);
+            cmd.Parameters.AddWithValue("$note", ConversationNotePort);
             cmd.ExecuteNonQuery();
         }
     }
