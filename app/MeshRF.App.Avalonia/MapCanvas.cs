@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http;
@@ -536,22 +536,31 @@ public sealed class MapCanvas : Control
         if (_vm is null) return;
         var markers = Markers;
 
-        // A small margin keeps edge markers and their labels from popping in late.
-        const double cullMargin = 48;
         var nodes = new List<(RadioViewModel.MapMarker mk, double px, double py)>();
 
         foreach (var mk in markers)
         {
             double px = LonToX(mk.Lon, _zoom) - originX;
             double py = LatToY(mk.Lat, _zoom) - originY;
-            if (px < -cullMargin || px > w + cullMargin || py < -cullMargin || py > h + cullMargin)
+
+            if (!mk.IsHome && !mk.IsWaypoint)
+            {
+                // Nodes are culled after they have been grouped, not here.
+                // Which nodes are on screen changes with every pan, and dropping
+                // one first would change how the rest group, so a group near the
+                // edge would rearrange as the pan carried its neighbours across
+                // the boundary.
+                nodes.Add((mk, px, py));
                 continue;
+            }
+
+            if (OffScreen(px, py, w, h)) continue;
 
             if (mk.IsHome)
             {
                 DrawHome(context, mk, px, py);
             }
-            else if (mk.IsWaypoint)
+            else
             {
                 if (mk.GeofenceRadiusM > 0) DrawGeofenceCircle(context, mk, px, py);
                 if (mk.BboxWest is double bw && mk.BboxSouth is double bs &&
@@ -561,16 +570,19 @@ public sealed class MapCanvas : Control
                 DrawLabel(context, mk.Label, px, py);
                 _hitTargets.Add(new HitTarget(px, py, MarkerRadiusPx + 2, mk.Title, null, mk));
             }
-            else
-            {
-                nodes.Add((mk, px, py));
-            }
         }
+
+        // Fixed order, whatever order the markers arrived in. The marker list
+        // follows the node grid, which reorders as nodes are heard, and both
+        // the node a group forms around and which overlapping label lands on
+        // top would otherwise change under a packet arriving mid-drag.
+        nodes.Sort(static (a, b) => (a.mk.NodeNum ?? 0).CompareTo(b.mk.NodeNum ?? 0));
 
         if (!_clusterNodes)
         {
             foreach (var n in nodes)
             {
+                if (OffScreen(n.px, n.py, w, h)) continue;
                 DrawDot(context, NodeFill, n.px, n.py);
                 DrawLabel(context, n.mk.Label, n.px, n.py);
                 _hitTargets.Add(new HitTarget(n.px, n.py, MarkerRadiusPx + 2, n.mk.Title, null, n.mk));
@@ -585,16 +597,24 @@ public sealed class MapCanvas : Control
             if (cluster.Count == 1)
             {
                 var (mk, px, py) = cluster[0];
+                if (OffScreen(px, py, w, h)) continue;
                 DrawDot(context, NodeFill, px, py);
                 DrawLabel(context, mk.Label, px, py);
                 _hitTargets.Add(new HitTarget(px, py, MarkerRadiusPx + 2, mk.Title, null, mk));
             }
             else
             {
-                DrawCluster(context, cluster);
+                DrawCluster(context, cluster, w, h);
             }
         }
     }
+
+    /// <summary>A margin outside the viewport keeps edge markers and their
+    /// labels from popping in late.</summary>
+    private const double CullMarginPx = 48;
+
+    private static bool OffScreen(double px, double py, double w, double h) =>
+        px < -CullMarginPx || px > w + CullMarginPx || py < -CullMarginPx || py > h + CullMarginPx;
 
     private static void DrawDot(DrawingContext context, IBrush fill, double px, double py) =>
         context.DrawEllipse(fill, MarkerOutline, new Point(px, py), MarkerRadiusPx, MarkerRadiusPx);
@@ -621,10 +641,12 @@ public sealed class MapCanvas : Control
     }
 
     private void DrawCluster(DrawingContext context,
-                             List<(RadioViewModel.MapMarker mk, double px, double py)> members)
+                             List<(RadioViewModel.MapMarker mk, double px, double py)> members,
+                             double w, double h)
     {
         double cx = members.Average(m => m.px);
         double cy = members.Average(m => m.py);
+        if (OffScreen(cx, cy, w, h)) return;
         context.DrawEllipse(ClusterFill, MarkerOutline, new Point(cx, cy),
                             ClusterBadgeRadiusPx, ClusterBadgeRadiusPx);
 
@@ -639,8 +661,16 @@ public sealed class MapCanvas : Control
     }
 
     /// <summary>Single-link clustering over a uniform grid: each node joins the
-    /// first existing cluster whose anchor is within the radius, checking only
-    /// the 9 neighbouring buckets rather than every cluster.</summary>
+    /// nearest existing cluster whose anchor is within the radius, checking only
+    /// the 9 neighbouring buckets rather than every cluster.
+    ///
+    /// Nearest, not first found, because the buckets are laid out from the
+    /// viewport's origin and so shift under the nodes as the map is panned. A
+    /// node in reach of two anchors would join whichever bucket the scan
+    /// reached first, and a one-pixel pan is enough to reverse that order —
+    /// groups would swap members and their badges jump mid-drag. Distance
+    /// between nodes does not depend on where the grid falls, so the same nodes
+    /// group the same way at every pan offset.</summary>
     private static List<List<(RadioViewModel.MapMarker mk, double px, double py)>> BuildMarkerClusters(
         IReadOnlyList<(RadioViewModel.MapMarker mk, double px, double py)> nodes, double clusterRadiusPx)
     {
@@ -657,17 +687,23 @@ public sealed class MapCanvas : Control
             int bucketX = (int)Math.Floor(node.px / cellSize);
             int bucketY = (int)Math.Floor(node.py / cellSize);
             int hit = -1;
+            double bestSq = double.MaxValue;
 
-            for (int bx = bucketX - 1; bx <= bucketX + 1 && hit < 0; bx++)
+            for (int bx = bucketX - 1; bx <= bucketX + 1; bx++)
             {
-                for (int by = bucketY - 1; by <= bucketY + 1 && hit < 0; by++)
+                for (int by = bucketY - 1; by <= bucketY + 1; by++)
                 {
                     if (!buckets.TryGetValue(BucketKey(bx, by), out var candidates)) continue;
                     foreach (var ci in candidates)
                     {
                         double dx = node.px - anchors[ci].Px;
                         double dy = node.py - anchors[ci].Py;
-                        if (dx * dx + dy * dy <= radiusSq) { hit = ci; break; }
+                        double distSq = dx * dx + dy * dy;
+                        if (distSq > radiusSq) continue;
+                        // Ties go to the older cluster, so an exact draw is
+                        // settled by the order the nodes came in rather than by
+                        // the order the buckets happened to be scanned in.
+                        if (distSq < bestSq || (distSq == bestSq && ci < hit)) { bestSq = distSq; hit = ci; }
                     }
                 }
             }
