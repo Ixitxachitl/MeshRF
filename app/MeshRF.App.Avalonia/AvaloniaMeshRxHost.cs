@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
 using MeshRF.Channels;
 using MeshRF.Mesh;
@@ -1030,10 +1030,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         foreach (var id in expired)
         {
             if (!_pendingAcks.Remove(id, out var pending)) continue;
-            // DeliveredToMesh counts as still waiting: the mesh carried the DM
-            // but the recipient never answered for it, and a message nobody
-            // confirmed reading is a failed delivery however far it travelled.
-            if (pending.Message.Delivery is not (MessageDelivery.Sent or MessageDelivery.DeliveredToMesh)) continue;
+            // Only a message with nothing at all behind it fails. A DM already
+            // at DeliveredToMesh was heard being relayed, so the mesh
+            // demonstrably carried it; the silence afterwards is the
+            // recipient's alone, and a red cross would deny the one thing we do
+            // know. It keeps the grey check it earned.
+            if (pending.Message.Delivery is not MessageDelivery.Sent) continue;
             SettleDelivery(pending.Message, MessageDelivery.Failed);
         }
     }
