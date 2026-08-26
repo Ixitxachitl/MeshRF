@@ -37,17 +37,15 @@ public partial class MapPanel : UserControl
         Canvas.RequestDeleteNode += OnRequestDeleteNode;
     }
 
-    /// <summary>"Edit…" on a waypoint marker's context menu. Same dialog and
-    /// same update call as the waypoints grid's own Edit entry.</summary>
+    /// <summary>"Edit…" on a waypoint marker's context menu, and a double-click
+    /// on the marker itself. Same dialog and same update call as the waypoints
+    /// grid's own Edit entry.</summary>
     private async void OnRequestEditWaypoint(WaypointRecord wp)
     {
         if (_viewModel is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        var result = await WaypointEditWindow.EditAsync(owner, wp, _viewModel.MyNodeNumber,
-                                                       _viewModel.CurrentUnitSystem);
-        if (result is null) return;
-        await _viewModel.UpdateWaypointAsync(wp, result);
+        await WaypointEditWindow.EditAndApplyAsync(owner, _viewModel, wp);
     }
 
     /// <summary>"Delete" on a waypoint marker's context menu. Asks the same

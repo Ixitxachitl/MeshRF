@@ -1077,6 +1077,7 @@
                                   GridLinesVisibility="Horizontal"
                                   CanUserSortColumns="True" CanUserResizeColumns="True"
                                   SelectionMode="Extended"
+                                  DoubleTapped="OnWaypointDoubleTapped"
                                   KeyDown="OnWaypointsGridKeyDown">
                             <DataGrid.ContextMenu>
                                 <ContextMenu>

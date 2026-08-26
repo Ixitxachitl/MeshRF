@@ -49,6 +49,27 @@ public partial class WaypointEditWindow : Window
         InitializeComponent();
     }
 
+    /// <summary>Opens the editor for a waypoint and applies what comes back.
+    /// Every way in — either grid, the map's marker menu, a double-click on
+    /// any of them — goes through here, so they all refuse the same waypoints
+    /// and all resend on the same terms.
+    ///
+    /// A lock belongs to whoever placed the marker: firmware ignores an edit
+    /// from anyone else, so offering the dialog would only produce a change
+    /// that silently does not take.</summary>
+    public static async Task EditAndApplyAsync(Window owner, RadioViewModel vm, WaypointRecord wp)
+    {
+        if (wp.IsLockedToAnother)
+        {
+            vm.StatusText = $"\"{wp.DisplayName}\" is locked to {wp.LockedToId} and cannot be edited here.";
+            return;
+        }
+
+        var result = await EditAsync(owner, wp, vm.MyNodeNumber, vm.CurrentUnitSystem);
+        if (result is null) return;
+        await vm.UpdateWaypointAsync(wp, result);
+    }
+
     public static async Task<WaypointEditResult?> EditAsync(Window owner, WaypointRecord wp, uint myNodeNum,
                                                             UnitSystem unitSystem)
     {

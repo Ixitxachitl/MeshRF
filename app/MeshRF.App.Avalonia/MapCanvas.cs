@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http;
@@ -885,8 +885,17 @@ public sealed class MapCanvas : Control
             return;
         }
 
-        // A click on a cluster badge fans it out instead of starting a drag.
         var hit = HitTest(p);
+
+        // A double-click on a marker does what double-clicking its row in the
+        // grids does: opens a node's DM tab, or a waypoint's editor.
+        if (e.ClickCount == 2 && ActivateMarker(hit?.Marker))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        // A click on a cluster badge fans it out instead of starting a drag.
         if (hit is { Cluster: not null } clusterHit)
         {
             SpiderExpand(clusterHit.Cluster!, clusterHit.X, clusterHit.Y);
@@ -1018,9 +1027,7 @@ public sealed class MapCanvas : Control
 
         if (mk.IsWaypoint)
         {
-            if (mk.WaypointRowId is not long rowId) return null;
-            var wp = _vm.Waypoints.FirstOrDefault(w => w.Id == rowId);
-            if (wp is null) return null;
+            if (WaypointFor(mk) is not { } wp) return null;
 
             var edit = new MenuItem { Header = "Edit…" };
             edit.Click += (_, _) => RequestEditWaypoint?.Invoke(wp);
@@ -1033,9 +1040,7 @@ public sealed class MapCanvas : Control
                 delete);
         }
 
-        if (mk.NodeNum is not uint nodeNum) return null;
-        var node = _vm.FilteredNodes.FirstOrDefault(n => n.NodeNum == nodeNum);
-        if (node is null) return null;
+        if (NodeFor(mk) is not { } node) return null;
 
         var deleteNode = new MenuItem { Header = "Delete" };
         deleteNode.Click += (_, _) => RequestDeleteNode?.Invoke(node);
@@ -1055,6 +1060,45 @@ public sealed class MapCanvas : Control
             new Separator(),
             deleteNode);
     }
+
+    /// <summary>Acts on the marker under a double-click: a node opens its DM
+    /// tab, a waypoint its editor, matching what double-clicking the same thing
+    /// in the node and waypoint grids does. Home has nothing to open and a
+    /// cluster badge stands for several nodes at once, so both fall through to
+    /// the click handling that expands and pans. Says whether it opened
+    /// anything.</summary>
+    private bool ActivateMarker(RadioViewModel.MapMarker? marker)
+    {
+        if (marker is not { } mk) return false;
+
+        if (WaypointFor(mk) is { } wp)
+        {
+            RequestEditWaypoint?.Invoke(wp);
+            return true;
+        }
+
+        if (NodeFor(mk) is { } node)
+        {
+            _vm!.MessageNodeCommand.Execute(node);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>The waypoint a marker stands for, or null when it is not a
+    /// waypoint marker or its row has since gone.</summary>
+    private WaypointRecord? WaypointFor(RadioViewModel.MapMarker mk) =>
+        _vm is not null && mk.IsWaypoint && mk.WaypointRowId is long rowId
+            ? _vm.Waypoints.FirstOrDefault(w => w.Id == rowId)
+            : null;
+
+    /// <summary>The node a marker stands for, or null when it is not a node
+    /// marker or the node has since been filtered out of the grid.</summary>
+    private NodeRecord? NodeFor(RadioViewModel.MapMarker mk) =>
+        _vm is not null && !mk.IsHome && !mk.IsWaypoint && mk.NodeNum is uint nodeNum
+            ? _vm.FilteredNodes.FirstOrDefault(n => n.NodeNum == nodeNum)
+            : null;
 
     private static ContextMenu Menu(params Control[] items)
     {
