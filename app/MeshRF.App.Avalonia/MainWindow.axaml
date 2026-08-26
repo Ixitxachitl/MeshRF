@@ -210,8 +210,15 @@
                                      the decoration too, so the rule runs unbroken
                                      across the whole line. -->
                                 <StackPanel Orientation="Horizontal">
+                                    <!-- Transparent, not unset: a TextBlock with no
+                                         background is not hit tested, so the press
+                                         would land on the bubble behind it and the
+                                         double-click would never arrive. -->
                                     <TextBlock Text="{Binding FromId}" FontSize="12" FontWeight="Bold"
                                                TextDecorations="Underline"
+                                               Background="Transparent"
+                                               Cursor="Hand"
+                                               DoubleTapped="OnMessageSenderDoubleTapped"
                                                ToolTip.Tip="{Binding FromId}" />
                                     <TextBlock Text=" · " FontSize="12" FontWeight="Bold"
                                                TextDecorations="Underline"

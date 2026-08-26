@@ -707,6 +707,16 @@ public partial class MainWindow : Window
         await WaypointEditWindow.EditAndApplyAsync(this, _viewModel, wp);
     }
 
+    /// <summary>Double-clicking a sender's name on a message opens that node's
+    /// DM tab, the way double-clicking its row in the node list or its marker on
+    /// the map does.</summary>
+    private void OnMessageSenderDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ChannelMessage message }) return;
+        _viewModel.MessageSenderCommand.Execute(message);
+        e.Handled = true;
+    }
+
     /// <summary>"React…" — pick a glyph, then send it as a tapback.</summary>
     private async void OnReactPick(object? sender, RoutedEventArgs e)
     {

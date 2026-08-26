@@ -2335,6 +2335,20 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SelectedTab = _rxHost.OpenConversation(node.NodeNum);
     }
 
+    /// <summary>Opens the DM tab for whoever sent a message. The sender is a
+    /// node number carried on the message itself, so this needs no node record:
+    /// a peer we have never had a NodeInfo from can still be answered
+    /// privately. Nothing to open for our own messages, or for the app's own
+    /// notes, which have no sender.</summary>
+    [RelayCommand]
+    private void MessageSender(ChannelMessage? message)
+    {
+        if (message is null) return;
+        uint peer = message.SenderNodeNum;
+        if (peer == 0 || peer == 0xFFFFFFFFu || peer == _rxHost.MyNodeNum) return;
+        SelectedTab = _rxHost.OpenConversation(peer);
+    }
+
     [RelayCommand]
     private void ReplyToMessage(ChannelMessage? target)
     {
