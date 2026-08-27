@@ -86,6 +86,10 @@ public sealed class MapCanvas : Control
     private static readonly TileProvider VectorDarkTiles = new(
         "ofmdark", string.Empty, string.Empty,
         "© OpenFreeMap · © OpenMapTiles · © OpenStreetMap contributors" + GestureHint,
+        // The style paints street names in rgba(80,78,78) on a near-black
+        // ground, which is fainter than this app wants over a dark shell. The
+        // lift brings it level with the other dark basemap.
+        Gamma: 1.4,
         StyleUrl: "https://tiles.openfreemap.org/styles/dark");
 
     /// <summary>Esri's Canvas basemaps stop at zoom 16 and serve a "Map data
@@ -569,10 +573,29 @@ public sealed class MapCanvas : Control
         // A vector tile is drawn rather than downloaded, but only once: the
         // bitmap it produces is cached on disk like any other tile, so the
         // style, the geometry and the rasteriser are all off the path for
-        // every later visit to the same tile.
+        // every later visit to the same tile. What is cached is the tile as
+        // drawn, before any recolouring, so a freshly drawn tile and one read
+        // back from the cache come out of here looking the same.
+        Bitmap drawn;
         if (provider.IsVector && !System.IO.File.Exists(file))
-            return await RasterizeVectorTileAsync(provider, file, x, y, zoom).ConfigureAwait(false);
+        {
+            var rasterised = await RasterizeVectorTileAsync(provider, file, x, y, zoom)
+                .ConfigureAwait(false);
+            if (rasterised is null) return null;
+            drawn = rasterised;
+        }
+        else
+        {
+            drawn = await LoadTileBytesAsync(provider, file, x, y, zoom).ConfigureAwait(false);
+        }
 
+        if (!provider.NeedsPostProcess) return drawn;
+        using (drawn) return PostProcessTile(drawn, provider);
+    }
+
+    private static async Task<Bitmap> LoadTileBytesAsync(
+        TileProvider provider, string file, int x, int y, int zoom)
+    {
         byte[] bytes;
         if (System.IO.File.Exists(file))
         {
@@ -601,10 +624,7 @@ public sealed class MapCanvas : Control
         }
 
         using var ms = new System.IO.MemoryStream(bytes);
-        var bmp = new Bitmap(ms);
-        if (!provider.NeedsPostProcess) return bmp;
-
-        using (bmp) return PostProcessTile(bmp, provider);
+        return new Bitmap(ms);
     }
 
     // -- Vector tiles -------------------------------------------------------
