@@ -227,7 +227,22 @@ public sealed class MapCanvas : Control
         Focusable = true;
         try { System.IO.Directory.CreateDirectory(s_cacheDir); } catch { /* cache is best-effort */ }
         SweepRetiredProviderTiles();
+        TrimCache();
     }
+
+    /// <summary>Ceiling for the on-disk tile cache. Rasterised tiles are a few
+    /// kilobytes each, but an encoded vector source tile is closer to half a
+    /// megabyte, so a session panning widely over the vector basemap is what
+    /// this is really holding back.</summary>
+    private const long MaxCacheBytes = 256L * 1024 * 1024;
+
+    /// <summary>Trimming goes below the ceiling rather than to it, so a cache
+    /// sitting at the limit does not re-trim on every write.</summary>
+    private const double TrimTo = 0.85;
+
+    /// <summary>How many newly written tiles trigger another check. A long
+    /// session would otherwise only ever be trimmed at startup.</summary>
+    private const int TrimEveryWrites = 400;
 
     /// <summary>Tiles cached under a provider the app no longer offers are dead
     /// bytes, and a well-travelled map leaves thousands of them. Swept once per
@@ -248,6 +263,34 @@ public sealed class MapCanvas : Control
             }
         });
     }
+
+    private static int s_trimRunning;
+    private static int s_writesSinceTrim;
+
+    /// <summary>Counts a tile written to disk and trims once enough have
+    /// accumulated to be worth the directory walk.</summary>
+    private static void CountCacheWrite()
+    {
+        if (Interlocked.Increment(ref s_writesSinceTrim) < TrimEveryWrites) return;
+        Interlocked.Exchange(ref s_writesSinceTrim, 0);
+        TrimCache();
+    }
+
+    /// <summary>Brings the cache back under its ceiling, off the UI thread and
+    /// one at a time.</summary>
+    private static void TrimCache()
+    {
+        if (Interlocked.Exchange(ref s_trimRunning, 1) != 0) return;
+        Task.Run(() =>
+        {
+            try { TileDiskCache.Trim(s_cacheDir, MaxCacheBytes, (long)(MaxCacheBytes * TrimTo)); }
+            catch { /* cache is best-effort */ }
+            finally { Interlocked.Exchange(ref s_trimRunning, 0); }
+        });
+    }
+
+    private static void MarkCacheHit(string file) =>
+        TileDiskCache.MarkUsed(file, TimeSpan.FromDays(1));
 
     public void Attach(RadioViewModel vm)
     {
@@ -534,6 +577,7 @@ public sealed class MapCanvas : Control
         if (System.IO.File.Exists(file))
         {
             bytes = await System.IO.File.ReadAllBytesAsync(file).ConfigureAwait(false);
+            MarkCacheHit(file);
         }
         else
         {
@@ -548,7 +592,11 @@ public sealed class MapCanvas : Control
                 .Replace("{x}", x.ToString(CultureInfo.InvariantCulture))
                 .Replace("{y}", y.ToString(CultureInfo.InvariantCulture));
             bytes = await s_http.GetByteArrayAsync(url).ConfigureAwait(false);
-            try { await System.IO.File.WriteAllBytesAsync(file, bytes).ConfigureAwait(false); }
+            try
+            {
+                await System.IO.File.WriteAllBytesAsync(file, bytes).ConfigureAwait(false);
+                CountCacheWrite();
+            }
             catch { /* cache best-effort */ }
         }
 
@@ -616,7 +664,11 @@ public sealed class MapCanvas : Control
         var bitmap = VectorTileRasterizer.Render(
             tile, vector.Style, zoom, x, y, vector.SourceMaxZoom, TileSize);
 
-        try { bitmap.Save(file, new PngBitmapEncoderOptions()); }
+        try
+        {
+            bitmap.Save(file, new PngBitmapEncoderOptions());
+            CountCacheWrite();
+        }
         catch { /* cache best-effort */ }
         return bitmap;
     }
@@ -667,6 +719,7 @@ public sealed class MapCanvas : Control
         if (System.IO.File.Exists(path))
         {
             bytes = await System.IO.File.ReadAllBytesAsync(path).ConfigureAwait(false);
+            MarkCacheHit(path);
         }
         else
         {
@@ -675,7 +728,11 @@ public sealed class MapCanvas : Control
                 .Replace("{x}", x.ToString(CultureInfo.InvariantCulture))
                 .Replace("{y}", y.ToString(CultureInfo.InvariantCulture));
             bytes = await s_http.GetByteArrayAsync(url).ConfigureAwait(false);
-            try { await System.IO.File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false); }
+            try
+            {
+                await System.IO.File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false);
+                CountCacheWrite();
+            }
             catch { /* cache best-effort */ }
         }
 
