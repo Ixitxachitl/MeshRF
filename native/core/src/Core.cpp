@@ -183,13 +183,25 @@ struct Core::Impl {
 
     std::mutex events_mu;
     std::deque<std::string> events; // produced by modem callback
+    std::uint64_t events_dropped{0};
+
+    // Adds a line, discarding the oldest once the queue is full. The count of
+    // discards travels to the reader rather than being reported from here: a
+    // full queue has no slot to put the notice in, which is the one line that
+    // must not be lost. Caller holds events_mu.
+    void queue_event_locked(std::string msg) {
+        if (events.size() >= kMaxQueuedEvents) {
+            events.pop_front();
+            ++events_dropped;
+        }
+        events.push_back(std::move(msg));
+    }
 
     // Queue a line for the UI log. Used by the packet-radio path, which has no
     // modem callback to route its diagnostics through.
     void push_event(std::string msg) {
         std::lock_guard<std::mutex> lk(events_mu);
-        if (events.size() >= kMaxQueuedEvents) events.pop_front();
-        events.push_back(std::move(msg));
+        queue_event_locked(std::move(msg));
     }
 
     // Open or release the SX1262 stick to match the current RX/TX selections.
@@ -318,8 +330,7 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
     });
     impl_->modem->set_event_callback([this](std::string msg) {
         std::lock_guard<std::mutex> ev_lk(impl_->events_mu);
-        if (impl_->events.size() >= kMaxQueuedEvents) impl_->events.pop_front();
-        impl_->events.push_back(std::move(msg));
+        impl_->queue_event_locked(std::move(msg));
     });
 
     if (!impl_->rx_radio) {
@@ -425,10 +436,9 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
             if (drops > impl_->last_drops_reported + impl_->device_rate / 2) {
                 impl_->last_drops_reported = drops;
                 std::lock_guard<std::mutex> lk(impl_->events_mu);
-                if (impl_->events.size() >= kMaxQueuedEvents) impl_->events.pop_front();
-                impl_->events.push_back("WARNING: dropped " +
-                                        std::to_string(drops) +
-                                        " samples (RX overrun)");
+                impl_->queue_event_locked("WARNING: dropped " +
+                                          std::to_string(drops) +
+                                          " samples (RX overrun)");
             }
         }
     });
@@ -1316,7 +1326,23 @@ const char* Core::device_status() const noexcept {
 
 std::size_t Core::pull_event(std::span<char> out) noexcept {
     std::lock_guard<std::mutex> lk(impl_->events_mu);
-    if (impl_->events.empty() || out.empty()) return 0;
+    if (out.empty()) return 0;
+
+    // Served ahead of the queue, and formatted into the caller's buffer
+    // rather than built as a string: this function is noexcept, and an
+    // allocation here would end the process on the one path that exists to
+    // report running out of room. Reports what was lost since the last
+    // notice, where the sample counter above reports a running total.
+    if (impl_->events_dropped != 0) {
+        int n = std::snprintf(out.data(), out.size(),
+                              "WARNING: dropped %llu log events (UI overrun)",
+                              static_cast<unsigned long long>(impl_->events_dropped));
+        impl_->events_dropped = 0;
+        if (n < 0) return 0;
+        return std::min(static_cast<std::size_t>(n), out.size() - 1);
+    }
+
+    if (impl_->events.empty()) return 0;
     const auto& front = impl_->events.front();
     std::size_t n = std::min(front.size(), out.size() - 1);
     std::memcpy(out.data(), front.data(), n);
