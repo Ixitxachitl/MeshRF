@@ -168,7 +168,15 @@ public sealed class MapCanvas : Control
 
     private static HttpClient CreateHttpClient()
     {
-        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        // A vector source tile is protobuf and compresses by around two fifths,
+        // but HttpClient offers no encoding unless told to, so without this the
+        // tiles arrive whole. Raster tiles are compressed already and simply
+        // decline.
+        var handler = new SocketsHttpHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+        };
+        var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         // OSM's tile policy requires an identifying UA.
         http.DefaultRequestHeaders.UserAgent.ParseAdd("MeshRF/1.0 (+https://github.com/meshrf)");
         return http;
