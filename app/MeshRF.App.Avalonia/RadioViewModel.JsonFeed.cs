@@ -109,6 +109,7 @@ public partial class RadioViewModel
                     request_id = result.RequestId,
                     reply_id = result.ReplyId,
                     emoji = result.Emoji,
+                    payload = ParseAppPayloadJson(result.AppProtoJson),
                     payload_hex = result.AppPayload.Length > 0
                         ? Convert.ToHexString(result.AppPayload) : null,
                 },
@@ -141,6 +142,24 @@ public partial class RadioViewModel
         {
             // A feed entry is diagnostic; never let it break packet handling.
             StatusText = $"JSON feed error: {ex.Message}";
+        }
+    }
+
+    /// <summary>The decoded app payload as real JSON, embedded in the entry
+    /// rather than escaped into a string, so it nests like the rest of the
+    /// document. Null for a port with no protobuf schema behind it, which
+    /// leaves payload_hex as the only view of those bytes.</summary>
+    private static JsonElement? ParseAppPayloadJson(string? protoJson)
+    {
+        if (string.IsNullOrEmpty(protoJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(protoJson);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

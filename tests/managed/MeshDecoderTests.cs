@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text;
+using Google.Protobuf;
 using MeshRF.Channels;
 using MeshRF.Mesh;
 using Xunit;
@@ -176,6 +177,45 @@ public class MeshDecoderTests
         Assert.Equal(21.5f, result.Telemetry.TemperatureC);
         Assert.Equal(48.0f, result.Telemetry.RelativeHumidityPct);
         Assert.Equal(1013.2f, result.Telemetry.BarometricPressureHpa);
+    }
+
+    [Fact]
+    public void DecodesMeshBeaconAsProtoJson()
+    {
+        const uint from = 0x4FA54F59u;
+        const uint id = 0xB9497226u;
+
+        var channel = new ChannelConfig
+        {
+            Index = 0,
+            Name = "LongFast",
+            Psk = new byte[] { 0x01 },
+            Role = ChannelRole.Primary,
+        };
+
+        var beacon = new Meshtastic.Protobufs.MeshBeacon { Message = "come join us" }.ToByteArray();
+
+        // Data: field 1 (portnum)=MESH_BEACON_APP(37), field 2 (payload).
+        var data = new List<byte> { 0x08, 37, 0x12, (byte)beacon.Length };
+        data.AddRange(beacon);
+
+        var cipher = MeshCrypto.Ctr(data.ToArray(), ChannelConfig.DefaultPsk, from, id);
+        var frame = new byte[MeshHeader.Size + cipher.Length];
+        frame[0] = frame[1] = frame[2] = frame[3] = 0xFF;
+        BitConverter.GetBytes(from).CopyTo(frame, 4);
+        BitConverter.GetBytes(id).CopyTo(frame, 8);
+        frame[12] = 0x03;
+        frame[13] = channel.Hash;
+        cipher.CopyTo(frame, MeshHeader.Size);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+
+        // A port missing from PortNum reads as an implausible decrypt, so this
+        // also pins 37 staying in the enum: without it the decode returns null
+        // and the beacon never reaches the JSON feed.
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.MeshBeacon, result!.Port);
+        Assert.Equal("{ \"message\": \"come join us\" }", result.AppProtoJson);
     }
 
     [Fact]

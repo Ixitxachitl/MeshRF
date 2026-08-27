@@ -93,11 +93,43 @@ public class ProtoEnumSyncTests
         Assert.Equal(FirmwareEditions.Default, FirmwareEditions.AllNames[0]);
     }
 
+    [Fact]
+    public void PortNumCoversEveryPortnumsProtoValue()
+    {
+        // Numbers only, not names: MeshDecoder rejects a decrypt whose portnum
+        // is absent from PortNum, so numeric coverage is the whole of what the
+        // decode path depends on. The C# spellings are close to the schema's
+        // but not mechanically derivable from them — PRIVATE_APP is PrivateApp,
+        // where every other _APP suffix is dropped.
+        var protoById = EnumEntries("PortNum", "portnums.proto")
+            .Where(e => e.Name != "MAX") // the ceiling sentinel, not a port
+            .ToDictionary(e => e.Id, e => e.Name);
+
+        var missingFromCs = protoById
+            .Where(e => !Enum.IsDefined(typeof(PortNum), e.Key))
+            .Select(e => $"{e.Key} ({e.Value})")
+            .ToList();
+
+        var staleInCs = Enum.GetValues<PortNum>()
+            .Select(v => (int)v)
+            .Where(v => !protoById.ContainsKey(v))
+            .Select(v => $"{v} ({(PortNum)v})")
+            .ToList();
+
+        Assert.True(missingFromCs.Count == 0,
+            "PortNum is missing port(s) declared in portnums.proto: " + string.Join(", ", missingFromCs) +
+            ". A portnum absent from the enum reads as an implausible decrypt, so every packet on these " +
+            "ports is discarded as though the key were wrong — no log line, no JSON feed entry.");
+        Assert.True(staleInCs.Count == 0,
+            "PortNum declares port(s) not present (or renumbered) in portnums.proto: " +
+            string.Join(", ", staleInCs));
+    }
+
     /// <summary>The (number, name) pairs of one enum, read out of mesh.proto as
     /// text so it is an independent reading from the compiled one.</summary>
-    private static List<(int Id, string Name)> EnumEntries(string enumName)
+    private static List<(int Id, string Name)> EnumEntries(string enumName, string protoFile = "mesh.proto")
     {
-        string protoPath = FindMeshProto();
+        string protoPath = FindProto(protoFile);
         string proto = File.ReadAllText(protoPath);
 
         var enumMatch = Regex.Match(proto, $@"enum {enumName} \{{(.*?)\r?\n\}}", RegexOptions.Singleline);
@@ -113,18 +145,20 @@ public class ProtoEnumSyncTests
     /// repo root (identified by third_party/meshtastic_protobufs existing
     /// under it), so this works regardless of Debug/Release/x64 output
     /// layout.</summary>
-    private static string FindMeshProto()
+    private static string FindMeshProto() => FindProto("mesh.proto");
+
+    private static string FindProto(string fileName)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            var candidate = Path.Combine(dir.FullName, "third_party", "meshtastic_protobufs", "meshtastic", "mesh.proto");
+            var candidate = Path.Combine(dir.FullName, "third_party", "meshtastic_protobufs", "meshtastic", fileName);
             if (File.Exists(candidate)) return candidate;
             dir = dir.Parent;
         }
 
         throw new FileNotFoundException(
-            "Could not locate third_party/meshtastic_protobufs/meshtastic/mesh.proto by walking up from " +
+            $"Could not locate third_party/meshtastic_protobufs/meshtastic/{fileName} by walking up from " +
             AppContext.BaseDirectory + ". Initialize submodules: git submodule update --init --recursive");
     }
 }

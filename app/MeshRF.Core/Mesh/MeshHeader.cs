@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 namespace MeshRF.Mesh;
 
-/// <summary>Meshtastic application port numbers (subset we recognise).</summary>
+/// <summary>
+/// Meshtastic application port numbers, mirroring the schema's PortNum minus
+/// its MAX sentinel. Completeness matters: MeshDecoder treats a portnum absent
+/// from this enum as a failed decrypt, so a value missing here silently
+/// discards every packet on that port.
+/// </summary>
 public enum PortNum
 {
     Unknown            = 0,
@@ -23,6 +28,7 @@ public enum PortNum
     PaxCounter         = 34,
     StoreForwardPlusPlus = 35,
     NodeStatus         = 36,
+    MeshBeacon         = 37,
     Serial             = 64,
     StoreForward       = 65,
     RangeTest          = 66,
@@ -34,6 +40,12 @@ public enum PortNum
     AtakPlugin         = 72,
     MapReport          = 73,
     PowerStress        = 74,
+    LorawanBridge      = 75,
+    ReticulumTunnel    = 76,
+    Cayenne            = 77,
+    AtakPluginV2       = 78,
+    LoraOta            = 79,
+    GroupAlarm         = 112,
     PrivateApp         = 256,
     AtakForwarder      = 257,
 }
