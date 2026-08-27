@@ -82,6 +82,19 @@ public interface IMeshRxHost
     void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result) { }
 
     /// <summary>
+    /// A frame decoded successfully, but <see cref="MessageStore"/> threw, so
+    /// whether it is new cannot be established. Treated as a duplicate on air —
+    /// no port handling, no change to relay or uplink — because a store that is
+    /// failing cannot dedup, and re-relaying every copy of a flood is the worse
+    /// error. It is still a packet we read, so the host records it for the log
+    /// and the JSON feed.
+    ///
+    /// Defaulted to a no-op, like <see cref="OnDuplicateDecoded"/>.
+    /// </summary>
+    void OnDecodeNotStored(MeshHeader header, MeshDecodeResult result,
+                           long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway) { }
+
+    /// <summary>
     /// A frame no key we hold could decrypt. The plaintext header still says who
     /// it was for and whether it wanted an acknowledgement, so a packet
     /// addressed to us still deserves an answer — a NAK rather than silence.

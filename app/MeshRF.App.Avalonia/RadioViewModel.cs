@@ -1230,16 +1230,32 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (ev.IndexOf("payload", StringComparison.Ordinal) < 0) return;
         var m = PayloadLineRegex.Match(ev);
-        if (!m.Success) return;
-        if (!(m.Groups["status"].Success && m.Groups["status"].Value == "OK")) return;
+        if (!m.Success)
+        {
+            LogDroppedFrame(ev, "unparsable payload line");
+            return;
+        }
+        if (!(m.Groups["status"].Success && m.Groups["status"].Value == "OK"))
+        {
+            LogDroppedFrame(ev, "failed CRC");
+            return;
+        }
 
         // Counted before the decode: channel utilisation is about occupied air,
         // so a frame that turns out not to be for us still used the channel.
         RecordAirtime(m.Groups["hex"].Value.Length / 2, isTx: false);
 
         var frame = HexToBytes(m.Groups["hex"].Value);
-        if (frame.Length < MeshHeader.Size) return;
-        if (!MeshHeader.TryParse(frame, out var header)) return;
+        if (frame.Length < MeshHeader.Size)
+        {
+            LogDroppedFrame(ev, $"{frame.Length} B is short of a {MeshHeader.Size} B header");
+            return;
+        }
+        if (!MeshHeader.TryParse(frame, out var header))
+        {
+            LogDroppedFrame(ev, "unparsable header");
+            return;
+        }
 
         float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
         // SNR comes from the preamble that opened this frame, matching
@@ -1247,6 +1263,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxRouter.ProcessReceivedFrame(frame, header, snrDb: _lastPreamblePeakDb, packetRssiDbm: packetRssiDbm);
         _lastPreamblePeakDb = null;
     }
+
+    /// <summary>Reports a frame the demodulator delivered that never reaches
+    /// the router. Those are the only receptions with no line of their own —
+    /// every packet the router does handle gets one from there — so without
+    /// this they are indistinguishable from nothing having been on the air.</summary>
+    private void LogDroppedFrame(string ev, string reason) =>
+        _rxHost.Log($"  {CompactDemodEventForUi(ev)} — dropped, {reason}");
 
     private static byte[] HexToBytes(string hex)
     {

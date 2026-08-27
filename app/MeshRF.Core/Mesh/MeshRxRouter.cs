@@ -26,13 +26,7 @@ public sealed class MeshRxRouter : IDisposable
     private readonly IUiDispatcher _dispatcher;
 
     private readonly Dictionary<uint, byte[]> _senderPublicKeyCache = new();
-    private readonly Channel<PkcWorkItem> _pkcQueue = Channel.CreateBounded<PkcWorkItem>(
-        new BoundedChannelOptions(MaxQueuedPkcDecodes)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = false,
-        });
+    private readonly Channel<PkcWorkItem> _pkcQueue;
     private readonly CancellationTokenSource _pkcCts = new();
     private readonly Task _pkcWorker;
 
@@ -41,6 +35,19 @@ public sealed class MeshRxRouter : IDisposable
         _host = host;
         _messageStore = messageStore;
         _dispatcher = dispatcher;
+        // The oldest waiting decode is dropped when the queue is full, which
+        // costs a direct message its only chance of being read. Rare enough to
+        // be worth a line rather than a counter, and silence here reads as a
+        // packet that was never sent.
+        _pkcQueue = Channel.CreateBounded<PkcWorkItem>(
+            new BoundedChannelOptions(MaxQueuedPkcDecodes)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false,
+            },
+            dropped => _host.Log(
+                $"  PKC decode queue full — dropped {dropped.Header.FromId} pkt {dropped.Header.PacketId:x8}"));
         _pkcWorker = Task.Run(RunPkcWorkerAsync);
     }
 
@@ -237,15 +244,28 @@ public sealed class MeshRxRouter : IDisposable
         // several times via different relays. Add returns false for a
         // packet we've already stored — skip all further handling for repeats.
         bool isNew;
+        bool stored = true;
         try { isNew = _messageStore.Add(record); }
-        catch (Exception ex) { _host.Log($"message store failed: {ex.Message}"); isNew = false; }
+        catch (Exception ex)
+        {
+            _host.Log($"message store failed: {ex.Message}");
+            stored = false;
+            isNew = false;
+        }
 
         if (!isNew)
         {
             _host.HandleDuplicateForRelay(frame, header, result, snrDb);
-            _host.OnDuplicateDecoded(header, result);
             _host.MarkNodeDirty(header.From);
-            _host.Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
+            // Acked on the same terms either way: a want_ack packet we could
+            // not file is still one the sender is waiting on, and a broken
+            // store is no reason to answer it differently.
+            _host.OnDuplicateDecoded(header, result);
+            // A throw is not a dedup hit, though. Both take the same
+            // conservative path on air, but calling the failure a duplicate
+            // reports a packet never seen before as one already handled.
+            if (stored) _host.Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
+            else _host.OnDecodeNotStored(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway);
             return;
         }
 

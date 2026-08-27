@@ -1368,6 +1368,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// sender: it retries three times, we drop every retry as a duplicate, and
     /// its message settles as failed even though we read it.
     /// </summary>
+    /// <summary>A decode the message store could not take. The packet is left
+    /// alone on air, but it reached us and was readable, so it is reported like
+    /// any other decode — with the store failure named, since the line would
+    /// otherwise look identical to a packet that was filed normally.</summary>
+    public void OnDecodeNotStored(MeshHeader header, MeshDecodeResult result,
+                                  long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway)
+    {
+        var summary = BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
+        Log($"{summary} (not stored)");
+        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary);
+    }
+
     public void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result)
     {
         if (!header.WantAck) return;
