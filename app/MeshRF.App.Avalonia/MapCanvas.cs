@@ -9,6 +9,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using MeshRF.Map;
 using MeshRF.Nodes;
 using MeshRF.Waypoints;
 
@@ -47,8 +48,13 @@ public sealed class MapCanvas : Control
     private readonly record struct TileProvider(
         string Id, string UrlTemplate, string Subdomains, string Attribution,
         double Brightness = 1.0, double Gamma = 1.0,
-        bool Invert = false, double HueRotate = 0.0, double Saturation = 1.0)
+        bool Invert = false, double HueRotate = 0.0, double Saturation = 1.0,
+        string? StyleUrl = null)
     {
+        /// <summary>A vector provider names a style rather than a tile URL:
+        /// the tiles it draws are rasterised here from geometry.</summary>
+        public bool IsVector => StyleUrl is not null;
+
         public bool NeedsPostProcess =>
             Brightness != 1.0 || Gamma != 1.0 || Invert || HueRotate != 0.0 || Saturation != 1.0;
     }
@@ -73,6 +79,15 @@ public sealed class MapCanvas : Control
         "esriimagery", EsriRoot + "World_Imagery" + EsriPath, "",
         "© Esri · Maxar · Earthstar Geographics" + GestureHint);
 
+    /// <summary>Drawn here from vector geometry rather than fetched as
+    /// pixels. The source stops at zoom 14, so deeper zooms magnify the parent
+    /// tile: detail stops increasing but the drawing stays sharp, where the
+    /// Esri canvas simply had nothing to serve.</summary>
+    private static readonly TileProvider VectorDarkTiles = new(
+        "ofmdark", string.Empty, string.Empty,
+        "© OpenFreeMap · © OpenMapTiles · © OpenStreetMap contributors" + GestureHint,
+        StyleUrl: "https://tiles.openfreemap.org/styles/dark");
+
     /// <summary>Esri's Canvas basemaps stop at zoom 16 and serve a "Map data
     /// not yet available" placeholder above it, so the dark map is OSM's own
     /// tiles inverted: they carry full detail across the whole zoom range and
@@ -85,7 +100,7 @@ public sealed class MapCanvas : Control
     /// <summary>No "Auto" entry, unlike MeshRF.App: that option exists to
     /// follow a light/dark app theme, and this app's shell is always dark.</summary>
     public static readonly IReadOnlyList<string> MapTileThemeOptions =
-        ["Dark", "Light", "Street", "Satellite"];
+        ["Dark", "Dark (Vector)", "Light", "Street", "Satellite"];
 
     private const string DefaultTileTheme = "Dark";
 
@@ -102,6 +117,7 @@ public sealed class MapCanvas : Control
 
     private TileProvider CurrentTiles => s_mapTileTheme switch
     {
+        "Dark (Vector)" => VectorDarkTiles,
         "Light" => LightTiles,
         "Street" => StreetTiles,
         "Satellite" => SatelliteTiles,
@@ -506,6 +522,14 @@ public sealed class MapCanvas : Control
     private static async Task<Bitmap?> GetTileBitmapAsync(TileProvider provider, int x, int y, int zoom)
     {
         var file = System.IO.Path.Combine(s_cacheDir, $"{provider.Id}_{zoom}_{x}_{y}.png");
+
+        // A vector tile is drawn rather than downloaded, but only once: the
+        // bitmap it produces is cached on disk like any other tile, so the
+        // style, the geometry and the rasteriser are all off the path for
+        // every later visit to the same tile.
+        if (provider.IsVector && !System.IO.File.Exists(file))
+            return await RasterizeVectorTileAsync(provider, file, x, y, zoom).ConfigureAwait(false);
+
         byte[] bytes;
         if (System.IO.File.Exists(file))
         {
@@ -533,6 +557,129 @@ public sealed class MapCanvas : Control
         if (!provider.NeedsPostProcess) return bmp;
 
         using (bmp) return PostProcessTile(bmp, provider);
+    }
+
+    // -- Vector tiles -------------------------------------------------------
+
+    /// <summary>A style and the tile source it resolved to. Held per style URL
+    /// as the Task itself, so concurrent tile loads racing on a cold cache all
+    /// await one fetch rather than each starting their own.</summary>
+    private sealed record VectorStyle(MapStyle Style, string TileTemplate, int SourceMaxZoom);
+
+    private static readonly ConcurrentDictionary<string, Task<VectorStyle>> s_vectorStyles = new();
+
+    // Decoded source tiles. Small on purpose: one is several megabytes of
+    // features, and magnified zooms draw hundreds of output tiles from a single
+    // parent, so a handful covers the panning that actually happens.
+    private const int MaxVectorSourceTiles = 8;
+    private static readonly ConcurrentDictionary<string, Task<VectorTile>> s_vectorSources = new();
+    private static readonly ConcurrentQueue<string> s_vectorSourceOrder = new();
+
+    private static Task<VectorStyle> VectorStyleAsync(string styleUrl) =>
+        s_vectorStyles.GetOrAdd(styleUrl, static url => LoadVectorStyleAsync(url));
+
+    private static async Task<VectorStyle> LoadVectorStyleAsync(string styleUrl)
+    {
+        var style = MapStyle.Parse(await s_http.GetStringAsync(styleUrl).ConfigureAwait(false));
+        var source = style.VectorSource()
+            ?? throw new InvalidOperationException($"{styleUrl} declares no vector source");
+
+        // The tile template is resolved from TileJSON rather than hardcoded:
+        // the OpenFreeMap tile path carries a dated build in it, and the
+        // publisher asks that it not be pinned.
+        string template;
+        int maxZoom = source.MaxZoom;
+        if (source.Url is { } tileJsonUrl)
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await s_http.GetStringAsync(tileJsonUrl).ConfigureAwait(false));
+            template = doc.RootElement.GetProperty("tiles")[0].GetString()
+                ?? throw new InvalidOperationException($"{tileJsonUrl} lists no tiles");
+            if (doc.RootElement.TryGetProperty("maxzoom", out var mz)) maxZoom = mz.GetInt32();
+        }
+        else template = source.Tiles.FirstOrDefault()
+            ?? throw new InvalidOperationException($"{styleUrl} names neither a TileJSON nor tiles");
+
+        return new VectorStyle(style, template, maxZoom);
+    }
+
+    private static async Task<Bitmap?> RasterizeVectorTileAsync(
+        TileProvider provider, string file, int x, int y, int zoom)
+    {
+        var vector = await VectorStyleAsync(provider.StyleUrl!).ConfigureAwait(false);
+        var (sourceZoom, sourceX, sourceY) =
+            TileProjection.SourceTile(zoom, x, y, vector.SourceMaxZoom);
+
+        var tile = await SourceTileAsync(provider, vector, sourceZoom, sourceX, sourceY)
+            .ConfigureAwait(false);
+
+        var bitmap = VectorTileRasterizer.Render(
+            tile, vector.Style, zoom, x, y, vector.SourceMaxZoom, TileSize);
+
+        try { bitmap.Save(file, new PngBitmapEncoderOptions()); }
+        catch { /* cache best-effort */ }
+        return bitmap;
+    }
+
+    /// <summary>The decoded source tile, fetching it if needed.
+    ///
+    /// The Task is what is cached, not the tile: a burst of neighbouring tiles
+    /// magnified from one parent would otherwise all miss together and each
+    /// start its own download of the same half megabyte.</summary>
+    private static Task<VectorTile> SourceTileAsync(
+        TileProvider provider, VectorStyle vector, int zoom, int x, int y)
+    {
+        var key = $"{provider.Id}_{zoom}_{x}_{y}";
+
+        bool created = false;
+        var task = s_vectorSources.GetOrAdd(key, k =>
+        {
+            created = true;
+            return LoadSourceTileAsync(vector, k, zoom, x, y);
+        });
+
+        if (created)
+        {
+            s_vectorSourceOrder.Enqueue(key);
+            while (s_vectorSources.Count > MaxVectorSourceTiles
+                   && s_vectorSourceOrder.TryDequeue(out var oldest))
+                s_vectorSources.TryRemove(oldest, out _);
+
+            // A failed fetch must not stay cached as a failure, or the backoff
+            // would retry into the same faulted task for the life of the app.
+            _ = task.ContinueWith(
+                t => s_vectorSources.TryRemove(key, out _),
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        return task;
+    }
+
+    private static async Task<VectorTile> LoadSourceTileAsync(
+        VectorStyle vector, string key, int zoom, int x, int y)
+    {
+        // The encoded tile is kept on disk too, so a first pass over an area
+        // after a restart does not refetch half a megabyte per parent.
+        var path = System.IO.Path.Combine(s_cacheDir, key + ".pbf");
+        byte[] bytes;
+        if (System.IO.File.Exists(path))
+        {
+            bytes = await System.IO.File.ReadAllBytesAsync(path).ConfigureAwait(false);
+        }
+        else
+        {
+            var url = vector.TileTemplate
+                .Replace("{z}", zoom.ToString(CultureInfo.InvariantCulture))
+                .Replace("{x}", x.ToString(CultureInfo.InvariantCulture))
+                .Replace("{y}", y.ToString(CultureInfo.InvariantCulture));
+            bytes = await s_http.GetByteArrayAsync(url).ConfigureAwait(false);
+            try { await System.IO.File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false); }
+            catch { /* cache best-effort */ }
+        }
+
+        return VectorTile.Parse(bytes);
     }
 
     /// <summary>Recolours a tile so a provider's palette suits the app: invert

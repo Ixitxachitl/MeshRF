@@ -47,6 +47,15 @@ public readonly record struct TileProjection(
             Magnification: magnification);
     }
 
+    /// <summary>Which tile actually has to be fetched for a requested tile.
+    /// Independent of extent and output size, so a caller can resolve the
+    /// download before it knows either.</summary>
+    public static (int Zoom, int X, int Y) SourceTile(int zoom, int x, int y, int sourceMaxZoom)
+    {
+        int excess = Math.Max(0, zoom - sourceMaxZoom);
+        return (Math.Min(zoom, sourceMaxZoom), x >> excess, y >> excess);
+    }
+
     public double MapX(int localX) => localX * PixelsPerUnit - OffsetX;
 
     public double MapY(int localY) => localY * PixelsPerUnit - OffsetY;
