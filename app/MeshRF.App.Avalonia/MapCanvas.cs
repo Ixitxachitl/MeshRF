@@ -147,6 +147,13 @@ public sealed class MapCanvas : Control
     private static readonly ConcurrentQueue<string> s_memCacheOrder = new();
     private readonly HashSet<string> _tilesInFlight = new(StringComparer.Ordinal);
 
+    /// <summary>Non-zero while a retry pass is already scheduled.</summary>
+    private int _retryScheduled;
+
+    /// <summary>Floor on the retry wake, so a run of quick failures cannot turn
+    /// into a redraw loop.</summary>
+    private static readonly TimeSpan MinRetryWake = TimeSpan.FromSeconds(1);
+
     private static readonly string[] RetiredProviderIds =
         ["cartodark", "cartopositron", "cartovoyager", "esridark", "esrilight"];
     private static int s_retiredSweepStarted;
@@ -562,8 +569,38 @@ public sealed class MapCanvas : Control
         }
         // The tile is left out of both caches, so a retry once the backoff has
         // elapsed refetches rather than serving nothing.
-        catch { s_tileBackoff.Failed(key, DateTimeOffset.UtcNow); }
+        catch
+        {
+            s_tileBackoff.Failed(key, DateTimeOffset.UtcNow);
+            ScheduleRetry(key);
+        }
         finally { _tilesInFlight.Remove(key); }
+    }
+
+    /// <summary>Wakes the canvas once a failed tile is allowed to be tried
+    /// again.
+    ///
+    /// Tiles are only ever requested from a render, and a render only happens
+    /// when something asks for one. Nothing else necessarily will: a map left
+    /// alone redraws no more, so without this a tile that failed once stays
+    /// blank until the view is panned or zoomed, however long its backoff
+    /// actually was.</summary>
+    private void ScheduleRetry(string key)
+    {
+        // One wake serves every tile waiting on it, so a screenful of failures
+        // schedules a single pass rather than one apiece.
+        if (Interlocked.Exchange(ref _retryScheduled, 1) != 0) return;
+
+        var delay = s_tileBackoff.RetryIn(key, DateTimeOffset.UtcNow);
+        if (delay < MinRetryWake) delay = MinRetryWake;
+
+        _ = Task.Delay(delay).ContinueWith(
+            _ =>
+            {
+                Volatile.Write(ref _retryScheduled, 0);
+                Dispatcher.UIThread.Post(InvalidateVisual);
+            },
+            CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     private static async Task<Bitmap?> GetTileBitmapAsync(TileProvider provider, int x, int y, int zoom)
