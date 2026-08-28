@@ -4,7 +4,7 @@
         x:Class="MeshRF.AvaloniaApp.LocationHistoryWindow"
         x:DataType="local:ConversationTabViewModel"
         Title="Location History"
-        Width="900" Height="640" MinWidth="640" MinHeight="420"
+        Width="960" Height="640" MinWidth="760" MinHeight="420"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
     <Grid Margin="6" RowDefinitions="Auto,*">
@@ -22,7 +22,7 @@
              empty rather than replaced by a line of text: the map still gives
              somewhere to look, and the window keeps the same shape whether or
              not the node has been heard from yet. -->
-        <Grid Grid.Row="1" ColumnDefinitions="*,6,320">
+        <Grid Grid.Row="1" ColumnDefinitions="*,6,420">
             <Border Grid.Column="0"
                     Background="{DynamicResource BrushSpectrumBackground}"
                     BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
@@ -35,6 +35,7 @@
                       ItemsSource="{Binding LocationHistory}"
                       AutoGenerateColumns="False" IsReadOnly="True"
                       GridLinesVisibility="Horizontal" SelectionMode="Extended"
+                      CanUserResizeColumns="True"
                       KeyDown="OnGridKeyDown"
                       local:DataGridAutoScrollBehavior.IsEnabled="{Binding #AutoScrollToggle.IsChecked}">
                 <DataGrid.ContextMenu>
@@ -42,12 +43,16 @@
                         <MenuItem Header="Delete selected" Click="OnDeleteSelected" />
                     </ContextMenu>
                 </DataGrid.ContextMenu>
+                <!-- Widths are start sizes wide enough for a full stamp and
+                     five-decimal coordinates, not limits: the headers can be
+                     dragged. Time takes the slack so a longer date convention
+                     still fits without a horizontal scrollbar. -->
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Time" Width="*"
+                    <DataGridTextColumn Header="Time" Width="*" MinWidth="160"
                                         Binding="{Binding TimestampLocal, Converter={x:Static local:UiStampConverter.Instance}}" />
-                    <DataGridTextColumn Header="Lat" Width="Auto" Binding="{Binding Latitude, StringFormat='{}{0:0.#####}'}" />
-                    <DataGridTextColumn Header="Lon" Width="Auto" Binding="{Binding Longitude, StringFormat='{}{0:0.#####}'}" />
-                    <DataGridTextColumn Header="Alt" Width="Auto" Binding="{Binding AltitudeDisplay}" />
+                    <DataGridTextColumn Header="Lat" Width="82" MinWidth="52" Binding="{Binding Latitude, StringFormat='{}{0:0.#####}'}" />
+                    <DataGridTextColumn Header="Lon" Width="82" MinWidth="52" Binding="{Binding Longitude, StringFormat='{}{0:0.#####}'}" />
+                    <DataGridTextColumn Header="Alt" Width="72" MinWidth="48" Binding="{Binding AltitudeDisplay}" />
                 </DataGrid.Columns>
             </DataGrid>
         </Grid>
