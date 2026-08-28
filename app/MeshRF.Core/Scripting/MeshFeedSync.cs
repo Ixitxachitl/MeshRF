@@ -52,6 +52,19 @@ public sealed class MeshFeedSync
     public double? WithinMetres { get; init; }
 
     /// <summary>
+    /// Tests a record has to pass to be worth a marker, over <c>{item.*}</c>.
+    /// All of them, or none if the list is empty.
+    /// </summary>
+    /// <remarks>
+    /// A feed is one publisher's idea of one list, and its idea is rarely
+    /// exactly a map layer: Watch Duty files prescribed burns as wildfires,
+    /// which is right for a feed and wrong for a marker that means "fire near
+    /// you". A record that fails is treated as gone rather than as never seen,
+    /// so one that stops qualifying has its marker retired like any other.
+    /// </remarks>
+    public IReadOnlyList<ScriptRequirement> Require { get; init; } = Array.Empty<ScriptRequirement>();
+
+    /// <summary>
     /// Paths whose values decide whether a record has meaningfully changed.
     /// </summary>
     /// <remarks>

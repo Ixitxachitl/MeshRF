@@ -67,7 +67,8 @@ public class FeedSyncTests
     /// and containment nested, plus a date_modified nothing watches.</summary>
     private static string Fire(int id, string name, bool active = true,
                                double lat = 39.31, double lng = -120.84,
-                               int acreage = 1200, int containment = 35)
+                               int acreage = 1200, int containment = 35,
+                               bool prescribed = false)
     {
         // Built by concatenation rather than a raw literal: JSON's closing
         // braces collide with interpolation delimiters in every $-count.
@@ -78,7 +79,8 @@ public class FeedSyncTests
              + ",\"lat\":" + N(lat)
              + ",\"lng\":" + N(lng)
              + ",\"date_modified\":\"whenever\""
-             + ",\"data\":{\"acreage\":" + acreage + ",\"containment\":" + containment + "}}";
+             + ",\"data\":{\"acreage\":" + acreage + ",\"containment\":" + containment
+             + ",\"is_prescribed\":" + (prescribed ? "true" : "false") + "}}";
     }
 
     // ----- parsing ------------------------------------------------------------
@@ -596,6 +598,135 @@ public class FeedSyncTests
 
         var back = Armed(store: new FeedSyncStore(temp.Path), at: Noon.AddMinutes(20));
         Assert.Empty(back.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon.AddMinutes(20)));
+    }
+
+    // ----- require -------------------------------------------------------------
+
+    /// <summary>The sample with a test that keeps prescribed burns off the
+    /// map, which is the case it was added for.</summary>
+    private static string Filtered => Yaml.Replace(
+        "  watch:\n",
+        "  require:\n"
+        + "    - value: \"{item.data.is_prescribed}\"\n"
+        + "      not_equals: true\n"
+        + "  watch:\n");
+
+    [Fact]
+    public void A_Lone_Require_Needs_No_Dash()
+    {
+        var loose = Yaml.Replace(
+            "  watch:\n",
+            "  require:\n"
+            + "      value: \"{item.data.is_prescribed}\"\n"
+            + "      not_equals: true\n"
+            + "  watch:\n");
+
+        var parse = ScriptParser.Parse(loose);
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        var test = Assert.Single(parse.Sync!.Require);
+        Assert.Equal("{item.data.is_prescribed}", test.Value);
+    }
+
+    [Fact]
+    public void Every_Require_Has_To_Hold()
+    {
+        var both = Yaml.Replace(
+            "  watch:\n",
+            "  require:\n"
+            + "    - value: \"{item.data.is_prescribed}\"\n"
+            + "      not_equals: true\n"
+            + "    - value: \"{item.data.acreage}\"\n"
+            + "      at_least: 100\n"
+            + "  watch:\n");
+
+        var engine = Armed(both);
+        Assert.Equal(2, ScriptParser.Parse(both).Sync!.Require.Count);
+
+        // Small and real, big and prescribed: each fails one test.
+        Assert.Empty(engine.Reconcile(FileName, Feed(
+            Fire(1, "Spot Fire", acreage: 4),
+            Fire(2, "Unit 7 Burn", acreage: 900, prescribed: true)), Home, Noon));
+
+        var placed = Assert.Single(
+            engine.Reconcile(FileName, Feed(Fire(3, "Bear Fire", acreage: 900)), Home, Noon));
+        Assert.Equal(FeedSyncActionKind.Place, placed.Kind);
+    }
+
+    [Fact]
+    public void A_Record_That_Fails_Require_Is_Never_Placed()
+    {
+        var engine = Armed(Filtered);
+
+        var action = Assert.Single(engine.Reconcile(FileName, Feed(
+            Fire(1, "Bear Fire"),
+            Fire(2, "Unit 7 Burn", prescribed: true)), Home, Noon));
+
+        Assert.Equal(FeedSyncActionKind.Place, action.Kind);
+        Assert.Contains("Bear Fire", action.Name);
+    }
+
+    [Fact]
+    public void A_Record_That_Stops_Qualifying_Is_Retired()
+    {
+        // Reclassification is the reason failing counts as gone rather than as
+        // unseen: the marker is already out there and has to be taken back.
+        var engine = Armed(Filtered);
+        var placed = Assert.Single(engine.Reconcile(FileName, Feed(Fire(1, "Bear Fire")), Home, Noon));
+
+        var removed = Assert.Single(engine.Reconcile(
+            FileName, Feed(Fire(1, "Bear Fire", prescribed: true)), Home, Noon.AddMinutes(15)));
+
+        Assert.Equal(FeedSyncActionKind.Remove, removed.Kind);
+        Assert.Equal(placed.WaypointId, removed.WaypointId);
+    }
+
+    [Fact]
+    public void A_Record_That_Starts_Qualifying_Is_Placed()
+    {
+        var engine = Armed(Filtered);
+        Assert.Empty(engine.Reconcile(
+            FileName, Feed(Fire(1, "Unit 7 Burn", prescribed: true)), Home, Noon));
+
+        var placed = Assert.Single(engine.Reconcile(
+            FileName, Feed(Fire(1, "Unit 7 Burn")), Home, Noon.AddMinutes(15)));
+        Assert.Equal(FeedSyncActionKind.Place, placed.Kind);
+    }
+
+    [Fact]
+    public void A_Missing_Field_Does_Not_Exclude_A_Record()
+    {
+        // A feed that has not filled the field in yet reads as empty, which is
+        // not "true" — the record stays. Silence is not a reason to drop a fire.
+        var engine = Armed(Filtered);
+        var bare = "{\"id\":9,\"is_active\":true,\"name\":\"Bare Fire\""
+                 + ",\"lat\":39.31,\"lng\":-120.84,\"data\":{}}";
+
+        Assert.Single(engine.Reconcile(FileName, Feed(bare), Home, Noon));
+    }
+
+    [Fact]
+    public void A_Require_That_Tests_Something_Moving_Is_Warned_About()
+    {
+        var moving = Yaml.Replace(
+            "  watch:\n",
+            "  require:\n"
+            + "    - value: \"{time}\"\n"
+            + "      not_equals: \"never\"\n"
+            + "  watch:\n");
+
+        var parse = ScriptParser.Parse(moving);
+        Assert.True(parse.IsValid);
+        Assert.Contains(parse.Problems, p => p.Message.Contains("{time} changes on its own"));
+    }
+
+    [Fact]
+    public void A_Require_With_No_Comparison_Is_An_Error()
+    {
+        var empty = Yaml.Replace("  watch:\n", "  require: []\n  watch:\n");
+
+        var parse = ScriptParser.Parse(empty);
+        Assert.False(parse.IsValid);
+        Assert.Contains("require", parse.FirstError!.Value.Message);
     }
 
     /// <summary>A scratch path that cleans itself up.</summary>

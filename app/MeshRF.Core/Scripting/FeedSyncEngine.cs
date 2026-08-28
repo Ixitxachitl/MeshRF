@@ -247,6 +247,16 @@ public sealed class FeedSyncEngine
                     if (metres > limit) continue;
                 }
 
+                var expansion = new ScriptExpansion(new ScriptEvent { Self = self, At = now }) { Item = raw };
+
+                // Failing a require: is being gone, not being unseen: the id
+                // never enters "present", so a record that stops qualifying is
+                // retired below by the same pass that retires one the feed has
+                // dropped. Nothing here is logged — the tests are written to
+                // exclude records by the dozen, every poll, for ever.
+                if (sync.Require.Count > 0 && sync.Require.Any(test => !test.Holds(expansion, out _)))
+                    continue;
+
                 present.Add(id);
 
                 // Declared immutable: already placed is already correct, and
@@ -257,7 +267,6 @@ public sealed class FeedSyncEngine
                     StillPlaced(immutable.WaypointId))
                     continue;
 
-                var expansion = new ScriptExpansion(new ScriptEvent { Self = self, At = now }) { Item = raw };
                 var name = ScriptTemplate.ClampToPayload(expansion.Expand(sync.Waypoint.Name));
                 var description = ScriptTemplate.ClampToPayload(expansion.Expand(sync.Waypoint.Description));
                 var fingerprint = Fingerprint(raw, sync.WatchPaths, name, description);

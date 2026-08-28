@@ -141,7 +141,7 @@ public static class ScriptParser
 
     private static readonly string[] SyncKeys =
         ["every", "url", "credential", "headers", "timeout", "items", "id", "active",
-         "lat", "lon", "within", "watch", "waypoint"];
+         "lat", "lon", "within", "require", "watch", "waypoint"];
 
     private static readonly string[] SyncWaypointKeys =
         ["name", "description", "icon", "radius", "expires",
@@ -291,6 +291,52 @@ public static class ScriptParser
             within = metres.Value;
         }
 
+        // Which records are worth a marker at all, beyond being live and near.
+        // A feed answers with what its publisher thinks belongs in one list;
+        // whether every one of those means the same thing on a map is a
+        // separate question, and this is where a script gets to say no. A
+        // record that fails is treated exactly as one that has gone, so a fire
+        // reclassified as a prescribed burn has its marker retired.
+        var require = new List<ScriptRequirement>();
+        if (TryGet(sync, "require", out var requireKey, out var requireValue))
+        {
+            int requireLine = (int)requireKey.Start.Line, requireColumn = (int)requireKey.Start.Column;
+            // A lone test needs no dash in front of it. Most feeds have exactly
+            // one thing to exclude, and making them write a list for it would
+            // be ceremony.
+            var tests = requireValue switch
+            {
+                YamlSequenceNode seq => seq.Children.ToList(),
+                YamlMappingNode one => [one],
+                _ => (List<YamlNode>?)null,
+            };
+            if (tests is null || tests.Count == 0)
+            {
+                problems.Add(ScriptProblem.Error(requireLine, requireColumn,
+                    "sync: require: needs a test — an indented value: and one comparison, " +
+                    "e.g. value: \"{item.data.is_prescribed}\" then not_equals: true"));
+                return new ScriptParseResult(null, problems);
+            }
+            foreach (var test in tests)
+            {
+                var parsed = ParseRequirement(test, requireLine, requireColumn, "sync: require", problems);
+                if (parsed is null) return new ScriptParseResult(null, problems);
+                // The record is the only stable thing to test. Anything that
+                // moves on its own admits records on one poll and retires them
+                // on the next, which puts the same markers on the air over and
+                // over — the churn watch: exists to prevent, by another door.
+                foreach (var token in MovingPlaceholders)
+                {
+                    if (!parsed.Value.Contains(token, StringComparison.Ordinal) &&
+                        !parsed.Operand.Contains(token, StringComparison.Ordinal)) continue;
+                    problems.Add(ScriptProblem.Warning(requireLine, requireColumn,
+                        $"sync: require: {token} changes on its own, so records will be admitted and " +
+                        "retired as it moves. Test a field of the record instead."));
+                }
+                require.Add(parsed);
+            }
+        }
+
         var watch = new List<string>();
         bool watchGiven = TryGet(sync, "watch", out var watchKey, out var watchValue);
         if (watchGiven)
@@ -341,6 +387,7 @@ public static class ScriptParser
             LatitudePath = latPath,
             LongitudePath = lonPath,
             WithinMetres = within,
+            Require = require,
             WatchPaths = watch,
             // An explicit empty list is a statement that the records never
             // change, which is different from not having said.

@@ -14,7 +14,9 @@
 #
 # The reply is a bare array — lat and lng at the top level, acreage and
 # containment under data — and it includes closed incidents, which is what
-# active: filters out.
+# active: filters out. geo_event_types is the only filter the endpoint honours;
+# it ignores any other query parameter rather than refusing it, so everything
+# narrower than "wildfires" is decided here.
 
 enabled: false
 
@@ -50,6 +52,18 @@ sync:
 
   # Fires anywhere in the state come back; only these are worth marking.
   within: 30mi
+
+  # A prescribed burn is a wildfire to Watch Duty and files under the same
+  # type, which is right for a feed and wrong for a marker that means "fire
+  # near you" — a planned burn is why the smoke is there, not a reason to
+  # leave. The flag is authoritative: every record whose name says prescribed
+  # carries it, so there is nothing to gain by matching on the name.
+  #
+  # A fire that is reclassified fails this on the next poll and its marker is
+  # retired, exactly as if the fire had gone out.
+  require:
+    - value: "{item.data.is_prescribed}"
+      not_equals: true
 
   # Resend only when one of these changes. Without it, a feed that restamps
   # every record on every poll would rebroadcast the lot every fifteen minutes.

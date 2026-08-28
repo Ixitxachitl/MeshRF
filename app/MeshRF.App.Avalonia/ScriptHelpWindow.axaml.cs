@@ -189,6 +189,10 @@ public partial class ScriptHelpWindow : Window
           lon: lng
           within: 30mi
 
+          require:             # and only records that pass this
+            - value: "{item.data.is_prescribed}"
+              not_equals: true
+
           watch:               # resend only when one of these moves
             - data.acreage
             - data.containment
@@ -210,6 +214,8 @@ public partial class ScriptHelpWindow : Window
         new("active: is_active", "Path to the flag saying a record is still live. One that goes false is retired exactly like one that stops being returned. Omit if every record returned counts."),
         new("lat: / lon:", "Paths to the position within each record."),
         new("within: 30mi", "Only mirror records this close to home. Omit to mirror the lot."),
+        new("require:", "Tests a record has to pass to be worth a marker, written like a script's require: — a value: over {item.*} and one comparison. Give a list for more than one; all have to hold. This is how a feed that files two kinds of thing under one type gets narrowed to the one that means something on a map."),
+        new("  what fails", "Failing counts as gone, not as unseen, so a record that stops qualifying has its marker retired like one the feed has dropped, and one that starts qualifying is placed."),
         new("watch: [a, b]", "Paths whose changes are worth resending for. With the wrong fields in it, a feed that restamps every record rebroadcasts everything on every poll."),
         new("watch: []", "Says the records never change — a lightning strike, not a fire. A marker is placed once and retired once, with nothing in between, and never refreshed. Different from leaving watch: out, which is only an omission and is warned about."),
         new("waypoint:", "The marker. Same keys as a script's, minus lat/lon — those come from the paths above — and its name and description are templates over {item.*}."),
