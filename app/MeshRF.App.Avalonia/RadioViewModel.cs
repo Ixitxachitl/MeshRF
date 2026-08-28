@@ -449,7 +449,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             bwHz = p.BwKhz * 1000.0;
             cr = p.Cr;
         }
-        _airtime.Record(AirtimeTracker.EstimateAirtimeMs(sf, bwHz, cr, payloadBytes), isTx);
+        _airtime.Record(AirtimeTracker.EstimateAirtimeMs(
+            sf, bwHz, cr, payloadBytes,
+            AirtimeTracker.PreambleSymbolsFor(ChannelPlan.IsWideLora(SelectedRegion))), isTx);
     }
 
     /// <summary>

@@ -10,11 +10,16 @@ namespace MeshRF.Mesh;
 /// <item><c>air_util_tx</c> — our own transmit airtime over the last hour.</item>
 /// </list>
 ///
-/// Firmware counts these from the radio's own timers. We have no such counter,
-/// so each frame's time on air is estimated from the preset and length and kept
-/// in a rolling window. The numbers are an estimate and are only as good as the
-/// frames we actually decoded — traffic we could not hear is traffic we cannot
-/// count.
+/// Firmware does not measure these either — <c>RadioLibInterface</c> logs
+/// <c>getTimeOnAir()</c>, which works the datasheet equation from the configured
+/// SF/BW/CR rather than reading a hardware timer. So the per-frame figure here
+/// is not an approximation of firmware's: it is the same calculation, carried
+/// out in the same integer steps, and agrees with it exactly.
+///
+/// What is genuinely ours alone is the coverage: these totals count the frames
+/// we decoded, and traffic we could not hear is traffic we cannot count. That
+/// understates channel utilisation on a mesh we hear only part of, and does not
+/// affect <c>air_util_tx</c>, which is only ever our own transmissions.
 /// </summary>
 public sealed class AirtimeTracker
 {
@@ -78,30 +83,67 @@ public sealed class AirtimeTracker
     }
 
     /// <summary>
-    /// Time on air for a LoRa frame, by the Semtech formula — the same one the
-    /// native modem uses to bound a burst. Low-data-rate optimisation is
-    /// inferred from the symbol time, as firmware does, rather than passed in.
+    /// Time on air for a LoRa frame, by the Semtech formula — the same one
+    /// firmware arrives at. Its figure is not measured either: RadioLib's
+    /// <c>getTimeOnAir</c> works the datasheet equation from the configured
+    /// SF/BW/CR, so matching it is a matter of feeding in the same parameters.
+    /// Low-data-rate optimisation is inferred from the symbol time at the same
+    /// 16 ms threshold RadioLib uses.
     /// </summary>
-    public static int EstimateAirtimeMs(int spreadingFactor, double bandwidthHz, int codingRate, int payloadBytes)
+    /// <param name="preambleSymbols">Firmware transmits a 16-symbol preamble
+    /// (12 above 2 GHz), not the radio default of 8 — see
+    /// <see cref="PreambleSymbols"/>.</param>
+    public static int EstimateAirtimeMs(int spreadingFactor, double bandwidthHz, int codingRate, int payloadBytes,
+                                        int preambleSymbols = PreambleSymbols)
     {
         if (payloadBytes <= 0 || bandwidthHz <= 0) return 0;
+        if (codingRate < 5 || codingRate > 8) return 0;
+        if (spreadingFactor < 5 || spreadingFactor > 12) return 0;
 
-        double sf = spreadingFactor;
-        double cr = codingRate - 4.0; // 5..8 -> 1..4
-        if (cr < 1.0) return 0;
+        // RadioLib works in microseconds with integer arithmetic, carrying the
+        // .25 terms pre-multiplied by four. Reproduced step for step rather
+        // than rewritten in floating point: the two agree to the microsecond
+        // this way, and the rounding of a rewrite would not.
+        long bwKhzTimes10 = (long)Math.Round(bandwidthHz / 100.0);
+        if (bwKhzTimes10 <= 0) return 0;
+        long symbolLengthUs = (10_000L << spreadingFactor) / bwKhzTimes10;
 
-        double tSym = Math.Pow(2.0, sf) / bandwidthHz;
-        int de = tSym >= 0.016 ? 1 : 0; // LDRO once a symbol reaches 16 ms
-        const int ih = 0;               // explicit header
-        const int crc = 1;
+        int sfCoeff1X4 = 17;   // 4.25 * 4
+        int sfCoeff2 = 8;
+        if (spreadingFactor is 5 or 6) { sfCoeff1X4 = 25; sfCoeff2 = 0; }
 
-        double numerator = 8.0 * payloadBytes - 4.0 * sf + 28.0 + 16.0 * crc - 20.0 * ih;
-        double denominator = 4.0 * (sf - 2.0 * de);
-        double payloadSym = 8.0;
-        if (denominator > 0)
-            payloadSym += Math.Max(Math.Ceiling(numerator / denominator) * (cr + 4.0), 0.0);
+        const int bitsPerCrc = 16;      // CRC on
+        const int symbolHeader = 20;    // explicit header
 
-        const double preambleSym = 8.0 + 4.25;
-        return (int)Math.Round((preambleSym + payloadSym) * tSym * 1000.0, MidpointRounding.AwayFromZero);
+        int bitCount = 8 * payloadBytes + bitsPerCrc - 4 * spreadingFactor + sfCoeff2 + symbolHeader;
+        if (bitCount < 0) bitCount = 0;
+
+        // Low-data-rate optimisation once a symbol reaches 16 ms, the same
+        // threshold RadioLib's automatic mode uses.
+        bool ldrOptimize = symbolLengthUs >= 16_000;
+        int sfDivisor = 4 * (ldrOptimize ? spreadingFactor - 2 : spreadingFactor);
+
+        long preCodedSymbols = (bitCount + sfDivisor - 1) / sfDivisor;   // integer ceiling
+        long symbolsX4 = (preambleSymbols + 8L) * 4 + sfCoeff1X4 + preCodedSymbols * codingRate * 4;
+
+        long airtimeUs = symbolLengthUs * symbolsX4 / 4;
+        // Truncated, not rounded: firmware divides the microseconds by 1000 as
+        // integers before logging the result.
+        return (int)(airtimeUs / 1000);
     }
+
+    /// <summary>
+    /// Firmware's <c>preambleLength</c>: 16 symbols, not the radio default of 8,
+    /// so a receiver has longer to wake and catch the preamble. 12 above 2 GHz.
+    /// </summary>
+    /// <remarks>
+    /// Worth stating because it is eight symbols of airtime on every packet the
+    /// mesh sends — on MediumFast that is 16 ms, close to a tenth of a frame.
+    /// Assuming the default 8 made every figure computed here read low.
+    /// </remarks>
+    public const int PreambleSymbols = 16;
+    public const int WideLoraPreambleSymbols = 12;
+
+    public static int PreambleSymbolsFor(bool wideLora) =>
+        wideLora ? WideLoraPreambleSymbols : PreambleSymbols;
 }
