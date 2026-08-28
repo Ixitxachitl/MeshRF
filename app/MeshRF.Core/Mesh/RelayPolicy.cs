@@ -34,8 +34,7 @@ public static class RelayPolicy
     private const double SnrMaxDb = 10.0;
 
     /// <summary>Firmware isRebroadcaster(): CLIENT_MUTE never relays.</summary>
-    public static bool IsRoutingRoleEnabled(string? role) =>
-        !(role ?? string.Empty).Trim().Equals("ClientMute", StringComparison.OrdinalIgnoreCase);
+    public static bool IsRoutingRoleEnabled(string? role) => Canonical(role) != "CLIENTMUTE";
 
     /// <summary>Ports firmware counts as "core" for CORE_PORTNUMS_ONLY.</summary>
     public static bool IsCorePort(PortNum port) => port switch
@@ -96,7 +95,7 @@ public static class RelayPolicy
 
     /// <summary>
     /// Firmware's hop preservation: router-ish roles keep the hop limit when the
-    /// previous relay was a favourited node, letting traffic cross a trusted
+    /// previous relay was a favourited router, letting traffic cross a trusted
     /// backbone without spending hops. The first hop always decrements, or a
     /// packet could circulate without ever ageing out.
     /// </summary>
@@ -105,21 +104,56 @@ public static class RelayPolicy
         int hopsAway = header.HopStart >= header.HopLimit ? header.HopStart - header.HopLimit : 0;
         if (hopsAway == 0) return true;
 
-        string role = ctx.Role.Trim().ToUpperInvariant();
-        if (role is not ("ROUTER" or "ROUTERLATE" or "CLIENTBASE")) return true;
+        if (!IsRouterish(ctx.Role)) return true;
 
         byte relayByte = header.RelayNode;
         if (relayByte == 0) return true;
 
-        // relay_node is only the low byte of the previous relay's node number,
-        // so this can match the wrong favourite in principle; firmware accepts
-        // that, and the consequence is only a preserved hop.
-        foreach (var node in ctx.AllNodes())
-            if (node.Favorite && (node.NodeNum & 0xFF) == relayByte)
-                return false;
+        if (!ResolveUniqueLastByte(ctx, relayByte, out var relay)) return true;
 
-        return true;
+        // Firmware re-checks the predicate on the single resolved node rather
+        // than on whatever the scan happened to hit first.
+        return !(relay!.Favorite && HasUser(relay) && IsRouterish(relay.Role));
     }
+
+    /// <summary>
+    /// Firmware <c>NodeDB::resolveUniqueLastByte</c>. <c>relay_node</c> carries
+    /// only the low byte of the previous relay's node number, so on a dense mesh
+    /// several nodes answer to it. Scanning for the first match makes hop
+    /// preservation depend on node-store order and can credit the wrong station;
+    /// reporting the collision and decrementing is the safe answer.
+    /// </summary>
+    /// <remarks>
+    /// The candidate set is narrowed first, exactly as firmware does: only a
+    /// direct neighbour, a favourite, or a router-role node is a plausible
+    /// relay, so an unrelated distant node sharing the byte is not a collision.
+    /// </remarks>
+    public static bool ResolveUniqueLastByte(RelayContext ctx, byte lastByte, out NodeRecord? resolved)
+    {
+        resolved = null;
+        foreach (var node in ctx.AllNodes())
+        {
+            if ((node.NodeNum & 0xFF) != lastByte) continue;
+            if (!(node.HopsAway == 0 || node.Favorite || IsRouterish(node.Role))) continue;
+
+            // A second plausible candidate shares this byte: ambiguous, and no
+            // further scanning can change that.
+            if (resolved is not null) { resolved = null; return false; }
+            resolved = node;
+        }
+        return resolved is not null;
+    }
+
+    /// <summary>Firmware's <c>nodeInfoLiteHasUser</c>: a node we have only ever
+    /// seen relay, with no NodeInfo of its own, is not a station we trust hops
+    /// to.</summary>
+    private static bool HasUser(NodeRecord node) =>
+        !string.IsNullOrEmpty(node.UserId) || !string.IsNullOrEmpty(node.LongName);
+
+    /// <summary>The roles firmware treats as backbone for hop preservation and
+    /// next-hop relevance: ROUTER, ROUTER_LATE and CLIENT_BASE.</summary>
+    public static bool IsRouterish(string? role) =>
+        Canonical(role) is "ROUTER" or "ROUTERLATE" or "CLIENTBASE";
 
     /// <summary>
     /// Firmware FloodingRouter::roleAllowsCancelingDupe. Routers never abandon a
@@ -129,7 +163,7 @@ public static class RelayPolicy
     /// </summary>
     public static bool RoleAllowsCancelingScheduledRelay(RelayContext ctx, MeshHeader header)
     {
-        string role = ctx.Role.Trim().ToUpperInvariant();
+        string role = Canonical(ctx.Role);
         if (role is "ROUTER" or "ROUTERLATE") return false;
         if (role == "CLIENTBASE") return !IsFromOrToFavoritedNode(ctx, header);
         return true;
@@ -253,11 +287,12 @@ public static class RelayPolicy
     /// </summary>
     public static bool ShouldClampToLateWindow(RelayContext ctx, MeshHeader header)
     {
-        string role = ctx.Role.Trim().ToUpperInvariant();
+        string role = Canonical(ctx.Role);
         if (role == "ROUTERLATE") return true;
         return role == "CLIENTBASE" && IsFromOrToFavoritedNode(ctx, header);
     }
 
-    public static bool IsRouterRole(string? role) =>
-        (role ?? string.Empty).Trim().Equals("Router", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Firmware <c>shouldRebroadcastEarlyLikeRouter</c>: ROUTER alone,
+    /// not ROUTER_LATE.</summary>
+    public static bool IsRouterRole(string? role) => Canonical(role) == "ROUTER";
 }

@@ -807,10 +807,11 @@ public static class MeshDecoder
     };
 
     // Position: 1=latitude_i(sfixed32) 2=longitude_i(sfixed32) 3=altitude(varint)
+    //           9=altitude_hae(sint32)
     private static MeshPosition ParsePosition(byte[] data)
     {
         double lat = 0, lon = 0;
-        int? alt = null;
+        int? alt = null, altHae = null;
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))
         {
@@ -822,10 +823,22 @@ public static class MeshDecoder
                     lon = (int)rdr.ReadFixed32() * 1e-7; break;
                 case 3 when wt == ProtoReader.WireType.Varint:
                     alt = (int)(long)rdr.ReadVarint(); break;
+                // A node whose position_flags clear ALTITUDE_MSL — the TAK roles
+                // — sends height above the ellipsoid here instead. Without this
+                // their altitude reads as absent.
+                case 9 when wt == ProtoReader.WireType.Varint:
+                    altHae = ZigZagDecode(rdr.ReadVarint()); break;
                 default: rdr.SkipField(wt); break;
             }
         }
-        return new MeshPosition { Latitude = lat, Longitude = lon, AltitudeM = alt };
+        return new MeshPosition { Latitude = lat, Longitude = lon, AltitudeM = alt ?? altHae };
+    }
+
+    /// <summary>Undo protobuf zig-zag for a <c>sint32</c> field.</summary>
+    private static int ZigZagDecode(ulong raw)
+    {
+        uint v = (uint)raw;
+        return (int)(v >> 1) ^ -(int)(v & 1);
     }
 
     // Waypoint: 1=id(varint) 2=latitude_i(sfixed32) 3=longitude_i(sfixed32)

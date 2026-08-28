@@ -604,7 +604,8 @@ public partial class MainWindow : Window
     }
 
     private async void OnSendNodeInfoPrompted(object? sender, RoutedEventArgs e) =>
-        await SendPromptedAsync("Send node info on which channel?", _viewModel.SendNodeInfoOnChannelAsync);
+        await SendPromptedAsync("Send node info on which channel?",
+            (ch, to) => _viewModel.SendNodeInfoOnChannelAsync(ch, to));
 
     private async void OnSendPositionPrompted(object? sender, RoutedEventArgs e) =>
         await SendPromptedAsync("Send position on which channel?", _viewModel.SendPositionOnChannelAsync);

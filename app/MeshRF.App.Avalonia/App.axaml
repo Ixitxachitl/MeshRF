@@ -19,6 +19,9 @@
         <SolidColorBrush x:Key="BrushAppBackground"      Color="#FF1E1E1E" />
         <SolidColorBrush x:Key="BrushAppForeground"      Color="#FFE6E6E6" />
         <SolidColorBrush x:Key="BrushSubtle"             Color="#FFB0B0B0" />
+        <!-- Red for a setting whose value is not the one actually in force.
+             Lightened off pure red, which is unreadable small on #1E1E1E. -->
+        <SolidColorBrush x:Key="BrushOverridden"         Color="#FFE0625E" />
         <SolidColorBrush x:Key="BrushPanelBackground"    Color="#FF2A2A2A" />
         <SolidColorBrush x:Key="BrushPanelBorder"        Color="#FF3F3F3F" />
         <SolidColorBrush x:Key="BrushSplitter"           Color="#FF3F3F3F" />

@@ -452,6 +452,43 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _airtime.Record(AirtimeTracker.EstimateAirtimeMs(sf, bwHz, cr, payloadBytes), isTx);
     }
 
+    /// <summary>
+    /// Firmware's duty-cycle abort in <c>Router::send</c> and the politer
+    /// <c>isTxAllowedAirUtil</c> gate in front of it.
+    ///
+    /// Only the EU bands actually constrain anything, and EU_866 is the region
+    /// where the role decides the budget: 10% for a router, 2.5% for everyone
+    /// else. Our <c>air_util_tx</c> is an estimate from the frames we sent, so
+    /// this is an approximation of a legal limit — <see cref="OverrideDutyCycle"/>
+    /// exists for an operator who knows their own obligations better than we do.
+    /// </summary>
+    /// <param name="polite">Background traffic we chose to send, held to half
+    /// the budget so a user-initiated message still fits.</param>
+    private bool DutyCycleAllows(bool polite, out string refusal)
+    {
+        refusal = string.Empty;
+        _airtime.Compute(out _, out float airUtilTx);
+        if (DutyCycle.IsTxAllowed(SelectedRegion, MyRole, airUtilTx, polite, OverrideDutyCycle))
+            return true;
+
+        double limit = DutyCycle.EffectivePercent(SelectedRegion, MyRole);
+        if (polite) limit = limit * DutyCycle.PolitePercent / 100.0;
+        refusal = $"{SelectedRegion} duty cycle: {airUtilTx:0.0}% of the last hour transmitted, " +
+                  $"limit {limit:0.##}% — try again in {DutyCycle.SilentMinutes(airUtilTx, limit)} min.";
+        return false;
+    }
+
+    /// <summary>Firmware <c>isTxAllowedChannelUtil(polite: true)</c>: don't add
+    /// volunteered traffic to a channel already a quarter occupied.</summary>
+    private bool ChannelUtilAllowsPoliteTx()
+    {
+        _airtime.Compute(out float channelUtil, out _);
+        return channelUtil < PoliteChannelUtilPercent;
+    }
+
+    /// <summary>Firmware's <c>polite_channel_util_percent</c>.</summary>
+    private const float PoliteChannelUtilPercent = 25f;
+
     /// <summary>Seconds since RX started, clamped to the protobuf's uint.</summary>
     private uint UptimeSeconds =>
         _rxStartedUtc is DateTime started
@@ -580,10 +617,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     // ----- My Node identity (Configure dialog) -----
 
+    /// <summary>
+    /// The roles a node can actually be set to. RouterClient and Repeater are
+    /// absent because firmware deprecated them: <c>AdminModule</c> rewrites
+    /// either to CLIENT as soon as a device config carrying it is applied, so
+    /// no live node holds one and offering them here would only let us
+    /// advertise a role the mesh no longer recognises. Their enum values are
+    /// still decoded, for stale NodeInfo still circulating.
+    /// </summary>
     public string[] NodeRoleOptions { get; } =
     {
-        "Client", "ClientMute", "ClientHidden", "Router", "RouterClient",
-        "Repeater", "Tracker", "Sensor", "TAK", "TakTracker", "LostAndFound",
+        "Client", "ClientMute", "ClientHidden", "Router",
+        "Tracker", "Sensor", "TAK", "TakTracker", "LostAndFound",
         "RouterLate", "ClientBase",
     };
 
@@ -621,6 +666,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// peers not to open a conversation, and nothing here enforces it.</summary>
     [ObservableProperty]
     private bool _myIsUnmessagable;
+
+    /// <summary>Firmware <c>lora.override_duty_cycle</c>: transmit past the
+    /// region's hourly budget. Off by default; the regions that declare a
+    /// budget do so because the band is regulated.</summary>
+    [ObservableProperty]
+    private bool _overrideDutyCycle;
 
     [ObservableProperty]
     private string _myHwModel = "UNSET";
@@ -841,6 +892,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedUserRole = _settings.UserRole;
         var savedUserIsLicensed = _settings.UserIsLicensed;
         var savedUserIsUnmessagable = _settings.UserIsUnmessagable;
+        var savedOverrideDutyCycle = _settings.OverrideDutyCycle;
         var savedUserHwModel = _settings.UserHwModel;
         var savedUserPublicKey = _settings.UserPublicKey;
         var savedUserPrivateKey = _settings.UserPrivateKey;
@@ -924,6 +976,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.IncomingChannelMessage += PlayIncomingRingtone;
         _rxHost.GeofenceCrossed += PlayGeofenceTone;
         _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
+        _rxHost.UnknownNodeHeard += HandleUnknownNodeHeard;
         _rxHost.TelemetryReplyRequested += HandleTelemetryReplyRequest;
         _rxHost.AckRequested += SendAck;
         _rxHost.RoutingReplyReceived += CancelAckRetransmit;
@@ -1024,6 +1077,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         MyRole = string.IsNullOrEmpty(savedUserRole) ? MyRole : savedUserRole;
         MyIsLicensed = savedUserIsLicensed;
         MyIsUnmessagable = savedUserIsUnmessagable;
+        OverrideDutyCycle = savedOverrideDutyCycle;
         MyHwModel = string.IsNullOrEmpty(savedUserHwModel) ? MyHwModel : savedUserHwModel;
         MyPublicKey = savedUserPublicKey;
         MyPrivateKey = savedUserPrivateKey;
@@ -1635,6 +1689,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.SyncPrimaryChannelName(value);
         RebuildSlots(snapToDefault: true);
         SaveSettings();
+        RefreshEffectiveSettings();
     }
 
     partial void OnSelectedRegionChanged(Region value)
@@ -1651,6 +1706,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RebuildSlots(snapToDefault: true);
         ApplyTxBandLimits();
         ApplyRegionPowerLimit();
+        RefreshEffectiveSettings();
         // A move to a band that doesn't touch the one we were operating in has
         // to be confirmed. Only once the constructor has established a starting
         // band: restoring a saved region is not a change. Nothing to confirm
@@ -1701,6 +1757,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (!_suppressRetune) SaveSettings();
         SpectrumCenterHz = value * 1_000_000.0;
+        // Off the default slot there is no shared channel to be held back for.
+        RefreshEffectiveSettings();
     }
 
     partial void OnLnaGainDbChanged(byte value) { ApplyGains(); SaveSettings(); }
@@ -1770,38 +1828,38 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnMyShortNameChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyRoleChanged(string value)
     {
+        // Firmware coerces the deprecated roles on config-set, so a settings.json
+        // written before they left the picker resolves the same way here.
+        if (RoleDefaults.IsDeprecated(value))
+        {
+            StatusText = $"{value} is deprecated in firmware; using Client.";
+            MyRole = RoleDefaults.Effective(value);   // re-enters with "Client"
+            return;
+        }
+
         ApplyRoleDefaults(value);
         SaveSettings();
         RefreshSelfNode();
     }
 
     /// <summary>
-    /// Coerce the schedules and rebroadcast mode the way firmware's
-    /// <c>installRoleDefaults</c> does, so a role means the same thing on air
-    /// here as it does on a real node.
-    ///
-    /// Skipped while settings are still loading: the constructor assigns the
-    /// saved role, and applying defaults there would overwrite the intervals
-    /// the user tuned with the role's canned ones on every launch.
+    /// Re-resolves the settings a role coerces, so a role means the same thing
+    /// on air here as it does on a real node.
     /// </summary>
+    /// <remarks>
+    /// Unlike firmware's <c>installRoleDefaults</c>, this writes nothing. The
+    /// role is applied as an overlay when a setting is read, so switching to
+    /// ROUTER for an afternoon and back leaves the intervals you had tuned
+    /// exactly as you left them.
+    /// </remarks>
     private void ApplyRoleDefaults(string? role)
     {
-        if (!_settingsLoaded) return;
-
-        var d = RoleDefaults.For(role);
-        if (d.NodeInfoEnabled is bool ni) AutoReportNodeInfoEnabled = ni;
-        if (d.NodeInfoSeconds is int nis) AutoReportNodeInfoSeconds = nis;
-        if (d.PositionEnabled is bool p) AutoReportPositionEnabled = p;
-        if (d.PositionSeconds is int ps) AutoReportPositionSeconds = ps;
-        if (d.DeviceMetricsEnabled is bool dm) AutoReportDeviceMetricsEnabled = dm;
-        if (d.DeviceMetricsSeconds is int dms) AutoReportDeviceMetricsSeconds = dms;
-        if (d.EnvironmentMetricsEnabled is bool em) AutoReportEnvironmentMetricsEnabled = em;
-        if (d.EnvironmentMetricsSeconds is int ems) AutoReportEnvironmentMetricsSeconds = ems;
-        if (d.AirQualityMetricsEnabled is bool aq) AutoReportAirQualityMetricsEnabled = aq;
-        if (d.NodeStatusEnabled is bool st) AutoReportNodeStatusEnabled = st;
-        if (d.IsUnmessagable is bool um) MyIsUnmessagable = um;
-        if (d.RebroadcastMode is string rb && RebroadcastModeOptions.Contains(rb)) RebroadcastMode = rb;
+        // Nothing is written any more: the role is an overlay over the user's
+        // own settings, resolved on read. See RadioViewModel.EffectiveSettings.
+        RefreshEffectiveSettings();
+        RearmAutoReportSchedules();
     }
+
     partial void OnMyHwModelChanged(string value) { SaveSettings(); RefreshSelfNode(); }
     partial void OnMyIsLicensedChanged(bool value)
     {
@@ -1812,8 +1870,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RefreshSelfNode();
         OnPropertyChanged(nameof(LicensedEncryptedChannelWarning));
         OnPropertyChanged(nameof(HasLicensedEncryptedChannelWarning));
+        RefreshEffectiveSettings();
     }
-    partial void OnMyIsUnmessagableChanged(bool value) { SaveSettings(); RefreshSelfNode(); }
+    partial void OnMyIsUnmessagableChanged(bool value) { SaveSettings(); RefreshSelfNode(); RefreshEffectiveSettings(); }
     // The self node record embeds the public key and derives our node number
     // from it, so a key change has to reach the node store like any other
     // identity edit — otherwise the grid keeps reporting the old key's
@@ -1869,7 +1928,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnHomeAltitudeTextChanged(string value) => SaveSettings();
     partial void OnMyFirmwareVersionChanged(string value) => SaveSettings();
     partial void OnMyFirmwareEditionChanged(string value) => SaveSettings();
-    partial void OnRebroadcastModeChanged(string value) => SaveSettings();
+    partial void OnRebroadcastModeChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
     partial void OnRoutingRelayEnabledChanged(bool value) => SaveSettings();
     // Port/baud edits restart the reader so a correction takes effect without
     // toggling the source.
@@ -2082,6 +2141,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.UserRole = MyRole;
         _settings.UserIsLicensed = MyIsLicensed;
         _settings.UserIsUnmessagable = MyIsUnmessagable;
+        _settings.OverrideDutyCycle = OverrideDutyCycle;
         _settings.UserHwModel = MyHwModel;
         _settings.UserPublicKey = MyPublicKey;
         _settings.UserPrivateKey = MyPrivateKey;
@@ -2164,6 +2224,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 return false;
             }
         }
+        if (!DutyCycleAllows(polite: false, out string dutyRefusal))
+        {
+            StatusText = dutyRefusal;
+            return false;
+        }
+
         var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
         var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
 
@@ -2657,19 +2723,25 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     /// <summary>Sends our NodeInfo on a chosen channel, or directed at a peer.
     /// Null channel means the primary — that's the auto-report path.</summary>
-    public async Task SendNodeInfoOnChannelAsync(ChannelConfig? channel, uint? to)
+    /// <param name="wantReplies">Ask the recipient for their NodeInfo back.
+    /// Suppressed for TRACKER and SENSOR, as firmware's
+    /// <c>sendOurNodeInfo</c> does: those roles beacon often enough that
+    /// soliciting a reply each time would set off a round of NodeInfo from
+    /// everything in earshot.</param>
+    public async Task SendNodeInfoOnChannelAsync(ChannelConfig? channel, uint? to, bool wantReplies = false)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
         channel ??= PrimaryChannel();
         if (channel is null) return;
+        bool wantResponse = wantReplies && RoleDefaults.AllowsRequestingReplies(MyRole);
         var frame = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, NextPacketId(),
             MyLongName, MyShortName,
             hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
             publicKey: TryParseKeyBase64(MyPublicKey),
             to: to ?? 0xFFFFFFFFu,
-            hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
+            hopLimit: (byte)HopLimit, wantResponse: wantResponse, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey,
-            isLicensed: MyIsLicensed, isUnmessagable: MyIsUnmessagable);
+            isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
         StatusText = await TransmitFrameAsync(frame) ? "Sent NodeInfo." : "Transmit failed.";
     }
 
@@ -2690,7 +2762,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
         int? alt = HomeAltitudeMeters;
         var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
-            altitudeM: alt, precisionBits: channel.EffectivePositionPrecision,
+            altitudeM: alt, altitudeIsMsl: EffectivePositionAltitudeMsl,
+            precisionBits: channel.EffectivePositionPrecision,
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);

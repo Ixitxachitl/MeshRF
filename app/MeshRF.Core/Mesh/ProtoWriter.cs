@@ -40,6 +40,11 @@ public sealed class ProtoWriter
         WriteVarint(value);
     }
 
+    /// <summary>Write a <c>sint32</c> field: zig-zag encoded so a small negative
+    /// value costs one byte rather than ten.</summary>
+    public void WriteSInt32Field(int fieldNumber, int value)
+        => WriteVarintField(fieldNumber, (ulong)(uint)((value << 1) ^ (value >> 31)));
+
     /// <summary>Write a 32-bit fixed field (wire type 5, little-endian).</summary>
     public void WriteFixed32Field(int fieldNumber, uint value)
     {

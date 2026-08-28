@@ -35,8 +35,19 @@ public class RelayPolicyTests
             isLicensed);
     }
 
-    private static NodeRecord Node(uint num, bool favorite = false, bool? licensed = null) =>
-        new() { NodeNum = num, Favorite = favorite, IsLicensed = licensed };
+    private static NodeRecord Node(uint num, bool favorite = false, bool? licensed = null,
+                                   string role = "Client", string longName = "Peer",
+                                   byte? hopsAway = null) =>
+        new()
+        {
+            NodeNum = num, Favorite = favorite, IsLicensed = licensed,
+            Role = role, LongName = longName, HopsAway = hopsAway,
+        };
+
+    /// <summary>A node that satisfies every hop-preservation condition:
+    /// favourited, named, and a router role.</summary>
+    private static NodeRecord FavouriteRouter(uint num) =>
+        Node(num, favorite: true, role: "Router");
 
     /// <summary>A stand-in for "we could decrypt this". Licensed operation
     /// coerces the rebroadcast mode to LOCAL_ONLY, which drops undecodable
@@ -115,19 +126,68 @@ public class RelayPolicyTests
     // ---- Hop preservation ----
 
     [Fact]
-    public void RouterPreservesHopsBehindAFavourite()
+    public void RouterPreservesHopsBehindAFavouriteRouter()
     {
-        var favourite = Node(Other, favorite: true);
-        var ctx = Context("Router", nodes: favourite);
+        var ctx = Context("Router", nodes: FavouriteRouter(Other));
         // Two hops in, last relayed by the favourite's low byte.
         var header = Header(hopLimit: 1, hopStart: 3, relayNode: (byte)(Other & 0xFF));
+        Assert.False(RelayPolicy.ShouldDecrementHopLimit(ctx, header));
+    }
+
+    // Firmware re-checks the full predicate on the resolved node: a favourite
+    // that is not a router is not backbone, and hops still cost.
+    [Fact]
+    public void FavouriteThatIsNotARouterStillCostsAHop()
+    {
+        var ctx = Context("Router", nodes: Node(Other, favorite: true, role: "Client"));
+        var header = Header(hopLimit: 1, hopStart: 3, relayNode: (byte)(Other & 0xFF));
+        Assert.True(RelayPolicy.ShouldDecrementHopLimit(ctx, header));
+    }
+
+    // A node we have only ever heard relay, with no NodeInfo of its own, is not
+    // one we extend hops for however it is flagged.
+    [Fact]
+    public void FavouriteRouterWithNoNodeInfoStillCostsAHop()
+    {
+        var ctx = Context("Router", nodes: Node(Other, favorite: true, role: "Router", longName: ""));
+        var header = Header(hopLimit: 1, hopStart: 3, relayNode: (byte)(Other & 0xFF));
+        Assert.True(RelayPolicy.ShouldDecrementHopLimit(ctx, header));
+    }
+
+    // The relay_node byte is one byte of four, so on a dense mesh two plausible
+    // relays answer to it. Crediting whichever the store happened to list first
+    // made hop preservation depend on node-store order.
+    [Fact]
+    public void AmbiguousRelayByteDecrements()
+    {
+        const uint Collides = 0x99AABB88u;   // different node, same low byte as Other
+        byte shared = (byte)(Other & 0xFF);
+        Assert.Equal((byte)(Collides & 0xFF), shared);
+        var ctx = Context("Router", nodes: new[] { FavouriteRouter(Other), FavouriteRouter(Collides) });
+        var header = Header(hopLimit: 1, hopStart: 3, relayNode: shared);
+        Assert.True(RelayPolicy.ShouldDecrementHopLimit(ctx, header));
+    }
+
+    // Only a plausible relay counts toward the collision: an unrelated distant
+    // node sharing the byte must not block preservation for a real backbone.
+    [Fact]
+    public void ImplausibleCandidateIsNotACollision()
+    {
+        const uint Stranger = 0x99AABB88u;   // different node, same low byte as Other
+        byte shared = (byte)(Other & 0xFF);
+        var ctx = Context("Router", nodes: new[]
+        {
+            FavouriteRouter(Other),
+            Node(Stranger, favorite: false, role: "Client"),   // not near, not favourite, not router
+        });
+        var header = Header(hopLimit: 1, hopStart: 3, relayNode: shared);
         Assert.False(RelayPolicy.ShouldDecrementHopLimit(ctx, header));
     }
 
     [Fact]
     public void FirstHopAlwaysDecrementsEvenBehindAFavourite()
     {
-        var ctx = Context("Router", nodes: Node(Other, favorite: true));
+        var ctx = Context("Router", nodes: FavouriteRouter(Other));
         var header = Header(hopLimit: 3, hopStart: 3, relayNode: (byte)(Other & 0xFF));
         Assert.True(RelayPolicy.ShouldDecrementHopLimit(ctx, header));
     }
@@ -135,7 +195,7 @@ public class RelayPolicyTests
     [Fact]
     public void ClientAlwaysDecrements()
     {
-        var ctx = Context("Client", nodes: Node(Other, favorite: true));
+        var ctx = Context("Client", nodes: FavouriteRouter(Other));
         var header = Header(hopLimit: 1, hopStart: 3, relayNode: (byte)(Other & 0xFF));
         Assert.True(RelayPolicy.ShouldDecrementHopLimit(ctx, header));
     }

@@ -4,13 +4,13 @@
         x:Class="MeshRF.AvaloniaApp.NodeIdentityWindow"
         x:DataType="local:RadioViewModel"
         Title="My Node — Identity &amp; Settings"
-        Width="560" Height="640"
+        Width="640" Height="640"
         MinWidth="480" MinHeight="300"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID" Margin="0,4,8,4" VerticalAlignment="Center" />
             <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
@@ -45,10 +45,17 @@
             </StackPanel>
 
             <TextBlock Grid.Row="6" Grid.Column="0" Text="Unmessagable" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <CheckBox Grid.Row="6" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
-                      Content="Advertise that this node shouldn't be messaged"
-                      IsChecked="{Binding MyIsUnmessagable}"
-                      ToolTip.Tip="Informational only — nothing here refuses an incoming DM. Some roles set this for you." />
+            <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox VerticalAlignment="Center"
+                          Content="Advertise that this node shouldn't be messaged"
+                          IsChecked="{Binding MyIsUnmessagable}"
+                          ToolTip.Tip="Informational only — nothing here refuses an incoming DM. Some roles set this for you." />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding UnmessagableNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding UnmessagableNote}"
+                           IsVisible="{Binding HasUnmessagableNote}" />
+            </StackPanel>
 
             <TextBlock Grid.Row="7" Grid.Column="0" Text="Hardware" Margin="0,4,8,4" VerticalAlignment="Center" />
             <ComboBox Grid.Row="7" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="200"
@@ -88,9 +95,16 @@
             </Grid>
 
             <TextBlock Grid.Row="11" Grid.Column="0" Text="Rebroadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <ComboBox Grid.Row="11" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="200"
-                      ItemsSource="{Binding RebroadcastModeOptions}" SelectedItem="{Binding RebroadcastMode}"
-                      ToolTip.Tip="Which traffic this node rebroadcasts when relay routing is enabled. Some roles override this, and licensed operation forces local-only." />
+            <StackPanel Grid.Row="11" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <ComboBox HorizontalAlignment="Left" Width="200"
+                          ItemsSource="{Binding RebroadcastModeOptions}" SelectedItem="{Binding RebroadcastMode}"
+                          ToolTip.Tip="Which traffic this node rebroadcasts when relay routing is enabled. Some roles override this, and licensed operation forces local-only." />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding RebroadcastModeNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding RebroadcastModeNote}"
+                           IsVisible="{Binding HasRebroadcastModeNote}" />
+            </StackPanel>
 
             <TextBlock Grid.Row="12" Grid.Column="0" Text="Routing" Margin="0,4,8,4" VerticalAlignment="Center" />
             <CheckBox Grid.Row="12" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
@@ -98,8 +112,16 @@
                       IsChecked="{Binding RoutingRelayEnabled}"
                       ToolTip.Tip="Rebroadcast other nodes' traffic, subject to the role and rebroadcast mode above. Needs a TX-capable device." />
 
-            <TextBlock Grid.Row="13" Grid.Column="0" Text="Location source" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="13" Grid.Column="1" Margin="0,4,0,4">
+            <!-- Firmware's lora.override_duty_cycle. Only the EU bands declare a
+                 budget, and on EU_866 the role picks which one applies. -->
+            <TextBlock Grid.Row="13" Grid.Column="0" Text="Duty cycle" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <CheckBox Grid.Row="13" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+                      Content="Transmit past the region's hourly limit"
+                      IsChecked="{Binding OverrideDutyCycle}"
+                      ToolTip.Tip="Off by default. The EU regions cap how much of each hour a node may transmit — 10% on EU_868/EU_433, and on EU_866 10% for a router role but 2.5% for everyone else. Transmits are refused once the estimate passes the cap; tick this only if you know your own obligations." />
+
+            <TextBlock Grid.Row="14" Grid.Column="0" Text="Location source" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="14" Grid.Column="1" Margin="0,4,0,4">
                 <ComboBox HorizontalAlignment="Left" Width="160"
                           ItemsSource="{Binding HomeLocationSourceOptions}" SelectedItem="{Binding HomeLocationSource}"
                           ToolTip.Tip="Choose between a fixed manual location and an auto-detected USB serial GPS." />
@@ -120,8 +142,8 @@
 
             <!-- Row 14 sits under Location source because it only governs the
                  serial GPS: the manual boxes are typed, not streamed. -->
-            <TextBlock Grid.Row="14" Grid.Column="0" Text="Smart position" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="14" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
+            <TextBlock Grid.Row="15" Grid.Column="0" Text="Smart position" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
                         IsEnabled="{Binding IsUsbSerialLocationSource}">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding GpsSmartPosition}"
                           ToolTip.Tip="Only take a fix that is both far enough from the last one taken and long enough after it. A receiver reports every second and wanders while standing still; without this the marker twitches in place and the settings file is rewritten all day." />
@@ -134,8 +156,8 @@
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="15" Grid.Column="0" Text="{Binding HomeAltitudeLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <Grid Grid.Row="15" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
+            <TextBlock Grid.Row="16" Grid.Column="0" Text="{Binding HomeAltitudeLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <Grid Grid.Row="16" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
                   IsEnabled="{Binding IsManualLocationSource}">
                 <TextBox Grid.Column="0" Margin="0,0,2,0" FontFamily="Consolas"
                          ToolTip.Tip="Latitude in degrees (-90..90)" Text="{Binding HomeLatitudeText}" />
@@ -145,8 +167,8 @@
                          ToolTip.Tip="Altitude (optional)" Text="{Binding HomeAltitudeText}" />
             </Grid>
 
-            <TextBlock Grid.Row="16" Grid.Column="0" Text="Hop limit" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <DockPanel Grid.Row="16" Grid.Column="1" Margin="0,4,0,4">
+            <TextBlock Grid.Row="17" Grid.Column="0" Text="Hop limit" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="17" Grid.Column="1" Margin="0,4,0,4">
                 <TextBlock DockPanel.Dock="Right" Width="20" Margin="6,0,0,0" VerticalAlignment="Center"
                            TextAlignment="Center" Text="{Binding HopLimit}" />
                 <Slider Minimum="1" Maximum="7" TickFrequency="1" IsSnapToTickEnabled="True"
@@ -154,105 +176,189 @@
                         ToolTip.Tip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
             </DockPanel>
 
-            <TextBlock Grid.Row="17" Grid.Column="0" Text="Ignore MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <CheckBox Grid.Row="17" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+            <TextBlock Grid.Row="18" Grid.Column="0" Text="Ignore MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <CheckBox Grid.Row="18" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
                       Content="Don't relay traffic from nodes heard via MQTT"
                       IsChecked="{Binding IgnoreMqtt}"
                       ToolTip.Tip="While on, the relay never rebroadcasts a packet that arrived via MQTT downlink, or anything from a node marked heard-via-MQTT — mirrors firmware's ignore_mqtt. Off by default: relaying downlinked traffic onto RF is what makes a downlink gateway a gateway." />
 
-            <TextBlock Grid.Row="18" Grid.Column="0" Text="OK to MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <CheckBox Grid.Row="18" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+            <TextBlock Grid.Row="19" Grid.Column="0" Text="OK to MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <CheckBox Grid.Row="19" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
                       Content="Allow gateways to uplink my packets to public MQTT"
                       IsChecked="{Binding OkToMqtt}" />
 
-            <TextBlock Grid.Row="19" Grid.Column="0" Text="Status text" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBox Grid.Row="19" Grid.Column="1" Margin="0,4,0,4" MaxLength="280" Text="{Binding MyNodeStatus}" />
+            <TextBlock Grid.Row="20" Grid.Column="0" Text="Status text" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBox Grid.Row="20" Grid.Column="1" Margin="0,4,0,4" MaxLength="280" Text="{Binding MyNodeStatus}" />
 
             <!-- Auto-report schedules. Each fires on the poll loop once its
                  interval is up and a TX-capable device is configured. -->
-            <TextBlock Grid.Row="20" Grid.Column="0" Text="Auto node info" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="20" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="21" Grid.Column="0" Text="Auto node info" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="21" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeInfoEnabled}" />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding NodeInfoEnabledNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding NodeInfoEnabledNote}"
+                           IsVisible="{Binding HasNodeInfoEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeInfoSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding NodeInfoSecondsNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding NodeInfoSecondsNote}"
+                           IsVisible="{Binding HasNodeInfoSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="21" Grid.Column="0" Text="Auto position" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="21" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="22" Grid.Column="0" Text="Auto position" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="22" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportPositionEnabled}" />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding PositionEnabledNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionEnabledNote}"
+                           IsVisible="{Binding HasPositionEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding PositionSecondsNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionSecondsNote}"
+                           IsVisible="{Binding HasPositionSecondsNote}" />
             </StackPanel>
 
             <!-- Firmware's position_broadcast_smart_enabled, and only meaningful
                  alongside the interval above: it adds early sends, it does not
                  replace the schedule. -->
-            <TextBlock Grid.Row="22" Grid.Column="0" Text="Smart broadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="22" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
+            <TextBlock Grid.Row="23" Grid.Column="0" Text="Smart broadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="23" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
                         IsEnabled="{Binding AutoReportPositionEnabled}">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportPositionSmartEnabled}"
                           ToolTip.Tip="Send a position ahead of the schedule once you have actually moved — firmware's position_broadcast_smart_enabled. It adds sends, it never delays the scheduled one." />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding PositionSmartEnabledNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionSmartEnabledNote}"
+                           IsVisible="{Binding HasPositionSmartEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="{Binding AutoReportPositionSmartMinMoveLabel}" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinMoveInput}"
                          ToolTip.Tip="How far to have moved since the last position sent, measured at the precision the channel actually transmits — firmware's broadcast_smart_minimum_distance. Default 100 m." />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding PositionSmartMinMoveNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionSmartMinMoveNote}"
+                           IsVisible="{Binding HasPositionSmartMinMoveNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Min gap" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinSeconds}"
                          ToolTip.Tip="Shortest time between sends, so a fast mover cannot flood the channel — firmware's broadcast_smart_minimum_interval_secs. Default 300 sec." />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding PositionSmartMinSecondsNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionSmartMinSecondsNote}"
+                           IsVisible="{Binding HasPositionSmartMinSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="23" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="23" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <!-- Firmware's ALTITUDE_MSL position flag. The TAK roles clear it,
+                 because CoTs carry height above the ellipsoid. -->
+            <TextBlock Grid.Row="24" Grid.Column="0" Text="Altitude datum" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+                <CheckBox VerticalAlignment="Center" Content="Above mean sea level"
+                          IsChecked="{Binding AutoReportPositionAltitudeMsl}"
+                          ToolTip.Tip="Send altitude as height above mean sea level (Position.altitude) rather than above the ellipsoid (Position.altitude_hae) — firmware's ALTITUDE_MSL position flag. The TAK roles clear it, since CoTs use HAE." />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding PositionAltitudeMslNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionAltitudeMslNote}"
+                           IsVisible="{Binding HasPositionAltitudeMslNote}" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="25" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportDeviceMetricsEnabled}" />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding DeviceMetricsEnabledNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding DeviceMetricsEnabledNote}"
+                           IsVisible="{Binding HasDeviceMetricsEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding DeviceMetricsSecondsNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding DeviceMetricsSecondsNote}"
+                           IsVisible="{Binding HasDeviceMetricsSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="24" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="26" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="26" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportEnvironmentMetricsEnabled}" />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding EnvironmentMetricsEnabledNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding EnvironmentMetricsEnabledNote}"
+                           IsVisible="{Binding HasEnvironmentMetricsEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding EnvironmentMetricsSecondsNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding EnvironmentMetricsSecondsNote}"
+                           IsVisible="{Binding HasEnvironmentMetricsSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="25" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="27" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="27" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportAirQualityMetricsEnabled}" />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding AirQualityMetricsEnabledNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AirQualityMetricsEnabledNote}"
+                           IsVisible="{Binding HasAirQualityMetricsEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding AirQualityMetricsSecondsNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AirQualityMetricsSecondsNote}"
+                           IsVisible="{Binding HasAirQualityMetricsSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="26" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="26" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="28" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="28" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeStatusEnabled}" />
+                <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           Text="{Binding NodeStatusEnabledNote}"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding NodeStatusEnabledNote}"
+                           IsVisible="{Binding HasNodeStatusEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="27" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="29" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AutoReportLastSentSummary}"
                        ToolTip.Tip="Last successful auto-send times for NodeInfo, Position, Device Metrics, Environment Metrics, Air Quality, and Status." />
 
-            <TextBlock Grid.Row="28" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="28" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="30" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="30" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding WeatherTelemetryStatus}"
                        ToolTip.Tip="Live status of weather fetches used for environment telemetry (Open-Meteo)." />
 
-            <TextBlock Grid.Row="29" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="29" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="31" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="31" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AirQualityTelemetryStatus}"
                        ToolTip.Tip="Live status of air quality fetches used for air quality telemetry (Open-Meteo AQ API)." />
 
-            <TextBlock Grid.Row="30" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+            <TextBlock Grid.Row="32" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource BrushSubtle}"
                        Text="Relay routing rebroadcasts other nodes' traffic after a contention delay, following the role and rebroadcast mode above. It needs a TX-capable device, and stays off entirely while the Routing box is unchecked." />
         </Grid>

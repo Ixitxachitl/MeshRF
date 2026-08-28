@@ -252,6 +252,43 @@ public partial class RadioViewModel
     [ObservableProperty] private string _weatherTelemetryStatus = "Weather telemetry: idle.";
     [ObservableProperty] private string _airQualityTelemetryStatus = "Air quality telemetry: idle.";
 
+    /// <summary>
+    /// Firmware <c>MeshService::handleFromRadio</c>: introduce ourselves to a
+    /// node we have just heard but hold no NodeInfo for, and ask for its own.
+    /// </summary>
+    /// <remarks>
+    /// The gates are firmware's, in its order. The router roles stay quiet
+    /// because a backbone node hears everything and would answer every stranger
+    /// on the mesh; the channel-utilisation gate keeps a busy channel from
+    /// filling with introductions; and a node more than two hops beyond our own
+    /// limit is one whose reply could never reach us anyway.
+    /// </remarks>
+    private void HandleUnknownNodeHeard(uint from, string? channelName, byte hopsAway)
+    {
+        if (!CanTransmit || from == 0) return;
+        if (RelayPolicy.IsRouterish(MyRole)) return;
+        if (!ChannelUtilAllowsPoliteTx()) return;
+        if (!DutyCycleAllows(polite: true, out _)) return;
+        if (hopsAway > HopLimit + 2) return;
+
+        var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+        if (channel is null) return;
+
+        // Built and queued here rather than through SendNodeInfoOnChannelAsync,
+        // which reports through StatusText: this runs on the decode thread, and
+        // an unprompted introduction is not what the status line is for.
+        var frame = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, NextPacketId(),
+            MyLongName, MyShortName,
+            hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
+            publicKey: TryParseKeyBase64(MyPublicKey),
+            to: from, hopLimit: (byte)HopLimit,
+            wantResponse: RoleDefaults.AllowsRequestingReplies(MyRole), okToMqtt: OkToMqtt,
+            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey,
+            isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
+        TransmitBackground(frame);
+        LogFromAnyThread($"  heard new node {_rxHost.NodeDisplayName(from)}, sending our NodeInfo");
+    }
+
     /// <summary>Answers a directed request from a peer. Without this our
     /// NodeInfo only ever leaves on the auto-report schedule or a manual
     /// click, so peers that ask for our name get nothing back.</summary>
@@ -271,7 +308,7 @@ public partial class RadioViewModel
                         hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
                         publicKey: TryParseKeyBase64(MyPublicKey),
                         to: to, hopLimit: (byte)HopLimit, wantResponse: false, okToMqtt: OkToMqtt,
-                        isLicensed: MyIsLicensed, isUnmessagable: MyIsUnmessagable);
+                        isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
                     TransmitBackground(nodeInfo);
                     break;
 
@@ -280,7 +317,8 @@ public partial class RadioViewModel
                     if (!TryGetHomeLocation(out double lat, out double lon)) return;
                     int? alt = HomeAltitudeMeters;
                     var position = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
-                        altitudeM: alt, precisionBits: channel.EffectivePositionPrecision,
+                        altitudeM: alt, altitudeIsMsl: EffectivePositionAltitudeMsl,
+                        precisionBits: channel.EffectivePositionPrecision,
                         to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
                     TransmitBackground(position);
                     break;
@@ -456,6 +494,11 @@ public partial class RadioViewModel
     /// <summary><c>broadcast_smart_minimum_interval_secs</c>.</summary>
     [ObservableProperty] private int _autoReportPositionSmartMinSeconds = 300;
 
+    /// <summary>Firmware's <c>ALTITUDE_MSL</c> position flag: send our altitude
+    /// as height above mean sea level rather than above the ellipsoid. The TAK
+    /// roles clear it, because CoTs carry HAE.</summary>
+    [ObservableProperty] private bool _autoReportPositionAltitudeMsl = true;
+
     public string AutoReportPositionSmartMinMoveLabel =>
         $"Min move ({DisplayUnits.ShortDistanceUnitShort(CurrentUnitSystem)})";
 
@@ -494,23 +537,128 @@ public partial class RadioViewModel
     private static DateTime Next(bool enabled, int seconds) =>
         enabled ? DateTime.UtcNow.AddSeconds(Clamp(seconds)) : DateTime.MaxValue;
 
-    partial void OnAutoReportNodeInfoEnabledChanged(bool value) { _nextNodeInfoUtc = Next(value, AutoReportNodeInfoSeconds); SaveSettings(); }
-    partial void OnAutoReportPositionEnabledChanged(bool value) { _nextPositionUtc = Next(value, AutoReportPositionSeconds); SaveSettings(); }
-    partial void OnAutoReportDeviceMetricsEnabledChanged(bool value) { _nextDeviceMetricsUtc = Next(value, AutoReportDeviceMetricsSeconds); SaveSettings(); }
-    partial void OnAutoReportEnvironmentMetricsEnabledChanged(bool value) { _nextEnvironmentMetricsUtc = Next(value, AutoReportEnvironmentMetricsSeconds); SaveSettings(); }
-    partial void OnAutoReportAirQualityMetricsEnabledChanged(bool value) { _nextAirQualityMetricsUtc = Next(value, AutoReportAirQualityMetricsSeconds); SaveSettings(); }
-    partial void OnAutoReportNodeStatusEnabledChanged(bool value) { _nextNodeStatusUtc = Next(value, AutoReportNodeStatusSeconds); SaveSettings(); }
+    /// <summary>
+    /// The configured interval after the default-channel floor and firmware's
+    /// congestion scaling, in that order — firmware raises the configured value
+    /// to the minimum first, then scales what it gets.
+    /// </summary>
+    /// <remarks>
+    /// Applied when a report is rescheduled rather than when it is configured,
+    /// so a mesh that grows during the day stretches our cadence, and leaving
+    /// the default channel restores our own, without the user's setting ever
+    /// being rewritten.
+    /// </remarks>
+    private int ScaledInterval(int effectiveSeconds) =>
+        BroadcastIntervals.ScaledSeconds(
+            Clamp(effectiveSeconds), MyRole, OnlineNodeCount,
+            SelectedPreset, ChannelPlan.IsWideLora(SelectedRegion));
 
-    partial void OnAutoReportNodeInfoSecondsChanged(int value) { _nextNodeInfoUtc = Next(AutoReportNodeInfoEnabled, value); SaveSettings(); }
-    partial void OnAutoReportPositionSecondsChanged(int value) { _nextPositionUtc = Next(AutoReportPositionEnabled, value); SaveSettings(); }
+    /// <summary>
+    /// Whether the radio is sitting on the frequency the region's default slot
+    /// resolves to — firmware's <c>uses_default_frequency_slot</c> and
+    /// <c>!override_frequency</c> together. A hand-tuned frequency reaches
+    /// nobody else's default channel, whatever ours is called.
+    /// </summary>
+    private bool OnDefaultFrequencySlot
+    {
+        get
+        {
+            double defaultMHz = ChannelPlan.FrequencyMHz(
+                SelectedRegion, SelectedPreset,
+                ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName()));
+            return Math.Abs(CenterFreqMHz - defaultMHz) < 0.0005;
+        }
+    }
 
-    partial void OnAutoReportPositionSmartEnabledChanged(bool value) => SaveSettings();
-    partial void OnAutoReportPositionSmartMinMoveInputChanged(string value) => SaveSettings();
-    partial void OnAutoReportPositionSmartMinSecondsChanged(int value) => SaveSettings();
-    partial void OnAutoReportDeviceMetricsSecondsChanged(int value) { _nextDeviceMetricsUtc = Next(AutoReportDeviceMetricsEnabled, value); SaveSettings(); }
-    partial void OnAutoReportEnvironmentMetricsSecondsChanged(int value) { _nextEnvironmentMetricsUtc = Next(AutoReportEnvironmentMetricsEnabled, value); SaveSettings(); }
-    partial void OnAutoReportAirQualityMetricsSecondsChanged(int value) { _nextAirQualityMetricsUtc = Next(AutoReportAirQualityMetricsEnabled, value); SaveSettings(); }
-    partial void OnAutoReportNodeStatusSecondsChanged(int value) { _nextNodeStatusUtc = Next(AutoReportNodeStatusEnabled, value); SaveSettings(); }
+    /// <summary>Firmware's telemetry floor, in force only while we are actually
+    /// on a default channel.</summary>
+    private int TelemetryFloorSeconds =>
+        DefaultChannelMinimums.HasDefaultChannel(
+            AllChannelConfigs(), SelectedPreset, !IsCustomLoraParams, OnDefaultFrequencySlot)
+            ? DefaultChannelMinimums.TelemetrySeconds(MyRole)
+            : 0;
+
+    /// <summary>Firmware's position floor, which follows the channel our
+    /// positions would actually go out on rather than the channel list.</summary>
+    private int PositionFloorSeconds =>
+        DefaultChannelMinimums.PositionUsesDefaultChannel(AllChannelConfigs(), SelectedPreset)
+            ? DefaultChannelMinimums.PositionSeconds(MyRole)
+            : 0;
+
+    /// <summary>The five-minute smart-broadcast gap a default channel imposes.
+    /// This is what holds a TAK_TRACKER's 15-second role default in check when
+    /// it is beaconing on the channel everyone shares.</summary>
+    private int SmartPositionFloorSeconds =>
+        DefaultChannelMinimums.PositionUsesDefaultChannel(AllChannelConfigs(), SelectedPreset)
+            ? DefaultChannelMinimums.SmartPositionSeconds
+            : 0;
+
+    /// <summary>Nodes heard inside firmware's two-hour online window, which is
+    /// what its congestion coefficient counts.</summary>
+    private int OnlineNodeCount
+    {
+        get
+        {
+            var cutoff = DateTimeOffset.UtcNow.Subtract(BroadcastIntervals.OnlineWindow).ToUnixTimeSeconds();
+            int n = 0;
+            foreach (var node in _nodeStore.All())
+                if (node.LastHeardEpoch >= cutoff) n++;
+            return n;
+        }
+    }
+
+    /// <summary>The scaled reschedule, and the note that explains a stretched
+    /// interval before it looks like a bug.</summary>
+    /// <summary>Reschedules a report, congestion-scaling the interval it is
+    /// already resolved to. The role and the default-channel minimums were
+    /// applied upstream — see RadioViewModel.EffectiveSettings.</summary>
+    private DateTime NextScheduled(int effectiveSeconds, string label)
+    {
+        int scaled = ScaledInterval(effectiveSeconds);
+        int configured = Clamp(effectiveSeconds);
+        // Reached from a thread-pool continuation in the auto-report tick, and
+        // Log mutates a collection bound to a ListBox.
+        if (scaled > configured)
+            LogFromAnyThread($"  {label} interval scaled {configured}s -> {scaled}s ({OnlineNodeCount} nodes online)");
+        return DateTime.UtcNow.AddSeconds(scaled);
+    }
+
+    partial void OnAutoReportNodeInfoEnabledChanged(bool value) { _nextNodeInfoUtc = Next(EffectiveNodeInfoEnabled, EffectiveNodeInfoSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportPositionEnabledChanged(bool value) { _nextPositionUtc = Next(EffectivePositionEnabled, EffectivePositionSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportDeviceMetricsEnabledChanged(bool value) { _nextDeviceMetricsUtc = Next(EffectiveDeviceMetricsEnabled, EffectiveDeviceMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportEnvironmentMetricsEnabledChanged(bool value) { _nextEnvironmentMetricsUtc = Next(EffectiveEnvironmentMetricsEnabled, EffectiveEnvironmentMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportAirQualityMetricsEnabledChanged(bool value) { _nextAirQualityMetricsUtc = Next(EffectiveAirQualityMetricsEnabled, EffectiveAirQualityMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportNodeStatusEnabledChanged(bool value) { _nextNodeStatusUtc = Next(EffectiveNodeStatusEnabled, AutoReportNodeStatusSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+
+    partial void OnAutoReportNodeInfoSecondsChanged(int value) { _nextNodeInfoUtc = Next(EffectiveNodeInfoEnabled, EffectiveNodeInfoSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportPositionSecondsChanged(int value) { _nextPositionUtc = Next(EffectivePositionEnabled, EffectivePositionSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+
+    partial void OnAutoReportPositionSmartEnabledChanged(bool value) { SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportPositionAltitudeMslChanged(bool value) { SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportPositionSmartMinMoveInputChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportPositionSmartMinSecondsChanged(int value) { SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportDeviceMetricsSecondsChanged(int value) { _nextDeviceMetricsUtc = Next(EffectiveDeviceMetricsEnabled, EffectiveDeviceMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportEnvironmentMetricsSecondsChanged(int value) { _nextEnvironmentMetricsUtc = Next(EffectiveEnvironmentMetricsEnabled, EffectiveEnvironmentMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportAirQualityMetricsSecondsChanged(int value) { _nextAirQualityMetricsUtc = Next(EffectiveAirQualityMetricsEnabled, EffectiveAirQualityMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportNodeStatusSecondsChanged(int value) { _nextNodeStatusUtc = Next(EffectiveNodeStatusEnabled, AutoReportNodeStatusSeconds); SaveSettings(); RefreshEffectiveSettings(); }
+
+    /// <summary>
+    /// Re-arms every schedule against the intervals now in force. Called when
+    /// the role changes: a pending timer armed for the old interval would
+    /// otherwise fire once on the old cadence before settling to the new one,
+    /// which for a Router picking up a 12-hour telemetry interval means one
+    /// beacon it should not have sent.
+    /// </summary>
+    private void RearmAutoReportSchedules()
+    {
+        if (!_settingsLoaded) return;
+        _nextNodeInfoUtc = Next(EffectiveNodeInfoEnabled, EffectiveNodeInfoSeconds);
+        _nextPositionUtc = Next(EffectivePositionEnabled, EffectivePositionSeconds);
+        _nextDeviceMetricsUtc = Next(EffectiveDeviceMetricsEnabled, EffectiveDeviceMetricsSeconds);
+        _nextEnvironmentMetricsUtc = Next(EffectiveEnvironmentMetricsEnabled, EffectiveEnvironmentMetricsSeconds);
+        _nextAirQualityMetricsUtc = Next(EffectiveAirQualityMetricsEnabled, EffectiveAirQualityMetricsSeconds);
+        _nextNodeStatusUtc = Next(EffectiveNodeStatusEnabled, AutoReportNodeStatusSeconds);
+    }
 
     private void LoadAutoReportSettings()
     {
@@ -526,6 +674,7 @@ public partial class RadioViewModel
         AutoReportPositionSmartMinMoveInput = DisplayUnits.FormatShortDistanceInput(
             _settings.AutoReportPositionSmartMinMoveMeters, CurrentUnitSystem);
         AutoReportPositionSmartMinSeconds = Math.Max(0, _settings.AutoReportPositionSmartMinSeconds);
+        AutoReportPositionAltitudeMsl = _settings.AutoReportPositionAltitudeMsl;
         AutoReportDeviceMetricsEnabled = _settings.AutoReportDeviceMetricsEnabled;
         AutoReportDeviceMetricsSeconds = Clamp(_settings.AutoReportDeviceMetricsSeconds);
         AutoReportEnvironmentMetricsEnabled = _settings.AutoReportEnvironmentMetricsEnabled;
@@ -552,6 +701,7 @@ public partial class RadioViewModel
         s.AutoReportPositionSmartEnabled = AutoReportPositionSmartEnabled;
         s.AutoReportPositionSmartMinMoveMeters = AutoReportPositionSmartMinMoveMeters;
         s.AutoReportPositionSmartMinSeconds = Math.Max(0, AutoReportPositionSmartMinSeconds);
+        s.AutoReportPositionAltitudeMsl = AutoReportPositionAltitudeMsl;
         s.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
         s.AutoReportDeviceMetricsSeconds = Clamp(AutoReportDeviceMetricsSeconds);
         s.AutoReportEnvironmentMetricsEnabled = AutoReportEnvironmentMetricsEnabled;
@@ -588,7 +738,7 @@ public partial class RadioViewModel
     /// </remarks>
     private bool SmartPositionBroadcastDue()
     {
-        if (!AutoReportPositionSmartEnabled || !_positionBroadcast.HasReference) return false;
+        if (!EffectivePositionSmartEnabled || !_positionBroadcast.HasReference) return false;
         if (!TryGetHomeLocation(out double lat, out double lon)) return false;
 
         var channel = PrimaryChannel();
@@ -597,8 +747,8 @@ public partial class RadioViewModel
         var (sendLat, sendLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.EffectivePositionPrecision);
         return _positionBroadcast.WouldTake(
             sendLat, sendLon, DateTime.UtcNow,
-            AutoReportPositionSmartMinMoveMeters,
-            TimeSpan.FromSeconds(Math.Max(0, AutoReportPositionSmartMinSeconds)),
+            EffectivePositionSmartMinMoveMeters,
+            TimeSpan.FromSeconds(EffectivePositionSmartMinSeconds),
             out _);
     }
 
@@ -616,6 +766,12 @@ public partial class RadioViewModel
     private void KickAutoReportTick()
     {
         if (!CanTransmit) return;
+        // Firmware's modules each check isTxAllowedAirUtil() before building a
+        // beacon: scheduled reports are background traffic and get only half the
+        // duty-cycle budget, so a user-initiated message still fits. The clocks
+        // keep running, so a report skipped here goes out on the next tick that
+        // has room rather than being lost.
+        if (!DutyCycleAllows(polite: true, out _)) return;
         if (Interlocked.Exchange(ref _autoReportTickInFlight, 1) != 0) return;
         _ = RunAutoReportTickAsync();
     }
@@ -626,9 +782,9 @@ public partial class RadioViewModel
         {
             // Each due check re-reads the clock because the send before it may
             // have taken a while (a weather fetch plus an over-the-air frame).
-            if (AutoReportNodeInfoEnabled && DateTime.UtcNow >= _nextNodeInfoUtc)
+            if (EffectiveNodeInfoEnabled && DateTime.UtcNow >= _nextNodeInfoUtc)
             {
-                _nextNodeInfoUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportNodeInfoSeconds));
+                _nextNodeInfoUtc = NextScheduled(EffectiveNodeInfoSeconds, "nodeinfo");
                 await SendSelfNodeInfoCommand.ExecuteAsync(null);
                 if (StatusText.StartsWith("Sent NodeInfo", StringComparison.OrdinalIgnoreCase))
                 { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
@@ -639,42 +795,42 @@ public partial class RadioViewModel
             // worth an early send. An early send restarts the interval, as it
             // does in firmware — the point is a fresh position on the mesh, and
             // one that just went out is fresh however it was triggered.
-            if (AutoReportPositionEnabled &&
+            if (EffectivePositionEnabled &&
                 (DateTime.UtcNow >= _nextPositionUtc || SmartPositionBroadcastDue()))
             {
-                _nextPositionUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportPositionSeconds));
+                _nextPositionUtc = NextScheduled(EffectivePositionSeconds, "position");
                 await SendSelfPositionCommand.ExecuteAsync(null);
                 if (StatusText.StartsWith("Sent position", StringComparison.OrdinalIgnoreCase))
                 { _lastPositionUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
 
-            if (AutoReportDeviceMetricsEnabled && DateTime.UtcNow >= _nextDeviceMetricsUtc)
+            if (EffectiveDeviceMetricsEnabled && DateTime.UtcNow >= _nextDeviceMetricsUtc)
             {
-                _nextDeviceMetricsUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportDeviceMetricsSeconds));
+                _nextDeviceMetricsUtc = NextScheduled(EffectiveDeviceMetricsSeconds, "device metrics");
                 await SendSelfDeviceMetricsCommand.ExecuteAsync(null);
                 if (StatusText.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
                 { _lastDeviceMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
 
-            if (AutoReportEnvironmentMetricsEnabled && DateTime.UtcNow >= _nextEnvironmentMetricsUtc)
+            if (EffectiveEnvironmentMetricsEnabled && DateTime.UtcNow >= _nextEnvironmentMetricsUtc)
             {
-                _nextEnvironmentMetricsUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportEnvironmentMetricsSeconds));
+                _nextEnvironmentMetricsUtc = NextScheduled(EffectiveEnvironmentMetricsSeconds, "environment metrics");
                 await SendSelfEnvironmentMetricsCommand.ExecuteAsync(null);
                 if (StatusText.StartsWith("Sent environment metrics", StringComparison.OrdinalIgnoreCase))
                 { _lastEnvironmentMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
 
-            if (AutoReportAirQualityMetricsEnabled && DateTime.UtcNow >= _nextAirQualityMetricsUtc)
+            if (EffectiveAirQualityMetricsEnabled && DateTime.UtcNow >= _nextAirQualityMetricsUtc)
             {
-                _nextAirQualityMetricsUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportAirQualityMetricsSeconds));
+                _nextAirQualityMetricsUtc = NextScheduled(EffectiveAirQualityMetricsSeconds, "air quality metrics");
                 await SendSelfAirQualityMetricsCommand.ExecuteAsync(null);
                 if (StatusText.StartsWith("Sent air quality metrics", StringComparison.OrdinalIgnoreCase))
                 { _lastAirQualityMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
 
-            if (AutoReportNodeStatusEnabled && DateTime.UtcNow >= _nextNodeStatusUtc)
+            if (EffectiveNodeStatusEnabled && DateTime.UtcNow >= _nextNodeStatusUtc)
             {
-                _nextNodeStatusUtc = DateTime.UtcNow.AddSeconds(Clamp(AutoReportNodeStatusSeconds));
+                _nextNodeStatusUtc = NextScheduled(AutoReportNodeStatusSeconds, "node status");
                 await SendSelfNodeStatusCommand.ExecuteAsync(null);
                 if (StatusText.StartsWith("Sent node status", StringComparison.OrdinalIgnoreCase))
                 { _lastNodeStatusUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }

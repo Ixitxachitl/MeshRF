@@ -187,6 +187,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// holds our identity and the transmitter, so it builds the reply.</summary>
     public Action<PortNum, uint, string?>? AutoReplyRequested { get; set; }
 
+    /// <summary>Raised on hearing a node we hold no NodeInfo for (node, channel
+    /// it was heard on, hops it travelled). The owner decides whether to
+    /// introduce us — see <see cref="PerhapsIntroduceOurselves"/>.</summary>
+    public Action<uint, string?, byte>? UnknownNodeHeard { get; set; }
+
     /// <summary>Raised for a directed telemetry request, carrying which metric
     /// group was asked for so the reply matches rather than always answering
     /// with device metrics.</summary>
@@ -1136,6 +1141,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // cheaper 0-hop repeat.
         if (header.WantAck) AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: false));
 
+        PerhapsIntroduceOurselves(header, result, hopsAway);
+
         // The sender's public key as it stood before this packet. Both the
         // NodeInfo case (which has to notice a substituted key rather than
         // absorb it) and the signature check after the switch need the key we
@@ -1372,6 +1379,32 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// alone on air, but it reached us and was readable, so it is reported like
     /// any other decode — with the store failure named, since the line would
     /// otherwise look identical to a packet that was filed normally.</summary>
+    /// <summary>
+    /// Firmware <c>MeshService::handleFromRadio</c>: hearing a node we hold no
+    /// NodeInfo for, send it ours and ask for its own. This is how a mesh fills
+    /// in names without anyone pressing anything — a node that only listens
+    /// stays anonymous to every peer that came up after it.
+    /// </summary>
+    /// <remarks>
+    /// A telemetry reply is exempt: it is already the answer to a request of
+    /// ours, and firmware explicitly declines to chase it with a NodeInfo.
+    /// Whether we actually transmit is the owner's call — the role and airtime
+    /// gates live with the transmitter.
+    /// </remarks>
+    private void PerhapsIntroduceOurselves(MeshHeader header, MeshDecodeResult result, byte hopsAway)
+    {
+        if (UnknownNodeHeard is null) return;
+        if (header.From == 0 || header.From == MyNodeNum) return;
+        if (result.Port == PortNum.Telemetry && result.RequestId != 0) return;
+
+        var node = _nodeStore.Get(header.From);
+        // "Has user" is a name, not a row: RecordSighting creates a record for
+        // anything we hear, so a bare row means we still know nothing about it.
+        if (!string.IsNullOrEmpty(node?.LongName) || !string.IsNullOrEmpty(node?.ShortName)) return;
+
+        UnknownNodeHeard.Invoke(header.From, result.ChannelName, hopsAway);
+    }
+
     public void OnDecodeNotStored(MeshHeader header, MeshDecodeResult result,
                                   long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway)
     {

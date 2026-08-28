@@ -31,6 +31,28 @@ public sealed record RoleDefaults
     public bool? AirQualityMetricsEnabled { get; init; }
     public bool? NodeStatusEnabled { get; init; }
 
+    /// <summary>Firmware <c>position_broadcast_smart_enabled</c>.</summary>
+    public bool? PositionSmartEnabled { get; init; }
+
+    /// <summary>Firmware <c>broadcast_smart_minimum_distance</c>, in metres.</summary>
+    public uint? PositionSmartMinMoveMeters { get; init; }
+
+    /// <summary>Firmware <c>broadcast_smart_minimum_interval_secs</c>.</summary>
+    public int? PositionSmartMinSeconds { get; init; }
+
+    /// <summary>
+    /// Whether the altitude we transmit is height above mean sea level
+    /// (<c>Position.altitude</c>, field 3) rather than above the ellipsoid
+    /// (<c>Position.altitude_hae</c>, field 9).
+    ///
+    /// This is the only part of firmware's <c>position_flags</c> that can change
+    /// what MeshRF puts on the air. The other flags — SPEED, HEADING, DOP,
+    /// SATINVIEW — gate fields fed by a GPS receiver's motion and fix-quality
+    /// output, which we have no source for, so modelling them would be config
+    /// that does nothing.
+    /// </summary>
+    public bool? PositionAltitudeMsl { get; init; }
+
     /// <summary>One of <c>RadioViewModel.RebroadcastModeOptions</c>.</summary>
     public string? RebroadcastMode { get; init; }
 
@@ -43,6 +65,7 @@ public sealed record RoleDefaults
     {
         NodeInfoEnabled = false,
         PositionEnabled = false,
+        PositionSmartEnabled = false,
         DeviceMetricsEnabled = false,
         EnvironmentMetricsEnabled = false,
         AirQualityMetricsEnabled = false,
@@ -50,7 +73,7 @@ public sealed record RoleDefaults
         RebroadcastMode = rebroadcastMode,
     };
 
-    public static RoleDefaults For(string? role) => (role ?? string.Empty).Trim().ToUpperInvariant() switch
+    public static RoleDefaults For(string? role) => Canonical(role) switch
     {
         "ROUTER" => new RoleDefaults
         {
@@ -83,10 +106,14 @@ public sealed record RoleDefaults
             IsUnmessagable = true,
         },
 
+        // CoTs carry height above the ellipsoid, so the TAK roles drop
+        // ALTITUDE_MSL from position_flags.
         "TAK" => new RoleDefaults
         {
             NodeInfoSeconds = OneDay,
             PositionSeconds = OneDay,
+            PositionSmartEnabled = false,
+            PositionAltitudeMsl = false,
             DeviceMetricsSeconds = OneDay,
         },
 
@@ -95,22 +122,47 @@ public sealed record RoleDefaults
             NodeInfoSeconds = OneDay,
             PositionEnabled = true,
             PositionSeconds = 3 * 60,
+            PositionSmartEnabled = true,
+            PositionSmartMinMoveMeters = 20,
+            PositionSmartMinSeconds = 15,
+            PositionAltitudeMsl = false,
             DeviceMetricsSeconds = OneDay,
             IsUnmessagable = true,
         },
 
+        // The point of the role is an unconditional beacon, so smart broadcast
+        // comes off: a stationary lost node still has to be findable.
         "LOSTANDFOUND" => new RoleDefaults
         {
             PositionEnabled = true,
             PositionSeconds = 300,
+            PositionSmartEnabled = false,
         },
 
         "CLIENTHIDDEN" => Silent("LocalOnly"),
 
-        // Firmware has no CLIENT_HIDDEN-style branch for repeaters, but the role
-        // is defined as originating nothing at all (config.proto REPEATER).
-        "REPEATER" => Silent(),
-
         _ => new RoleDefaults(),
     };
+
+    /// <summary>
+    /// Roles firmware no longer honours. <c>AdminModule</c> rewrites both to
+    /// CLIENT the moment a device config carrying them is applied, so a live
+    /// mesh contains no node in either role and MeshRF must not advertise one.
+    /// The enum values stay decodable for the sake of stale NodeInfo on the air.
+    /// </summary>
+    public static bool IsDeprecated(string? role) =>
+        Canonical(role) is "ROUTERCLIENT" or "REPEATER";
+
+    /// <summary>The role firmware would actually store for a requested one.</summary>
+    public static string Effective(string? role) =>
+        IsDeprecated(role) ? "Client" : (role ?? string.Empty).Trim();
+
+    /// <summary>Firmware <c>NodeInfoModule::sendOurNodeInfo</c>: a tracker or a
+    /// sensor never asks for a reply, so a battery node's beacon can't set off
+    /// a round of NodeInfo from everyone that hears it.</summary>
+    public static bool AllowsRequestingReplies(string? role) =>
+        Canonical(role) is not ("TRACKER" or "SENSOR");
+
+    private static string Canonical(string? s) =>
+        (s ?? string.Empty).Trim().Replace("_", string.Empty).ToUpperInvariant();
 }

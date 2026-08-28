@@ -119,7 +119,7 @@ public partial class RadioViewModel
 
         return new RelayContext(
             MyRole ?? string.Empty,
-            RebroadcastMode ?? "ALL",
+            EffectiveRebroadcastMode,
             _rxHost.MyNodeNum,
             SelectedPreset,
             _nodeStore.Get,

@@ -358,6 +358,7 @@ public static class MeshEncoder
                                         double latitude,
                                         double longitude,
                                         int? altitudeM = null,
+                                        bool altitudeIsMsl = true,
                                         byte precisionBits = 32,
                                         uint to = 0xFFFFFFFFu,
                                         byte hopLimit = 3,
@@ -377,8 +378,16 @@ public static class MeshEncoder
         var pos = new ProtoWriter();
         pos.WriteFixed32Field(1, (uint)latI);                 // latitude_i (sfixed32)
         pos.WriteFixed32Field(2, (uint)lonI);                 // longitude_i (sfixed32)
+        // Firmware's ALTITUDE_MSL position flag picks the field: height above
+        // mean sea level in 3, above the ellipsoid in 9. The TAK roles clear the
+        // flag because CoTs carry HAE.
         if (altitudeM is int alt)
-            pos.WriteVarintField(3, (ulong)(long)alt);        // altitude (int32)
+        {
+            if (altitudeIsMsl)
+                pos.WriteVarintField(3, (ulong)(long)alt);    // altitude (int32)
+            else
+                pos.WriteSInt32Field(9, alt);                 // altitude_hae (sint32)
+        }
         pos.WriteFixed32Field(4, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds()); // time (fixed32)
         pos.WriteVarintField(23, precisionBits);              // precision_bits (field 23)
 
