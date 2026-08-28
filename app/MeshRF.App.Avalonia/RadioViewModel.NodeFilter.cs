@@ -17,7 +17,10 @@ namespace MeshRF.AvaloniaApp;
 /// </summary>
 public partial class RadioViewModel
 {
-    public IReadOnlyList<string> NodeHopsFilterOptions { get; } = ["Any", "Direct", "≤1 hop", "≤2 hops", "≤3 hops", "≤4 hops"];
+    /// <summary>Stops at 6. hops_away comes out of a 3-bit hop_limit, so 7 is
+    /// the ceiling and "≤7 hops" would exclude nothing that "Any" keeps.</summary>
+    public IReadOnlyList<string> NodeHopsFilterOptions { get; } =
+        ["Any", "Direct", "≤1 hop", "≤2 hops", "≤3 hops", "≤4 hops", "≤5 hops", "≤6 hops"];
     public IReadOnlyList<string> NodeKeyFilterOptions { get; } = ["Any", "Good key", "Mismatch", "No key"];
     public IReadOnlyList<string> NodeSignedFilterOptions { get; } = ["Show all", "Signed", "Unsigned"];
     public IReadOnlyList<string> NodeLocationFilterOptions { get; } = ["Any", "Has position", "No position"];
@@ -229,7 +232,8 @@ public partial class RadioViewModel
 
         int maxHops = NodeHopsFilter switch
         {
-            "Direct" => 0, "≤1 hop" => 1, "≤2 hops" => 2, "≤3 hops" => 3, "≤4 hops" => 4, _ => -1,
+            "Direct" => 0, "≤1 hop" => 1, "≤2 hops" => 2, "≤3 hops" => 3, "≤4 hops" => 4,
+            "≤5 hops" => 5, "≤6 hops" => 6, _ => -1,
         };
         if (maxHops >= 0 && (n.HopsAway is null || n.HopsAway > maxHops)) return false;
 
