@@ -469,7 +469,7 @@ public sealed class ScriptEngine
                     ScriptActionKind.Send, action.Text,
                     to, action.Channel,
                     action.ReplyLink && evt.Kind != ScriptEventKind.Timer ? evt.PacketId : 0,
-                    TimeSpan.Zero);
+                    TimeSpan.Zero, Hops: action.Hops);
             }
 
             case ScriptActionKind.Http:

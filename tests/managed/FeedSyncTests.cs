@@ -208,6 +208,17 @@ public class FeedSyncTests
     }
 
     [Fact]
+    public void A_Sync_Can_Set_The_Hop_Limit_Its_Markers_Go_Out_At()
+    {
+        // A feed places far more frames than a script does, so the hops it does
+        // not need are the ones most worth not spending.
+        var parse = ScriptParser.Parse(Yaml.Replace("  waypoint:\n", "  waypoint:\n    hops: 2\n"));
+
+        Assert.True(parse.IsValid, parse.FirstError?.ToString());
+        Assert.Equal((byte)2, parse.Sync!.Waypoint.Hops);
+    }
+
+    [Fact]
     public void A_Syncs_To_Cannot_Be_A_Placeholder()
     {
         // A feed places its markers unprompted, so there is no message for one

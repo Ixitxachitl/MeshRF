@@ -105,6 +105,31 @@ Start with `ping.yaml`. It needs no account and no network, so if it answers,
 the engine is armed and working and anything that goes wrong afterwards is the
 script or the API rather than the setup.
 
+## How far a message travels
+
+A `send:` or a `waypoint:` goes out at the hop limit under My Node, the same one
+the compose box uses. Where a particular message should not, `hops:` gives it
+its own, 0 to 7:
+
+```yaml
+- send:
+    to: "{from.id}"
+    text: "…"
+    hops: 0               # direct neighbours only, never relayed
+```
+
+`hops: 0` is the cheapest thing a script can transmit: no node repeats it, so it
+costs one airtime slot rather than one per relay in range. That is the right
+answer for a signal report, an acknowledgement, or anything else that only means
+something to whoever can already hear you — and the slider under My Node cannot
+ask for it, since it starts at 1. Raise it above the setting only for a message
+that genuinely has to cross the mesh; a relayed frame is spent from everyone's
+airtime, not yours.
+
+The same key works on a script's `waypoint:` and on a sync's, where it matters
+more — a feed places far more frames than a script does, and a marker usually
+only means something to nodes near enough to act on it.
+
 ## Before you enable anything
 
 **Turn on Dry run.** Scripts are evaluated and logged in full but nothing is

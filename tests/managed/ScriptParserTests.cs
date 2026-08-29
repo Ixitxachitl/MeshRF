@@ -229,6 +229,99 @@ public class ScriptParserTests
     }
 
     [Fact]
+    public void Send_Can_Set_Its_Own_Hop_Limit()
+    {
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - send:
+                  to: "!a1b2c3d4"
+                  text: "hi"
+                  hops: 0
+            """);
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        // 0 is a hop limit, not an absent one: it says direct neighbours only,
+        // which the app-wide slider cannot even ask for.
+        Assert.Equal((byte)0, result.Script!.Actions[0].Hops);
+    }
+
+    [Fact]
+    public void Hops_On_A_Reply_Names_The_Way_Across()
+    {
+        // reply: is a bare scalar with nowhere to hang a key, and it is the
+        // first place someone will try one.
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - reply: "pong"
+                hops: 0
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("has to be a send:", SingleError(result).Message);
+    }
+
+    [Fact]
+    public void Send_Without_Hops_Defers_To_The_Configured_Limit()
+    {
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - send:
+                  to: "!a1b2c3d4"
+                  text: "hi"
+            """);
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        Assert.Null(result.Script!.Actions[0].Hops);
+    }
+
+    [Fact]
+    public void Hops_Above_Seven_Is_Rejected_Rather_Than_Masked()
+    {
+        // The header field is three bits and the encoder masks it, so an
+        // unchecked 9 would go out as 1 — the opposite of what was asked for.
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - send:
+                  to: "!a1b2c3d4"
+                  text: "hi"
+                  hops: 9
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("outside 0-7", SingleError(result).Message);
+    }
+
+    [Fact]
+    public void Hops_That_Is_Not_A_Number_Is_Rejected()
+    {
+        var result = ScriptParser.Parse(
+            """
+            trigger:
+              - command: ping
+            action:
+              - send:
+                  to: "!a1b2c3d4"
+                  text: "hi"
+                  hops: far
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("whole number from 0 to 7", SingleError(result).Message);
+    }
+
+    [Fact]
     public void Bare_Node_Id_Is_Rejected_When_It_Is_Not_One()
     {
         var result = ScriptParser.Parse("trigger:\n  - command: ping\ncondition:\n  - from: [bob]\naction:\n  - reply: \"x\"\n");

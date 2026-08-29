@@ -37,7 +37,7 @@ public static class ScriptParser
 
     private static readonly string[] WaypointKeys =
         ["lat", "lon", "name", "description", "icon", "radius", "expires",
-         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me"];
+         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me", "hops"];
 
     /// <summary>Comparators a require: may use. Exactly one per entry.</summary>
     private static readonly string[] RequireComparisons =
@@ -47,7 +47,7 @@ public static class ScriptParser
     private static readonly string[] RequireKeys =
         [.. RequireComparisons, "value", "ignore_case"];
 
-    private static readonly string[] SendKeys = ["to", "channel", "text", "reply_link"];
+    private static readonly string[] SendKeys = ["to", "channel", "text", "reply_link", "hops"];
 
     private static readonly string[] HttpKeys =
         ["url", "method", "credential", "json", "save_as", "timeout", "body", "content_type", "optional", "headers"];
@@ -145,7 +145,7 @@ public static class ScriptParser
 
     private static readonly string[] SyncWaypointKeys =
         ["name", "description", "icon", "radius", "expires",
-         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me"];
+         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me", "hops"];
 
     /// <summary>
     /// Parses a feed sync. Shares enabled:/alias: with a script so the library,
@@ -500,6 +500,7 @@ public static class ScriptParser
             To = to,
             Channel = channel,
             LockToMe = lockToMe,
+            Hops = ReadHops(map, problems, "sync: waypoint"),
         };
     }
 
@@ -919,7 +920,19 @@ public static class ScriptParser
         // takes a bare scalar, so siblings are always a mistake there — except
         // when:, which any action may carry.
         if (kind is not ("send" or "http" or "waypoint" or "require" or "ring"))
-            RejectUnknownKeys(map, [.. kinds, "when"], "action option", problems);
+        {
+            // hops: belongs to send: and waypoint:, and reply: is where someone
+            // will reach for it first. Worth naming the way across rather than
+            // only refusing the key, so "hops" is known here purely to keep
+            // RejectUnknownKeys from adding a second, vaguer error over it.
+            if (TryGet(map, "hops", out var hopsKey, out _))
+            {
+                problems.Add(ScriptProblem.Error(hopsKey.Start.Line, hopsKey.Start.Column,
+                    $"{kind}: takes no hops: — a message with its own hop limit has to be a send:, " +
+                    "which takes reply_link: true when it should still be threaded under the trigger"));
+            }
+            RejectUnknownKeys(map, [.. kinds, "when", "hops"], "action option", problems);
+        }
 
         switch (kind)
         {
@@ -991,6 +1004,7 @@ public static class ScriptParser
                     To = to,
                     Channel = channel,
                     ReplyLink = ReadBool(send, "reply_link", problems) ?? false,
+                    Hops = ReadHops(send, problems, "send"),
                     Line = line,
                 };
             }
@@ -1440,6 +1454,7 @@ public static class ScriptParser
                 To = to,
                 Channel = channel,
                 LockToMe = ReadBool(map, "lock_to_me", problems) ?? true,
+                Hops = ReadHops(map, problems, "waypoint"),
             },
         };
     }
@@ -1819,6 +1834,38 @@ public static class ScriptParser
                     $"{what}: has to be true or false, not '{text}'"));
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Reads a <c>hops:</c> override. Absent means the app's configured hop
+    /// limit, which is what almost every message wants — the override is for
+    /// the one whose reach is part of what it is, like a neighbours-only ping
+    /// at 0 or an alert worth carrying further than the rest of the traffic.
+    /// </summary>
+    /// <remarks>
+    /// Range-checked rather than left to the encoder, which packs the field
+    /// with <c>&amp; 0x07</c>: three bits is all the header has, so an
+    /// unchecked 9 would quietly go out as 1.
+    /// </remarks>
+    private static byte? ReadHops(YamlMappingNode map, List<ScriptProblem> problems, string what)
+    {
+        if (!TryGet(map, "hops", out var key, out var value)) return null;
+        var text = AsScalar(value, problems, "hops");
+        if (text is null) return null;
+
+        if (!int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var hops))
+        {
+            problems.Add(ScriptProblem.Error(key.Start.Line, key.Start.Column,
+                $"{what}: hops: has to be a whole number from 0 to 7, not '{text}'"));
+            return null;
+        }
+        if (hops is < 0 or > 7)
+        {
+            problems.Add(ScriptProblem.Error(key.Start.Line, key.Start.Column,
+                $"{what}: hops: {hops} is outside 0-7 — the header carries three bits and nothing larger fits"));
+            return null;
+        }
+        return (byte)hops;
     }
 
     private static TimeSpan? ReadDuration(

@@ -54,6 +54,37 @@ public class ScriptWaypointTests
     }
 
     [Fact]
+    public void A_Waypoint_Can_Set_Its_Own_Hop_Limit()
+    {
+        var result = Parse(
+            """
+              - waypoint:
+                  lat: home
+                  name: Storm
+                  expires: 1h
+                  hops: 2
+            """);
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        Assert.Equal((byte)2, result.Script!.Actions[0].Waypoint!.Hops);
+    }
+
+    [Fact]
+    public void A_Waypoint_Without_Hops_Defers_To_The_Configured_Limit()
+    {
+        var result = Parse(
+            """
+              - waypoint:
+                  lat: home
+                  name: Storm
+                  expires: 1h
+            """);
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        Assert.Null(result.Script!.Actions[0].Waypoint!.Hops);
+    }
+
+    [Fact]
     public void Home_Uses_This_Nodes_Location_And_Needs_No_Lon()
     {
         var result = Parse("  - waypoint:\n      lat: home\n      name: Storm\n      expires: 1h\n");

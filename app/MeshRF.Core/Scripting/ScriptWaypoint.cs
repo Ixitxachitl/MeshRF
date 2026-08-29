@@ -64,4 +64,8 @@ public sealed class ScriptWaypoint
     /// <summary>Only this node may edit or clear it. Keeps a script's markers
     /// from being rewritten by anyone who receives them.</summary>
     public bool LockToMe { get; init; } = true;
+
+    /// <summary>Hop limit for the marker, or null to use the app's configured
+    /// limit.</summary>
+    public byte? Hops { get; init; }
 }

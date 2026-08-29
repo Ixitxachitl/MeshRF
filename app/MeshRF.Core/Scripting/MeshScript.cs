@@ -188,6 +188,13 @@ public sealed record ScriptAction
     /// the triggering one. Always on for <c>reply:</c>.</summary>
     public bool ReplyLink { get; init; }
 
+    /// <summary>
+    /// Hop limit for this one message, or null to use the app's configured
+    /// limit. <c>send:</c> only — a waypoint carries its own on
+    /// <see cref="ScriptWaypoint.Hops"/>, which a feed sync needs too.
+    /// </summary>
+    public byte? Hops { get; init; }
+
     public TimeSpan Delay { get; init; }
 
     /// <summary>The request, for <see cref="ScriptActionKind.Http"/>.</summary>

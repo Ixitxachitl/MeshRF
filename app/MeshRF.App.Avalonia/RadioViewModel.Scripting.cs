@@ -451,7 +451,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             notifyOnEnter: !action.IsRemoval && sync.Waypoint.NotifyOnEnter,
             notifyOnExit: !action.IsRemoval && sync.Waypoint.NotifyOnExit,
             to: to != 0 ? to : 0xFFFFFFFFu,
-            hopLimit: (byte)HopLimit,
+            hopLimit: sync.Waypoint.Hops ?? (byte)HopLimit,
             okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
@@ -678,7 +678,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                     return;
                 }
                 await SendTextAsync(channel, to, text, action.ReplyId,
-                                    ReplyContextFor(run, action.ReplyId), messages);
+                                    ReplyContextFor(run, action.ReplyId), messages, action.Hops);
                 break;
             }
 
@@ -806,7 +806,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             notifyOnEnter: waypoint.NotifyOnEnter,
             notifyOnExit: waypoint.NotifyOnExit,
             to: action.ToNode != 0 ? action.ToNode : 0xFFFFFFFFu,
-            hopLimit: (byte)HopLimit,
+            hopLimit: waypoint.Hops ?? (byte)HopLimit,
             okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 

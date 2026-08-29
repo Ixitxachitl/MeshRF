@@ -2319,13 +2319,17 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <param name="replyContext">Quote line shown above the echoed bubble.</param>
     /// <param name="messages">Bubble list to echo into, or null to send without
     /// a visible conversation (a script answering a channel it has no tab for).</param>
+    /// <param name="hopLimit">Hop limit for this one message, or null for the
+    /// configured one. Only a script passes it — the compose box has no way to
+    /// say anything but the app-wide setting.</param>
     private async Task<bool> SendTextAsync(
         ChannelConfig? channel,
         uint to,
         string text,
         uint replyId,
         string replyContext,
-        ObservableCollection<ChannelMessage>? messages)
+        ObservableCollection<ChannelMessage>? messages,
+        byte? hopLimit = null)
     {
         if (_core is null || text.Length == 0) return false;
 
@@ -2348,14 +2352,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (!usePkc && channel is null) return false;
 
         var packetId = NextPacketId();
+        byte hops = hopLimit ?? (byte)HopLimit;
 
         var frame = usePkc
             ? MeshEncoder.EncodePkcTextMessage(
                 _rxHost.MyNodeNum, to, packetId, text, myPriv, peerPub,
-                hopLimit: (byte)HopLimit, wantAck: true, replyId: replyId, okToMqtt: OkToMqtt)
+                hopLimit: hops, wantAck: true, replyId: replyId, okToMqtt: OkToMqtt)
             : MeshEncoder.EncodeTextMessage(
                 channel!, _rxHost.MyNodeNum, packetId, text, to: to,
-                hopLimit: (byte)HopLimit, wantAck: to != 0xFFFFFFFFu,
+                hopLimit: hops, wantAck: to != 0xFFFFFFFFu,
                 replyId: replyId, okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 

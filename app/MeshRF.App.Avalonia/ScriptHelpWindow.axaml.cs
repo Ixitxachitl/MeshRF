@@ -83,6 +83,7 @@ public partial class ScriptHelpWindow : Window
         new("  channel: LongFast", "Destination channel instead of a node. Use one of to:/channel:, not both. Neither means the primary, and channel: {primary} says so out loud — the only way to name a primary that has no name of its own. Braces, so it cannot be mistaken for a channel called \"primary\"."),
         new("  text: \"…\"", "The message body. Required."),
         new("  reply_link: true", "Thread the message under the one that triggered it."),
+        new("  hops: 0", "Hop limit for this one message, 0-7, instead of the app-wide setting. 0 reaches direct neighbours only and is never relayed — the right answer for something local, and the cheapest thing a script can transmit. Raise it only for a message that genuinely has to cross the mesh."),
         new("http:", "Call a REST endpoint and keep the answer for a later action. Takes the indented keys below."),
         new("  url: \"https://…\"", "The endpoint. Placeholders in it are percent-encoded, so a message containing & or a space cannot rewrite the request. Required, and must be https:// or http://."),
         new("  method: GET", "GET (default), POST or PUT."),
@@ -113,6 +114,7 @@ public partial class ScriptHelpWindow : Window
         new("  to: \"{from.id}\"", "Address the marker to one node instead of broadcasting it. It still travels under the primary's key — the address saves everyone else drawing it rather than keeping it from them."),
         new("  channel: LongFast", "Channel to broadcast on. Use one of to:/channel:, not both. Defaults to the primary, and channel: {primary} says so out loud."),
         new("  lock_to_me: false", "Let others edit the marker. On by default, so a script's markers cannot be rewritten."),
+        new("  hops: 2", "Hop limit for the marker, 0-7, instead of the app-wide setting. A marker only means something to nodes near enough to act on it, so it is often worth fewer hops than the setting."),
         new("react: 👍", "Emoji tapback on the triggering message. Takes placeholders like reply: does, so react: \"{hops|keycap}\" tapbacks the hop count."),
         new("position: true", "Send this node's position."),
         new("nodeinfo: true", "Send this node's name, hardware and public key."),
@@ -223,6 +225,7 @@ public partial class ScriptHelpWindow : Window
         new("  channel: Fires", "Which channel the markers go out on. Defaults to the primary, and channel: {primary} says so out loud. A feed worth its own channel keeps a mesh's shared one clear."),
         new("  to: \"!a1b2c3d4\"", "Or address them to one node. A literal id only — a feed places its markers unprompted, so there is no message for a placeholder to come from."),
         new("  lock_to_me:", "Off by default here, unlike a script's waypoint. These are placed unattended and may outlive this node's interest, so whoever receives one should be able to clear it."),
+        new("  hops: 2", "Hop limit for the markers, 0-7, instead of the app-wide setting. A feed places far more frames than a script does, so the hops it does not need are the ones worth not spending."),
     ];
 
     public IReadOnlyList<HelpRow> SyncNotes { get; } =

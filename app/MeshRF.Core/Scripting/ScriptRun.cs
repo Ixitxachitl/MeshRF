@@ -20,6 +20,9 @@ namespace MeshRF.Scripting;
 /// <param name="Require">The test, for a require: action.</param>
 /// <param name="When">Gate on this action alone: it is skipped when the test
 /// does not hold, and the rest of the sequence runs regardless.</param>
+/// <param name="Hops">Hop limit for a send:, or null for the app's configured
+/// limit. A waypoint's is on <see cref="ScriptWaypoint.Hops"/> instead, since a
+/// feed sync places markers without ever building one of these.</param>
 public sealed record ResolvedAction(
     ScriptActionKind Kind,
     string Text,
@@ -31,7 +34,8 @@ public sealed record ResolvedAction(
     ScriptWaypoint? Waypoint = null,
     ScriptRequirement? Require = null,
     ScriptRequirement? When = null,
-    ScriptRingtone? Ringtone = null)
+    ScriptRingtone? Ringtone = null,
+    byte? Hops = null)
 {
     /// <summary>Whether this action puts a frame on the air. http: makes a
     /// network request, require: only decides, and ring: is a noise on this
@@ -49,7 +53,8 @@ public sealed record ResolvedAction(
     {
         ScriptActionKind.Reply or ScriptActionKind.Send =>
             $"{(Kind == ScriptActionKind.Reply ? "reply" : "send")} to " +
-            $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}: \"{expandedText}\"",
+            $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}: \"{expandedText}\"" +
+            DescribeHops(Hops),
         ScriptActionKind.React => $"react {expandedText} to packet {ReplyId:x8}",
         ScriptActionKind.Position => $"send position to {nameOf(ToNode)}",
         ScriptActionKind.NodeInfo => $"send node info to {nameOf(ToNode)}",
@@ -58,12 +63,19 @@ public sealed record ResolvedAction(
         ScriptActionKind.Waypoint =>
             $"waypoint \"{expandedText}\" to " +
             $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}" +
-            (Waypoint is { RadiusM: > 0 } fenced ? $" with a {fenced.RadiusM} m fence" : ""),
+            (Waypoint is { RadiusM: > 0 } fenced ? $" with a {fenced.RadiusM} m fence" : "") +
+            DescribeHops(Waypoint?.Hops),
         ScriptActionKind.Require => $"require {Require?.Describe()}",
         ScriptActionKind.Delay => $"wait {Delay.TotalSeconds:0.#}s",
         ScriptActionKind.Log => $"log: \"{expandedText}\"",
         _ => Kind.ToString(),
     };
+
+    /// <summary>Names the hop limit in the log only when the script asked for
+    /// one, so an ordinary line stays about the message rather than repeating
+    /// the app-wide setting on every send.</summary>
+    private static string DescribeHops(byte? hops) =>
+        hops is { } n ? $" at {n} hop{(n == 1 ? "" : "s")}" : string.Empty;
 }
 
 /// <summary>A script that matched, and the actions it wants to run.</summary>
