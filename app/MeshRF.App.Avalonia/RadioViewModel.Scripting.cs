@@ -693,7 +693,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 }
                 var packetId = NextPacketId();
                 var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text,
-                    to: to, replyId: action.ReplyId, emoji: 1,
+                    to: to, hopLimit: (byte)HopLimit, replyId: action.ReplyId, emoji: 1,
                     xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
                 if (await TransmitFrameAsync(frame))
                 {
