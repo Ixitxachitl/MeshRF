@@ -292,7 +292,11 @@ public partial class RadioViewModel
     /// <summary>Answers a directed request from a peer. Without this our
     /// NodeInfo only ever leaves on the auto-report schedule or a manual
     /// click, so peers that ask for our name get nothing back.</summary>
-    private void HandleAutoReplyRequest(PortNum port, uint to, string? channelName)
+    /// <param name="hopLimit">How far the answer may travel — the hops the
+    /// request took plus a margin, worked out by the host from the request's
+    /// own header. A script asking for one of these has no request behind it
+    /// and passes the configured limit.</param>
+    private void HandleAutoReplyRequest(PortNum port, uint to, string? channelName, byte hopLimit)
     {
         if (!CanTransmit || to == 0 || to == 0xFFFFFFFFu) return;
         var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
@@ -307,7 +311,7 @@ public partial class RadioViewModel
                         MyLongName, MyShortName,
                         hwModel: (uint)Math.Max(0, HardwareModels.Id(MyHwModel)), role: RoleEnumValue(MyRole),
                         publicKey: TryParseKeyBase64(MyPublicKey),
-                        to: to, hopLimit: (byte)HopLimit, wantResponse: false, okToMqtt: OkToMqtt,
+                        to: to, hopLimit: hopLimit, wantResponse: false, okToMqtt: OkToMqtt,
                         isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
                     TransmitBackground(nodeInfo);
                     break;
@@ -319,7 +323,7 @@ public partial class RadioViewModel
                     var position = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
                         altitudeM: alt, altitudeIsMsl: EffectivePositionAltitudeMsl,
                         precisionBits: channel.EffectivePositionPrecision,
-                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt);
+                        to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt);
                     TransmitBackground(position);
                     break;
 
@@ -337,7 +341,8 @@ public partial class RadioViewModel
     /// own variant; here one handler covers them, and an unspecified request
     /// gets device metrics — the variant every node can answer.
     /// </summary>
-    private async void HandleTelemetryReplyRequest(uint to, string? channelName, TelemetryVariants wanted)
+    private async void HandleTelemetryReplyRequest(
+        uint to, string? channelName, TelemetryVariants wanted, byte hopLimit)
     {
         if (!CanTransmit || to == 0 || to == 0xFFFFFFFFu) return;
         var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
@@ -360,7 +365,7 @@ public partial class RadioViewModel
                         temperatureC: weather.TemperatureC,
                         relativeHumidityPct: weather.RelativeHumidityPct,
                         barometricPressureHpa: weather.BarometricPressureHpa,
-                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt));
+                        to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt));
                 }
 
                 if (wanted.HasFlag(TelemetryVariants.AirQuality) &&
@@ -369,7 +374,7 @@ public partial class RadioViewModel
                     TransmitBackground(MeshEncoder.EncodeTelemetryAirQualityMetrics(
                         channel, _rxHost.MyNodeNum, NextPacketId(),
                         pm25Standard: aq.Pm25Standard, pm100Standard: aq.Pm100Standard,
-                        to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt));
+                        to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt));
                 }
                 return;
             }
@@ -377,7 +382,7 @@ public partial class RadioViewModel
             TransmitBackground(MeshEncoder.EncodeTelemetryDeviceMetrics(
                 channel, _rxHost.MyNodeNum, NextPacketId(),
                 batteryLevel: 101, // 101 = mains-powered, the sentinel this app reports.
-                to: to, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt));
+                to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt));
         }
         catch (Exception ex)
         {

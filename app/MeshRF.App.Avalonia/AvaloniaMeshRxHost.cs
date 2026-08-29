@@ -182,10 +182,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// means such requests are simply not answered.</summary>
     public Action<byte[]>? TransmitAutoReply { get; set; }
 
+    /// <summary>How far a reply to a request addressed to us may travel, given
+    /// the request's header and whether it carried Data.bitfield. The owner
+    /// holds the configured hop limit and firmware's response rule, so it
+    /// supplies the number; left null falls back to the Meshtastic default.</summary>
+    public Func<MeshHeader, bool, byte>? ResponseHopLimitProvider { get; set; }
+
     /// <summary>Raised when a peer directs a request at us that we should
-    /// answer (port, requester, channel the request arrived on). The owner
-    /// holds our identity and the transmitter, so it builds the reply.</summary>
-    public Action<PortNum, uint, string?>? AutoReplyRequested { get; set; }
+    /// answer (port, requester, channel the request arrived on, hops the answer
+    /// may travel). The owner holds our identity and the transmitter, so it
+    /// builds the reply; the hop limit comes from here because only the request
+    /// says how far away the asker was.</summary>
+    public Action<PortNum, uint, string?, byte>? AutoReplyRequested { get; set; }
 
     /// <summary>Raised on hearing a node we hold no NodeInfo for (node, channel
     /// it was heard on, hops it travelled). The owner decides whether to
@@ -194,8 +202,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Raised for a directed telemetry request, carrying which metric
     /// group was asked for so the reply matches rather than always answering
-    /// with device metrics.</summary>
-    public Action<uint, string?, TelemetryVariants>? TelemetryReplyRequested { get; set; }
+    /// with device metrics, and how far the answer may travel.</summary>
+    public Action<uint, string?, TelemetryVariants, byte>? TelemetryReplyRequested { get; set; }
 
     /// <summary>Raised for a unicast addressed to us carrying want_ack, so the
     /// owner (which holds the transmitter) can send the routing ack. Failing to
@@ -1162,7 +1170,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 // sender's record with blanks.
                 if (result.AppPayload.Length == 0)
                 {
-                    if (IsDirectedRequest(header, result)) AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName);
+                    if (IsDirectedRequest(header, result))
+                        AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName,
+                                                   ReplyHopLimit(header, result));
                     break;
                 }
                 // The router skips RecordSighting for a NodeInfo record (its own
@@ -1217,7 +1227,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 // and key this packet carried rather than a bare node id.
                 if (firstNodeInfo) RaiseNewNode(header.From, snrDb, packetRssiDbm, hopsAway);
                 // An advertisement may still ask us to reply with ours.
-                if (IsDirectedRequest(header, result)) AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName);
+                if (IsDirectedRequest(header, result))
+                    AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName,
+                                               ReplyHopLimit(header, result));
                 break;
 
             case PortNum.Position when result.Position is not null:
@@ -1226,7 +1238,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 if (result.Position.Latitude == 0 && result.Position.Longitude == 0 &&
                     IsDirectedRequest(header, result))
                 {
-                    AutoReplyRequested?.Invoke(PortNum.Position, header.From, result.ChannelName);
+                    AutoReplyRequested?.Invoke(PortNum.Position, header.From, result.ChannelName,
+                                               ReplyHopLimit(header, result));
                     break;
                 }
                 // Record a history point only when the coordinates actually
@@ -1269,7 +1282,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 if (result.AppPayload.Length == 0 && IsDirectedRequest(header, result))
                 {
                     TelemetryReplyRequested?.Invoke(header.From, result.ChannelName,
-                                                    result.Telemetry.PresentVariants);
+                                                    result.Telemetry.PresentVariants,
+                                                    ReplyHopLimit(header, result));
                     break;
                 }
                 var t = result.Telemetry;
@@ -1288,7 +1302,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 RecordTelemetryHistory(header.From, t, rxEpoch);
                 MarkNodeDirty(header.From);
                 if (IsDirectedRequest(header, result))
-                    TelemetryReplyRequested?.Invoke(header.From, result.ChannelName, t.PresentVariants);
+                    TelemetryReplyRequested?.Invoke(header.From, result.ChannelName, t.PresentVariants,
+                                                    ReplyHopLimit(header, result));
                 break;
 
             case PortNum.NodeStatus when result.StatusMessage is not null:
@@ -1798,6 +1813,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         else Waypoints.Add(waypointRecord);
     }
 
+    /// <summary>
+    /// How far an answer to <paramref name="header"/> may travel.
+    /// </summary>
+    /// <remarks>
+    /// A reply sent at the full configured limit is rebroadcast by every
+    /// repeater in range however close the asker turned out to be, so it gets
+    /// only the hops the request needed plus a margin. 3 is firmware's default,
+    /// for a host with no owner wired up to say better.
+    /// </remarks>
+    private byte ReplyHopLimit(MeshHeader header, MeshDecodeResult result) =>
+        ResponseHopLimitProvider?.Invoke(header, result.HasDataBitfield) ?? 3;
+
     /// <summary>Handle a TRACEROUTE_APP frame: either the accumulated-path
     /// reply to a request we sent, or (if want_response and addressed to us)
     /// a request from someone else, auto-replied via <see cref="TransmitAutoReply"/>.</summary>
@@ -1818,7 +1845,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             if (primary is not null)
             {
                 var frame = MeshEncoder.EncodeTracerouteReply(primary.Config, MyNodeNum, header.From,
-                    (uint)Random.Shared.NextInt64(1, uint.MaxValue), header.PacketId, route: null, snrTowards: null);
+                    (uint)Random.Shared.NextInt64(1, uint.MaxValue), header.PacketId, route: null, snrTowards: null,
+                    hopLimit: ReplyHopLimit(header, result));
                 reply(frame);
             }
         }

@@ -1000,6 +1000,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Enables PKC decode in the shared router; without it every direct
         // message stays undecodable.
         _rxHost.MyPrivateKeyProvider = () => TryParseKeyBase64(MyPrivateKey);
+        // The host answers a traceroute itself rather than raising it, so it
+        // needs the same response rule the acks use — it holds neither the
+        // configured limit nor ReplyHops.
+        _rxHost.ResponseHopLimitProvider = ResponseHopLimit;
         // Uplink is a parallel side-effect of receiving, alongside relaying —
         // the shared router calls this for every non-echo frame it handles.
         _rxHost.UplinkHandler = UplinkIfEligible;

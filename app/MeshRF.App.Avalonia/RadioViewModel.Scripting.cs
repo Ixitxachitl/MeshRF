@@ -703,12 +703,15 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 break;
             }
 
+            // The configured limit, not a reply's: a script's nodeinfo: or
+            // position: is a send it decided on, and the request whose distance
+            // would size it is not necessarily the thing that triggered the run.
             case ScriptActionKind.NodeInfo:
-                HandleAutoReplyRequest(PortNum.NodeInfo, action.ToNode, action.ChannelName);
+                HandleAutoReplyRequest(PortNum.NodeInfo, action.ToNode, action.ChannelName, (byte)HopLimit);
                 break;
 
             case ScriptActionKind.Position:
-                HandleAutoReplyRequest(PortNum.Position, action.ToNode, action.ChannelName);
+                HandleAutoReplyRequest(PortNum.Position, action.ToNode, action.ChannelName, (byte)HopLimit);
                 break;
 
             case ScriptActionKind.Waypoint:
