@@ -1780,7 +1780,6 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             BboxEast = wp.BoundingBox?.East,
             BboxNorth = wp.BoundingBox?.North,
         };
-        _waypointStore.Upsert(waypointRecord);
         var existingWpIndex = -1;
         for (int i = 0; i < Waypoints.Count; i++)
         {
@@ -1790,6 +1789,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
             }
         }
+        // A past-dated expiry is how the mesh retires a marker. For one we
+        // never held — or deleted already — there is nothing to retire, and
+        // filing it would resurrect the marker as a greyed-out row.
+        if (existingWpIndex < 0 && waypointRecord.IsExpired) return;
+        _waypointStore.Upsert(waypointRecord);
         if (existingWpIndex >= 0) Waypoints[existingWpIndex] = waypointRecord;
         else Waypoints.Add(waypointRecord);
     }
