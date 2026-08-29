@@ -171,9 +171,9 @@
             <DockPanel Grid.Row="17" Grid.Column="1" Margin="0,4,0,4">
                 <TextBlock DockPanel.Dock="Right" Width="20" Margin="6,0,0,0" VerticalAlignment="Center"
                            TextAlignment="Center" Text="{Binding HopLimit}" />
-                <Slider Minimum="1" Maximum="7" TickFrequency="1" IsSnapToTickEnabled="True"
+                <Slider Minimum="0" Maximum="7" TickFrequency="1" IsSnapToTickEnabled="True"
                         VerticalAlignment="Center" Value="{Binding HopLimit}"
-                        ToolTip.Tip="Hops a transmitted packet may travel (1..7). Meshtastic default is 3." />
+                        ToolTip.Tip="Hops a transmitted packet may travel (0..7). Meshtastic default is 3. At 0 nothing you send is ever repeated, so it reaches direct neighbours only." />
             </DockPanel>
 
             <TextBlock Grid.Row="18" Grid.Column="0" Text="Ignore MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />

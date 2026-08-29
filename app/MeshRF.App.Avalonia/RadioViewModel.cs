@@ -1094,7 +1094,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // and would otherwise make this depend on the order of these two lines.
         SyncPublicKeyToPrivateKey();
         MyNodeStatus = savedUserNodeStatus;
-        HopLimit = savedHopLimit > 0 ? savedHopLimit : HopLimit;
+        // Clamped rather than sanity-checked against zero: 0 is a hop limit a
+        // user can choose, not an unset one — a settings.json without the key
+        // keeps this property's own default of 3 and never reaches here.
+        HopLimit = Math.Clamp(savedHopLimit, 0, 7);
         OkToMqtt = savedOkToMqtt;
         IgnoreMqtt = savedIgnoreMqtt;
         HomeLatitudeText = savedHomeLatitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
