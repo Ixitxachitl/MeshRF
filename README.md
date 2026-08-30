@@ -11,7 +11,7 @@ provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 A CH341+SX1262 USB stick can also be used for either direction, on its own or
 alongside an SDR — see [SX1262 USB sticks](#sx1262-usb-sticks).
 
-Current release line: **v2.1.10**
+Current release line: **v2.3.0**
 
 <img width="1547" height="990" alt="image" src="https://github.com/user-attachments/assets/ba593234-2b41-4b29-85e2-f85aba94e5fe" />
 
@@ -190,10 +190,14 @@ limits:
 ```
 
 - **Triggers**: `command`, `text` (regex), `new_node`, `reaction`, `every`, `at`.
-- **Conditions**: `scope`, `channel`, `from` / `not_from`, `snr_above`,
-  `hops_below`, `between`, `favorite`, `has_key`.
+- **Conditions**: `scope`, `channel` / `not_channel`, `from` / `not_from`,
+  `snr_above`, `hops_below`, `between`, `favorite`, `has_key`.
 - **Actions**: `reply`, `send`, `react`, `position`, `nodeinfo`, `traceroute`,
-  `http`, `waypoint`, `require`, `delay`, `log`.
+  `http`, `waypoint`, `require`, `delay`, `log`, `ring`.
+- **Reach**: `send:` and `waypoint:` take `hops:` (0-7) to override the app-wide
+  hop limit for one message. `hops: 0` is never repeated by any node, so it
+  costs one airtime slot rather than one per relay in range — the right answer
+  for anything that only means something to whoever can already hear you.
 
 A `waypoint:` action drops a marker, optionally with a geofence and enter/exit
 alerts. A `require:` action stops the sequence unless a value holds — which is
@@ -231,6 +235,34 @@ Working starting points live in [samples/scripts/](samples/scripts/) — a signa
 report, a ChatGPT bridge, a lightning waypoint and a wildfire waypoint. All ship
 disabled; copy one into the scripts folder, fill in the credential it names, and
 turn it on.
+
+A **feed sync** is the other half: instead of answering something that happened,
+it keeps a set of waypoints in step with a REST feed. It polls, places a marker
+for each record it has not seen, resends one whose watched fields changed, and
+retires one that has gone — a record leaving a list is not an event, so only
+something holding the previous list can notice it. `require:` narrows a feed to
+the records worth a marker, and failing it counts as gone rather than as unseen,
+so a record that stops qualifying clears itself off everyone's map:
+
+```yaml
+sync:
+  every: 15m
+  url: "https://api.watchduty.org/api/v1/geo_events/?geo_event_types=*"
+  items: ""              # the response is the array itself
+  id: id                 # identity, so a resend replaces
+  active: is_active
+  lat: lat
+  lon: lng
+  within: 30mi
+  require:
+    - value: "{item.data.is_prescribed}"
+      not_equals: true   # a planned burn is not "fire near you"
+  watch: [data.acreage, data.containment]
+  waypoint:
+    name: "Fire: {item.name}"
+    icon: "🔥"
+    radius: 10mi
+```
 
 A script can call a REST API and broadcast the answer. Fetching and sending are
 two steps, so the result can be shaped into a sentence, combined from more than
