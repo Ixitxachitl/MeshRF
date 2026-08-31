@@ -155,7 +155,13 @@ stays hidden and the first device found is used.
 - Cross-platform Avalonia desktop app (.NET 8, Windows/Linux/macOS) with MVVM
   architecture.
 - Channel/DM tabs with persisted history.
-- RTTTL notification controls (including per-channel mute options).
+- RTTTL notification tones for messages, geofence crossings and alert bells,
+  each with its own duration or Off, behind a **Notifications** button. Volume
+  is shared; muting is available per channel and per conversation.
+- Alert bell button beside the compose box. It shows a bell in the message and
+  adds Meshtastic's `ASCII_BELL` on the way out, so a receiving node sounds its
+  external notification. Incoming alerts are marked on the bubble, which is the
+  only way to see one from a client that sends the character alone.
 - Improved auto-scroll and large-node-count map performance tuning.
 - Drag-to-reorder for secondary channel tabs and DM tabs.
 - Emoji picker built from the colour emoji font's actual glyph coverage, so it
@@ -189,7 +195,9 @@ limits:
   max_per_hour: 6
 ```
 
-- **Triggers**: `command`, `text` (regex), `new_node`, `reaction`, `every`, `at`.
+- **Triggers**: `command`, `text` (regex), `new_node`, `reaction`, `every`, `at`,
+  `quick_send` (adds a named button to the Quick send bar and runs when pressed;
+  its `to:` asks for a destination, or names a channel or node).
 - **Conditions**: `scope`, `channel` / `not_channel`, `from` / `not_from`,
   `snr_above`, `hops_below`, `between`, `favorite`, `has_key`.
 - **Actions**: `reply`, `send`, `react`, `position`, `nodeinfo`, `traceroute`,
