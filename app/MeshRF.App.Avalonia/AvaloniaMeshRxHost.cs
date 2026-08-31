@@ -1200,6 +1200,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     LongName = result.User.LongName,
                     ShortName = result.User.ShortName,
                     Role = string.IsNullOrEmpty(result.User.Role) ? "Client" : result.User.Role,
+                    // Empty preserves what is on file, so a later NodeInfo sent
+                    // from a reloaded NodeDB (which zero-fills the MAC) does not
+                    // erase the one the node advertised when it booted.
+                    MacAddress = result.User.MacAddress,
                     // Empty preserves whatever is on file (the upsert NULLIFs
                     // it), which is how a mismatch keeps the old key.
                     PublicKey = keyMismatch ? string.Empty : newKeyHex,

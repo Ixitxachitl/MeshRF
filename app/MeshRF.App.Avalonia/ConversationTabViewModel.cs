@@ -68,6 +68,22 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
 
     public bool HasTelemetry => Telemetry.Count > 0;
 
+    /// <summary>Width of the peer-values panel. The splitter beside it drags
+    /// this rather than a grid column, so the column can stay Auto and collapse
+    /// to nothing for a peer we hold no record for.</summary>
+    [ObservableProperty]
+    private double _telemetryPanelWidth = DefaultTelemetryPanelWidth;
+
+    public const double DefaultTelemetryPanelWidth = 240;
+    private const double MinTelemetryPanelWidth = 140;
+    private const double MaxTelemetryPanelWidth = 640;
+
+    /// <summary>Widens (positive) or narrows (negative) the peer-values panel,
+    /// clamped so a drag can neither hide it nor crowd out the messages.</summary>
+    public void ResizeTelemetryPanel(double delta) =>
+        TelemetryPanelWidth = Math.Clamp(TelemetryPanelWidth + delta,
+                                         MinTelemetryPanelWidth, MaxTelemetryPanelWidth);
+
     /// <summary>Suppress the incoming-message ringtone for this peer. Stored on
     /// the node record, so it is the same flag the node grid and the channel
     /// mute check.</summary>
@@ -114,6 +130,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
             Add("Long name", n.LongName);
             Add("Short name", n.ShortName);
             Add("Hardware", n.HwModel);
+            Add("MAC address", n.MacAddress);
             Add("Role", n.Role);
             if (n.IsUnmessagable.HasValue) Add("Unmessagable", n.IsUnmessagable.Value ? "Yes" : "No");
             if (n.SeenViaMqtt == true) Add("Via MQTT", "Yes");

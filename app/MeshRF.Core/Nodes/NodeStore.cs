@@ -129,6 +129,7 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("gas_resistance_mohm", "REAL");
         AddColumnIfMissing("iaq", "INTEGER");
         AddColumnIfMissing("public_key", "TEXT");
+        AddColumnIfMissing("mac_address", "TEXT");
         AddColumnIfMissing("key_mismatch", "INTEGER");
         AddColumnIfMissing("has_xeddsa_signed", "INTEGER");
         AddColumnIfMissing("is_unmessagable", "INTEGER");
@@ -236,7 +237,7 @@ public sealed class NodeStore : IDisposable
                                    channel_util_pct, air_util_tx_pct,
                                    uptime_seconds, temperature_c,
                                        relative_humidity_pct, barometric_pressure_hpa,
-                                       gas_resistance_mohm, iaq, public_key, key_mismatch,
+                                       gas_resistance_mohm, iaq, public_key, mac_address, key_mismatch,
                                        is_unmessagable, is_licensed, has_xeddsa_signed,
                                        mute_rtttl, ignored, node_status,
                                        pm10_std, pm25_std, pm100_std,
@@ -252,7 +253,7 @@ public sealed class NodeStore : IDisposable
                         $chan, $airx,
                         $uptime, $temp,
                         $hum, $pres,
-                                    $gas, $iaq, $pubkey, $mismatch,
+                                    $gas, $iaq, $pubkey, $mac, $mismatch,
                                     $isunmessagable, $islicensed, $xeddsasigned,
                                     $mute_rtttl, $ignored, $node_status,
                                     $pm10std, $pm25std, $pm100std,
@@ -283,6 +284,7 @@ public sealed class NodeStore : IDisposable
                     gas_resistance_mohm     = COALESCE(excluded.gas_resistance_mohm, gas_resistance_mohm),
                     iaq              = COALESCE(excluded.iaq, iaq),
                     public_key       = COALESCE(NULLIF(excluded.public_key, ''), public_key),
+                    mac_address      = COALESCE(NULLIF(excluded.mac_address, ''), mac_address),
                     key_mismatch     = COALESCE(excluded.key_mismatch, key_mismatch),
                     is_unmessagable  = COALESCE(excluded.is_unmessagable, is_unmessagable),
                     is_licensed      = COALESCE(excluded.is_licensed, is_licensed),
@@ -331,6 +333,7 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$gas",  (object?)rec.GasResistanceMohm ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$iaq",  (object?)rec.Iaq ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$pubkey", rec.PublicKey ?? string.Empty);
+            cmd.Parameters.AddWithValue("$mac", rec.MacAddress ?? string.Empty);
             cmd.Parameters.AddWithValue("$mismatch",
                 rec.KeyMismatch is bool km ? (km ? 1 : 0) : (object)DBNull.Value);
             cmd.Parameters.AddWithValue("$isunmessagable",
@@ -955,6 +958,7 @@ public sealed class NodeStore : IDisposable
             Iaq                   = Nullable<int>("iaq"),
             NodeStatus            = ReadStringOrEmpty(r, "node_status"),
             PublicKey             = ReadStringOrEmpty(r, "public_key"),
+            MacAddress            = ReadStringOrEmpty(r, "mac_address"),
             KeyMismatch           = Nullable<bool>("key_mismatch"),
             IsUnmessagable        = Nullable<bool>("is_unmessagable"),
             IsLicensed            = Nullable<bool>("is_licensed"),

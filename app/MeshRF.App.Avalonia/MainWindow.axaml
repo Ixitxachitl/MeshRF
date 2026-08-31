@@ -1363,14 +1363,14 @@
                                         </DockPanel>
                                     </Border>
 
-                                    <!-- Messages beside the peer's current values. -->
-                                    <Grid ColumnDefinitions="*,5,Auto">
-                                        <ContentControl Grid.Column="0" Content="{Binding}"
-                                                        ContentTemplate="{StaticResource MessageListTemplate}" />
-                                        <GridSplitter Grid.Column="1" Width="5"
-                                                      Background="{DynamicResource BrushSplitter}"
-                                                      IsVisible="{Binding HasTelemetry}" />
-                                        <Border Grid.Column="2" Width="240" Padding="6,4"
+                                    <!-- Messages beside the peer's current values. A DockPanel,
+                                         not a Grid: the panel and its handle collapse to nothing
+                                         for a peer we hold no record for, which a splitter-sized
+                                         column can't do. The handle drags the panel's own width
+                                         (OnTelemetrySplitterDrag) instead of a column's. -->
+                                    <DockPanel LastChildFill="True">
+                                        <Border DockPanel.Dock="Right" Padding="6,4"
+                                                Width="{Binding TelemetryPanelWidth}"
                                                 IsVisible="{Binding HasTelemetry}"
                                                 Background="{DynamicResource BrushPanelBackground}"
                                                 BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
@@ -1389,7 +1389,15 @@
                                                 </ItemsControl>
                                             </ScrollViewer>
                                         </Border>
-                                    </Grid>
+                                        <Border DockPanel.Dock="Right" Width="5" Cursor="SizeWestEast"
+                                                IsVisible="{Binding HasTelemetry}"
+                                                Background="{DynamicResource BrushSplitter}"
+                                                PointerPressed="OnTelemetrySplitterPressed"
+                                                PointerMoved="OnTelemetrySplitterMoved"
+                                                PointerReleased="OnTelemetrySplitterReleased" />
+                                        <ContentControl Content="{Binding}"
+                                                        ContentTemplate="{StaticResource MessageListTemplate}" />
+                                    </DockPanel>
                                 </DockPanel>
                             </DataTemplate>
                         </TabControl.DataTemplates>

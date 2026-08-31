@@ -578,6 +578,35 @@ public partial class MainWindow : Window
         TelemetryHistoryWindow.Show(this, convo);
     }
 
+    // Drag state for the peer-values panel handle. Positions are taken
+    // relative to the window, which stays put while the handle itself
+    // moves under the cursor as the panel resizes.
+    private double? _telemetrySplitterLastX;
+
+    private void OnTelemetrySplitterPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Border handle) return;
+        _telemetrySplitterLastX = e.GetPosition(this).X;
+        e.Pointer.Capture(handle);
+    }
+
+    /// <summary>Widens the panel as the handle is dragged left, narrows it
+    /// dragged right. The panel is docked right, so its width grows as x falls.</summary>
+    private void OnTelemetrySplitterMoved(object? sender, PointerEventArgs e)
+    {
+        if (_telemetrySplitterLastX is not double lastX) return;
+        if (sender is not Border { DataContext: ConversationTabViewModel convo }) return;
+        double x = e.GetPosition(this).X;
+        convo.ResizeTelemetryPanel(lastX - x);
+        _telemetrySplitterLastX = x;
+    }
+
+    private void OnTelemetrySplitterReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _telemetrySplitterLastX = null;
+        e.Pointer.Capture(null);
+    }
+
     private void OnOpenConversationLocationHistory(object? sender, RoutedEventArgs e)
     {
         if (sender is not Control { DataContext: ConversationTabViewModel convo }) return;

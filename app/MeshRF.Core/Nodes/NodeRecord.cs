@@ -35,6 +35,7 @@ public sealed class NodeRecord : INotifyPropertyChanged
         LongName        = source.LongName;
         ShortName       = source.ShortName;
         HwModel         = source.HwModel;
+        MacAddress      = source.MacAddress;
         Role            = source.Role;
         LastHeardEpoch  = source.LastHeardEpoch;
         SeenViaMqtt     = source.SeenViaMqtt;
@@ -87,6 +88,15 @@ public sealed class NodeRecord : INotifyPropertyChanged
     public string ShortName { get; set; } = string.Empty;
     public string HwModel   { get; set; } = string.Empty;
     public string Role      { get; set; } = string.Empty;
+
+    /// <summary>MAC the peer advertised in NodeInfo (field 4), as
+    /// <c>aa:bb:cc:dd:ee:ff</c>; empty when it has never sent a real one.
+    /// The field is deprecated, and firmware zero-fills it for any node whose
+    /// record came back from flash, so most peers never populate it.</summary>
+    public string MacAddress { get; set; } = string.Empty;
+
+    /// <summary>Convenience flag for UI visibility bindings.</summary>
+    public bool HasMacAddress => !string.IsNullOrEmpty(MacAddress);
 
     /// <summary>Unix epoch seconds, 0 if never heard.</summary>
     public long LastHeardEpoch { get; set; }

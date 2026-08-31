@@ -105,6 +105,13 @@ public sealed class MeshUser
     public int HwModel { get; init; }
     public string Role { get; init; } = string.Empty;
 
+    /// <summary>User.macaddr (field 4) as <c>aa:bb:cc:dd:ee:ff</c>, empty when
+    /// absent. Deprecated since Meshtastic 2.1.x: senders still put their real
+    /// chip MAC on the wire, but a node that reloads its NodeDB from flash has
+    /// only the zero-filled copy left to advertise, so most peers send nothing
+    /// meaningful here. An all-zero value is reported as absent.</summary>
+    public string MacAddress { get; init; } = string.Empty;
+
     /// <summary>32-byte X25519 public key (field 8), empty if not advertised.</summary>
     public byte[] PublicKey { get; init; } = Array.Empty<byte>();
 
@@ -755,6 +762,7 @@ public static class MeshDecoder
         int hw = 0;
         int role = -1;
         byte[] pub = Array.Empty<byte>();
+        byte[] mac = Array.Empty<byte>();
         bool? isLicensed = null;
         bool? isUnmessagable = null;
         var rdr = new ProtoReader(data);
@@ -765,6 +773,7 @@ public static class MeshDecoder
                 case 1 when wt == ProtoReader.WireType.Len: id = rdr.ReadString(); break;
                 case 2 when wt == ProtoReader.WireType.Len: ln = rdr.ReadString(); break;
                 case 3 when wt == ProtoReader.WireType.Len: sn = rdr.ReadString(); break;
+                case 4 when wt == ProtoReader.WireType.Len: mac = rdr.ReadLengthDelimited().ToArray(); break;
                 case 5 when wt == ProtoReader.WireType.Varint: hw = (int)rdr.ReadVarint(); break;
                 case 6 when wt == ProtoReader.WireType.Varint: isLicensed = rdr.ReadVarint() != 0; break;
                 case 7 when wt == ProtoReader.WireType.Varint: role = (int)rdr.ReadVarint(); break;
@@ -780,10 +789,23 @@ public static class MeshDecoder
             ShortName = sn,
             HwModel = hw,
             Role = RoleName(role),
+            MacAddress = FormatMacAddress(mac),
             PublicKey = pub,
             IsLicensed = isLicensed,
             IsUnmessagable = isUnmessagable,
         };
+    }
+
+    /// <summary>Renders a 6-byte MAC as lowercase <c>aa:bb:cc:dd:ee:ff</c>.
+    /// Any other length, and the all-zero placeholder firmware substitutes for
+    /// a MAC it no longer keeps, yield an empty string.</summary>
+    private static string FormatMacAddress(ReadOnlySpan<byte> mac)
+    {
+        if (mac.Length != 6) return string.Empty;
+        bool allZero = true;
+        foreach (byte b in mac) { if (b != 0) { allZero = false; break; } }
+        if (allZero) return string.Empty;
+        return string.Join(':', mac.ToArray().Select(b => b.ToString("x2")));
     }
 
     private static string RoleName(int role) => role switch
