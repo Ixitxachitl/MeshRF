@@ -130,6 +130,9 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("iaq", "INTEGER");
         AddColumnIfMissing("public_key", "TEXT");
         AddColumnIfMissing("mac_address", "TEXT");
+        // Written once, when the row is created, and never updated after --
+        // see the Upsert below, which leaves it out of the DO UPDATE list.
+        AddColumnIfMissing("first_heard_epoch", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("key_mismatch", "INTEGER");
         AddColumnIfMissing("has_xeddsa_signed", "INTEGER");
         AddColumnIfMissing("is_unmessagable", "INTEGER");
@@ -238,6 +241,7 @@ public sealed class NodeStore : IDisposable
                                    uptime_seconds, temperature_c,
                                        relative_humidity_pct, barometric_pressure_hpa,
                                        gas_resistance_mohm, iaq, public_key, mac_address, key_mismatch,
+                                       first_heard_epoch,
                                        is_unmessagable, is_licensed, has_xeddsa_signed,
                                        mute_rtttl, ignored, node_status,
                                        pm10_std, pm25_std, pm100_std,
@@ -254,6 +258,7 @@ public sealed class NodeStore : IDisposable
                         $uptime, $temp,
                         $hum, $pres,
                                     $gas, $iaq, $pubkey, $mac, $mismatch,
+                                    $last_heard,
                                     $isunmessagable, $islicensed, $xeddsasigned,
                                     $mute_rtttl, $ignored, $node_status,
                                     $pm10std, $pm25std, $pm100std,
@@ -592,7 +597,7 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$lon", longitude);
             cmd.Parameters.AddWithValue("$alt", (object?)altitudeM ?? DBNull.Value);
             var id = Convert.ToInt64(cmd.ExecuteScalar());
-            TrimLocationHistory(nodeNum, 500);
+            TrimLocationHistory(nodeNum, HistoryRowsKeptPerNode);
             return id;
         }
     }
@@ -801,7 +806,7 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$sig", rec.Signature ?? string.Empty);
             var id = Convert.ToInt64(cmd.ExecuteScalar());
-            TrimTelemetryHistory(rec.NodeNum, 500);
+            TrimTelemetryHistory(rec.NodeNum, HistoryRowsKeptPerNode);
             return id;
         }
     }
@@ -854,6 +859,54 @@ public sealed class NodeStore : IDisposable
                 """;
             cmd.Parameters.AddWithValue("$n", nodeNum);
             cmd.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>How many history rows each node keeps, per table. Named
+    /// because <see cref="FirstHeard"/> has to know it: a node sitting exactly
+    /// on the cap has had older rows deleted, so its earliest surviving row is
+    /// a lower bound rather than the first time it was heard.</summary>
+    public const int HistoryRowsKeptPerNode = 500;
+
+    /// <summary>
+    /// The earliest moment we still hold any record of this node, across both
+    /// history tables, and whether that is only a lower bound.
+    /// </summary>
+    /// <remarks>
+    /// Derived rather than stored. Nothing records a first sighting -- the
+    /// check that fires the new_node trigger is a transient "does a row exist
+    /// yet", not a timestamp -- so the earliest history row is the closest
+    /// thing we have. It is trimmed to <see cref="HistoryRowsKeptPerNode"/> per
+    /// table, so a node that reports often loses its oldest rows and the answer
+    /// walks forward over time. <c>Capped</c> says when that has happened, so
+    /// the UI can show the value as "or earlier" rather than claim a date that
+    /// is quietly wrong for exactly the nodes we know best.
+    /// </remarks>
+    public (DateTime? Utc, bool Capped) FirstHeard(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        lock (_gate)
+        {
+            long? earliest = null;
+            bool capped = false;
+
+            foreach (var table in new[] { "node_location_history", "node_telemetry_history" })
+            {
+                using var cmd = _conn.CreateCommand();
+                cmd.CommandText =
+                    $"SELECT MIN(timestamp_epoch), COUNT(*) FROM {table} WHERE node_num = $n";
+                cmd.Parameters.AddWithValue("$n", nodeNum);
+                using var r = cmd.ExecuteReader();
+                if (!r.Read() || r.IsDBNull(0)) continue;
+
+                long min = r.GetInt64(0);
+                if (earliest is null || min < earliest) earliest = min;
+                if (r.GetInt64(1) >= HistoryRowsKeptPerNode) capped = true;
+            }
+
+            return earliest is long epoch
+                ? (DateTimeOffset.FromUnixTimeSeconds(epoch).UtcDateTime, capped)
+                : (null, false);
         }
     }
 
@@ -958,6 +1011,7 @@ public sealed class NodeStore : IDisposable
             Iaq                   = Nullable<int>("iaq"),
             NodeStatus            = ReadStringOrEmpty(r, "node_status"),
             PublicKey             = ReadStringOrEmpty(r, "public_key"),
+            FirstHeardEpoch       = r.GetInt64(r.GetOrdinal("first_heard_epoch")),
             MacAddress            = ReadStringOrEmpty(r, "mac_address"),
             KeyMismatch           = Nullable<bool>("key_mismatch"),
             IsUnmessagable        = Nullable<bool>("is_unmessagable"),

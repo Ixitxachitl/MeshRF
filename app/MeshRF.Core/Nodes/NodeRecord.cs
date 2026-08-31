@@ -38,6 +38,7 @@ public sealed class NodeRecord : INotifyPropertyChanged
         MacAddress      = source.MacAddress;
         Role            = source.Role;
         LastHeardEpoch  = source.LastHeardEpoch;
+        FirstHeardEpoch = source.FirstHeardEpoch;
         SeenViaMqtt     = source.SeenViaMqtt;
         SnrDb           = source.SnrDb;
         RssiDbm         = source.RssiDbm;
@@ -100,6 +101,19 @@ public sealed class NodeRecord : INotifyPropertyChanged
 
     /// <summary>Unix epoch seconds, 0 if never heard.</summary>
     public long LastHeardEpoch { get; set; }
+
+    /// <summary>
+    /// When this node was first heard, in Unix epoch seconds; 0 when unknown.
+    /// </summary>
+    /// <remarks>
+    /// Written once, by the insert that creates the row, and never touched
+    /// again -- the upsert leaves it out of its update list, which is what
+    /// makes it a first sighting rather than a second copy of last-heard. It is
+    /// 0 for every node already known before the column existed, and for a row
+    /// created by a write that carried no timestamp; callers fall back to the
+    /// oldest stored history for those.
+    /// </remarks>
+    public long FirstHeardEpoch { get; set; }
 
     /// <summary>Transport of the most recent sighting: true when it arrived
     /// <c>via_mqtt</c>. Mirrors firmware's per-node <c>VIA_MQTT</c> bitfield,

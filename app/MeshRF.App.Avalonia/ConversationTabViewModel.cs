@@ -162,11 +162,49 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
             if (n.Latitude is double lat && n.Longitude is double lon)
                 Add("Position", $"{lat:0.#####}, {lon:0.#####}");
             if (n.AltitudeM is int altM) Add("Altitude", FormatAltitude(altM));
-            if (n.LastHeardEpoch > 0)
-                Add("Last heard", UiFormats.Stamp(
-                    DateTimeOffset.FromUnixTimeSeconds(n.LastHeardEpoch).LocalDateTime));
+            // Both always shown, in the order they happened. A node we cannot
+            // date reads "unknown" rather than dropping the row: half the node
+            // table predates the recorded sighting, and a line that silently
+            // came and went between peers would look like a broken panel
+            // instead of a known gap.
+            Add("First heard", FirstHeardLabel(n));
+            Add("Last heard", n.LastHeardEpoch > 0
+                ? UiFormats.Stamp(DateTimeOffset.FromUnixTimeSeconds(n.LastHeardEpoch).LocalDateTime)
+                : UnknownStamp);
         }
         OnPropertyChanged(nameof(HasTelemetry));
+    }
+
+    /// <summary>Shown where a time is genuinely not known, rather than
+    /// leaving the row out and making the panel's shape vary by node.</summary>
+    private const string UnknownStamp = "unknown";
+
+    /// <summary>
+    /// When this peer was first heard.
+    /// </summary>
+    /// <remarks>
+    /// The stored sighting is exact and is used wherever there is one. Nodes
+    /// already known before that was recorded have none, so those fall back to
+    /// the oldest history row still held -- which is trimmed per node, so for a
+    /// node that reports often it is newer than the first row ever written. The
+    /// fallback is marked "or earlier" rather than stating a date that would be
+    /// wrong, and would drift later the longer the node is known. "unknown"
+    /// when there is neither, which is the truth for every node met before the
+    /// sighting was recorded and that never reported a position or telemetry.
+    /// </remarks>
+    private string FirstHeardLabel(NodeRecord node)
+    {
+        if (node.FirstHeardEpoch > 0)
+            return UiFormats.Stamp(
+                DateTimeOffset.FromUnixTimeSeconds(node.FirstHeardEpoch).LocalDateTime);
+
+        if (_nodeStore is null) return UnknownStamp;
+
+        var (utc, capped) = _nodeStore.FirstHeard(NodeNum);
+        if (utc is not DateTime stamp) return UnknownStamp;
+
+        var text = UiFormats.Stamp(stamp.ToLocalTime());
+        return capped ? $"{text} or earlier" : text;
     }
 
     /// <summary>Altitudes are stored in metres and shown in the app's unit
