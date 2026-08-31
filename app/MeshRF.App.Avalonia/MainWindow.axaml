@@ -3,6 +3,7 @@
         xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
         xmlns:mesh="clr-namespace:MeshRF;assembly=MeshRF.Core"
         xmlns:nodes="clr-namespace:MeshRF.Nodes;assembly=MeshRF.Core"
+        xmlns:scripting="clr-namespace:MeshRF.Scripting;assembly=MeshRF.Core"
         xmlns:waypoints="clr-namespace:MeshRF.Waypoints;assembly=MeshRF.Core"
         x:Class="MeshRF.AvaloniaApp.MainWindow"
         x:Name="RootWindow"
@@ -660,6 +661,23 @@
                                     ToolTip.Tip="Fetch PM2.5/PM10 from the Open-Meteo air quality API, then broadcast TELEMETRY air quality metrics" />
                             <Button Content="Status" Padding="10,3" Click="OnSendNodeStatusPrompted"
                                     ToolTip.Tip="Broadcast your NODE_STATUS_APP text on the primary channel" />
+                            <!-- Buttons the scripts asked for, after the built-in
+                                 ones. Empty unless a script has a quick_send
+                                 trigger, so the bar looks unchanged without one. -->
+                            <ItemsControl ItemsSource="{Binding ScriptQuickSends}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="4" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="scripting:QuickSendButton">
+                                        <Button Content="{Binding Label}" Padding="10,3"
+                                                Click="OnRunScriptQuickSend"
+                                                ToolTip.Tip="{Binding FileName}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
                     </Border>
 

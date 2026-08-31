@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MeshRF.Channels;
 using MeshRF.Nodes;
+using MeshRF.Scripting;
 using MeshRF.Waypoints;
 
 namespace MeshRF.AvaloniaApp;
@@ -650,6 +651,29 @@ public partial class MainWindow : Window
 
     private async void OnSendNodeStatusPrompted(object? sender, RoutedEventArgs e) =>
         await SendPromptedAsync("Send status on which channel?", _viewModel.SendNodeStatusOnChannelAsync);
+
+    /// <summary>
+    /// Runs the script behind one of the buttons a quick_send trigger added.
+    /// A button set to ask prompts for its destination exactly like the
+    /// built-in quick sends; one that named a channel or a node goes there
+    /// without asking.
+    /// </summary>
+    private async void OnRunScriptQuickSend(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: QuickSendButton button }) return;
+
+        if (button.Asks)
+        {
+            var dest = await ChannelPickerWindow.PickAsync(
+                this, _viewModel, $"Run {button.Label} on which channel?");
+            if (dest is null) return;
+            _viewModel.RunScriptQuickSend(button.Label, dest.Value.Channel, dest.Value.DmNodeNum);
+            return;
+        }
+
+        if (!_viewModel.TryResolveQuickSendDestination(button, out var channel, out var dmNodeNum)) return;
+        _viewModel.RunScriptQuickSend(button.Label, channel, dmNodeNum);
+    }
 
     /// <summary>Centers the map on the selected node's last known position.</summary>
     private void OnShowOnMap(object? sender, RoutedEventArgs e)

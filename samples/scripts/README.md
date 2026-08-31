@@ -21,6 +21,7 @@ want it again.
 | Script | Needs | What it does |
 | --- | --- | --- |
 | [ping.yaml](ping.yaml) | nothing | Answers `!ping` with a signal report. |
+| [quick-ping.yaml](quick-ping.yaml) | nothing | Adds a **Ping** button to the Quick send bar that sends `!ping` wherever you point it. |
 | [test-hops.yaml](test-hops.yaml) | a channel named Test | Reacts to anything saying "test" there with a keycap emoji for the hop count. |
 | [sos.yaml](sos.yaml) | one node id | Relays `!sos` to an operator by DM, with a marker at the sender's last position, wherever the call came from. |
 | [ask-chatgpt.yaml](ask-chatgpt.yaml) | OpenAI key | Answers `!ask <question>` from the chat completions API. |
@@ -104,6 +105,44 @@ come back to the script six months later.
 Start with `ping.yaml`. It needs no account and no network, so if it answers,
 the engine is armed and working and anything that goes wrong afterwards is the
 script or the API rather than the setup.
+
+## Running a script yourself
+
+Every other trigger here waits for something to arrive. `quick_send:` does not:
+it adds a button to the Quick send bar, beside the built-in ones, and the script
+runs when you press it.
+
+```yaml
+trigger:
+  - quick_send: Ping      # the label on the button
+    to: ask               # asks where to send, like the buttons beside it
+```
+
+`to:` also takes a channel name or a node id, which makes it a button that goes
+straight there without asking. Leave it out and it asks, because a button that
+transmits somewhere its label never named is the one worth not having.
+
+A press is not something that arrived, so it has a destination but no sender.
+`scope:` and `channel:` read the destination and work as usual, while the
+conditions that ask who sent it — `from:`, `snr_above:`, `hops_below:`,
+`favorite:`, `has_key:` — can never hold, and a script using one will never fire
+from a button. Inside the actions, a `send:` naming neither `to:` nor `channel:`
+goes wherever the button was pointed.
+
+Two scripts may name the same button. One button appears, and pressing it runs
+both.
+
+[quick-ping.yaml](quick-ping.yaml) is the sample, and the other half of
+`ping.yaml`: one sends the `!ping`, the other answers it.
+
+Worth being clear about who answers, though: `!ping` is a MeshRF convention
+rather than a Meshtastic one. Stock firmware does not know what it means and
+ignores it, as does any node whose owner has not enabled a script that answers
+it. The node that replies is one running `ping.yaml` — and that sample is
+`scope: direct`, so it answers direct messages and not channels. Point the
+button at that node to get an answer; point it at a channel and the message
+goes out and is simply read by people, which is still enough to see the button
+work.
 
 ## How far a message travels
 

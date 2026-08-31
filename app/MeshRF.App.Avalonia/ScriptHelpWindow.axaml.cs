@@ -59,6 +59,8 @@ public partial class ScriptHelpWindow : Window
         new("reaction: 👍", "An emoji tapback lands on one of your messages. Use 'any' for any emoji."),
         new("every: 4h", "Fires on a fixed interval. Minimum 1m."),
         new("at: \"08:00\"", "Fires once a day at this local time."),
+        new("quick_send: Ping", "Puts a button labelled Ping on the Quick send bar; the script runs when you press it."),
+        new("  to: ask", "Where that button sends: ask to be prompted like the built-in quick sends (the default), or name a channel or a node id to go straight there."),
     ];
 
     public IReadOnlyList<HelpRow> Conditions { get; } =

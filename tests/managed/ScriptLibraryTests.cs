@@ -217,8 +217,8 @@ public class ScriptLibraryTests : IDisposable
         var installed = _library.InstallSamples();
 
         Assert.Equal(
-            ["ask-chatgpt.yaml", "lightning-sync.yaml", "ping.yaml", "sos.yaml", "test-hops.yaml",
-             "weather.yaml", "wildfire-sync.yaml"],
+            ["ask-chatgpt.yaml", "lightning-sync.yaml", "ping.yaml", "quick-ping.yaml", "sos.yaml",
+             "test-hops.yaml", "weather.yaml", "wildfire-sync.yaml"],
             installed.OrderBy(n => n, StringComparer.Ordinal));
 
         // Every one parses and is switched off, which is what makes installing

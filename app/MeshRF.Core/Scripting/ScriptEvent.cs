@@ -11,6 +11,9 @@ public enum ScriptEventKind
     Reaction,
     /// <summary>A scheduled trigger came due. Carries no sender.</summary>
     Timer,
+    /// <summary>A Quick send button was pressed. Carries no sender, but does
+    /// carry the destination chosen for it.</summary>
+    QuickSend,
 }
 
 /// <summary>This node, as scripts see it.</summary>
@@ -57,6 +60,29 @@ public sealed record ScriptEvent
     public string Text { get; init; } = string.Empty;
 
     public uint FromNode { get; init; }
+
+    /// <summary>Button label, for <see cref="ScriptEventKind.QuickSend"/>. Only
+    /// the script whose trigger names this button runs.</summary>
+    public string QuickSendName { get; init; } = string.Empty;
+
+    /// <summary>Peer a <see cref="ScriptEventKind.QuickSend"/> was aimed at, or
+    /// 0 when it was aimed at a channel. Kept apart from <see cref="FromNode"/>
+    /// so conditions asking who sent this still fail closed: a button press has
+    /// a destination but no sender.</summary>
+    public uint ToNode { get; init; }
+
+    /// <summary>Node an answer goes to: the peer chosen for a button press, the
+    /// sender for anything that arrived over the air.</summary>
+    public uint DestinationNode => Kind == ScriptEventKind.QuickSend ? ToNode : FromNode;
+
+    /// <summary>Whether somebody put this event on the air, so conditions about
+    /// them (from:, snr_above:, hops_below:) have something to read.</summary>
+    public bool HasSender => Kind is ScriptEventKind.Text or ScriptEventKind.NewNode
+                                  or ScriptEventKind.Reaction;
+
+    /// <summary>Whether this event knows where a message would go. Only a
+    /// schedule does not: it is neither on a channel nor aimed at anyone.</summary>
+    public bool HasDestination => Kind != ScriptEventKind.Timer;
     public string FromShort { get; init; } = string.Empty;
     public string FromLong { get; init; } = string.Empty;
 

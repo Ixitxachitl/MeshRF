@@ -232,6 +232,132 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         {
             _rxHost.Log($"scripts: could not read the scripts folder — {ex.Message}");
         }
+        RefreshScriptQuickSends();
+        RaiseScriptsStatusChanged();
+    }
+
+    // ----- quick send buttons -------------------------------------------------
+
+    /// <summary>
+    /// Buttons the armed scripts have asked the Quick send bar to show, beside
+    /// the built-in ones.
+    /// </summary>
+    /// <remarks>
+    /// Deduplicated by label: two scripts may name the same button, and one
+    /// button that runs both of them is the sane reading of that. The press is
+    /// matched by label in the engine, so both still fire.
+    /// </remarks>
+    public ObservableCollection<QuickSendButton> ScriptQuickSends { get; } = [];
+
+    private void RefreshScriptQuickSends()
+    {
+        var wanted = new List<QuickSendButton>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var button in _scriptEngine.QuickSendButtons)
+            if (seen.Add(button.Label)) wanted.Add(button);
+
+        // Rebuilt in place rather than cleared and refilled, so a reload that
+        // changes nothing does not make the bar flicker.
+        if (wanted.Count == ScriptQuickSends.Count
+            && wanted.Select(b => b.Label).SequenceEqual(ScriptQuickSends.Select(b => b.Label)))
+            return;
+
+        ScriptQuickSends.Clear();
+        foreach (var button in wanted) ScriptQuickSends.Add(button);
+    }
+
+    /// <summary>
+    /// Works out where a button that did not ask should send: the node it named,
+    /// or the channel it named. Reports to the status line and answers false
+    /// when the name matches nothing, since a button pointed at a channel that
+    /// has since been renamed should say so rather than fall back to the
+    /// primary and transmit somewhere unintended.
+    /// </summary>
+    public bool TryResolveQuickSendDestination(
+        QuickSendButton button, out ChannelConfig? channel, out uint? dmNodeNum)
+    {
+        channel = null;
+        dmNodeNum = null;
+
+        if (ScriptEngine.TryParseNodeId(button.Destination) is var node && node != 0)
+        {
+            dmNodeNum = node;
+            return true;
+        }
+
+        var match = Tabs.OfType<ChannelTabViewModel>()
+                        .FirstOrDefault(c => !c.Config.IsDisabled
+                            && string.Equals(c.Config.Name, button.Destination,
+                                             StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            StatusText = $"{button.Label}: no channel or node called \"{button.Destination}\".";
+            _rxHost.Log($"scripts: {button.FileName} quick_send \"{button.Label}\" points at " +
+                        $"\"{button.Destination}\", which is not a channel or a node id");
+            return false;
+        }
+
+        channel = match.Config;
+        return true;
+    }
+
+    /// <summary>
+    /// Runs whatever scripts put <paramref name="label"/> on the Quick send bar,
+    /// aimed at the destination already resolved for it.
+    /// </summary>
+    /// <remarks>
+    /// A button press is not something that arrived over the air, so the event
+    /// carries no sender: conditions asking who sent it (from:, snr_above:,
+    /// hops_below:, favorite:, has_key:) fail closed, while the ones asking
+    /// where it is going (scope:, channel:) read the destination below.
+    /// </remarks>
+    public void RunScriptQuickSend(string label, ChannelConfig? channel, uint? dmNodeNum)
+    {
+        if (!ScriptsEnabled)
+        {
+            StatusText = "Scripts are turned off.";
+            return;
+        }
+        if (!IsRunning)
+        {
+            StatusText = "Start the receiver before running a script.";
+            return;
+        }
+
+        bool isDirect = dmNodeNum is not null;
+        var evt = new ScriptEvent
+        {
+            Kind = ScriptEventKind.QuickSend,
+            QuickSendName = label,
+            ToNode = dmNodeNum ?? 0,
+            IsDirect = isDirect,
+            Channel = isDirect ? string.Empty : channel?.Name ?? string.Empty,
+            IsPrimaryChannel = !isDirect && channel?.Role == ChannelRole.Primary,
+            Self = BuildScriptSelf(),
+            At = DateTimeOffset.Now,
+        };
+
+        IReadOnlyList<ScriptRun> runs;
+        try
+        {
+            runs = _scriptEngine.Evaluate(evt);
+        }
+        catch (Exception ex)
+        {
+            _rxHost.Log($"scripts: {label} failed to evaluate — {ex.Message}");
+            return;
+        }
+
+        if (runs.Count == 0)
+        {
+            // The button exists, so a script named it; reaching here means its
+            // conditions turned the press down.
+            _rxHost.Log($"scripts: {label} matched no script that would run here");
+            StatusText = $"{label}: nothing to send.";
+            return;
+        }
+
+        foreach (var run in runs) Start(run);
         RaiseScriptsStatusChanged();
     }
 

@@ -1,0 +1,43 @@
+# Puts a "Ping" button on the Quick send bar that sends !ping where you point it.
+#
+# The other half of ping.yaml: that one answers a !ping, this one sends it.
+#
+# WHO ACTUALLY ANSWERS
+#   Almost nobody, unless you have arranged it. !ping is a MeshRF convention,
+#   not a Meshtastic one — stock firmware has no idea what it means and ignores
+#   it, as does any node whose owner has not enabled a script that answers. The
+#   node that does answer is one running ping.yaml, and that sample replies to
+#   direct messages only, so aim this at that node rather than at a channel.
+#   Pointed at a channel it still transmits, and is still the quickest way to
+#   watch the button work — just do not read the silence as a problem.
+#
+# Nothing to configure and no credential.
+
+enabled: false
+
+alias: Ping a node from a button
+
+trigger:
+  # The label on the button, which is also how the press finds this script: a
+  # button runs only the scripts that asked for it by that name.
+  - quick_send: Ping
+    # Which channel or node it goes to, chosen when you press it, exactly like
+    # the built-in quick sends beside it. Naming the node that runs ping.yaml
+    # instead — to: "!a1b2c3d4" — makes it a one-press button that never asks.
+    to: ask
+
+action:
+  # No to: or channel:, so it goes wherever the button was pointed. Naming
+  # either here would override that and send somewhere else entirely.
+  - send:
+      text: "!ping"
+      # No hops: here, so this travels at the hop limit under My Node. It needs
+      # them: the node answering may be several hops off, and hops: 0 would keep
+      # the ping from ever reaching it. Add hops: 0 only to ask the narrower
+      # question of who can hear you with nobody relaying.
+
+limits:
+  # A button is pressed deliberately, so this is not guarding against a runaway
+  # script — it is guarding against a leaned-on button.
+  cooldown: 30s
+  max_per_hour: 10

@@ -23,7 +23,7 @@ public static class ScriptParser
         ["enabled", "alias", "mode", "trigger", "condition", "action", "limits"];
 
     private static readonly string[] TriggerKinds =
-        ["text", "command", "new_node", "reaction", "every", "at"];
+        ["text", "command", "new_node", "reaction", "every", "at", "quick_send"];
 
     private static readonly string[] ConditionKinds =
         ["scope", "channel", "not_channel", "from", "not_from", "snr_above", "hops_below", "between",
@@ -717,6 +717,30 @@ public static class ScriptParser
             case "new_node":
                 RejectUnknownKeys(map, kinds, "trigger option", problems);
                 return new ScriptTrigger { Kind = ScriptTriggerKind.NewNode, Line = line };
+
+            case "quick_send":
+            {
+                RejectUnknownKeys(map, [.. kinds, "to"], "trigger option", problems);
+                var label = (AsScalar(value, problems, "quick_send") ?? string.Empty).Trim();
+                if (label.Length == 0)
+                {
+                    problems.Add(ScriptProblem.Error(line, column,
+                        "quick_send: needs a name — it is the label on the button"));
+                    return null;
+                }
+                // Defaults to asking, which is what every built-in quick send
+                // does. A button that transmits somewhere its label never named
+                // is the one worth not having.
+                var to = (ReadString(map, "to", problems) ?? string.Empty).Trim();
+                if (to.Length == 0) to = ScriptTrigger.QuickSendAsk;
+                return new ScriptTrigger
+                {
+                    Kind = ScriptTriggerKind.QuickSend,
+                    Pattern = label,
+                    Destination = to,
+                    Line = line,
+                };
+            }
 
             case "reaction":
             {

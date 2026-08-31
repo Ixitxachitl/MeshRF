@@ -339,6 +339,45 @@ public class SampleScriptTests
             .ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Loads one sample as if it had been copied in and switched on.</summary>
+    [Fact]
+    public void The_Quick_Ping_Sample_Puts_A_Button_On_The_Bar()
+    {
+        // The only sample whose trigger is a button rather than something
+        // arriving: nothing else here would notice if the bar stopped being
+        // offered the label, since the file would still parse and still arm.
+        var engine = Armed("quick-ping.yaml");
+
+        var button = Assert.Single(engine.QuickSendButtons);
+        Assert.Equal("Ping", button.Label);
+        Assert.True(button.Asks, "the sample should ask where it is sending");
+    }
+
+    [Fact]
+    public void The_Quick_Ping_Sample_Sends_Where_The_Button_Was_Pointed()
+    {
+        var engine = Armed("quick-ping.yaml");
+
+        var run = Assert.Single(engine.Evaluate(new ScriptEvent
+        {
+            Kind = ScriptEventKind.QuickSend,
+            QuickSendName = "Ping",
+            Channel = "Test",
+            Self = new ScriptSelf(0x11111111, "ME", "My Node", 101),
+            At = DateTimeOffset.Now,
+        }));
+
+        var action = Assert.Single(run.Actions);
+        Assert.Equal(ScriptActionKind.Send, action.Kind);
+        Assert.Equal("!ping", run.Expansion.ExpandMessage(action.Text));
+        // The chosen channel, not the primary: an unaddressed send: under a
+        // button goes where the button was aimed.
+        Assert.Equal("Test", action.ChannelName);
+        Assert.Equal(0u, action.ToNode);
+        // No hops: of its own. The node that answers a !ping may be several
+        // hops off, so pinning this to 0 would stop the ping reaching it.
+        Assert.Null(action.Hops);
+    }
+
     private static ScriptEngine Armed(string fileName)
     {
         var path = Path.Combine(SamplesDirectory, fileName);

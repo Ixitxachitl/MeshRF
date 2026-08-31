@@ -64,6 +64,8 @@ public enum ScriptTriggerKind
     Every,
     /// <summary>Fires once a day at a wall-clock time.</summary>
     At,
+    /// <summary>Fires when its button in the Quick send bar is pressed.</summary>
+    QuickSend,
 }
 
 public sealed class ScriptTrigger
@@ -71,9 +73,15 @@ public sealed class ScriptTrigger
     public ScriptTriggerKind Kind { get; init; }
 
     /// <summary>Regex for <see cref="ScriptTriggerKind.Text"/>, the bare command
-    /// word for <see cref="ScriptTriggerKind.Command"/>, and the emoji (empty =
-    /// any) for <see cref="ScriptTriggerKind.Reaction"/>.</summary>
+    /// word for <see cref="ScriptTriggerKind.Command"/>, the emoji (empty =
+    /// any) for <see cref="ScriptTriggerKind.Reaction"/>, and the button label
+    /// for <see cref="ScriptTriggerKind.QuickSend"/>.</summary>
     public string Pattern { get; init; } = string.Empty;
+
+    /// <summary>Where a <see cref="ScriptTriggerKind.QuickSend"/> button sends:
+    /// <see cref="QuickSendAsk"/> to choose at the moment it is pressed, the
+    /// name of a channel, or a node id for a direct message.</summary>
+    public string Destination { get; init; } = string.Empty;
 
     /// <summary>Case-insensitive matching, default on. Text triggers only.</summary>
     public bool IgnoreCase { get; init; } = true;
@@ -87,6 +95,15 @@ public sealed class ScriptTrigger
     /// <summary>1-based line in the source file, for error reporting and for
     /// the editor's jump-to-problem.</summary>
     public int Line { get; init; }
+
+    /// <summary>The <c>to:</c> value that means "prompt for the destination
+    /// when the button is pressed", the way the built-in quick sends do.</summary>
+    public const string QuickSendAsk = "ask";
+
+    /// <summary>Whether this button chooses its destination when pressed.</summary>
+    public bool AsksForDestination =>
+        Kind == ScriptTriggerKind.QuickSend
+        && string.Equals(Destination, QuickSendAsk, StringComparison.OrdinalIgnoreCase);
 }
 
 public enum ScriptConditionKind
@@ -244,4 +261,17 @@ public sealed class ScriptLimits
 
     /// <summary>Hard ceiling on firings per rolling hour.</summary>
     public int MaxPerHour { get; init; } = 6;
+}
+
+/// <summary>
+/// A button a script asks the Quick send bar to show.
+/// </summary>
+/// <param name="Label">What the button says, and what identifies the press.</param>
+/// <param name="Destination">Where it sends: <see cref="ScriptTrigger.QuickSendAsk"/>,
+/// a channel name, or a node id.</param>
+/// <param name="FileName">Script that declared it, for diagnostics.</param>
+public sealed record QuickSendButton(string Label, string Destination, string FileName)
+{
+    public bool Asks =>
+        string.Equals(Destination, ScriptTrigger.QuickSendAsk, StringComparison.OrdinalIgnoreCase);
 }

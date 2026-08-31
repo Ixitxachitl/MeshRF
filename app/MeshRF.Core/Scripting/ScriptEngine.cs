@@ -47,6 +47,17 @@ public sealed class ScriptEngine
     /// <summary>Names of the loaded scripts, in the order they run.</summary>
     public IReadOnlyList<string> ArmedNames => _scripts.Select(s => s.FileName).ToList();
 
+    /// <summary>
+    /// Every quick_send button the armed scripts ask for, in the order the
+    /// scripts are listed. Labels can repeat: two scripts may share a button,
+    /// and pressing it runs both.
+    /// </summary>
+    public IReadOnlyList<QuickSendButton> QuickSendButtons =>
+        _scripts.SelectMany(s => s.Script.Triggers
+                    .Where(t => t.Kind == ScriptTriggerKind.QuickSend)
+                    .Select(t => new QuickSendButton(t.Pattern, t.Destination, s.FileName)))
+                .ToList();
+
     /// <summary>Raised for anything worth putting in the app log that isn't a
     /// run: a skipped action, a regex that timed out, a script held back by its
     /// limits.</summary>
@@ -231,6 +242,13 @@ public sealed class ScriptEngine
                 case ScriptTriggerKind.NewNode when evt.Kind == ScriptEventKind.NewNode:
                     return true;
 
+                case ScriptTriggerKind.QuickSend when evt.Kind == ScriptEventKind.QuickSend:
+                    // Matched by label, so pressing one button runs only the
+                    // script that put it there.
+                    if (string.Equals(trigger.Pattern, evt.QuickSendName, StringComparison.Ordinal))
+                        return true;
+                    break;
+
                 case ScriptTriggerKind.Reaction when evt.Kind == ScriptEventKind.Reaction:
                     // An empty pattern is the "any" form.
                     if (trigger.Pattern.Length == 0 ||
@@ -281,11 +299,11 @@ public sealed class ScriptEngine
                 return condition.Scope switch
                 {
                     ScriptScope.Any => true,
-                    ScriptScope.Direct => evt.Kind != ScriptEventKind.Timer && evt.IsDirect,
-                    ScriptScope.Channel => evt.Kind != ScriptEventKind.Timer && !evt.IsDirect,
+                    ScriptScope.Direct => evt.HasDestination && evt.IsDirect,
+                    ScriptScope.Channel => evt.HasDestination && !evt.IsDirect,
                     // Broadcast on the primary. A direct message carries no
                     // channel of its own, so it is never "on" one.
-                    ScriptScope.Primary => evt.Kind != ScriptEventKind.Timer && !evt.IsDirect && evt.IsPrimaryChannel,
+                    ScriptScope.Primary => evt.HasDestination && !evt.IsDirect && evt.IsPrimaryChannel,
                     _ => false,
                 };
 
@@ -311,7 +329,7 @@ public sealed class ScriptEngine
                 return evt.SnrDb is { } snr && snr > condition.Number;
 
             case ScriptConditionKind.HopsBelow:
-                return evt.Kind != ScriptEventKind.Timer && evt.Hops < condition.Number;
+                return evt.HasSender && evt.Hops < condition.Number;
 
             case ScriptConditionKind.Between:
                 // The event's own offset, not the machine's current one. The
@@ -435,8 +453,9 @@ public sealed class ScriptEngine
         string fileName, ScriptAction action, ScriptEvent evt, ScriptExpansion expansion)
     {
         // Where an answer goes: back to the sender for a direct message,
-        // otherwise out on the channel it arrived on.
-        uint replyTo = evt.IsDirect ? evt.FromNode : 0;
+        // otherwise out on the channel it arrived on. A quick_send button has
+        // no sender, so it answers to the destination chosen for it instead.
+        uint replyTo = evt.IsDirect ? evt.DestinationNode : 0;
         string replyChannel = evt.IsDirect ? string.Empty : evt.Channel;
 
         switch (action.Kind)
@@ -453,6 +472,18 @@ public sealed class ScriptEngine
 
             case ScriptActionKind.Send:
             {
+                // A send: under a quick_send trigger that names neither a node
+                // nor a channel goes where the button was pointed. Anywhere
+                // else an unaddressed send: means the primary, which is what a
+                // script with no button has always meant by it.
+                if (evt.Kind == ScriptEventKind.QuickSend
+                    && action.To.Length == 0 && action.Channel.Length == 0)
+                {
+                    return new ResolvedAction(
+                        ScriptActionKind.Send, action.Text,
+                        replyTo, replyChannel, 0, TimeSpan.Zero, Hops: action.Hops);
+                }
+
                 uint to = 0;
                 if (action.To.Length > 0)
                 {
