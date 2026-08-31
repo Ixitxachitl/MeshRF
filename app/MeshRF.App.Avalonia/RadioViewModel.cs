@@ -1825,7 +1825,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnWaterfallFloorDbChanged(double value) => SaveSettings();
     partial void OnWaterfallCeilDbChanged(double value) => SaveSettings();
     partial void OnWaterfallAutoLevelsChanged(bool value) => SaveSettings();
-    partial void OnPendingReplyPacketIdChanged(uint value) => OnPropertyChanged(nameof(HasPendingReply));
+    partial void OnPendingReplyPacketIdChanged(uint value)
+    {
+        OnPropertyChanged(nameof(HasPendingReply));
+        NotifyComposeBudgetChanged();
+    }
 
     /// <summary>
     /// Re-derives our node number from the current public key and adopts it.
@@ -1921,6 +1925,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(LicensedEncryptedChannelWarning));
         OnPropertyChanged(nameof(HasLicensedEncryptedChannelWarning));
         RefreshEffectiveSettings();
+        // Licensed operation rules PKC out, which hands a DM back its 12 bytes.
+        NotifyComposeBudgetChanged();
     }
     partial void OnMyIsUnmessagableChanged(bool value) { SaveSettings(); RefreshSelfNode(); RefreshEffectiveSettings(); }
     // The self node record embeds the public key and derives our node number
@@ -1940,6 +1946,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         SyncPublicKeyToPrivateKey();
         SaveSettings();
+        // Whether we have a usable identity key decides whether a DM is sealed,
+        // and a sealed one carries 12 bytes less.
+        NotifyComposeBudgetChanged();
     }
 
     /// <summary>
@@ -2352,6 +2361,29 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Whether a message to <paramref name="to"/> would be PKC-sealed, and the
+    /// keys that would seal it.
+    /// </summary>
+    /// <remarks>
+    /// A direct message must be PKC-sealed. Firmware rejects a text message
+    /// addressed to it that decrypted with the channel PSK outright
+    /// ("Rejecting legacy DM", Router.cpp) unless the node is licensed, so a
+    /// legacy unicast DM is silently dropped by the peer. Licensed operation
+    /// rules PKC out entirely (firmware wouldEncryptWithPKC), so a DM falls
+    /// back to the plaintext legacy form — the only lawful one on ham bands.
+    /// </remarks>
+    private bool TryPkcKeysFor(uint to, out byte[] myPrivateKey, out byte[] peerPublicKey)
+    {
+        myPrivateKey = Array.Empty<byte>();
+        peerPublicKey = Array.Empty<byte>();
+        if (to == 0xFFFFFFFFu) return false;
+
+        myPrivateKey = TryParseKeyBase64(MyPrivateKey);
+        peerPublicKey = TryParseHex(_rxHost.PublicKeyHexFor(to));
+        return !MyIsLicensed && myPrivateKey.Length == 32 && peerPublicKey.Length == 32;
+    }
+
+    /// <summary>
     /// Sends one text message and records it, independently of what the UI has
     /// selected.
     /// </summary>
@@ -2383,23 +2415,20 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (_core is null || text.Length == 0) return false;
 
-        // A direct message must be PKC-sealed. Firmware rejects a text message
-        // addressed to it that decrypted with the channel PSK outright
-        // ("Rejecting legacy DM", Router.cpp) unless the node is licensed, so a
-        // legacy unicast DM is silently dropped by the peer.
-        byte[] myPriv = Array.Empty<byte>(), peerPub = Array.Empty<byte>();
-        bool usePkc = false;
-
-        if (to != 0xFFFFFFFFu)
-        {
-            myPriv = TryParseKeyBase64(MyPrivateKey);
-            peerPub = TryParseHex(_rxHost.PublicKeyHexFor(to));
-            // Licensed operation rules PKC out entirely (firmware
-            // wouldEncryptWithPKC), so a DM falls back to the plaintext
-            // legacy form — which is the only lawful one on ham bands.
-            usePkc = !MyIsLicensed && myPriv.Length == 32 && peerPub.Length == 32;
-        }
+        bool usePkc = TryPkcKeysFor(to, out var myPriv, out var peerPub);
         if (!usePkc && channel is null) return false;
+
+        // Oversize text would build a frame the modem refuses (LoraEncoder
+        // throws above 255 bytes, and the SX1262 path rejects it), which
+        // surfaces as a bare transmit failure. Say what is actually wrong
+        // instead — the compose bar's counter shows the same budget.
+        int limit = TextMessageLimits.MaxTextBytes(pkc: usePkc, reply: replyId != 0);
+        int size = TextMessageLimits.ByteCount(text);
+        if (size > limit)
+        {
+            StatusText = $"Message is {size} bytes; one frame carries {limit}.";
+            return false;
+        }
 
         var packetId = NextPacketId();
         byte hops = hopLimit ?? (byte)HopLimit;
@@ -2457,9 +2486,44 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SelectedTab is not null && !string.IsNullOrWhiteSpace(MessageText) &&
         // Nothing goes out on a disabled channel: firmware has no key or hash
         // for one, so the frame would be unaddressable.
-        SelectedTab is not ChannelTabViewModel { Config.IsDisabled: true };
+        SelectedTab is not ChannelTabViewModel { Config.IsDisabled: true } &&
+        !ComposeOverLimit;
 
-    partial void OnMessageTextChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
+    // A message costs what it costs in UTF-8, and the budget moves with where
+    // it is going — see TextMessageLimits. The compose bar shows both, because
+    // a message that doesn't fit is otherwise only found out about on send, and
+    // the count that matters is not one the writer can see on screen: an emoji
+    // is one character and four bytes.
+
+    /// <summary>What the message being composed would occupy on air, including
+    /// the alert bell added on the way out.</summary>
+    public int ComposeBytes =>
+        TextMessageLimits.ByteCount(AlertBell.ForTransmission(MessageText.Trim()));
+
+    /// <summary>Bytes of text one frame can carry to where the selected tab
+    /// sends.</summary>
+    public int ComposeByteLimit =>
+        TextMessageLimits.MaxTextBytes(
+            pkc: TryPkcKeysFor(SelectedTab is ConversationTabViewModel c ? c.NodeNum : 0xFFFFFFFFu,
+                               out _, out _),
+            reply: PendingReplyPacketId != 0);
+
+    public bool ComposeOverLimit => ComposeBytes > ComposeByteLimit;
+
+    public string ComposeByteCounter => $"{ComposeBytes}/{ComposeByteLimit}";
+
+    /// <summary>Refreshes the compose counter, from every change that moves
+    /// either half of it — the text, and everything that sizes the budget.</summary>
+    private void NotifyComposeBudgetChanged()
+    {
+        OnPropertyChanged(nameof(ComposeBytes));
+        OnPropertyChanged(nameof(ComposeByteLimit));
+        OnPropertyChanged(nameof(ComposeOverLimit));
+        OnPropertyChanged(nameof(ComposeByteCounter));
+        SendMessageCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnMessageTextChanged(string value) => NotifyComposeBudgetChanged();
     partial void OnSelectedTabChanged(ITabItem? value)
     {
         // Looking at the tab is what marks its activity seen; without this the
@@ -2472,7 +2536,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             if (_tabHistory.Count > TabHistoryDepth) _tabHistory.RemoveRange(TabHistoryDepth, _tabHistory.Count - TabHistoryDepth);
         }
         if (value is ChannelTabViewModel ch) _lastSelectedChannelIndex = ch.Config.Index;
-        SendMessageCommand.NotifyCanExecuteChanged();
+        NotifyComposeBudgetChanged();
         OnPropertyChanged(nameof(CanRemoveSelectedChannel));
         RemoveSelectedChannelCommand.NotifyCanExecuteChanged();
         SaveSettings();

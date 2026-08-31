@@ -144,6 +144,16 @@
             <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
         </Style>
 
+        <!-- Compose byte counter: quiet until the message no longer fits,
+             then the same red the app uses for an overridden value. -->
+        <Style Selector="TextBlock.byteCount">
+            <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+        </Style>
+        <Style Selector="TextBlock.byteCount.over">
+            <Setter Property="Foreground" Value="{DynamicResource BrushOverridden}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
         <Style Selector="TextBlock.attention">
             <Setter Property="FontWeight" Value="SemiBold" />
             <Style.Animations>
@@ -1420,6 +1430,13 @@
                     </Border>
 
                     <DockPanel Grid.Row="2" Margin="0,6,0,0" LastChildFill="True">
+                        <TextBlock DockPanel.Dock="Right" Classes="byteCount"
+                                   Classes.over="{Binding ComposeOverLimit}"
+                                   Text="{Binding ComposeByteCounter}"
+                                   FontFamily="Consolas" FontSize="11" MinWidth="52"
+                                   Margin="6,0,0,0" TextAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   ToolTip.Tip="UTF-8 bytes used of what one LoRa frame carries to this destination. An emoji costs four; most non-ASCII costs two or three." />
                         <Button DockPanel.Dock="Right" Content="Send" Margin="4,0,0,0"
                                 Command="{Binding SendMessageCommand}" />
                         <Button DockPanel.Dock="Left" Content="😀" Margin="0,0,4,0" Padding="6,1"
