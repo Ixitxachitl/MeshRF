@@ -7,6 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MeshRF.Channels;
+using MeshRF.Mesh;
 using MeshRF.Nodes;
 using MeshRF.Scripting;
 using MeshRF.Waypoints;
@@ -909,6 +910,22 @@ public partial class MainWindow : Window
         _viewModel.MessageText = text.Insert(caret, glyph);
         ComposeBox.CaretIndex = caret + glyph.Length;
         ComposeBox.Focus();
+    }
+
+    /// <summary>
+    /// Inserts a bell emoji at the caret. Sending is what turns it into an
+    /// alert: the control character firmware listens for is added on the way
+    /// out, so the box shows a bell rather than the placeholder box a
+    /// non-printing character draws.
+    /// </summary>
+    private void OnInsertAlertBell(object? sender, RoutedEventArgs e)
+    {
+        var text = _viewModel.MessageText ?? string.Empty;
+        int caret = Math.Clamp(ComposeBox.CaretIndex, 0, text.Length);
+        _viewModel.MessageText = text.Insert(caret, AlertBell.Glyph);
+        ComposeBox.CaretIndex = caret + AlertBell.Glyph.Length;
+        ComposeBox.Focus();
+        _viewModel.StatusText = "Alert bell added - this message will sound an alert on nodes set to notify on one.";
     }
 
     /// <summary>Enter sends, Shift+Enter is left alone for future multi-line.</summary>

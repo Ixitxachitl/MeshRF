@@ -227,13 +227,21 @@
                                     <TextBlock Text="{Binding TimeLabel}" FontSize="12" FontWeight="Bold"
                                                TextDecorations="Underline"
                                                Foreground="{DynamicResource BrushSubtle}" />
+                                    <!-- Marks a message the sender flagged as an alert.
+                                         The bell character itself is non-printing, so
+                                         without this an alert from a client that sends
+                                         the bell alone would look like any other. -->
+                                    <TextBlock Text="&#x00A0;&#x1F514;" FontSize="12" FontWeight="Bold"
+                                               TextDecorations="Underline"
+                                               IsVisible="{Binding HasAlertBell}"
+                                               ToolTip.Tip="Sent as an alert - carries Meshtastic's bell character" />
                                 </StackPanel>
                                 <!-- SelectableTextBlock handles its own pointer input
                                      for text selection and doesn't let the request
                                      reach the Border, so it carries the menu itself —
                                      this is the part of the bubble people actually
                                      right-click. -->
-                                <SelectableTextBlock local:MarkdownText.Text="{Binding Text}"
+                                <SelectableTextBlock local:MarkdownText.Text="{Binding DisplayText}"
                                                      local:MarkdownText.Suffix="{Binding DeliveryGlyph}"
                                                      local:MarkdownText.SuffixBrush="{Binding Delivery, Converter={StaticResource DeliveryMarkForeground}}"
                                                      Margin="0,2,0,0"
@@ -542,32 +550,6 @@
             </WrapPanel>
         </Border>
 
-        <!-- Toolbar row 4: alert sounds. The tunes themselves live in the
-             Sounds dialog — two RTTTL strings are far too wide for a toolbar,
-             and there are two of them now. -->
-        <Border DockPanel.Dock="Top"
-                Background="{DynamicResource BrushPanelBackground}"
-                BorderBrush="{DynamicResource BrushPanelBorder}"
-                BorderThickness="0,0,0,1"
-                Padding="4,1">
-            <WrapPanel>
-                <TextBlock Text="Sounds" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
-                <ComboBox ItemsSource="{Binding RingtoneModes}" SelectedItem="{Binding RingtoneMode}"
-                          FontSize="11" Width="100" Height="26" Margin="0,0,10,2"
-                          ToolTip.Tip="How long an alert tone plays. Off silences every alert, including a script's ring: action." />
-                <TextBlock Text="Volume" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
-                <Slider Width="120" Minimum="0" Maximum="100" TickFrequency="5"
-                        Value="{Binding RingtoneVolume}" VerticalAlignment="Center" Margin="0,0,4,2" />
-                <TextBlock Width="36" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,2"
-                           Text="{Binding RingtoneVolume, StringFormat='{}{0:F0}%'}" />
-                <Button Content="Tones…" FontSize="11" Height="26" Margin="0,0,4,2"
-                        Click="OnOpenRingtoneSettings"
-                        ToolTip.Tip="Edit the message and geofence tunes" />
-                <Button Content="Preview" FontSize="11" Height="26" Margin="0,0,0,2"
-                        Command="{Binding TestRingtoneCommand}" ToolTip.Tip="Preview the message tone" />
-            </WrapPanel>
-        </Border>
-
         <!-- Status bar. -->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource BrushPanelBackground}"
@@ -630,6 +612,9 @@
                             <Button DockPanel.Dock="Right" Content="Scripts" Padding="8,2" Margin="0,0,4,0"
                                     Click="OnOpenScripts"
                                     ToolTip.Tip="Automation scripts: reply to messages and send on a schedule" />
+                            <Button DockPanel.Dock="Right" Content="Notifications" Padding="8,2" Margin="0,0,4,0"
+                                    Click="OnOpenRingtoneSettings"
+                                    ToolTip.Tip="Alert tones and volume: the message, geofence and alert bell tunes, and how long each plays" />
                             <!-- Our own recorded history, the counterpart of the
                                  per-node entries in the node grid's menu. -->
                             <Button DockPanel.Dock="Right" Content="Location" Padding="8,2" Margin="0,0,4,0"
@@ -1439,6 +1424,9 @@
                                 Command="{Binding SendMessageCommand}" />
                         <Button DockPanel.Dock="Left" Content="😀" Margin="0,0,4,0" Padding="6,1"
                                 Click="OnPickComposeEmoji" ToolTip.Tip="Insert an emoji" />
+                        <Button DockPanel.Dock="Left" Content="🔔" Margin="0,0,4,0" Padding="6,1"
+                                Click="OnInsertAlertBell"
+                                ToolTip.Tip="Insert Meshtastic's alert bell, which asks the receiving node to sound its notification for this message" />
                         <TextBox Name="ComposeBox" Text="{Binding MessageText}"
                                  PlaceholderText="Type a message and press Enter or Send"
                                  KeyDown="OnComposeKeyDown" />

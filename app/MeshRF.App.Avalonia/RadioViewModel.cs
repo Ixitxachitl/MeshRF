@@ -400,6 +400,23 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _geofenceRtttl = DefaultGeofenceRtttl;
 
+    /// <summary>Tone for a message carrying Meshtastic's alert bell character.
+    /// A struck-bell pattern by default, so a message the sender marked as
+    /// urgent is audibly not the one everybody else sends.</summary>
+    public const string DefaultAlertBellRtttl = "bell:d=16,o=7,b=180:c,p,c,4p,c,p,c";
+
+    [ObservableProperty]
+    private string _alertBellRtttl = DefaultAlertBellRtttl;
+
+    /// <summary>Each tone plays for as long as its own setting says. They used
+    /// to share one, which meant silencing geofence crossings silenced messages
+    /// too -- and the whole point of a separate tone is a separate decision.</summary>
+    [ObservableProperty]
+    private string _geofenceRingtoneMode = "Play once";
+
+    [ObservableProperty]
+    private string _alertBellRingtoneMode = "Play once";
+
     /// <summary>Map the display name to the enum, matching MeshRF.App's labels.
     /// Fully qualified because the RingtoneMode property above shadows the
     /// enum type name inside this class.</summary>
@@ -497,9 +514,22 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             ? (uint)Math.Clamp((DateTime.UtcNow - started).TotalSeconds, 0, uint.MaxValue)
             : 0u;
 
-    /// <summary>Play the incoming-message alert, unless it's muted.</summary>
-    public void PlayIncomingRingtone() =>
-        _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+    /// <summary>Play the incoming-message alert, unless it's muted. A message
+    /// carrying the alert bell gets the bell tone and its own duration, which
+    /// is the whole reason a sender bothers to include one.</summary>
+    public void PlayIncomingRingtone(bool hasAlertBell)
+    {
+        if (hasAlertBell) PlayAlertBellTone();
+        else _ringtone.Play(RingtoneRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+    }
+
+    /// <summary>Play the alert-bell tone for a message that carried one.</summary>
+    public void PlayAlertBellTone() =>
+        _ringtone.Play(AlertBellRtttl, ParseRingtoneMode(AlertBellRingtoneMode), RingtoneVolume / 100.0);
+
+    [RelayCommand]
+    private void TestAlertBellTone() =>
+        _ringtone.Play(AlertBellRtttl, ParseRingtoneMode(AlertBellRingtoneMode), RingtoneVolume / 100.0);
 
     /// <summary>Puts both tunes back to stock. Mode and volume are left alone:
     /// they are how loud and how long the operator wants alerts, which is a
@@ -509,16 +539,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         RingtoneRtttl = IRingtonePlayer.MeshtasticDefault;
         GeofenceRtttl = DefaultGeofenceRtttl;
+        AlertBellRtttl = DefaultAlertBellRtttl;
     }
 
     [RelayCommand]
     private void TestGeofenceTone() =>
-        _ringtone.Play(GeofenceRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+        _ringtone.Play(GeofenceRtttl, ParseRingtoneMode(GeofenceRingtoneMode), RingtoneVolume / 100.0);
 
-    /// <summary>Play the geofence crossing chime. Shares the ringtone's mode
-    /// and volume so the Off setting silences crossings too.</summary>
+    /// <summary>Play the geofence crossing chime. Its own duration, the shared
+    /// volume: how loud alerts are is one decision, how long each kind of alert
+    /// goes on for is three.</summary>
     public void PlayGeofenceTone() =>
-        _ringtone.Play(GeofenceRtttl, ParseRingtoneMode(RingtoneMode), RingtoneVolume / 100.0);
+        _ringtone.Play(GeofenceRtttl, ParseRingtoneMode(GeofenceRingtoneMode), RingtoneVolume / 100.0);
 
     /// <summary>
     /// Sounds a script's <c>ring:</c> action. Each part falls back to the app's
@@ -545,6 +577,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnRingtoneVolumeChanged(double value) => SaveSettings();
     partial void OnRingtoneRtttlChanged(string value) => SaveSettings();
     partial void OnGeofenceRtttlChanged(string value) => SaveSettings();
+    partial void OnAlertBellRtttlChanged(string value) => SaveSettings();
+    partial void OnGeofenceRingtoneModeChanged(string value) => SaveSettings();
+    partial void OnAlertBellRingtoneModeChanged(string value) => SaveSettings();
 
     [ObservableProperty]
     private uint _pendingReplyPacketId;
@@ -920,6 +955,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedRingtoneVolume = _settings.RingtoneVolume;
         var savedRingtoneRtttl = _settings.RingtoneRtttl;
         var savedGeofenceRtttl = _settings.GeofenceRtttl;
+        var savedAlertBellRtttl = _settings.AlertBellRtttl;
+        var savedGeofenceRingtoneMode = _settings.GeofenceRingtoneMode;
+        var savedAlertBellRingtoneMode = _settings.AlertBellRingtoneMode;
         var savedLastSelectedChannelIndex = _settings.LastSelectedChannelIndex;
         var savedSelectedConversationNode = _settings.SelectedConversationNode;
 
@@ -1126,6 +1164,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RingtoneVolume = savedRingtoneVolume;
         if (!string.IsNullOrWhiteSpace(savedRingtoneRtttl)) RingtoneRtttl = savedRingtoneRtttl;
         if (!string.IsNullOrWhiteSpace(savedGeofenceRtttl)) GeofenceRtttl = savedGeofenceRtttl;
+        if (!string.IsNullOrWhiteSpace(savedAlertBellRtttl)) AlertBellRtttl = savedAlertBellRtttl;
+        if (RingtoneModes.Contains(savedGeofenceRingtoneMode)) GeofenceRingtoneMode = savedGeofenceRingtoneMode;
+        if (RingtoneModes.Contains(savedAlertBellRingtoneMode)) AlertBellRingtoneMode = savedAlertBellRingtoneMode;
         LoadNodeFilterSettings(_settings);
         // Must precede the gate below: the SaveSettings() there writes every
         // field this app owns, so loading after it would persist the
@@ -2126,6 +2167,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.RingtoneVolume = (int)Math.Round(RingtoneVolume);
         _settings.RingtoneRtttl = RingtoneRtttl;
         _settings.GeofenceRtttl = GeofenceRtttl;
+        _settings.AlertBellRtttl = AlertBellRtttl;
+        _settings.GeofenceRingtoneMode = GeofenceRingtoneMode;
+        _settings.AlertBellRingtoneMode = AlertBellRingtoneMode;
         _settings.MutedRingtoneChannels = Tabs.OfType<ChannelTabViewModel>()
             .Where(t => t.MuteRtttl).Select(t => t.Config.Index).ToList();
         _settings.MapNodeLabelMode = MapNodeLabelMode;
@@ -2296,7 +2340,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 return;
         }
 
-        if (await SendTextAsync(channel, to, MessageText.Trim(),
+        // The bell is added here rather than in the compose box: the character
+        // is non-printing, so carrying it in the text being typed shows the
+        // writer a placeholder box beside their bell.
+        if (await SendTextAsync(channel, to, AlertBell.ForTransmission(MessageText.Trim()),
                                 PendingReplyPacketId, PendingReplyContext, messages) is false)
             return;
 

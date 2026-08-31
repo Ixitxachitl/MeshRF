@@ -164,12 +164,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public event Action? OpenConversationsChanged;
 
     /// <summary>Raised when a text message addressed to us arrives from a node
-    /// that isn't ignored, so the owner can play the alert tone.</summary>
-    public Action? IncomingDirectMessage { get; set; }
+    /// that isn't ignored, so the owner can play the alert tone. The flag says
+    /// the text carried Meshtastic's alert bell, which gets its own tone.</summary>
+    public Action<bool>? IncomingDirectMessage { get; set; }
 
     /// <summary>Raised when broadcast text lands on a channel tab that isn't
-    /// muted, from a node that's neither ignored nor individually muted.</summary>
-    public Action? IncomingChannelMessage { get; set; }
+    /// muted, from a node that's neither ignored nor individually muted. The
+    /// flag says the text carried an alert bell.</summary>
+    public Action<bool>? IncomingChannelMessage { get; set; }
 
     /// <summary>Sounded for a geofence crossing. Separate from the message
     /// alerts so a crossing can be a short chime rather than the ringtone that
@@ -1583,7 +1585,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             MarkTabNeedsAttention(_conversationsByNode[header.From]);
             // Alert only for real messages from nodes we haven't ignored —
             // a tapback shouldn't ring.
-            if (!isReaction && !IsNodeIgnored(header.From)) IncomingDirectMessage?.Invoke();
+            if (!isReaction && !IsNodeIgnored(header.From))
+                IncomingDirectMessage?.Invoke(AlertBell.IsIn(result.Text));
         }
         else if (ResolveChannelTab(result.ChannelName) is { } chanTab2)
         {
@@ -1592,7 +1595,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // ignored, or that node is individually muted. Matches MeshRF.App,
             // which also rings for channel reactions (unlike the DM path above).
             if (!chanTab2.MuteRtttl && !IsNodeIgnored(header.From) && !IsNodeRtttlMuted(header.From))
-                IncomingChannelMessage?.Invoke();
+                IncomingChannelMessage?.Invoke(AlertBell.IsIn(result.Text));
         }
 
         // Last, so a script can never delay the message appearing or the alert

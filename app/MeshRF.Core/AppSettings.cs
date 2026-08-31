@@ -332,7 +332,14 @@ public sealed class AppSettings
     public uint SelectedConversationNode { get; set; }
     public List<uint> OpenConversations { get; set; } = new();
     public List<int> MutedRingtoneChannels { get; set; } = new();
+    /// <summary>How long the message tone plays. Each tone carries its own,
+    /// so a crossing or an alert bell can be silenced without silencing the
+    /// messages -- the setting used to be shared by all of them.</summary>
     public string RingtoneMode { get; set; } = "Play once";
+
+    public string GeofenceRingtoneMode { get; set; } = "Play once";
+
+    public string AlertBellRingtoneMode { get; set; } = "Play once";
     public int RingtoneVolume { get; set; } = 70;
     public string RingtoneRtttl { get; set; } =
         "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p";
@@ -344,6 +351,14 @@ public sealed class AppSettings
     /// ringtone's mode and volume.
     /// </summary>
     public string GeofenceRtttl { get; set; } = "chirp:d=32,o=5,b=160:c,e,g";
+
+    /// <summary>
+    /// Tone for a message carrying Meshtastic's alert bell character. Kept
+    /// separate because the bell is the sender saying this one matters, which
+    /// is worth hearing differently from the message tone every other message
+    /// gets.
+    /// </summary>
+    public string AlertBellRtttl { get; set; } = "bell:d=16,o=7,b=180:c,p,c,4p,c,p,c";
 
     // -- Map viewport ------------------------------------------------------
 

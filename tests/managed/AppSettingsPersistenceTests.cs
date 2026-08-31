@@ -40,6 +40,50 @@ public sealed class AppSettingsPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void Each_Alert_Tone_Keeps_Its_Own_Duration()
+    {
+        // The three durations used to be one setting. Silencing crossings has
+        // to leave messages audible, which only holds if all three round-trip
+        // independently.
+        var settings = new AppSettings
+        {
+            RingtoneMode = "30 seconds",
+            GeofenceRingtoneMode = "Off",
+            AlertBellRingtoneMode = "10 seconds",
+        };
+
+        SaveAndFlush(settings);
+
+        var loaded = AppSettings.Load();
+        Assert.Equal("30 seconds", loaded.RingtoneMode);
+        Assert.Equal("Off", loaded.GeofenceRingtoneMode);
+        Assert.Equal("10 seconds", loaded.AlertBellRingtoneMode);
+    }
+
+    [Fact]
+    public void The_Alert_Bell_Tune_Round_Trips()
+    {
+        SaveAndFlush(new AppSettings { AlertBellRtttl = "x:d=8,o=5,b=120:c" });
+
+        Assert.Equal("x:d=8,o=5,b=120:c", AppSettings.Load().AlertBellRtttl);
+    }
+
+    [Fact]
+    public void A_Settings_File_Predating_The_Split_Keeps_Its_Message_Tone()
+    {
+        // Upgrading must not silently reset what the operator had chosen: the
+        // message tone kept its key, so an old file still supplies it, and the
+        // two new durations come up at their defaults rather than Off.
+        File.WriteAllText(_path, "{\"RingtoneMode\":\"30 seconds\"}");
+
+        var loaded = AppSettings.Load();
+
+        Assert.Equal("30 seconds", loaded.RingtoneMode);
+        Assert.Equal("Play once", loaded.GeofenceRingtoneMode);
+        Assert.Equal("Play once", loaded.AlertBellRingtoneMode);
+    }
+
+    [Fact]
     public void SaveWritesAFileThatLoadsBack()
     {
         SaveAndFlush(new AppSettings { CenterFreqMHz = 913.125, MainLeftPaneStar = 2.5 });

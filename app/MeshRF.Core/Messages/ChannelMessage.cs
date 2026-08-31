@@ -2,6 +2,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using MeshRF.Mesh;
 
 namespace MeshRF;
 
@@ -16,6 +17,17 @@ public partial class ChannelMessage : ObservableObject
     public uint SenderNodeNum { get; init; }
 
     public string Text    { get; init; } = string.Empty;
+
+    /// <summary>Whether the sender marked this as an alert with Meshtastic's
+    /// bell character. Worth showing: the character is non-printing, so without
+    /// a mark here an alert is indistinguishable from any other message on a
+    /// client that does not buzz.</summary>
+    public bool HasAlertBell => AlertBell.IsIn(Text);
+
+    /// <summary>The message as it should be drawn: the bell taken out, since it
+    /// has no glyph and a font lacking one draws a placeholder box. The bell
+    /// emoji a sender may have paired with it is ordinary text and stays.</summary>
+    public string DisplayText => HasAlertBell ? AlertBell.StripFrom(Text) : Text;
     public float? RssiDbm { get; init; }
     public float? SnrDb   { get; init; }
 
@@ -111,7 +123,7 @@ public partial class ChannelMessage : ObservableObject
 
     /// <summary>Single-line rendering used for clipboard copy.</summary>
     public string Display =>
-        $"[{UiFormats.Stamp(Timestamp)}] {FromId,-12}  {Text}{DeliverySuffix}";
+        $"[{UiFormats.Stamp(Timestamp)}] {FromId,-12}  {DisplayText}{DeliverySuffix}";
 
     /// <summary>Add or update one reaction for this message. A sender only
     /// counts once per emoji.</summary>

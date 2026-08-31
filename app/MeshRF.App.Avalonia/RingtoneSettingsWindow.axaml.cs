@@ -4,9 +4,10 @@ using Avalonia.Controls;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// The two alert tunes in one place, with the mode and volume they share.
-/// Every field is a two-way binding onto <see cref="RadioViewModel"/>, which
-/// persists on change, so there is no Save button — same as the MQTT dialog.
+/// Every notification setting in one place: the three alert tunes, how long
+/// each plays, and the volume they share. Every field is a two-way binding
+/// onto <see cref="RadioViewModel"/>, which persists on change, so there is
+/// no Save button — same as the MQTT dialog.
 /// </summary>
 public partial class RingtoneSettingsWindow : Window
 {
