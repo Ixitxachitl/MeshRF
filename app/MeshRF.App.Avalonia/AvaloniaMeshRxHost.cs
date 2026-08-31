@@ -982,7 +982,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (pending.Broadcast)
         {
             _pendingAcks.Remove(header.PacketId);
-            SettleDelivery(pending.Message, MessageDelivery.Delivered);
+            SettleDelivery(pending.Message, MessageDelivery.Delivered,
+                $"heard {RelayDisplayName(header.RelayNode)} relay our broadcast");
             Log($"  relayed by {RelayDisplayName(header.RelayNode)} — channel message {header.PacketId:x8} reached the mesh");
             return;
         }
@@ -992,7 +993,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // this guard a late relay would demote a delivered message.
         if (pending.Message.Delivery != MessageDelivery.Sent) return;
 
-        SettleDelivery(pending.Message, MessageDelivery.DeliveredToMesh);
+        SettleDelivery(pending.Message, MessageDelivery.DeliveredToMesh,
+            $"heard {RelayDisplayName(header.RelayNode)} relay our direct message");
         Log($"  relayed by {RelayDisplayName(header.RelayNode)} — direct message {header.PacketId:x8} reached the mesh, "
             + "waiting on the recipient");
     }
@@ -1042,7 +1044,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
         _pendingAcks.Remove(result.RequestId);
         bool ack = result.RoutingError == 0;
-        SettleDelivery(pending.Message, ack ? MessageDelivery.Delivered : MessageDelivery.Failed);
+        SettleDelivery(pending.Message, ack ? MessageDelivery.Delivered : MessageDelivery.Failed,
+            ack
+                ? $"ACK from {NodeDisplayName(header.From)}"
+                : $"NAK from {NodeDisplayName(header.From)}, routing error {result.RoutingError}");
         Log(ack
             ? $"  ACK from {NodeDisplayName(header.From)} for id {result.RequestId:x8}"
             : $"  NAK (reason={result.RoutingError}) from {NodeDisplayName(header.From)} for id {result.RequestId:x8}");
@@ -1071,19 +1076,43 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // recipient's alone, and a red cross would deny the one thing we do
             // know. It keeps the grey check it earned.
             if (pending.Message.Delivery is not MessageDelivery.Sent) continue;
-            SettleDelivery(pending.Message, MessageDelivery.Failed);
+            SettleDelivery(pending.Message, MessageDelivery.Failed,
+                $"no ack within {AckTimeout.TotalSeconds:0}s and nothing heard relaying it");
         }
     }
 
     /// <summary>Apply a delivery state to the live bubble and persist it, so the
     /// mark survives a restart.</summary>
-    private void SettleDelivery(ChannelMessage message, MessageDelivery delivery)
+    /// <param name="reason">
+    /// Why the state changed, for the log. Every transition is logged, because
+    /// a mark that changes on its own is otherwise impossible to account for
+    /// after the fact: the timeout in particular used to turn a check into a
+    /// cross while saying nothing at all about having done so.
+    /// </param>
+    private void SettleDelivery(ChannelMessage message, MessageDelivery delivery, string reason)
     {
+        var previous = message.Delivery;
         message.Delivery = delivery;
+        if (previous != delivery)
+        {
+            Log($"  delivery {message.PacketId:x8}: {DeliveryName(previous)} -> {DeliveryName(delivery)} ({reason})");
+        }
         if (message.PacketId == 0 || MyNodeNum == 0) return;
         try { _messageStore.UpdateDelivery(message.PacketId, MyNodeNum, (int)delivery); }
         catch (Exception ex) { Log($"delivery update failed: {ex.Message}"); }
     }
+
+    /// <summary>What the log calls each state. The stored enum names would do,
+    /// but these match the marks the user actually sees.</summary>
+    private static string DeliveryName(MessageDelivery delivery) => delivery switch
+    {
+        MessageDelivery.None            => "none",
+        MessageDelivery.Sent            => "sent",
+        MessageDelivery.DeliveredToMesh => "reached mesh (grey check)",
+        MessageDelivery.Delivered       => "delivered (green check)",
+        MessageDelivery.Failed          => "failed (cross)",
+        _ => delivery.ToString(),
+    };
 
     public void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt)
     {
