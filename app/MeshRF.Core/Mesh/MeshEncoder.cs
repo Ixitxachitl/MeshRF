@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text;
 using MeshRF.Channels;
 
@@ -80,9 +80,15 @@ public static class MeshEncoder
             data.WriteFixed32Field(7, replyId);
         if (emoji != 0)
             data.WriteFixed32Field(8, emoji);
+        // Written even when every bit is clear. Firmware's perhapsEncode sets
+        // has_bitfield on everything isFromUs, and the field is explicit-presence
+        // (optional uint32 bitfield = 9), so nanopb emits tag + varint(0) for a
+        // zero value. Presence is what receivers read as "this sender is new
+        // enough to populate hop_start": without it, 2.8.0's classifyHopStart
+        // takes a hop_start of 0 for pre-2.3.0 firmware and MESHTASTIC_PREHOP_DROP
+        // discards the packet. Omitting it would blackhole every hops:0 send.
         ulong bitfield = (okToMqtt ? BitfieldOkToMqtt : 0) | (wantResponse ? BitfieldWantResponse : 0);
-        if (bitfield != 0)
-            data.WriteVarintField(9, bitfield);
+        data.WriteVarintField(9, bitfield);
 
         // field 10 = xeddsa_signature. Broadcasts, plus every packet when
         // licensed (mirrors firmware Router::perhapsEncode, which signs
@@ -195,9 +201,9 @@ public static class MeshEncoder
             data.WriteFixed32Field(7, replyId);
         if (emoji != 0)
             data.WriteFixed32Field(8, emoji);
+        // Always written — see Encode.
         ulong bitfieldPkc = (okToMqtt ? BitfieldOkToMqtt : 0) | (wantResponse ? BitfieldWantResponse : 0);
-        if (bitfieldPkc != 0)
-            data.WriteVarintField(9, bitfieldPkc);
+        data.WriteVarintField(9, bitfieldPkc);
         var plain = data.ToArray();
 
         // 2. Seal with X25519 + AES-CCM (ciphertext || 8-byte tag || 4-byte nonce).

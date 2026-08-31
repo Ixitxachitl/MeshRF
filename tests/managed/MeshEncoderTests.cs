@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text;
 using MeshRF.Channels;
 using MeshRF.Mesh;
@@ -116,24 +116,50 @@ public class MeshEncoderTests
     /// <summary>
     /// Data.bitfield presence has to survive decode, because it is what tells a
     /// hop_start of 0 ("this sender wanted zero hops") apart from a sender too
-    /// old to populate the field at all.
+    /// old to populate the field at all. Everything we originate carries it,
+    /// whatever its value — firmware's perhapsEncode sets has_bitfield on every
+    /// packet isFromUs, and 2.8.0 drops a zero-hop packet that arrives without
+    /// it (classifyHopStart / MESHTASTIC_PREHOP_DROP).
     /// </summary>
-    [Fact]
-    public void BitfieldPresenceSurvivesDecode()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void EverythingWeOriginateCarriesTheBitfield(bool okToMqtt)
     {
         var channel = DefaultChannel();
 
-        // EncodeTextMessage writes the bitfield (it carries ok_to_mqtt).
-        var withField = MeshEncoder.EncodeTextMessage(channel, 0x1u, 0x2u, "hi", okToMqtt: true);
-        var decodedWith = MeshDecoder.Decode(withField, new[] { channel });
-        Assert.NotNull(decodedWith);
-        Assert.True(decodedWith!.HasDataBitfield);
+        // A zero bitfield is still a written field: ok_to_mqtt sets a bit in it,
+        // it does not decide whether the field exists.
+        var text = MeshEncoder.EncodeTextMessage(channel, 0x1u, 0x2u, "hi", okToMqtt: okToMqtt);
+        var decodedText = MeshDecoder.Decode(text, new[] { channel });
+        Assert.NotNull(decodedText);
+        Assert.True(decodedText!.HasDataBitfield);
 
-        // A routing ack carries no bitfield at all.
-        var withoutField = MeshEncoder.EncodeRouting(channel, 0x1u, 0x2u, 0x3u, 0x4u);
-        var decodedWithout = MeshDecoder.Decode(withoutField, new[] { channel });
-        Assert.NotNull(decodedWithout);
-        Assert.False(decodedWithout!.HasDataBitfield);
+        // Including the packets no one composes — a routing ack is isFromUs too.
+        var ack = MeshEncoder.EncodeRouting(channel, 0x1u, 0x2u, 0x3u, 0x4u);
+        var decodedAck = MeshDecoder.Decode(ack, new[] { channel });
+        Assert.NotNull(decodedAck);
+        Assert.True(decodedAck!.HasDataBitfield);
+    }
+
+    /// <summary>
+    /// The case the bitfield exists for: a hops:0 send has hop_start 0, which a
+    /// 2.8.0 receiver reads as pre-2.3.0 firmware and drops unless the bitfield
+    /// is there to prove otherwise.
+    /// </summary>
+    [Fact]
+    public void ZeroHopSendsCarryTheBitfieldThatKeepsThemAlive()
+    {
+        var channel = DefaultChannel();
+        var frame = MeshEncoder.EncodeTextMessage(channel, 0x1u, 0x2u, "hi", hopLimit: 0);
+
+        Assert.True(MeshHeader.TryParse(frame, out var header));
+        Assert.Equal(0, header.HopStart);
+        Assert.Equal(0, header.HopLimit);
+
+        var decoded = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.NotNull(decoded);
+        Assert.True(decoded!.HasDataBitfield);
     }
 
     [Fact]
