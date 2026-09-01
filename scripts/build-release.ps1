@@ -53,8 +53,11 @@ if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) {
 }
 elseif ($IsLinux) {
     $platform     = 'linux'
-    $rid          = 'linux-x64'
-    $cmakePreset  = 'linux-x64'
+    # The Linux presets are named for the RID they target, so one lookup does
+    # both. Native builds only: nothing here cross-compiles, so the host's
+    # architecture is the target's.
+    $rid          = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'linux-arm64' } else { 'linux-x64' }
+    $cmakePreset  = $rid
     $nativeConfig = if ($NativeConfig) { $NativeConfig } else { 'Release' }
     # Ninja is single-config: no per-config subdirectory.
     $nativeBinDir = Join-Path $repoRoot "build/$cmakePreset/bin"

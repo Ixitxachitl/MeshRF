@@ -8,10 +8,12 @@ at all, performing LoRa demodulation and modulation in software on the host CPU.
 It decodes Meshtastic frames, decrypts channel payloads, parses protobufs, and
 provides a desktop UI for channels, nodes, map, telemetry, and messaging.
 
-A CH341+SX1262 USB stick can also be used for either direction, on its own or
-alongside an SDR — see [SX1262 USB sticks](#sx1262-usb-sticks).
+An SX1262 hardware modem can also be used for either direction, on its own or
+alongside an SDR — over a CH341 USB stick on any platform, or on the host's own
+SPI bus on Linux (uConsole AIO V2, Raspberry Pi HATs). See
+[SX1262 hardware modems](#sx1262-hardware-modems).
 
-Current release line: **v2.3.3**
+Current release line: **v2.4.0**
 
 <img width="1547" height="990" alt="image" src="https://github.com/user-attachments/assets/ba593234-2b41-4b29-85e2-f85aba94e5fe" />
 
@@ -19,44 +21,60 @@ Current release line: **v2.3.3**
 ## Status
 
 - Receive path is operational end-to-end: SDR IQ -> DSP -> LoRa demod ->
-  Meshtastic frame decode -> decrypt -> parse -> UI. An SX1262 USB stick can
-  take the place of everything left of the frame decode, handing up finished
-  frames instead of IQ.
+  Meshtastic frame decode -> decrypt -> parse -> UI. An SX1262 modem can take
+  the place of everything left of the frame decode, handing up finished frames
+  instead of IQ.
 - Transmit path is operational for channel broadcast, direct messages, and
   control/management packets, either modulated in software onto a HackRF or
-  handed to an SX1262 USB stick.
+  handed to an SX1262 modem.
 - The app is actively maintained with frequent updates focused on map scale,
   messaging UX, telemetry/routing controls, and observability.
-- Windows, Linux and macOS all build the native core and the app from source.
-  Windows is the most exercised; Linux and macOS builds are produced by CI and
-  have had far less time on real radio hardware.
+- Windows, Linux and macOS all build the native core and the app from source,
+  x64 everywhere and arm64 on Linux and macOS. Windows is the most exercised;
+  Linux and macOS builds are produced by CI and have had far less time on real
+  radio hardware. The linux-arm64 artifact and the SPI radio path it exists for
+  have not been run on hardware at all yet.
 
 ## Key Capabilities
 
 ### Radio and Signal Processing
 
 - Runtime-selectable radio backend: HackRF One or RTL-SDR for receive, HackRF
-  One for transmit, or a CH341+SX1262 USB stick for either direction.
+  One for transmit, or an SX1262 hardware modem for either direction.
 - Independent RX and TX device selection, so an SDR receiver can be paired with
-  a hardware transmitter. See [SX1262 USB sticks](#sx1262-usb-sticks).
+  a hardware transmitter. See [SX1262 hardware modems](#sx1262-hardware-modems).
 - Software LoRa demod/mod with Meshtastic-oriented preset support.
 - Optional receive conditioning features (including DC blocking).
 - Live spectrum and waterfall with packet-linked snapshot support (SDR receive
   only — a hardware modem produces no IQ).
 
-### SX1262 USB sticks
+### SX1262 hardware modems
 
 MeshRF normally modulates and demodulates LoRa in software using an SDR. It can
-instead hand framed bytes to a CH341+SX1262 USB stick, which does preamble,
-sync, FEC and chirping itself. The stick is selectable for **RX, TX or both**.
+instead hand framed bytes to an SX1262, which does preamble, sync, FEC and
+chirping itself. The radio is selectable for **RX, TX or both**.
+
+An SX1262 is reached over one of two buses, chosen by the board you pick:
+
+| Bus | Boards | Platforms |
+| --- | --- | --- |
+| CH341 USB-SPI bridge | Elecrow MeshStick, NullHop/muzi MeshToad V3 | Windows, Linux, macOS |
+| The host's own SPI bus | uConsole AIO V2, Raspberry Pi HATs | Linux only |
+
+Everything above the PHY — decrypt, protobuf, routing, MQTT, the whole UI — is
+identical either way, because both paths emit the same frame events the
+software demodulator does.
 
 The intended setup is **SDR receive + SX1262 transmit**. It keeps everything
 that makes MeshRF worth using — the spectrum, waterfall, packet spectrogram and
 IQ capture — while fixing the weak leg: HackRF TX is ~10 dBm of unfiltered
-wideband output, where these sticks put out 22 or 30 dBm through a matched
-front end. Because the stick is a separate USB device, **RX is never paused for
-a burst**; the waterfall stays live throughout, and the receiver hears the
+wideband output, where these modems put out 22 or 30 dBm through a matched
+front end. Because the modem is a device of its own — a second USB device, or a
+radio on the SPI bus while the SDR is on USB — **RX is never paused for a
+burst**; the waterfall stays live throughout, and the receiver hears the
 transmission.
+
+#### USB sticks
 
 **Receiving** on the stick as well makes MeshRF a complete node for someone who
 owns a LoRa stick and no SDR — one stick serves both directions half-duplex,
@@ -107,6 +125,73 @@ With more than one stick attached, a **Stick** picker appears offering each
 one's EEPROM serial — the only thing that distinguishes them, since they all
 share `1a86:5512` and report no product string. With a single stick the picker
 stays hidden and the first device found is used.
+
+#### SPI boards (Linux)
+
+On a single-board computer the radio is usually soldered to the host's own SPI
+bus rather than hanging off USB. MeshRF drives those through `/dev/spidevB.D`
+and the GPIO character device — the same wiring meshtasticd uses, so a board
+with a meshtasticd config already has its pin map written down.
+
+| Board | Radio | Antenna-port power |
+| --- | --- | --- |
+| uConsole AIO V2 | bare SX1262 on SPI1 | -9 .. 22 dBm |
+| Custom SPI board | whatever you declare | whatever you declare |
+
+Only one preset ships, and deliberately: a pin map can be read off a config
+file, but a **power model cannot**. Nothing on an SPI bus reports whether a
+power amplifier sits after the chip, and meshtasticd's configs do not record
+one either — they cap chip power instead. Assuming a board is bare when it has
+an E22-style front end is wrong in the direction that over-radiates: the UI
+would say 22 dBm while the antenna saw 30. The uConsole AIO V2 is listed
+because it is genuinely a bare SX1262 with nothing after it. Every other board
+goes through **Custom SPI board**, where the front end is yours to declare.
+
+Requirements:
+
+- SPI enabled (`dtparam=spi=on`, or `raspi-config`), so `/dev/spidev*` exists.
+- Read/write on the spidev node and the GPIO chip — the `spi` and `gpio`
+  groups on Raspberry Pi OS. No root needed.
+- Nothing else holding the radio. `meshtasticd` claims the same GPIO lines, and
+  MeshRF will say so by name rather than failing vaguely.
+
+**uConsole AIO V2** additionally gates its peripherals behind GPIOs that are
+off at boot: LoRa on 16, SDR on 7, GPS on 27, the internal USB hub on 23. Until
+the AIO's own enable has been set, neither the radio nor the RTL-SDR exists as
+far as MeshRF is concerned.
+
+**Custom SPI board** takes its wiring and power model from `settings.json`
+under `CustomSpi`. Line numbers are GPIO chip offsets, which on a Raspberry Pi
+are the BCM numbers meshtasticd quotes. `Cs: -1` leaves chip select to the SPI
+controller, which is the usual wiring; give it a line number only if your board
+routed CS to an ordinary GPIO. `RxEn: -1` is right for any board whose DIO2
+runs the RF switch.
+
+```json
+"CustomSpi": {
+  "SpiDev": "spidev0.0",
+  "GpioChip": "gpiochip0",
+  "SpeedHz": 2000000,
+  "Cs": -1, "Busy": 20, "Reset": 24, "Dio1": 16, "RxEn": 12,
+  "Dio2AsRfSwitch": true, "Dio3Tcxo": true, "TcxoVoltage": 2,
+  "MaxChipDbm": 22, "PaGainDb": 8, "MinOutDbm": -1, "MaxOutDbm": 30
+}
+```
+
+Pin maps for common HATs, transcribed from `bin/config.d` in
+meshtastic/firmware. **The power fields are not included** — fill those in from
+your own module's datasheet, per the reasoning above.
+
+| Board | SpiDev | Busy | Reset | Dio1 | RxEn |
+| --- | --- | --- | --- | --- | --- |
+| MeshAdv Mini E22-900M22S | `spidev0.0` | 20 | 24 | 16 | 12 |
+| Nebra SX1262 Pi HAT | `spidev0.0` | 4 | 18 | 22 | 25 |
+| PiTastic / ZebraHat 1W | `spidev0.0` | 27 | 17 | 22 | -1 |
+| RAK6421 13300 (slot 1) | `spidev0.0` | 24 | 16 | 22 | -1 |
+
+Boards with a separate **TXen** line (MeshAdv-Pi 900M30S, and others that
+switch transmit and receive with two pins) are not supported: the driver drives
+one RF-switch line, not two.
 
 ### Meshtastic Protocol Support
 
@@ -326,7 +411,8 @@ MeshRF.Core  (.NET 8 class library)
 
 MeshRF.Native (C++20, built with CMake)
   - SDR HAL (HackRF, RTL-SDR) — IQ in, IQ out
-  - Packet-radio HAL (CH341 USB-SPI + SX126x) — framed bytes, no IQ
+  - Packet-radio HAL (SX126x over CH341 USB-SPI or Linux spidev) — framed
+    bytes, no IQ
   - DSP + LoRa modem pipeline
   - Spectrum/waterfall and native packet plumbing
 ```
@@ -337,8 +423,8 @@ Common to every platform:
 
 - CMake 3.25+
 - .NET 8 SDK
-- Radio hardware: a HackRF One or RTL-SDR dongle, and/or a CH341+SX1262 USB
-  stick (see [SX1262 USB sticks](#sx1262-usb-sticks)). A stick alone is enough
+- Radio hardware: a HackRF One or RTL-SDR dongle, and/or an SX1262 modem
+  (see [SX1262 hardware modems](#sx1262-hardware-modems)). A modem alone is enough
   for both directions; an SDR alone can receive, and needs a HackRF to transmit.
 
 **Windows 10/11 x64**
@@ -349,13 +435,18 @@ Common to every platform:
 - SDR drivers as needed (typically via Zadig/WinUSB).
 - For an SX1262 USB stick, the WCH CH341PAR driver package (not Zadig).
 
-**Linux x64**
+**Linux x64 / arm64**
 
 ```bash
 sudo apt-get install -y ninja-build cmake libhackrf-dev librtlsdr-dev \
                         libusb-1.0-0-dev libudev-dev \
                         autoconf autoconf-archive automake libtool
 ```
+
+arm64 additionally needs `VCPKG_FORCE_SYSTEM_BINARIES=1`, which the
+`linux-arm64` preset sets for the configure step. Export it in your shell too
+if you are bootstrapping vcpkg yourself: it ships no prebuilt tools for that
+architecture and has to build its own with the system compiler.
 
 **macOS (arm64 or x64)**
 
@@ -430,6 +521,10 @@ cmake --build build/windows-x64 --config RelWithDebInfo -j
 cmake --preset linux-x64 -D CMAKE_BUILD_TYPE=Release
 cmake --build build/linux-x64 -j
 
+# Linux arm64 (Raspberry Pi, uConsole) — native, not cross-compiled
+cmake --preset linux-arm64 -D CMAKE_BUILD_TYPE=Release
+cmake --build build/linux-arm64 -j
+
 # macOS (use macos-x64 on Intel)
 cmake --preset macos-arm64 -D CMAKE_BUILD_TYPE=Release
 cmake --build build/macos-arm64 -j
@@ -477,7 +572,8 @@ builds a self-contained single-file release into `dist/`:
 | Host | Artifact |
 | --- | --- |
 | Windows | `MeshRF-v<version>-win-x64.zip` |
-| Linux | `MeshRF-v<version>-linux-x64.tar.gz` |
+| Linux x64 | `MeshRF-v<version>-linux-x64.tar.gz` |
+| Linux arm64 | `MeshRF-v<version>-linux-arm64.tar.gz` |
 | macOS | `MeshRF-v<version>-osx-arm64.zip` (or `-osx-x64`) |
 
 ```powershell
@@ -508,7 +604,7 @@ mismatch.
 | --- | --- |
 | `app/MeshRF.App.Avalonia/` | Cross-platform desktop application (Windows/Linux/macOS) |
 | `app/MeshRF.Core/` | Managed protocol/interop/storage library |
-| `native/core/` | C++ SDR/DSP/LoRa core, plus the CH341+SX126x packet radio |
+| `native/core/` | C++ SDR/DSP/LoRa core, plus the SX126x packet radio |
 | `native/bridge/` | C ABI bridge DLL for P/Invoke |
 | `tests/managed/` | Managed unit tests |
 | `tests/native/` | Native unit tests |

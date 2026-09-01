@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -89,44 +90,130 @@ void calibration_band(std::uint64_t hz, std::uint8_t& lo, std::uint8_t& hi) {
     else                                   { lo = 0xE1; hi = 0xE9; }
 }
 
-const Sx126xBoardProfile kProfiles[] = {
-    // No selection. Deliberately first so it is also the lookup fallback: an
-    // unrecognised board value must land on something that cannot transmit,
-    // not on a real profile that would quietly pick a power model for the user.
-    {
-        Sx126xBoard::Unspecified, "(no board selected)",
-        /*has_rxen*/ true, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
-        /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ -9, /*pa_gain_db*/ 0,
-        /*min_out_dbm*/ 0, /*max_out_dbm*/ 0,
-    },
-    // Elecrow MeshStick: bare SX1262, so what the chip puts out is what
-    // reaches the antenna.
-    {
-        Sx126xBoard::MeshStick, "MeshStick (SX1262)",
-        /*has_rxen*/ true, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
-        /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ 22, /*pa_gain_db*/ 0,
-        /*min_out_dbm*/ -9, /*max_out_dbm*/ 22,
-    },
-    // NullHop/muzi MeshToad V3: SX1262 driving an E22P-915M30S, which adds
-    // roughly 8 dB. Note the module can pull ~900 mA on TX at full power,
-    // over what a USB 2.0 port must supply — see the power warning surfaced
-    // in the UI.
-    {
-        Sx126xBoard::MeshToad, "MeshToad V3 (SX1262 + E22P-915M30S)",
-        /*has_rxen*/ true, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
-        /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ 22, /*pa_gain_db*/ 8,
-        /*min_out_dbm*/ -1, /*max_out_dbm*/ 30,
-    },
-};
+// The Custom SPI board's declaration. Guarded because the UI can rewrite it
+// from the settings dialog while a poll of the power range reads it.
+std::mutex           g_custom_mu;
+Sx126xCustomSpiBoard g_custom{};
+
+// Built on first use rather than as a namespace-scope array: the SPI entries
+// carry std::string device names, so this is dynamically initialized, and a
+// function-local static is the one form of that with no initialization-order
+// question to answer.
+const std::vector<Sx126xBoardProfile>& profiles() {
+    static const std::vector<Sx126xBoardProfile> kProfiles = [] {
+        std::vector<Sx126xBoardProfile> v;
+
+        // No selection. Deliberately first so it is also the lookup fallback:
+        // an unrecognised board value must land on something that cannot
+        // transmit, not on a real profile that would quietly pick a power
+        // model for the user.
+        v.push_back({
+            Sx126xBoard::Unspecified, "(no board selected)",
+            Sx126xTransport::Ch341Usb, /*spi*/ {},
+            /*has_rxen*/ true, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
+            /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ -9, /*pa_gain_db*/ 0,
+            /*min_out_dbm*/ 0, /*max_out_dbm*/ 0,
+        });
+
+        // Elecrow MeshStick: bare SX1262, so what the chip puts out is what
+        // reaches the antenna.
+        v.push_back({
+            Sx126xBoard::MeshStick, "MeshStick (SX1262)",
+            Sx126xTransport::Ch341Usb, /*spi*/ {},
+            /*has_rxen*/ true, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
+            /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ 22, /*pa_gain_db*/ 0,
+            /*min_out_dbm*/ -9, /*max_out_dbm*/ 22,
+        });
+
+        // NullHop/muzi MeshToad V3: SX1262 driving an E22P-915M30S, which adds
+        // roughly 8 dB. Note the module can pull ~900 mA on TX at full power,
+        // over what a USB 2.0 port must supply — see the power warning
+        // surfaced in the UI.
+        v.push_back({
+            Sx126xBoard::MeshToad, "MeshToad V3 (SX1262 + E22P-915M30S)",
+            Sx126xTransport::Ch341Usb, /*spi*/ {},
+            /*has_rxen*/ true, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
+            /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ 22, /*pa_gain_db*/ 8,
+            /*min_out_dbm*/ -1, /*max_out_dbm*/ 30,
+        });
+
+        // uConsole AIO V2: bare SX1262 on SPI1, DIO2 running the RF switch, so
+        // no RXEN line. Wiring taken from the board's meshtasticd config;
+        // being a bare chip with no front end, its power model is the
+        // MeshStick's. GPIO 16 gates the radio's power on this board and is
+        // the AIO's own to drive — MeshRF does not touch it, so a radio that
+        // has not been enabled simply is not there.
+        Sx126xSpiPins aio;
+        aio.spidev   = "spidev1.0"; // SPI1, CS on the controller's CE0 (GPIO 18)
+        aio.gpiochip = "gpiochip0";
+        aio.cs       = -1;          // hardware chip select
+        aio.busy     = 24;
+        aio.reset    = 25;
+        aio.dio1     = 26;
+        aio.rxen     = -1;
+        v.push_back({
+            Sx126xBoard::UConsoleAio, "uConsole AIO V2 (SX1262)",
+            Sx126xTransport::LinuxSpi, aio,
+            /*has_rxen*/ false, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
+            /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ 22, /*pa_gain_db*/ 0,
+            /*min_out_dbm*/ -9, /*max_out_dbm*/ 22,
+        });
+
+        // Custom SPI. Placeholder only: every field is replaced from the
+        // operator's declaration in sx126x_profile(), and the empty pin map
+        // left here refuses to open until they have made one.
+        v.push_back({
+            Sx126xBoard::CustomSpi, "Custom SX1262 (SPI)",
+            Sx126xTransport::LinuxSpi, /*spi*/ {},
+            /*has_rxen*/ false, /*dio2_as_rf_switch*/ true, /*dio3_tcxo*/ true,
+            /*tcxo_voltage*/ 0x02, /*max_chip_dbm*/ 22, /*pa_gain_db*/ 0,
+            /*min_out_dbm*/ -9, /*max_out_dbm*/ 22,
+        });
+
+        return v;
+    }();
+    return kProfiles;
+}
 
 } // namespace
 
-const Sx126xBoardProfile& sx126x_profile(Sx126xBoard board) {
-    for (const auto& p : kProfiles)
-        if (p.board == board) return p;
+void set_custom_spi_board(const Sx126xCustomSpiBoard& board) {
+    std::lock_guard<std::mutex> lk(g_custom_mu);
+    g_custom = board;
+}
+
+Sx126xCustomSpiBoard custom_spi_board() {
+    std::lock_guard<std::mutex> lk(g_custom_mu);
+    return g_custom;
+}
+
+Sx126xBoardProfile sx126x_profile(Sx126xBoard board) {
+    const auto& all = profiles();
+    const Sx126xBoardProfile* found = nullptr;
+    for (const auto& p : all)
+        if (p.board == board) { found = &p; break; }
     // Fail safe, not open: an unknown value gets the Unspecified profile,
     // which cannot transmit, rather than a real board's power model.
-    return kProfiles[0];
+    if (found == nullptr) return all.front();
+
+    if (board != Sx126xBoard::CustomSpi) return *found;
+
+    // The custom entry is whatever the operator last declared. Everything
+    // about it is theirs to state, the power model included: MeshRF cannot
+    // probe a front end, and assuming there is none would under-report the
+    // output of every board that has one.
+    const Sx126xCustomSpiBoard decl = custom_spi_board();
+    Sx126xBoardProfile p = *found;
+    p.spi               = decl.pins;
+    p.has_rxen          = decl.has_rxen;
+    p.dio2_as_rf_switch = decl.dio2_as_rf_switch;
+    p.dio3_tcxo         = decl.dio3_tcxo;
+    p.tcxo_voltage      = decl.tcxo_voltage;
+    p.max_chip_dbm      = decl.max_chip_dbm;
+    p.pa_gain_db        = decl.pa_gain_db;
+    p.min_out_dbm       = decl.min_out_dbm;
+    p.max_out_dbm       = decl.max_out_dbm;
+    return p;
 }
 
 std::uint8_t sx126x_bandwidth_code(std::uint32_t bandwidth_hz) {
@@ -225,8 +312,8 @@ bool Sx126xRadio::wait_busy(int timeout_ms, std::string& error) {
         std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     for (;;) {
         bool busy = false;
-        if (!bus_.read_pin(kCh341PinBusy, busy)) {
-            error = "CH341: could not read BUSY";
+        if (!bus_.read_pin(kSx126xPinBusy, busy)) {
+            error = "SPI bus: could not read BUSY";
             return false;
         }
         if (!busy) return true;
@@ -246,11 +333,11 @@ bool Sx126xRadio::command(std::uint8_t opcode, std::span<const std::uint8_t> par
     tx.push_back(opcode);
     tx.insert(tx.end(), params.begin(), params.end());
 
-    if (!bus_.write_pin(kCh341PinCs, false)) { error = "CH341: CS assert failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, false)) { error = "SPI bus: CS assert failed"; return false; }
     const bool ok = bus_.transfer(tx, {});
-    if (!bus_.write_pin(kCh341PinCs, true)) { error = "CH341: CS release failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, true)) { error = "SPI bus: CS release failed"; return false; }
     if (!ok) {
-        error = "CH341: SPI write failed (opcode 0x" +
+        error = "SPI bus: SPI write failed (opcode 0x" +
                 std::string(1, "0123456789ABCDEF"[opcode >> 4]) +
                 std::string(1, "0123456789ABCDEF"[opcode & 0x0F]) + ")";
         return false;
@@ -268,10 +355,10 @@ bool Sx126xRadio::command_read(std::uint8_t opcode, std::span<std::uint8_t> out,
     std::vector<std::uint8_t> rx(total, 0);
     tx[0] = opcode;
 
-    if (!bus_.write_pin(kCh341PinCs, false)) { error = "CH341: CS assert failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, false)) { error = "SPI bus: CS assert failed"; return false; }
     const bool ok = bus_.transfer(tx, rx);
-    if (!bus_.write_pin(kCh341PinCs, true)) { error = "CH341: CS release failed"; return false; }
-    if (!ok) { error = "CH341: SPI read failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, true)) { error = "SPI bus: CS release failed"; return false; }
+    if (!ok) { error = "SPI bus: SPI read failed"; return false; }
 
     std::copy(rx.begin() + 2, rx.end(), out.begin());
     return true;
@@ -299,10 +386,10 @@ bool Sx126xRadio::read_register(std::uint16_t addr, std::span<std::uint8_t> out,
     tx[1] = static_cast<std::uint8_t>(addr >> 8);
     tx[2] = static_cast<std::uint8_t>(addr & 0xFF);
 
-    if (!bus_.write_pin(kCh341PinCs, false)) { error = "CH341: CS assert failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, false)) { error = "SPI bus: CS assert failed"; return false; }
     const bool ok = bus_.transfer(tx, rx);
-    if (!bus_.write_pin(kCh341PinCs, true)) { error = "CH341: CS release failed"; return false; }
-    if (!ok) { error = "CH341: register read failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, true)) { error = "SPI bus: CS release failed"; return false; }
+    if (!ok) { error = "SPI bus: register read failed"; return false; }
 
     std::copy(rx.begin() + 4, rx.end(), out.begin());
     return true;
@@ -328,10 +415,10 @@ bool Sx126xRadio::read_buffer(std::uint8_t offset, std::span<std::uint8_t> out,
     tx[0] = kCmdReadBuffer;
     tx[1] = offset;
 
-    if (!bus_.write_pin(kCh341PinCs, false)) { error = "CH341: CS assert failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, false)) { error = "SPI bus: CS assert failed"; return false; }
     const bool ok = bus_.transfer(tx, rx);
-    if (!bus_.write_pin(kCh341PinCs, true)) { error = "CH341: CS release failed"; return false; }
-    if (!ok) { error = "CH341: buffer read failed"; return false; }
+    if (!bus_.write_pin(kSx126xPinCs, true)) { error = "SPI bus: CS release failed"; return false; }
+    if (!ok) { error = "SPI bus: buffer read failed"; return false; }
 
     std::copy(rx.begin() + 3, rx.end(), out.begin());
     return true;
@@ -350,14 +437,14 @@ bool Sx126xRadio::modify_register(std::uint16_t addr, std::uint8_t clear_mask,
 // ---------------------------------------------------------------------------
 
 bool Sx126xRadio::reset(std::string& error) {
-    if (!bus_.write_pin(kCh341PinCs, true) ||
-        !bus_.write_pin(kCh341PinReset, false)) {
-        error = "CH341: could not drive NRST";
+    if (!bus_.write_pin(kSx126xPinCs, true) ||
+        !bus_.write_pin(kSx126xPinReset, false)) {
+        error = "SPI bus: could not drive NRST";
         return false;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    if (!bus_.write_pin(kCh341PinReset, true)) {
-        error = "CH341: could not release NRST";
+    if (!bus_.write_pin(kSx126xPinReset, true)) {
+        error = "SPI bus: could not release NRST";
         return false;
     }
     // The datasheet allows up to 3.5 ms for the internal boot sequence.
@@ -423,8 +510,8 @@ bool Sx126xRadio::check_device_errors(std::string& error) {
 bool Sx126xRadio::begin(std::string& error) {
     // Park the RF switch before anything else so a half-configured radio can
     // never key the PA into an unselected path.
-    if (profile_.has_rxen && !bus_.write_pin(kCh341PinRxen, false)) {
-        error = "CH341: could not drive RXen";
+    if (profile_.has_rxen && !bus_.write_pin(kSx126xPinRxen, false)) {
+        error = "SPI bus: could not drive RXen";
         return false;
     }
     if (!reset(error)) return false;
@@ -613,8 +700,8 @@ bool Sx126xRadio::transmit(const PacketRadioConfig& cfg,
     // 9. Key the transmitter. DIO2 raises the module's TX enable by itself;
     //    RXen must be low so the receive path stays out of the way.
     const double airtime = lora_airtime_seconds(cfg.params, payload.size());
-    if (profile_.has_rxen && !bus_.write_pin(kCh341PinRxen, false)) {
-        error = "CH341: could not drive RXen low for transmit";
+    if (profile_.has_rxen && !bus_.write_pin(kSx126xPinRxen, false)) {
+        error = "SPI bus: could not drive RXen low for transmit";
         return false;
     }
     {
@@ -660,7 +747,7 @@ bool Sx126xRadio::transmit(const PacketRadioConfig& cfg,
     std::string ignored;
     clear_irq_status(ignored);
     set_standby(ignored);
-    if (profile_.has_rxen) bus_.write_pin(kCh341PinRxen, false);
+    if (profile_.has_rxen) bus_.write_pin(kSx126xPinRxen, false);
 
     if (sent && !check_device_errors(error)) return false;
     return sent;
@@ -668,7 +755,7 @@ bool Sx126xRadio::transmit(const PacketRadioConfig& cfg,
 
 bool Sx126xRadio::idle(std::string& error) {
     const bool ok = set_standby(error);
-    if (profile_.has_rxen) bus_.write_pin(kCh341PinRxen, false);
+    if (profile_.has_rxen) bus_.write_pin(kSx126xPinRxen, false);
     return ok;
 }
 
@@ -692,8 +779,8 @@ bool Sx126xRadio::enter_rx(const PacketRadioConfig& cfg, std::string& error) {
 
     // RF switch the other way round from transmit: the receive path has to be
     // enabled, and DIO2 drops the transmit side by itself.
-    if (profile_.has_rxen && !bus_.write_pin(kCh341PinRxen, true)) {
-        error = "CH341: could not drive RXen high for receive";
+    if (profile_.has_rxen && !bus_.write_pin(kSx126xPinRxen, true)) {
+        error = "SPI bus: could not drive RXen high for receive";
         return false;
     }
 

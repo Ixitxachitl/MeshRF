@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// IPacketRadio over a CH341+SX126x USB stick (Elecrow MeshStick, NullHop
-// MeshToad V3). Ties the USB bridge (Ch341Transport) to the radio driver
-// (Sx126xRadio) and presents the packet-level interface Core uses for both
-// directions.
+// IPacketRadio over an SX126x, on either of the buses one can hang off: a
+// CH341 USB stick (Elecrow MeshStick, NullHop MeshToad V3) or the host's own
+// SPI controller (uConsole AIO V2, Raspberry Pi HATs). Ties the bus to the
+// radio driver (Sx126xRadio) and presents the packet-level interface Core uses
+// for both directions.
 //
-// The stick is half-duplex, so receive runs on a private polling thread and a
-// transmit borrows the radio from it for the length of the burst. Polling
-// rather than the DIO1 interrupt line is deliberate: the CH341's interrupt
-// endpoint tops out around 400 Hz, and reading the IRQ register costs one SPI
-// round trip we are paying for anyway.
+// The radio is half-duplex, so receive runs on a private polling thread and a
+// transmit borrows it for the length of the burst. Polling rather than the
+// DIO1 interrupt line is deliberate: the CH341's interrupt endpoint tops out
+// around 400 Hz, and reading the IRQ register costs one SPI round trip we are
+// paying for anyway. On spidev the same poll is far cheaper still.
 #include "mrf/hal/PacketRadio.h"
 
-#include "Ch341Transport.h"
+#include "Ch341Bus.h"
+#include "SpiDevBus.h"
+#include "Sx126xBus.h"
 #include "Sx126x.h"
 
 #include <atomic>
@@ -45,8 +48,9 @@ constexpr auto kRxPollInterval = std::chrono::milliseconds(3);
 
 class Sx1262Radio final : public IPacketRadio {
 public:
-    Sx1262Radio(std::unique_ptr<Ch341Transport> bus, const Sx126xBoardProfile& profile)
-        : bus_(std::move(bus)), profile_(profile), radio_(*bus_, profile) {}
+    Sx1262Radio(std::unique_ptr<Sx126xBus> bus, Sx126xBoardProfile profile)
+        : bus_(std::move(bus)), profile_(std::move(profile)),
+          radio_(*bus_, profile_) {}
 
     ~Sx1262Radio() override { stop_rx(); }
 
@@ -128,11 +132,14 @@ private:
         }
     }
 
-    // Declaration order matters: radio_ holds a reference to *bus_, so the
-    // transport has to be constructed first and destroyed last.
-    std::unique_ptr<Ch341Transport> bus_;
-    const Sx126xBoardProfile&       profile_;
-    Sx126xRadio                     radio_;
+    // Declaration order matters: radio_ holds references to both *bus_ and
+    // profile_, so both have to be constructed first and destroyed last. The
+    // profile is owned rather than referenced because the Custom SPI board's
+    // is assembled per open from the operator's declaration, and so outlives
+    // no table.
+    std::unique_ptr<Sx126xBus> bus_;
+    Sx126xBoardProfile         profile_;
+    Sx126xRadio                radio_;
 
     // Serializes every SPI conversation. Held by the receive thread around
     // each poll and by transmit() for a whole burst.
@@ -147,24 +154,30 @@ private:
 
 std::unique_ptr<IPacketRadio> open_packet_radio(Sx126xBoard board,
                                                 const std::string& serial) {
-    // Refused before the USB device is even touched. Opening here would leave
-    // a radio armed under a power model nobody chose, and the boards cannot be
+    // Refused before any device is touched. Opening here would leave a radio
+    // armed under a power model nobody chose, and the sticks cannot be
     // distinguished at runtime to choose one safely.
     if (board == Sx126xBoard::Unspecified) {
-        set_status("select which SX1262 stick is connected (MeshStick or "
-                   "MeshToad) \xE2\x80\x94 they share USB IDs and cannot be "
-                   "told apart, and the wrong one misreports transmit power");
+        set_status("select which SX1262 board this is â the USB sticks "
+                   "share USB IDs and cannot be told apart, and the wrong one "
+                   "misreports transmit power");
         return nullptr;
     }
 
+    const Sx126xBoardProfile profile = sx126x_profile(board);
+
     std::string transport_status;
-    auto bus = open_ch341(serial, transport_status);
+    std::unique_ptr<Sx126xBus> bus;
+    if (profile.transport == Sx126xTransport::LinuxSpi) {
+        bus = open_spidev(profile.spi, transport_status);
+    } else {
+        bus = open_ch341(serial, transport_status);
+    }
     if (!bus) {
         set_status(transport_status);
         return nullptr;
     }
 
-    const auto& profile = sx126x_profile(board);
     auto dev = std::make_unique<Sx1262Radio>(std::move(bus), profile);
 
     std::string error;
@@ -173,12 +186,13 @@ std::unique_ptr<IPacketRadio> open_packet_radio(Sx126xBoard board,
         return nullptr;
     }
 
-    // Spell out the power model, not just the board name. The two sticks are
-    // indistinguishable over USB, so the board is the user's word for it —
-    // and a wrong answer is silent in the worst direction: a MeshToad driven
-    // as a MeshStick radiates ~8 dB more than the UI says. Stating the
-    // arithmetic on every open is what makes that visible.
-    std::string power = " \xE2\x80\x94 up to " + std::to_string(profile.max_out_dbm) + " dBm";
+    // Spell out the power model, not just the board name. A board is the
+    // user's word for what is attached — over USB because the two sticks are
+    // indistinguishable, over SPI because nothing on the bus reports a front
+    // end at all — and a wrong answer is silent in the worst direction: a
+    // MeshToad driven as a MeshStick radiates ~8 dB more than the UI says.
+    // Stating the arithmetic on every open is what makes that visible.
+    std::string power = " â up to " + std::to_string(profile.max_out_dbm) + " dBm";
     if (profile.pa_gain_db != 0)
         power += " (chip " + std::to_string(profile.max_chip_dbm) + " dBm + " +
                  std::to_string(profile.pa_gain_db) + " dB PA)";
@@ -189,9 +203,19 @@ std::unique_ptr<IPacketRadio> open_packet_radio(Sx126xBoard board,
     return dev;
 }
 
-bool packet_radio_available() { return ch341_backend_available(); }
+// Either bus counts: the UI offers the SX1262 device when a machine could have
+// one, and only the board picker narrows that to a specific transport.
+bool packet_radio_available() {
+    return ch341_backend_available() || spidev_backend_available();
+}
 
-std::vector<std::string> list_packet_radio_serials() { return list_ch341_serials(); }
+std::vector<std::string> list_packet_radio_serials() {
+    // Only the USB sticks have serials, and only they can be ambiguous. An SPI
+    // radio is identified by its spidev node, which the board profile already
+    // names, so it contributes nothing to a picker whose whole purpose is
+    // telling identical sticks apart.
+    return list_ch341_serials();
+}
 
 const char* packet_radio_status() {
     // Snapshot into thread-local storage under the lock: callers read through

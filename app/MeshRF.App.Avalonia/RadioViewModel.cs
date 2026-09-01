@@ -139,11 +139,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public RadioDeviceKind[] AvailableTxDevices { get; } =
         { RadioDeviceKind.Null, RadioDeviceKind.HackRf, RadioDeviceKind.Sx1262 };
 
-    /// <summary>The CH341+SX126x sticks MeshRF knows how to drive. Unspecified
-    /// is offered so the picker can start on it: nothing transmits until a real
-    /// board is chosen, because the two cannot be told apart at runtime.</summary>
+    /// <summary>The SX126x boards MeshRF knows how to drive. Unspecified is
+    /// offered so the picker can start on it: nothing transmits until a real
+    /// board is chosen, because the USB sticks cannot be told apart at
+    /// runtime and no SPI board announces its front end.
+    ///
+    /// The SPI boards appear only on Linux, which is the only platform with a
+    /// spidev to reach them through — offering them elsewhere would be
+    /// offering a choice that can only fail.</summary>
     public Sx1262Board[] AvailableSx1262Boards { get; } =
-        { Sx1262Board.Unspecified, Sx1262Board.MeshStick, Sx1262Board.MeshToad };
+        OperatingSystem.IsLinux()
+            ? new[] { Sx1262Board.Unspecified, Sx1262Board.MeshStick, Sx1262Board.MeshToad,
+                      Sx1262Board.UConsoleAio, Sx1262Board.CustomSpi }
+            : new[] { Sx1262Board.Unspecified, Sx1262Board.MeshStick, Sx1262Board.MeshToad };
 
     private static readonly uint[] HackRfSampleRatesHz =
         [2_000_000, 2_400_000, 4_000_000, 8_000_000, 10_000_000, 12_500_000, 16_000_000, 20_000_000];
@@ -1069,6 +1077,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Sx1262 opens the stick against whichever profile is current, and
         // opening it as a MeshStick when it is really a MeshToad would put the
         // power model 8 dB out until the user touched the picker.
+        //
+        // The custom SPI declaration goes first for the same reason: it *is*
+        // that board's profile, so it has to be in place before anything can
+        // select it.
+        MeshtasticCore.SetCustomSpiBoard(_settings.CustomSpi);
         SelectedSx1262Serial = savedSx1262Serial ?? string.Empty;
         if (Enum.TryParse<Sx1262Board>(savedSx1262Board, out var sxBoard) &&
             AvailableSx1262Boards.Contains(sxBoard))

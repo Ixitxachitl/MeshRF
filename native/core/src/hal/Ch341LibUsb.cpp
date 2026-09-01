@@ -7,7 +7,7 @@
 //
 // On Windows the vendor DLL is used instead (Ch341Windows.cpp) because the
 // CH341PAR driver owns the device there and libusb cannot claim it.
-#include "Ch341Transport.h"
+#include "Ch341Bus.h"
 
 #if !defined(_WIN32)
 
@@ -53,13 +53,13 @@ enum : std::uint8_t {
 
 // D0-D5 direction, 1 = output. Matches the Windows backend: SCK/MOSI belong to
 // the SPI engine, BUSY (D4) is an input, CS/RXen/NRST are driven by us.
-constexpr std::uint8_t kDirOut = (1u << kCh341PinCs) |
-                                 (1u << kCh341PinRxen) |
-                                 (1u << kCh341PinReset) |
+constexpr std::uint8_t kDirOut = (1u << kSx126xPinCs) |
+                                 (1u << kSx126xPinRxen) |
+                                 (1u << kSx126xPinReset) |
                                  (1u << 3) |
                                  (1u << 5);
 
-constexpr std::uint8_t kDataIdle = (1u << kCh341PinCs) | (1u << kCh341PinReset);
+constexpr std::uint8_t kDataIdle = (1u << kSx126xPinCs) | (1u << kSx126xPinReset);
 
 // The CH341's SPI engine clocks bytes out least-significant bit first, but the
 // SX126x expects MSB first. The Windows DLL flips this in hardware via the
@@ -75,7 +75,7 @@ constexpr std::uint8_t reverse_bits(std::uint8_t v) {
 static_assert(reverse_bits(0x01) == 0x80, "bit reversal");
 static_assert(reverse_bits(0xA8) == 0x15, "bit reversal");
 
-class Ch341LibUsbTransport final : public Ch341Transport {
+class Ch341LibUsbTransport final : public Sx126xBus {
 public:
     Ch341LibUsbTransport(libusb_context* ctx, libusb_device_handle* h, std::string name,
                          std::string serial)
@@ -84,7 +84,7 @@ public:
 
     ~Ch341LibUsbTransport() override {
         // Park the radio: CS released, held in reset, RF switch off.
-        set_pins((1u << kCh341PinCs));
+        set_pins((1u << kSx126xPinCs));
         libusb_release_interface(handle_, 0);
         libusb_close(handle_);
         libusb_exit(ctx_);
@@ -206,7 +206,7 @@ std::string read_serial(libusb_device_handle* h) {
 
 } // namespace
 
-std::unique_ptr<Ch341Transport> open_ch341(const std::string& serial, std::string& status) {
+std::unique_ptr<Sx126xBus> open_ch341(const std::string& serial, std::string& status) {
     libusb_context* ctx = nullptr;
     if (libusb_init(&ctx) != 0) {
         status = "libusb_init failed";
@@ -315,7 +315,7 @@ bool ch341_backend_available() {
 
 namespace mrf::hal {
 
-std::unique_ptr<Ch341Transport> open_ch341(const std::string&, std::string& status) {
+std::unique_ptr<Sx126xBus> open_ch341(const std::string&, std::string& status) {
     status = "built without libusb; SX1262 USB sticks are unavailable";
     return nullptr;
 }

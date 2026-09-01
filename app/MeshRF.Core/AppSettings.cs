@@ -57,13 +57,19 @@ public sealed class AppSettings
     /// <summary>Enable the HackRF RF amplifier during TX.</summary>
     public bool TxAmpEnable { get; set; } = false;
 
-    /// <summary>Which CH341+SX126x USB stick is attached: "MeshStick",
-    /// "MeshToad", or "Unspecified". Matches <see cref="MeshRF.Sx1262Board"/>.
-    /// The two boards share USB IDs and wiring, so this selects the power model
-    /// only — but it cannot be detected, and the wrong answer misreports
-    /// radiated power by ~8 dB, so it defaults to Unspecified and the
-    /// transmitter stays shut until the user picks.</summary>
+    /// <summary>Which SX126x board is attached: "MeshStick", "MeshToad",
+    /// "UConsoleAio", "CustomSpi", or "Unspecified". Matches
+    /// <see cref="MeshRF.Sx1262Board"/>. The two USB sticks share USB IDs and
+    /// wiring, so between them this selects the power model only — but it
+    /// cannot be detected, and the wrong answer misreports radiated power by
+    /// ~8 dB, so it defaults to Unspecified and the transmitter stays shut
+    /// until the user picks.</summary>
     public string Sx1262Board { get; set; } = "Unspecified";
+
+    /// <summary>Wiring and power model for the "CustomSpi" board — an SX1262
+    /// on the host's own SPI bus that MeshRF ships no preset for. Ignored for
+    /// every other board. See the HAT pin maps in the README.</summary>
+    public CustomSpiBoardSettings CustomSpi { get; set; } = new();
 
     /// <summary>EEPROM serial of the SX1262 stick to use when several are
     /// attached. Empty takes the first that answers.</summary>
@@ -629,3 +635,53 @@ public sealed class AppSettings
     }
 }
 
+/// <summary>
+/// An SX1262 on the host's own SPI bus, described by the operator. Both halves
+/// have to be stated: nothing on an SPI bus announces which GPIO lines a board
+/// used, and nothing reports whether a power amplifier sits after the chip.
+///
+/// The power fields are in dBm at the antenna port. <see cref="PaGainDb"/> is
+/// the difference between that and what gets programmed into the chip, so a
+/// bare SX1262 leaves it at 0 and a board with an E22-style front end sets it
+/// to that module's gain. Leaving it at 0 on a board that has a PA is the one
+/// mistake here that under-reports — the UI would show 22 dBm while the
+/// antenna saw 30 — which is why MeshRF ships no guesses for these boards.
+/// </summary>
+public sealed class CustomSpiBoardSettings
+{
+    /// <summary>SPI device node under /dev, e.g. "spidev0.0".</summary>
+    public string SpiDev { get; set; } = "spidev0.0";
+    /// <summary>GPIO character device under /dev, e.g. "gpiochip0".</summary>
+    public string GpioChip { get; set; } = "gpiochip0";
+    /// <summary>SPI clock in Hz. The SX126x tolerates 16 MHz; meshtasticd
+    /// uses 2 MHz and so do we.</summary>
+    public int SpeedHz { get; set; } = 2_000_000;
+
+    /// <summary>Chip-select GPIO line, or -1 to let the SPI controller drive
+    /// its own — which is the usual wiring, with the radio on CE0.</summary>
+    public int Cs { get; set; } = -1;
+    /// <summary>BUSY line. Required.</summary>
+    public int Busy { get; set; } = -1;
+    /// <summary>NRST line. Required.</summary>
+    public int Reset { get; set; } = -1;
+    /// <summary>DIO1 / IRQ line. Required.</summary>
+    public int Dio1 { get; set; } = -1;
+    /// <summary>RXEN line, or -1 on a board whose DIO2 runs the RF switch.</summary>
+    public int RxEn { get; set; } = -1;
+
+    /// <summary>DIO2 drives the RF switch directly. True on most modules.</summary>
+    public bool Dio2AsRfSwitch { get; set; } = true;
+    /// <summary>DIO3 supplies the TCXO. True on any module with one.</summary>
+    public bool Dio3Tcxo { get; set; } = true;
+    /// <summary>SetDIO3AsTCXOCtrl voltage code; 0x02 is 1.8 V.</summary>
+    public byte TcxoVoltage { get; set; } = 0x02;
+
+    /// <summary>Ceiling programmed into SetTxParams, in dBm.</summary>
+    public sbyte MaxChipDbm { get; set; } = 22;
+    /// <summary>Antenna-port power minus chip power. 0 on a bare SX1262.</summary>
+    public sbyte PaGainDb { get; set; } = 0;
+    /// <summary>Lowest selectable antenna-port power, in dBm.</summary>
+    public sbyte MinOutDbm { get; set; } = -9;
+    /// <summary>Highest selectable antenna-port power, in dBm.</summary>
+    public sbyte MaxOutDbm { get; set; } = 22;
+}

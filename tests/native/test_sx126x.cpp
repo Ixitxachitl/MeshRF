@@ -242,3 +242,82 @@ TEST(Sx126xAirtime, LowDataRateOptimizeLengthensTheFrame) {
     EXPECT_GT(hal::lora_airtime_seconds(params(12, 125'000, 8, true), 50),
               hal::lora_airtime_seconds(params(12, 125'000, 8, false), 50));
 }
+
+// --- Transports and pin maps ---------------------------------------------
+
+TEST(Sx126xTransport, UsbSticksAreOnTheBridgeAndSpiBoardsAreNot) {
+    for (auto board : {Sx126xBoard::MeshStick, Sx126xBoard::MeshToad,
+                       Sx126xBoard::Unspecified}) {
+        EXPECT_EQ(hal::sx126x_profile(board).transport, hal::Sx126xTransport::Ch341Usb);
+    }
+    for (auto board : {Sx126xBoard::UConsoleAio, Sx126xBoard::CustomSpi}) {
+        EXPECT_EQ(hal::sx126x_profile(board).transport, hal::Sx126xTransport::LinuxSpi);
+    }
+}
+
+TEST(Sx126xTransport, UConsoleAioCarriesItsMeshtasticdPinMap) {
+    const auto& p = hal::sx126x_profile(Sx126xBoard::UConsoleAio);
+    // Straight from the AIO V2's own meshtasticd config: SPI1, BUSY 24,
+    // NRST 25, DIO1 26, and DIO2 running the RF switch so there is no RXEN.
+    EXPECT_EQ(p.spi.spidev, "spidev1.0");
+    EXPECT_EQ(p.spi.busy, 24);
+    EXPECT_EQ(p.spi.reset, 25);
+    EXPECT_EQ(p.spi.dio1, 26);
+    EXPECT_EQ(p.spi.rxen, -1);
+    EXPECT_FALSE(p.has_rxen);
+    EXPECT_TRUE(p.dio2_as_rf_switch);
+    EXPECT_TRUE(p.dio3_tcxo);
+    // Chip select is the SPI controller's own (SPI1-CE0), not a GPIO we drive.
+    EXPECT_LT(p.spi.cs, 0);
+    EXPECT_TRUE(p.spi.complete());
+}
+
+TEST(Sx126xTransport, UConsoleAioIsABareChipSoItRadiatesWhatItProduces) {
+    const auto& p = hal::sx126x_profile(Sx126xBoard::UConsoleAio);
+    EXPECT_EQ(p.pa_gain_db, 0);
+    EXPECT_EQ(p.max_out_dbm, 22);
+    EXPECT_EQ(hal::sx126x_chip_power_dbm(p, 22), 22);
+    EXPECT_EQ(hal::sx126x_chip_power_dbm(p, 0), 0);
+}
+
+TEST(Sx126xTransport, AnUndeclaredCustomBoardHasNoUsablePinMap) {
+    // The default declaration names no lines, so open_spidev() refuses it
+    // rather than driving whatever GPIO 0 happens to be wired to.
+    hal::set_custom_spi_board(hal::Sx126xCustomSpiBoard{});
+    EXPECT_FALSE(hal::sx126x_profile(Sx126xBoard::CustomSpi).spi.complete());
+}
+
+TEST(Sx126xTransport, ADeclaredCustomBoardBecomesItsProfile) {
+    hal::Sx126xCustomSpiBoard decl{};
+    decl.pins.spidev = "spidev0.0";
+    decl.pins.busy   = 20;
+    decl.pins.reset  = 24;
+    decl.pins.dio1   = 16;
+    decl.pins.rxen   = 12;
+    decl.has_rxen    = true;
+    // An E22-style front end: the operator states the gain, because nothing on
+    // the bus reports it and assuming zero would under-report by 8 dB.
+    decl.pa_gain_db  = 8;
+    decl.max_out_dbm = 30;
+    decl.min_out_dbm = -1;
+    hal::set_custom_spi_board(decl);
+
+    const auto& p = hal::sx126x_profile(Sx126xBoard::CustomSpi);
+    EXPECT_TRUE(p.spi.complete());
+    EXPECT_EQ(p.spi.busy, 20);
+    EXPECT_EQ(p.spi.rxen, 12);
+    EXPECT_TRUE(p.has_rxen);
+    EXPECT_EQ(p.max_out_dbm, 30);
+    // And the declared gain is actually applied to the power arithmetic.
+    EXPECT_EQ(hal::sx126x_chip_power_dbm(p, 30), 22);
+
+    hal::set_custom_spi_board(hal::Sx126xCustomSpiBoard{}); // leave it as found
+}
+
+TEST(Sx126xTransport, AnUnknownBoardStillFallsBackToOneThatCannotTransmit) {
+    // Re-checked with the enum extended: the fallback has to stay the
+    // Unspecified profile, not the first SPI board that happens to be added.
+    const auto& bogus = hal::sx126x_profile(static_cast<Sx126xBoard>(99));
+    EXPECT_EQ(bogus.board, Sx126xBoard::Unspecified);
+    EXPECT_EQ(bogus.max_out_dbm, 0);
+}

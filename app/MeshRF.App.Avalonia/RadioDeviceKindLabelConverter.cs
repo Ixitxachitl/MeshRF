@@ -54,6 +54,11 @@ public sealed class Sx1262BoardLabelConverter : IValueConverter
     {
         Sx1262Board.MeshStick => "MeshStick (22 dBm)",
         Sx1262Board.MeshToad => "MeshToad V3 (30 dBm)",
+        Sx1262Board.UConsoleAio => "uConsole AIO V2 (22 dBm)",
+        // No power in the label: this board's is whatever the user declared,
+        // so quoting a number here would be quoting it back to them as though
+        // MeshRF had verified it.
+        Sx1262Board.CustomSpi => "Custom SPI board…",
         // Phrased as an instruction, not a value: this is the state the picker
         // starts in, and it is the one thing the user has to resolve before
         // the stick will transmit.

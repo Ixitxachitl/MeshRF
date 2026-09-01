@@ -60,14 +60,31 @@ MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
 // --- SX1262 packet transmitter -------------------------------------------
 // Which CH341+SX126x stick is attached, mirroring mrf::hal::Sx126xBoard:
 //   0 = MeshStick (bare SX1262, 22 dBm), 1 = MeshToad V3 (+PA, 30 dBm),
-//   2 = Unspecified (the default: the transmitter will not open).
-// The two boards are electrically identical, share USB IDs and report no
+//   2 = Unspecified (the default: the transmitter will not open),
+//   3 = uConsole AIO V2 (bare SX1262 on the host's SPI1, 22 dBm),
+//   4 = Custom SPI (wiring and power model from mrf_set_custom_spi_board).
+// The board also selects the transport: 0-2 are CH341 USB sticks, 3-4 are on
+// the host's own SPI bus and are Linux-only.
+// The two USB sticks are electrically identical, share USB IDs and report no
 // distinguishing product string, so this is a user choice, not a detection.
 // It only changes the power model — but getting it wrong misreports radiated
 // power by ~8 dB, so nothing transmits until a real board is selected.
 // Returns 0 on success, -1 on an unknown board, -2 on null.
 MRF_API int32_t MRF_CALL mrf_core_set_sx1262_board(mrf_core_t* core, int32_t board);
 MRF_API int32_t MRF_CALL mrf_core_get_sx1262_board(const mrf_core_t* core);
+
+// Declares where a Custom SPI board's radio is wired and what its front end
+// does, for board 4 above. Process-global, not per-core: it describes the
+// machine. Line numbers are GPIO chip offsets (BCM numbers on a Raspberry Pi),
+// -1 for absent; cs = -1 uses the SPI controller's own chip select. Power is
+// in dBm at the antenna port, with pa_gain_db the difference between that and
+// what is programmed into the chip. Returns 0 on success, -1 on failure.
+MRF_API int32_t MRF_CALL mrf_set_custom_spi_board(
+    const char* spidev, const char* gpiochip, int32_t speed_hz,
+    int32_t cs, int32_t busy, int32_t reset, int32_t dio1, int32_t rxen,
+    int32_t has_rxen, int32_t dio2_as_rf_switch, int32_t dio3_tcxo,
+    int32_t tcxo_voltage, int32_t max_chip_dbm, int32_t pa_gain_db,
+    int32_t min_out_dbm, int32_t max_out_dbm);
 
 // Which stick to use when several are attached, by EEPROM serial — the only
 // thing that distinguishes them, since they share VID/PID and report no

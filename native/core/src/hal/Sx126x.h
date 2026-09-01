@@ -14,7 +14,7 @@
 // on themselves.
 #pragma once
 
-#include "Ch341Transport.h"
+#include "Sx126xBus.h"
 #include "mrf/hal/PacketRadio.h"
 
 #include <cstdint>
@@ -23,27 +23,42 @@
 
 namespace mrf::hal {
 
-// Per-board wiring and power model. Both supported sticks share a pin map —
+// How a board's radio is reached. Orthogonal to the power model, but bundled
+// into the profile because in practice each board is one specific pairing.
+enum class Sx126xTransport : int {
+    Ch341Usb = 0, // CH341 USB-SPI bridge — the MeshStick / MeshToad sticks
+    LinuxSpi = 1, // the host's own SPI bus — Pi HATs, the uConsole AIO V2
+};
+
+// Per-board wiring and power model. The two USB sticks share a pin map —
 // verified against lora-usb-meshstick-1262.yaml and lora-usb-meshtoad-e22.yaml
 // in meshtastic/firmware, which are byte-for-byte identical apart from
-// comments — so only the power model actually differs.
+// comments — so between those two only the power model differs. An SPI board
+// additionally carries where on the host its radio is wired.
 struct Sx126xBoardProfile {
-    Sx126xBoard  board;
-    const char*  name;
-    bool         has_rxen;           // RF-switch receive enable on D1
-    bool         dio2_as_rf_switch;  // DIO2 drives the transmit side directly
-    bool         dio3_tcxo;          // DIO3 supplies the TCXO
-    std::uint8_t tcxo_voltage;       // SetDIO3AsTCXOCtrl code (0x02 = 1.8 V)
-    std::int8_t  max_chip_dbm;       // ceiling written to SetTxParams
+    Sx126xBoard     board;
+    const char*     name;
+    Sx126xTransport transport;
+    // Wiring, for LinuxSpi boards only; ignored entirely on Ch341Usb, whose
+    // pin map is fixed by the bridge itself.
+    Sx126xSpiPins   spi;
+    bool            has_rxen;           // RF-switch receive enable line
+    bool            dio2_as_rf_switch;  // DIO2 drives the transmit side directly
+    bool            dio3_tcxo;          // DIO3 supplies the TCXO
+    std::uint8_t    tcxo_voltage;       // SetDIO3AsTCXOCtrl code (0x02 = 1.8 V)
+    std::int8_t     max_chip_dbm;       // ceiling written to SetTxParams
     // Antenna power minus chip power. Zero on a bare SX1262; the MeshToad's
     // E22P-915M30S front end adds roughly this much, which is why the number
     // shown in the UI is not the number programmed into the radio.
-    std::int8_t  pa_gain_db;
-    std::int8_t  min_out_dbm;
-    std::int8_t  max_out_dbm;
+    std::int8_t     pa_gain_db;
+    std::int8_t     min_out_dbm;
+    std::int8_t     max_out_dbm;
 };
 
-const Sx126xBoardProfile& sx126x_profile(Sx126xBoard board);
+// The profile for `board`, with the Custom SPI entry resolved against whatever
+// the operator most recently declared. By value rather than by reference
+// because that entry is not a constant — see set_custom_spi_board().
+Sx126xBoardProfile sx126x_profile(Sx126xBoard board);
 
 // Time-on-air in seconds for a LoRa frame, per the SX1276/SX126x formula.
 // Exposed for tests and used to bound how long a burst is waited on.
@@ -82,11 +97,11 @@ bool sx126x_tx_frequency_permitted(std::uint64_t freq_hz,
                                    std::uint64_t band_max_hz,
                                    std::string& reason);
 
-// Drives one SX126x over a CH341 bridge. Not thread-safe; Core serializes
+// Drives one SX126x over whichever bus it is on. Not thread-safe; Core serializes
 // transmits behind its own lock.
 class Sx126xRadio {
 public:
-    Sx126xRadio(Ch341Transport& bus, const Sx126xBoardProfile& profile)
+    Sx126xRadio(Sx126xBus& bus, const Sx126xBoardProfile& profile)
         : bus_(bus), profile_(profile) {}
 
     // Reset, verify the radio answers, and apply the board-level settings
@@ -148,7 +163,7 @@ private:
     bool clear_irq_status(std::string& error);
     bool check_device_errors(std::string& error);
 
-    Ch341Transport&           bus_;
+    Sx126xBus&                bus_;
     const Sx126xBoardProfile& profile_;
 };
 

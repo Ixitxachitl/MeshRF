@@ -2,7 +2,7 @@
 //
 // Windows CH341 transport over WCH's CH341DLL. See Ch341DynLoad.h for why the
 // vendor DLL is preferred over libusb on this platform.
-#include "Ch341Transport.h"
+#include "Ch341Bus.h"
 
 #if defined(_WIN32)
 
@@ -19,17 +19,17 @@ namespace {
 // D0-D5 direction, 1 = output. D3 (SCK) and D5 (MOSI) belong to the SPI
 // engine but still have to be declared as outputs; D4 (BUSY) stays an input.
 // D6 (DIO1) is input-only in hardware and is not covered by Set_D5_D0 at all.
-constexpr std::uint32_t kDirOut = (1u << kCh341PinCs) |
-                                  (1u << kCh341PinRxen) |
-                                  (1u << kCh341PinReset) |
+constexpr std::uint32_t kDirOut = (1u << kSx126xPinCs) |
+                                  (1u << kSx126xPinRxen) |
+                                  (1u << kSx126xPinReset) |
                                   (1u << 3) |  // SCK
                                   (1u << 5);   // MOSI
 
 // Idle levels: CS high (deasserted), NRST high (out of reset), RXen low,
 // SCK low (SPI mode 0).
-constexpr std::uint32_t kDataIdle = (1u << kCh341PinCs) | (1u << kCh341PinReset);
+constexpr std::uint32_t kDataIdle = (1u << kSx126xPinCs) | (1u << kSx126xPinReset);
 
-class Ch341WindowsTransport final : public Ch341Transport {
+class Ch341WindowsTransport final : public Sx126xBus {
 public:
     Ch341WindowsTransport(const ch341_dyn::Api& api, ULONG index, std::string name,
                           std::string serial)
@@ -38,7 +38,7 @@ public:
 
     ~Ch341WindowsTransport() override {
         // Park the radio: CS released, held in reset, RF switch off.
-        api_.CH341Set_D5_D0(index_, kDirOut, (1u << kCh341PinCs));
+        api_.CH341Set_D5_D0(index_, kDirOut, (1u << kSx126xPinCs));
         api_.CH341CloseDevice(index_);
     }
 
@@ -129,7 +129,7 @@ std::string serial_from_path(const char* path) {
 
 } // namespace
 
-std::unique_ptr<Ch341Transport> open_ch341(const std::string& serial, std::string& status) {
+std::unique_ptr<Sx126xBus> open_ch341(const std::string& serial, std::string& status) {
     ch341_dyn::Api api{};
     if (!ch341_dyn::load(api)) {
         status = ch341_dyn::last_status();

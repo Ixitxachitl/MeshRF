@@ -7,6 +7,7 @@ add_library(mrf_core STATIC
     src/hal/Ch341DynLoad.cpp
     src/hal/Ch341Windows.cpp
     src/hal/Ch341LibUsb.cpp
+    src/hal/SpiDevBus.cpp
     src/hal/Sx126x.cpp
     src/hal/Sx1262Radio.cpp
     src/dsp/Fir.cpp

@@ -66,7 +66,14 @@
   <PropertyGroup>
     <NativeConfig Condition="'$(NativeConfig)' == ''">RelWithDebInfo</NativeConfig>
     <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$(OS)' == 'Windows_NT'">$(MSBuildThisFileDirectory)..\..\build\windows-x64\bin\$(NativeConfig)</NativeBinDir>
-    <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$([MSBuild]::IsOSPlatform(`Linux`))'">$(MSBuildThisFileDirectory)../../build/linux-x64/bin</NativeBinDir>
+    <!-- The Linux CMake presets are named for the RID they target
+         (linux-x64, linux-arm64), so the build directory follows straight
+         from it. An explicit -r wins; otherwise the SDK's own host RID picks
+         the right one when building natively on a Pi or a uConsole. -->
+    <_NativeLinuxRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_NativeLinuxRid>
+    <_NativeLinuxRid Condition="'$(_NativeLinuxRid)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</_NativeLinuxRid>
+    <_NativeLinuxRid Condition="'$(_NativeLinuxRid)' == ''">linux-x64</_NativeLinuxRid>
+    <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$([MSBuild]::IsOSPlatform(`Linux`))'">$(MSBuildThisFileDirectory)../../build/$(_NativeLinuxRid)/bin</NativeBinDir>
     <NativeBinDir Condition="'$(NativeBinDir)' == '' AND '$([MSBuild]::IsOSPlatform(`OSX`))'">$(MSBuildThisFileDirectory)../../build/macos-arm64/bin</NativeBinDir>
   </PropertyGroup>
   <Target Name="CopyNativeBridge" AfterTargets="Build">

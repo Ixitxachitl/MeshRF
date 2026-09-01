@@ -75,6 +75,19 @@ public enum Sx1262Board
     /// once before anything can transmit.
     /// </summary>
     Unspecified = 2,
+    /// <summary>
+    /// ClockworkPi uConsole with the HackerGadgets AIO V2 expansion: a bare
+    /// SX1262 on the host's own SPI1, up to 22 dBm. Linux only, and the AIO's
+    /// GPIO 16 has to have powered the radio before it exists at all.
+    /// </summary>
+    UConsoleAio = 3,
+    /// <summary>
+    /// Any other SX1262 on a host SPI bus — a Raspberry Pi HAT, a custom
+    /// build. Linux only. Both the wiring and the power model come from
+    /// <see cref="AppSettings.CustomSpi"/>, because neither can be probed and
+    /// a guessed PA gain is wrong in the direction that over-radiates.
+    /// </summary>
+    CustomSpi = 4,
 }
 
 /// <summary>
@@ -200,6 +213,20 @@ public sealed class MeshtasticCore : IDisposable
     /// Which CH341+SX126x stick is attached. Changing this re-opens the device
     /// when it is already selected, so the power model follows immediately.
     /// </summary>
+    /// <summary>
+    /// Declares the wiring and power model of the <see cref="Sx1262Board.CustomSpi"/>
+    /// board. Static because the native side keeps one declaration per
+    /// process: it describes the machine, not a session. Takes effect on the
+    /// next open, so call it before selecting the board.
+    /// </summary>
+    public static void SetCustomSpiBoard(CustomSpiBoardSettings s) =>
+        NativeMethods.SetCustomSpiBoard(
+            s.SpiDev ?? "", s.GpioChip ?? "", s.SpeedHz,
+            s.Cs, s.Busy, s.Reset, s.Dio1, s.RxEn,
+            s.RxEn >= 0 ? 1 : 0,
+            s.Dio2AsRfSwitch ? 1 : 0, s.Dio3Tcxo ? 1 : 0,
+            s.TcxoVoltage, s.MaxChipDbm, s.PaGainDb, s.MinOutDbm, s.MaxOutDbm);
+
     public Sx1262Board Sx1262Board
     {
         get

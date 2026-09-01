@@ -104,8 +104,7 @@ MRF_API int32_t MRF_CALL mrf_core_device_available(const mrf_core_t* core,
 
 MRF_API int32_t MRF_CALL mrf_core_set_sx1262_board(mrf_core_t* core, int32_t board) {
     if (!core) return -2;
-    if (board < 0 || board > static_cast<int32_t>(mrf::hal::Sx126xBoard::Unspecified))
-        return -1;
+    if (board < 0 || board > mrf::hal::kSx126xBoardMax) return -1;
     core->core.set_sx1262_board(static_cast<mrf::hal::Sx126xBoard>(board));
     return 0;
 }
@@ -397,8 +396,51 @@ MRF_API int32_t MRF_CALL mrf_core_transmit_params(mrf_core_t* core,
     }
 }
 
+// Declares the wiring and power model of an SX1262 on the host's own SPI bus,
+// for the Custom SPI board. Process-global rather than per-core, like the
+// board profiles it feeds: it describes the machine, not a session.
+//
+// Every field is the operator's statement about their hardware. The power
+// model especially: nothing on an SPI bus reports whether a front end is
+// fitted, and assuming none would under-report the output of every board that
+// has one.
+MRF_API int32_t MRF_CALL mrf_set_custom_spi_board(
+    const char* spidev, const char* gpiochip, int32_t speed_hz,
+    int32_t cs, int32_t busy, int32_t reset, int32_t dio1, int32_t rxen,
+    int32_t has_rxen, int32_t dio2_as_rf_switch, int32_t dio3_tcxo,
+    int32_t tcxo_voltage, int32_t max_chip_dbm, int32_t pa_gain_db,
+    int32_t min_out_dbm, int32_t max_out_dbm) {
+    try {
+        mrf::hal::Sx126xCustomSpiBoard b{};
+        if (spidev && *spidev) b.pins.spidev = spidev;
+        if (gpiochip && *gpiochip) b.pins.gpiochip = gpiochip;
+        if (speed_hz > 0) b.pins.speed_hz = static_cast<std::uint32_t>(speed_hz);
+        b.pins.cs    = cs;
+        b.pins.busy  = busy;
+        b.pins.reset = reset;
+        b.pins.dio1  = dio1;
+        b.pins.rxen  = rxen;
+
+        b.has_rxen          = has_rxen != 0;
+        b.dio2_as_rf_switch = dio2_as_rf_switch != 0;
+        b.dio3_tcxo         = dio3_tcxo != 0;
+        b.tcxo_voltage      = static_cast<std::uint8_t>(tcxo_voltage);
+        b.max_chip_dbm      = static_cast<std::int8_t>(max_chip_dbm);
+        b.pa_gain_db        = static_cast<std::int8_t>(pa_gain_db);
+        b.min_out_dbm       = static_cast<std::int8_t>(min_out_dbm);
+        b.max_out_dbm       = static_cast<std::int8_t>(max_out_dbm);
+
+        mrf::hal::set_custom_spi_board(b);
+        return 0;
+    } catch (...) {
+        return -1;
+    }
+}
+
 // 8: SX1262 packet transmitter (board selection, dBm power control).
 // 9: SX1262 receive path and serial-based stick selection.
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 9u; }
+// 10: SX1262 over the host's own SPI bus (uConsole AIO V2, Pi HATs), with a
+//     declarable custom pin map and power model.
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 10u; }
 
 } // extern "C"

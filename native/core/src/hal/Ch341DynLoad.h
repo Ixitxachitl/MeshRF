@@ -34,7 +34,7 @@ enum : std::uint32_t {
 };
 
 // CH341StreamSPI4 chip-select field: bit 7 enables CS handling, bits 1-0 pick
-// D0/D1/D2. We drive CS by hand (see Ch341Transport.h) so a multi-transfer
+// D0/D1/D2. We drive CS by hand (see Ch341Bus.h) so a multi-transfer
 // SX126x command stays inside one assertion, and pass 0 to leave it alone.
 enum : std::uint32_t {
     kChipSelectIgnore = 0x00u,

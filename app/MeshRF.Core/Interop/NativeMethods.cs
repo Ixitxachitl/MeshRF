@@ -56,6 +56,16 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_get_sx1262_board")]
     public static partial int CoreGetSx1262Board(nint core);
 
+    // Process-global, not per-core: it describes the machine's wiring, not a
+    // session. Hence no core handle.
+    [LibraryImport(Dll, EntryPoint = "mrf_set_custom_spi_board", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int SetCustomSpiBoard(
+        string spidev, string gpiochip, int speedHz,
+        int cs, int busy, int reset, int dio1, int rxen,
+        int hasRxen, int dio2AsRfSwitch, int dio3Tcxo,
+        int tcxoVoltage, int maxChipDbm, int paGainDb,
+        int minOutDbm, int maxOutDbm);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_set_sx1262_serial", StringMarshalling = StringMarshalling.Utf8)]
     public static partial int CoreSetSx1262Serial(nint core, string serial);
 
