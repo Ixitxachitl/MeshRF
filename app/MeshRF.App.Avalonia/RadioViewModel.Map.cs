@@ -225,8 +225,20 @@ public partial class RadioViewModel
     // ----- Home location -----
 
     /// <summary>Ctrl+right-click on the map drops our home location here.</summary>
+    /// <remarks>
+    /// Refused while the USB GPS is the location source: there the receiver
+    /// owns the position boxes, and its next fix — a second away — would
+    /// overwrite anything dropped by hand. The identity window disables the
+    /// typed boxes for the same reason; this is the same gate for the gesture.
+    /// </remarks>
     public void SetHomeLocation(double lat, double lon)
     {
+        if (IsUsbSerialLocationSource)
+        {
+            StatusText = "Location comes from the USB GPS. Set the location source to Manual to place it yourself.";
+            return;
+        }
+
         HomeLatitudeText = lat.ToString("F6", CultureInfo.InvariantCulture);
         HomeLongitudeText = lon.ToString("F6", CultureInfo.InvariantCulture);
         StatusText = $"Location set to {HomeLatitudeText}, {HomeLongitudeText}";

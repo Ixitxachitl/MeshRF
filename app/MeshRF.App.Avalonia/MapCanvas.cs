@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Globalization;
 using System.Net.Http;
 using Avalonia;
@@ -59,8 +60,11 @@ public sealed class MapCanvas : Control
             Brightness != 1.0 || Gamma != 1.0 || Invert || HueRotate != 0.0 || Saturation != 1.0;
     }
 
-    private const string GestureHint =
-        "  ·  Ctrl+left-click send waypoint  ·  Ctrl+right-click set location";
+    private const string GestureHint = "  ·  Ctrl+left-click send waypoint";
+
+    /// <summary>Appended only while the position is ours to place: with the USB
+    /// GPS selected the gesture is refused, so the line must not offer it.</summary>
+    private const string SetLocationHint = "  ·  Ctrl+right-click set location";
 
     private static readonly TileProvider LightTiles = new(
         "osm", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "abc",
@@ -128,10 +132,11 @@ public sealed class MapCanvas : Control
         _ => DarkTiles,
     };
 
-    public string Attribution => CurrentTiles.Attribution;
+    public string Attribution => CurrentTiles.Attribution +
+        (_vm is null || _vm.IsManualLocationSource ? SetLocationHint : string.Empty);
 
-    /// <summary>Raised when the tile provider changes, so the host can refresh
-    /// its attribution line.</summary>
+    /// <summary>Raised when the tile provider or the location source changes,
+    /// so the host can refresh its attribution line.</summary>
     public event Action? AttributionChanged;
 
     // -- Tile cache ---------------------------------------------------------
@@ -313,9 +318,14 @@ public sealed class MapCanvas : Control
 
     public void Attach(RadioViewModel vm)
     {
-        if (_vm is not null) _vm.MapDataChanged -= OnMapDataChanged;
+        if (_vm is not null)
+        {
+            _vm.MapDataChanged -= OnMapDataChanged;
+            _vm.PropertyChanged -= OnViewModelPropertyChanged;
+        }
         _vm = vm;
         _vm.MapDataChanged += OnMapDataChanged;
+        _vm.PropertyChanged += OnViewModelPropertyChanged;
         _markerCache = null;
         InvalidateVisual();
     }
@@ -338,6 +348,14 @@ public sealed class MapCanvas : Control
         // that saturates the UI thread and makes the whole panel, including
         // hovering the controls layered over it, feel sticky.
         _renderPending = true;
+    }
+
+    /// <summary>The attribution line carries the set-location gesture, which is
+    /// only offered while the location source is manual.</summary>
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(RadioViewModel.IsManualLocationSource))
+            AttributionChanged?.Invoke();
     }
 
     private bool _renderPending;
