@@ -31,14 +31,14 @@ public sealed class AppSettings
     public byte VgaGainDb { get; set; } = 20;
     public bool AmpEnable { get; set; } = false;
 
-    /// <summary>Legacy selected radio backend, now treated as RX on migration.</summary>
-    public string DeviceKind { get; set; } = "Null";
-
     /// <summary>Selected RX radio backend: "Auto", "HackRf", "RtlSdr" or "Null".
     /// Matches <see cref="MeshRF.RadioDeviceKind"/>.</summary>
     public string RxDeviceKind { get; set; } = "Null";
 
-    /// <summary>Legacy shared RX sample rate used by older builds; kept for migration.</summary>
+    /// <summary>Device-independent RX sample rate, rewritten alongside whichever
+    /// per-device rate below is in play. A device still on its 2.4 MHz default
+    /// falls back to this, so a rate chosen before that device was ever selected
+    /// carries over instead of reverting.</summary>
     public uint RxSampleRateHz { get; set; } = 2_400_000;
 
     /// <summary>Requested HackRF RX device sample rate in Hz.</summary>
@@ -381,7 +381,6 @@ public sealed class AppSettings
     public string NodeFilterKey { get; set; } = "Any";
     public string NodeFilterSigned { get; set; } = "Show all";
     public string NodeFilterLocation { get; set; } = "Any";
-    public bool NodeFilterHideInvalidLocations { get; set; } = false;
     public string NodeFilterIgnored { get; set; } = "Show all";
     public string NodeFilterFavorite { get; set; } = "Show all";
     public string NodeFilterMqtt { get; set; } = "Any";

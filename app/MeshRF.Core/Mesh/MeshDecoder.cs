@@ -127,9 +127,19 @@ public sealed class MeshUser
 /// <summary>Subset of the Meshtastic <c>Position</c> protobuf.</summary>
 public sealed class MeshPosition
 {
-    public double Latitude { get; init; }
-    public double Longitude { get; init; }
+    /// <summary>Position.latitude_i, or null when the field was absent. It is
+    /// <c>optional</c> in the proto, so a sender that has no fix — or that is
+    /// only asking for ours — omits it rather than reporting zero.</summary>
+    public double? Latitude { get; init; }
+
+    /// <summary>Position.longitude_i, or null when the field was absent.</summary>
+    public double? Longitude { get; init; }
+
     public int? AltitudeM { get; init; }
+
+    /// <summary>Both coordinates arrived on the wire. A Position without them
+    /// carries no location, whatever else it holds.</summary>
+    public bool HasLocation => Latitude.HasValue && Longitude.HasValue;
 }
 
 /// <summary>Subset of the Meshtastic <c>Waypoint</c> protobuf.</summary>
@@ -832,7 +842,7 @@ public static class MeshDecoder
     //           9=altitude_hae(sint32)
     private static MeshPosition ParsePosition(byte[] data)
     {
-        double lat = 0, lon = 0;
+        double? lat = null, lon = null;
         int? alt = null, altHae = null;
         var rdr = new ProtoReader(data);
         while (rdr.TryReadTag(out int field, out var wt))

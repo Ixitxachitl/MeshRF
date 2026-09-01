@@ -1268,41 +1268,41 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
 
             case PortNum.Position when result.Position is not null:
-                // A zero-island position with want_response is the request
-                // form, the same convention NodeInfo uses.
-                if (result.Position.Latitude == 0 && result.Position.Longitude == 0 &&
-                    IsDirectedRequest(header, result))
+                // A Position that omits the coordinates carries no location. With
+                // want_response it is the request form, the same convention
+                // NodeInfo uses; either way there is nothing here to store, and
+                // writing the missing fields as 0,0 would erase what we know of
+                // the sender — including when we overhear a request aimed at
+                // somebody else.
+                if (result.Position is not { Latitude: double lat, Longitude: double lon })
                 {
-                    AutoReplyRequested?.Invoke(PortNum.Position, header.From, result.ChannelName,
-                                               ReplyHopLimit(header, result));
+                    if (IsDirectedRequest(header, result))
+                        AutoReplyRequested?.Invoke(PortNum.Position, header.From, result.ChannelName,
+                                                   ReplyHopLimit(header, result));
                     break;
                 }
                 // Record a history point only when the coordinates actually
                 // moved: position packets repeat unchanged, and storing every
                 // one would bury real movement in duplicates.
                 var previous = _nodeStore.Get(header.From);
-                bool positionChanged =
-                    previous?.Latitude != result.Position.Latitude ||
-                    previous?.Longitude != result.Position.Longitude;
+                bool positionChanged = previous?.Latitude != lat || previous?.Longitude != lon;
 
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
-                    Latitude = result.Position.Latitude,
-                    Longitude = result.Position.Longitude,
+                    Latitude = lat,
+                    Longitude = lon,
                     AltitudeM = result.Position.AltitudeM,
                 });
                 if (positionChanged)
                 {
                     var when = DateTimeOffset.FromUnixTimeSeconds(rxEpoch).UtcDateTime;
                     long id = _nodeStore.AddLocationHistory(
-                        header.From, when,
-                        result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM);
+                        header.From, when, lat, lon, result.Position.AltitudeM);
                     LocationHistoryRecorded?.Invoke(header.From, new NodeLocationHistoryRecord(
-                        id, header.From, when,
-                        result.Position.Latitude, result.Position.Longitude, result.Position.AltitudeM));
+                        id, header.From, when, lat, lon, result.Position.AltitudeM));
                 }
-                EvaluateGeofenceCrossing(header.From, result.Position.Latitude, result.Position.Longitude);
+                EvaluateGeofenceCrossing(header.From, lat, lon);
                 MarkNodeDirty(header.From);
                 break;
 
@@ -1538,8 +1538,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 => $"{prefix}: \"{TrimForReplyPreview(result.Text)}\"{size}",
             PortNum.NodeInfo when result.User is not null
                 => $"{prefix}: user={result.User.LongName} ({result.User.ShortName}){size}",
+            PortNum.Position when result.Position is { Latitude: double lat, Longitude: double lon }
+                => $"{prefix}: lat={lat:F5} lon={lon:F5}{size}",
+            // No coordinates on the wire. The firmware stamps precision_bits onto
+            // every position it originates, so a request is 3 bytes rather than 0.
             PortNum.Position when result.Position is not null
-                => $"{prefix}: lat={result.Position.Latitude:F5} lon={result.Position.Longitude:F5}{size}",
+                => $"{prefix}: {(result.WantResponse ? "position request" : "no position")}{size}",
             PortNum.Waypoint when result.Waypoint is not null
                 => $"{prefix}: waypoint={result.Waypoint.Name} lat={result.Waypoint.Latitude:F5} lon={result.Waypoint.Longitude:F5}{size}",
             PortNum.Telemetry when result.Telemetry is not null

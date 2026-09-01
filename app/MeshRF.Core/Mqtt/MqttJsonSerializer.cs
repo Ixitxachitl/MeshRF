@@ -98,11 +98,11 @@ public static class MqttJsonSerializer
             case PortNum.Position when result.Position is not null:
             {
                 var p = result.Position;
-                var payload = new JsonObject
-                {
-                    ["latitude_i"] = (int)Math.Round(p.Latitude / 1e-7),
-                    ["longitude_i"] = (int)Math.Round(p.Longitude / 1e-7),
-                };
+                // Omit the coordinates the sender omitted; publishing them as 0,0
+                // would put a request on the map as a position off West Africa.
+                var payload = new JsonObject();
+                if (p.Latitude is double lat) payload["latitude_i"] = (int)Math.Round(lat / 1e-7);
+                if (p.Longitude is double lon) payload["longitude_i"] = (int)Math.Round(lon / 1e-7);
                 if (p.AltitudeM is int alt && alt != 0) payload["altitude"] = alt;
                 return ("position", payload);
             }

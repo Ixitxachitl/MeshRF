@@ -718,7 +718,7 @@
                                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled" MaxHeight="220">
                                         <Grid Margin="0,6,0,0" ColumnDefinitions="120,*"
-                                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Hops" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="0" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeHopsFilterOptions}" SelectedItem="{Binding NodeHopsFilter}" />
@@ -735,92 +735,88 @@
                                             <ComboBox Grid.Row="3" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeLocationFilterOptions}" SelectedItem="{Binding NodeLocationFilter}" />
 
-                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Invalid pos" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <CheckBox Grid.Row="4" Grid.Column="1" FontSize="11" Content="Hide invalid positions"
-                                                      IsChecked="{Binding NodeHideInvalidLocations}" />
-
-                                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Ignored nodes" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="5" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Ignored nodes" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="4" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeIgnoredFilterOptions}" SelectedItem="{Binding NodeIgnoredFilter}" />
 
-                                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Favorites" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="6" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Favorites" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="5" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeFavoriteFilterOptions}" SelectedItem="{Binding NodeFavoriteFilter}" />
 
-                                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Via MQTT" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="7" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Via MQTT" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="6" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeMqttFilterOptions}" SelectedItem="{Binding NodeMqttFilter}" />
 
-                                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Heard within" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <TextBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11" Text="{Binding NodeMaxAgeMinutesText}"
+                                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Heard within" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <TextBox Grid.Row="7" Grid.Column="1" Height="22" FontSize="11" Text="{Binding NodeMaxAgeMinutesText}"
                                                      PlaceholderText="minutes" ToolTip.Tip="Only show nodes heard within this many minutes" />
 
-                                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Max distance" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <TextBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11" Text="{Binding NodeDistanceKmText}"
+                                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Max distance" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <TextBox Grid.Row="8" Grid.Column="1" Height="22" FontSize="11" Text="{Binding NodeDistanceKmText}"
                                                      PlaceholderText="{Binding NodeDistanceUnitShort}" ToolTip.Tip="Needs a home location set in My Node → Configure" />
 
-                                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Has temperature" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="10" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Has temperature" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="9" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeTemperatureFilter}" />
 
-                                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Has humidity" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="11" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Has humidity" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="10" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeHumidityFilter}" />
 
-                                            <TextBlock Grid.Row="12" Grid.Column="0" Text="Has pressure" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="12" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Has pressure" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="11" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePressureFilter}" />
 
-                                            <TextBlock Grid.Row="13" Grid.Column="0" Text="Has gas resist." FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="13" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="12" Grid.Column="0" Text="Has gas resist." FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="12" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeGasResistanceFilter}" />
 
-                                            <TextBlock Grid.Row="14" Grid.Column="0" Text="Has IAQ" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="14" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="13" Grid.Column="0" Text="Has IAQ" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="13" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeIaqFilter}" />
 
-                                            <TextBlock Grid.Row="15" Grid.Column="0" Text="Has PM1.0 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="15" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="14" Grid.Column="0" Text="Has PM1.0 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="14" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm10StdFilter}" />
 
-                                            <TextBlock Grid.Row="16" Grid.Column="0" Text="Has PM2.5 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="16" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="15" Grid.Column="0" Text="Has PM2.5 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="15" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm25StdFilter}" />
 
-                                            <TextBlock Grid.Row="17" Grid.Column="0" Text="Has PM10 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="17" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="16" Grid.Column="0" Text="Has PM10 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="16" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm100StdFilter}" />
 
-                                            <TextBlock Grid.Row="18" Grid.Column="0" Text="Has PM1.0 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="18" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="17" Grid.Column="0" Text="Has PM1.0 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="17" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm10EnvFilter}" />
 
-                                            <TextBlock Grid.Row="19" Grid.Column="0" Text="Has PM2.5 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="19" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="18" Grid.Column="0" Text="Has PM2.5 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="18" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm25EnvFilter}" />
 
-                                            <TextBlock Grid.Row="20" Grid.Column="0" Text="Has PM10 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="20" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="19" Grid.Column="0" Text="Has PM10 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="19" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm100EnvFilter}" />
 
-                                            <TextBlock Grid.Row="21" Grid.Column="0" Text="Has Ch1 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <Grid Grid.Row="21" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                            <TextBlock Grid.Row="20" Grid.Column="0" Text="Has Ch1 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="20" Grid.Column="1" ColumnDefinitions="*,4,*">
                                                 <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh1VoltageFilter}" />
                                                 <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh1CurrentFilter}" />
                                             </Grid>
 
-                                            <TextBlock Grid.Row="22" Grid.Column="0" Text="Has Ch2 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <Grid Grid.Row="22" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                            <TextBlock Grid.Row="21" Grid.Column="0" Text="Has Ch2 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="21" Grid.Column="1" ColumnDefinitions="*,4,*">
                                                 <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh2VoltageFilter}" />
                                                 <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh2CurrentFilter}" />
                                             </Grid>
 
-                                            <TextBlock Grid.Row="23" Grid.Column="0" Text="Has Ch3 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <Grid Grid.Row="23" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                            <TextBlock Grid.Row="22" Grid.Column="0" Text="Has Ch3 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="22" Grid.Column="1" ColumnDefinitions="*,4,*">
                                                 <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh3VoltageFilter}" />
                                                 <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
@@ -962,20 +958,11 @@
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Width="Auto" SortMemberPath="HasLocation">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="📍" ToolTip.Tip="Position known (red dot = reported position is invalid)" />
+                                    <TextBlock Text="📍" ToolTip.Tip="Position known" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
-                                    <!-- Same color-emoji caveat as the key column: 📍 ignores
-                                         Foreground, so invalid position is a badge dot, not a tint. -->
                                     <DataTemplate x:DataType="nodes:NodeRecord">
-                                        <Panel IsVisible="{Binding HasLocation}" ToolTip.Tip="Location known">
-                                            <TextBlock Text="📍" />
-                                            <Ellipse Width="5" Height="5" Fill="#FF6B6B"
-                                                     Stroke="{DynamicResource BrushPanelBackground}" StrokeThickness="0.75"
-                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                                     IsVisible="{Binding HasInvalidLocation}"
-                                                     ToolTip.Tip="Reported location is invalid" />
-                                        </Panel>
+                                        <TextBlock Text="📍" IsVisible="{Binding HasLocation}" ToolTip.Tip="Location known" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>

@@ -44,7 +44,6 @@ public partial class RadioViewModel
     [ObservableProperty] private string _nodeKeyFilter = "Any";
     [ObservableProperty] private string _nodeSignedFilter = "Show all";
     [ObservableProperty] private string _nodeLocationFilter = "Any";
-    [ObservableProperty] private bool _nodeHideInvalidLocations;
     [ObservableProperty] private string _nodeIgnoredFilter = "Show all";
     [ObservableProperty] private string _nodeFavoriteFilter = "Show all";
     [ObservableProperty] private string _nodeMqttFilter = "Any";
@@ -143,7 +142,6 @@ public partial class RadioViewModel
     partial void OnNodeKeyFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeSignedFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeLocationFilterChanged(string value) => OnFilterChanged();
-    partial void OnNodeHideInvalidLocationsChanged(bool value) => OnFilterChanged();
     partial void OnNodeIgnoredFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeFavoriteFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeMqttFilterChanged(string value) => OnFilterChanged();
@@ -181,7 +179,6 @@ public partial class RadioViewModel
         NodeKeyFilter = "Any";
         NodeSignedFilter = "Show all";
         NodeLocationFilter = "Any";
-        NodeHideInvalidLocations = false;
         NodeIgnoredFilter = "Show all";
         NodeFavoriteFilter = "Show all";
         NodeMqttFilter = "Any";
@@ -255,8 +252,6 @@ public partial class RadioViewModel
             case "Has position" when !n.HasLocation: return false;
             case "No position" when n.HasLocation: return false;
         }
-
-        if (NodeHideInvalidLocations && n.HasInvalidLocation) return false;
 
         switch (NodeIgnoredFilter)
         {
@@ -350,7 +345,6 @@ public partial class RadioViewModel
         if (NodeKeyFilterOptions.Contains(s.NodeFilterKey)) NodeKeyFilter = s.NodeFilterKey;
         if (NodeSignedFilterOptions.Contains(s.NodeFilterSigned)) NodeSignedFilter = s.NodeFilterSigned;
         if (NodeLocationFilterOptions.Contains(s.NodeFilterLocation)) NodeLocationFilter = s.NodeFilterLocation;
-        NodeHideInvalidLocations = s.NodeFilterHideInvalidLocations;
         if (NodeIgnoredFilterOptions.Contains(s.NodeFilterIgnored)) NodeIgnoredFilter = s.NodeFilterIgnored;
         if (NodeFavoriteFilterOptions.Contains(s.NodeFilterFavorite)) NodeFavoriteFilter = s.NodeFilterFavorite;
         if (NodeMqttFilterOptions.Contains(s.NodeFilterMqtt)) NodeMqttFilter = s.NodeFilterMqtt;
@@ -386,7 +380,6 @@ public partial class RadioViewModel
         s.NodeFilterKey = NodeKeyFilter;
         s.NodeFilterSigned = NodeSignedFilter;
         s.NodeFilterLocation = NodeLocationFilter;
-        s.NodeFilterHideInvalidLocations = NodeHideInvalidLocations;
         s.NodeFilterIgnored = NodeIgnoredFilter;
         s.NodeFilterFavorite = NodeFavoriteFilter;
         s.NodeFilterMqtt = NodeMqttFilter;

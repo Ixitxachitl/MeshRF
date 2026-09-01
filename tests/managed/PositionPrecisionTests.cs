@@ -64,8 +64,9 @@ public class PositionPrecisionTests
             Assert.NotNull(decoded!.Position);
 
             var (lat, lon) = MeshEncoder.ApplyPositionPrecision(Lat, Lon, precision);
-            Assert.Equal(lat, decoded.Position!.Latitude, 6);
-            Assert.Equal(lon, decoded.Position.Longitude, 6);
+            Assert.True(decoded.Position!.HasLocation);
+            Assert.Equal(lat, decoded.Position.Latitude!.Value, 6);
+            Assert.Equal(lon, decoded.Position.Longitude!.Value, 6);
         }
     }
 }

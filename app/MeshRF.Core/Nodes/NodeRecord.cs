@@ -216,25 +216,6 @@ public sealed class NodeRecord : INotifyPropertyChanged
     /// <summary>True when both latitude and longitude are present.</summary>
     public bool HasLocation => Latitude.HasValue && Longitude.HasValue;
 
-    private const double NearOriginInvalidDegrees = 0.01;
-
-    /// <summary>True when a position exists but is clearly invalid for mapping:
-    /// near the (0,0) sentinel or coordinates outside the legal lat/lon bounds.</summary>
-    public bool HasInvalidLocation
-    {
-        get
-        {
-            if (Latitude is not double lat || Longitude is not double lon)
-                return false;
-
-            if (Math.Abs(lat) < NearOriginInvalidDegrees &&
-                Math.Abs(lon) < NearOriginInvalidDegrees)
-                return true;
-
-            return lat is < -90 or > 90 || lon is < -180 or > 180;
-        }
-    }
-
     /// <summary>When true, text messages from this node do not play the RTTTL ringtone.</summary>
     public bool MuteRtttl { get; set; }
 
