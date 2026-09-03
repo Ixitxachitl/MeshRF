@@ -42,8 +42,11 @@ public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChange
     /// Node this waypoint is locked to, or 0 for one anybody may edit.
     /// </summary>
     /// <remarks>
-    /// Firmware honours the lock: only the node named here can change or
-    /// retire the marker, so a locked one belongs to whoever placed it for as
+    /// The lock is a rule each client keeps for itself — firmware never reads
+    /// the field, and holds no waypoint list to apply it to. An unlocked
+    /// marker is therefore open to anybody: any node may move it, rename it or
+    /// retire it, and this map accepts that. A locked one takes changes only
+    /// from the node named here, so it belongs to whoever placed it for as
     /// long as it lives.
     /// </remarks>
     public uint LockedTo { get; set; }

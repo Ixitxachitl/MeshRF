@@ -1859,22 +1859,25 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// </remarks>
     public void RecordOutgoingWaypoint(WaypointRecord record)
     {
-        _waypointStore.Upsert(record);
-
         for (int i = 0; i < Waypoints.Count; i++)
         {
-            if (Waypoints[i].FromNode != record.FromNode || Waypoints[i].WaypointId != record.WaypointId) continue;
+            if (Waypoints[i].WaypointId != record.WaypointId) continue;
+            // Editing or retiring somebody else's marker does not make it ours.
+            record.FromNode = Waypoints[i].FromNode;
+            _waypointStore.Upsert(record);
             Waypoints[i] = record;
             return;
         }
+
+        _waypointStore.Upsert(record);
         Waypoints.Add(record);
     }
 
     private void HandleWaypoint(MeshHeader header, MeshDecodeResult result)
     {
         var wp = result.Waypoint!;
-        // Some senders omit waypoint id (0); fall back to packet id
-        // as a stable per-sender key, same as MainViewModel.
+        // Some senders omit waypoint id (0); fall back to packet id, which is
+        // drawn from the same 32-bit space and is just as unlikely to collide.
         uint waypointId = wp.Id != 0 ? wp.Id : header.PacketId;
         var waypointRecord = new WaypointRecord
         {
@@ -1896,19 +1899,38 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             BboxEast = wp.BoundingBox?.East,
             BboxNorth = wp.BoundingBox?.North,
         };
+        // Matched on id alone: a marker belongs to the mesh, not to whoever
+        // last described it, so an unlocked one may be edited or retired by
+        // anybody. Scoping this to the sender as well used to drop the expiry
+        // that retires a marker somebody else placed.
         var existingWpIndex = -1;
         for (int i = 0; i < Waypoints.Count; i++)
         {
-            if (Waypoints[i].FromNode == header.From && Waypoints[i].WaypointId == waypointId)
-            {
-                existingWpIndex = i;
-                break;
-            }
+            if (Waypoints[i].WaypointId != waypointId) continue;
+            existingWpIndex = i;
+            break;
         }
-        // A past-dated expiry is how the mesh retires a marker. For one we
-        // never held — or deleted already — there is nothing to retire, and
-        // filing it would resurrect the marker as a greyed-out row.
-        if (existingWpIndex < 0 && waypointRecord.IsExpired) return;
+
+        if (existingWpIndex < 0)
+        {
+            // A past-dated expiry is how the mesh retires a marker. For one we
+            // never held — or deleted already — there is nothing to retire, and
+            // filing it would resurrect the marker as a greyed-out row.
+            if (waypointRecord.IsExpired) return;
+        }
+        else
+        {
+            // locked_to names the one node allowed to change the marker.
+            // Nothing on the mesh polices that — firmware never reads the
+            // field — so honouring it here is the whole of what makes a lock
+            // mean anything to this map.
+            uint lockHolder = Waypoints[existingWpIndex].LockedTo;
+            if (lockHolder != 0 && lockHolder != header.From) return;
+
+            // Who placed it does not change when somebody else edits it.
+            waypointRecord.FromNode = Waypoints[existingWpIndex].FromNode;
+        }
+
         _waypointStore.Upsert(waypointRecord);
         if (existingWpIndex >= 0) Waypoints[existingWpIndex] = waypointRecord;
         else Waypoints.Add(waypointRecord);

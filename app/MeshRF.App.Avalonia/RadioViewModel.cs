@@ -3049,10 +3049,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// permitting.
     /// </summary>
     /// <remarks>
-    /// One locked to another node is not ours to retire — an expiry from a node
-    /// that does not hold the lock is ignored — and one that has already lapsed
-    /// is off every map that holds it, so neither loses anything by going
-    /// quietly. An active one of our own does.
+    /// One locked to another node is not ours to retire — a client keeping the
+    /// lock ignores an expiry from anybody but the holder — and one that has
+    /// already lapsed is off every map that holds it, so neither loses anything
+    /// by going quietly. Any other active one does, our own or not: an
+    /// unlocked marker is open to whoever wants to retire it.
     /// </remarks>
     private bool IsOursToRetire(WaypointRecord wp) => !IsLockedToAnother(wp) && !HasLapsed(wp);
 
@@ -3120,8 +3121,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         ForgetWaypointLocal(wp);
 
         // Worth saying out loud: a marker locked to someone else stays on their
-        // map and everyone else's. Nothing is broadcast for it, because an
-        // expiry from a node that does not hold the lock is ignored anyway.
+        // map and everyone else's. Nothing is broadcast for it, because any
+        // client keeping the lock discards an expiry from a node that does not
+        // hold it.
         if (lockedToOther)
         {
             StatusText = $"Removed \"{wp.DisplayName}\" from this list only — " +
@@ -3161,7 +3163,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var updated = new WaypointRecord
         {
             Id = original.Id,
-            FromNode = _rxHost.MyNodeNum,
+            // Whoever placed it keeps that credit; we are only the last to
+            // touch it, which packet_id already records.
+            FromNode = original.FromNode,
             WaypointId = original.WaypointId,
             PacketId = packetId,
             Channel = original.Channel,

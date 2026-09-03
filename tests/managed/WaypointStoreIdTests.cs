@@ -54,7 +54,7 @@ public class WaypointStoreIdTests : IDisposable
     }
 
     [Fact]
-    public void UpsertOfSameSenderAndIdKeepsTheSameRow()
+    public void UpsertOfTheSameIdKeepsTheSameRow()
     {
         using var store = new WaypointStore(_db);
         var placed = Waypoint(1, "Chute Fire");
@@ -81,5 +81,68 @@ public class WaypointStoreIdTests : IDisposable
 
         var left = store.All();
         Assert.Equal(spared.WaypointId, Assert.Single(left).WaypointId);
+    }
+
+    /// <summary>
+    /// A marker is identified by its id alone, so an unlocked one retired by
+    /// somebody other than the node that placed it lands on the row already
+    /// held rather than starting a second one.
+    /// </summary>
+    [Fact]
+    public void AnotherSenderRetiringTheSameIdLandsOnTheSameRow()
+    {
+        using var store = new WaypointStore(_db);
+        var placed = Waypoint(1, "Chute Fire");
+        store.Upsert(placed);
+
+        var retired = Waypoint(1, "Chute Fire");
+        retired.FromNode = 0x885ec106;
+        retired.ExpireEpoch = 1;
+        retired.RxEpoch = 2_000;
+        store.Upsert(retired);
+
+        Assert.Equal(placed.Id, retired.Id);
+        var row = Assert.Single(store.All());
+        Assert.Equal(1u, row.ExpireEpoch);
+        Assert.True(row.IsExpired);
+        // Retiring it does not make it theirs.
+        Assert.Equal(0xcafebabeu, row.FromNode);
+    }
+
+    /// <summary>
+    /// A DB written under the old sender-scoped key could hold one id once per
+    /// sender. Opening it collapses those to the freshest, which is what the
+    /// unique index on the id alone then holds.
+    /// </summary>
+    [Fact]
+    public void OpeningASenderScopedDbCollapsesDuplicateIds()
+    {
+        using (var store = new WaypointStore(_db))
+        {
+            store.Upsert(Waypoint(1, "Chute Fire"));
+        }
+        SqliteConnection.ClearAllPools();
+
+        // Reinstate the old key and slip in the row it used to allow.
+        using (var conn = new SqliteConnection($"Data Source={_db}"))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                DROP INDEX idx_waypoints_waypoint_id;
+                CREATE UNIQUE INDEX idx_waypoints_sender_id
+                    ON waypoints(from_node, waypoint_id);
+                INSERT INTO waypoints (from_node, waypoint_id, name, latitude, longitude, rx_epoch)
+                    VALUES (2287911174, 1, 'Chute Fire', 39.05, -121.07, 2000);
+                """;
+            cmd.ExecuteNonQuery();
+        }
+        SqliteConnection.ClearAllPools();
+
+        using var reopened = new WaypointStore(_db);
+
+        var row = Assert.Single(reopened.All());
+        Assert.Equal(2_000, row.RxEpoch);
+        Assert.Equal(2287911174u, row.FromNode);
     }
 }

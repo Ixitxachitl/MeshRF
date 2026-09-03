@@ -55,13 +55,13 @@ public sealed class WaypointStore : IDisposable
                     locked_to     INTEGER NOT NULL DEFAULT 0,
                     rx_epoch      INTEGER NOT NULL DEFAULT 0
                 );
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_sender_id
-                    ON waypoints(from_node, waypoint_id);
                 CREATE INDEX IF NOT EXISTS idx_waypoints_rx
                     ON waypoints(rx_epoch DESC);
                 """;
             cmd.ExecuteNonQuery();
         }
+
+        EnsureWaypointIdIsUnique();
 
         // Geofence columns were added after the original schema; add them to
         // any pre-existing DB file rather than requiring a fresh one.
@@ -73,6 +73,42 @@ public sealed class WaypointStore : IDisposable
         EnsureColumn("notify_on_enter", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("notify_on_exit", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("notify_favorites_only", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    /// <summary>
+    /// Makes <c>waypoint_id</c> alone the row key.
+    /// </summary>
+    /// <remarks>
+    /// A waypoint's identity on the mesh is its id: <c>locked_to</c>, not the
+    /// sender, is what says who may change it, so an unlocked marker may be
+    /// edited or retired by anybody. Keying rows by sender and id together
+    /// meant a retirement broadcast by a node other than the one that placed
+    /// the marker landed on no row at all and was thrown away.
+    /// </remarks>
+    private void EnsureWaypointIdIsUnique()
+    {
+        using (var check = _conn.CreateCommand())
+        {
+            check.CommandText =
+                "SELECT COUNT(*) FROM pragma_index_list('waypoints') WHERE name = 'idx_waypoints_waypoint_id'";
+            if (Convert.ToInt64(check.ExecuteScalar()) > 0) return;
+        }
+
+        using var cmd = _conn.CreateCommand();
+        // The sender-scoped key let one id sit in the table once per sender.
+        // Those rows are the same marker as different nodes last described it,
+        // so the freshest is the one to keep.
+        cmd.CommandText = """
+            DELETE FROM waypoints WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY waypoint_id ORDER BY rx_epoch DESC, id DESC) AS rn
+                    FROM waypoints)
+                WHERE rn > 1);
+            DROP INDEX IF EXISTS idx_waypoints_sender_id;
+            CREATE UNIQUE INDEX idx_waypoints_waypoint_id ON waypoints(waypoint_id);
+            """;
+        cmd.ExecuteNonQuery();
     }
 
     private void EnsureColumn(string name, string columnDef)
@@ -88,7 +124,7 @@ public sealed class WaypointStore : IDisposable
         alter.ExecuteNonQuery();
     }
 
-    /// <summary>Insert or update a waypoint from the same sender/id pair,
+    /// <summary>Insert a waypoint, or update the one already carrying its id,
     /// stamping <see cref="WaypointRecord.Id"/> with the row it landed on.</summary>
     /// <remarks>
     /// The row id is read back rather than discarded because it is the record's
@@ -96,6 +132,10 @@ public sealed class WaypointStore : IDisposable
     /// hit-tests by it. A record built from a packet has none until its row
     /// exists, and a whole session's worth sharing a default 0 makes every one
     /// of those match the first arrival instead of itself.
+    ///
+    /// <c>from_node</c> is the one column an update leaves alone: it records
+    /// who put the marker on the mesh, and an edit or a retirement from
+    /// somebody else does not change that.
     /// </remarks>
     public void Upsert(WaypointRecord rec)
     {
@@ -118,7 +158,7 @@ public sealed class WaypointStore : IDisposable
                      $exp, $lock, $rx,
                      $geor, $bw, $bs, $be, $bn,
                      $nen, $nex, $nfav)
-                ON CONFLICT(from_node, waypoint_id) DO UPDATE SET
+                ON CONFLICT(waypoint_id) DO UPDATE SET
                     packet_id             = excluded.packet_id,
                     channel               = excluded.channel,
                     name                  = excluded.name,
