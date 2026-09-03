@@ -97,4 +97,48 @@ public class GeofenceTests
                      Geofence.HaversineMetres(37.6, -122.4, 37.0, -122.0),
                      precision: 6);
     }
+
+    /// <summary>
+    /// The margin the crossing detector applies on the way out. A node parked
+    /// on the boundary reports positions either side of it on GPS noise alone,
+    /// and each of those would be a crossing — a chime, and a transmission when
+    /// a script watches the fence.
+    /// </summary>
+    [Fact]
+    public void AMarginKeepsAPointJustOutsideTheFenceInside()
+    {
+        // ~13 m north of a 500 m fence's edge: outside as drawn, inside once
+        // the exit margin is applied.
+        var wp = Circle(37.5, -122.0, 500);
+        Assert.False(Geofence.Contains(wp, 37.50461, -122.0));
+        Assert.True(Geofence.Contains(wp, 37.50461, -122.0, Geofence.ExitMarginMetres));
+
+        // Far enough out that the margin does not save it either.
+        Assert.False(Geofence.Contains(wp, 37.509, -122.0, Geofence.ExitMarginMetres));
+    }
+
+    [Fact]
+    public void AMarginGrowsABoundingBoxInBothAxes()
+    {
+        var wp = Box(west: -122.5, south: 37.0, east: -122.0, north: 37.5);
+
+        // ~11 m north of the top edge, and ~9 m east of the right one.
+        Assert.False(Geofence.Contains(wp, 37.5001, -122.25));
+        Assert.True(Geofence.Contains(wp, 37.5001, -122.25, Geofence.ExitMarginMetres));
+        Assert.False(Geofence.Contains(wp, 37.25, -121.9999));
+        Assert.True(Geofence.Contains(wp, 37.25, -121.9999, Geofence.ExitMarginMetres));
+
+        // A degree out is beyond any margin.
+        Assert.False(Geofence.Contains(wp, 38.5, -122.25, Geofence.ExitMarginMetres));
+    }
+
+    /// <summary>The longitude conversion divides by a cosine that goes to zero
+    /// at the poles, so the margin path has to stay finite there.</summary>
+    [Fact]
+    public void AMarginAtThePoleDoesNotBlowUp()
+    {
+        var wp = Box(west: -1, south: 89.9, east: 1, north: 90);
+        Assert.True(Geofence.Contains(wp, 89.95, 0, Geofence.ExitMarginMetres));
+        Assert.False(Geofence.Contains(wp, 0, 0, Geofence.ExitMarginMetres));
+    }
 }

@@ -1,0 +1,72 @@
+# Greets somebody by direct message when they arrive inside a fenced waypoint,
+# asking for their public key first if we do not already have it.
+#
+# SET UP
+#   1. Drop a waypoint on the map where you want the fence, name it, and give
+#      it a geofence radius. Its own notify_on_enter is not needed — that only
+#      controls the chime and the channel note.
+#   2. Put that name in geofence: below. The editor will offer the fences
+#      already on your map.
+#
+# The fence is matched by name, so a waypoint that expires and gets dropped
+# again keeps this working.
+#
+# WHY THE KEY MATTERS
+#   Firmware rejects a text message addressed to it that decrypted with the
+#   channel key ("Rejecting legacy DM", Router.cpp), so a DM to somebody whose
+#   public key we do not hold is transmitted and then thrown away at the far
+#   end. Asking for their NodeInfo is how we get that key; require_key: below
+#   is what stops us spending airtime on a greeting nobody will read.
+
+enabled: false
+
+alias: Welcome arrivals at the gate
+
+trigger:
+  - geofence: "North Gate"
+    # enter is the default. both would greet people on the way out too, and
+    # {geofence.event} would then say which happened.
+    on: enter
+
+condition:
+  # Walking into your own fence would otherwise have this greet you.
+  - not_from: ["{my.id}"]
+
+action:
+  # Asks them to send their NodeInfo, which carries their public key — but only
+  # for somebody we do not already hold a key for. {from.has_key} comes off the
+  # crossing itself, so a regular who is already on file costs nothing.
+  - nodeinfo:
+      request: true
+    when:
+      value: "{from.has_key}"
+      equals: false
+
+  # Long enough for the answer to make the round trip. A couple of hops over a
+  # slow preset is most of this; shorten it on a dense mesh.
+  #
+  # Gated on the same test as the request: with nothing on the air to wait for,
+  # a known arrival should be greeted straight away rather than after 45s.
+  - delay: 45s
+    when:
+      value: "{from.has_key}"
+      equals: false
+
+  - send:
+      # Straight to whoever arrived.
+      to: "{from.id}"
+      text: "Welcome to {geofence}, {from.short}. Water and shade by the barn."
+      # They never answered, so the greeting would be binned on arrival. Say
+      # nothing instead — the log line records who was skipped and why.
+      require_key: true
+      # One hop: they are standing inside the fence, so they are next to you.
+      hops: 1
+
+limits:
+  # Per node, so greeting one arrival does not silence the next person's. Long
+  # enough that somebody working near the boundary is not greeted repeatedly —
+  # the fence itself only reports a departure once you are 25 m clear of it,
+  # and this is the second line of defence.
+  cooldown: 30m
+  per_node: true
+  max_per_hour: 6

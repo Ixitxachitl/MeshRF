@@ -23,7 +23,12 @@ public class ScriptCompletionTests
             new ScriptSuggestion("!a1b2c3d4", "\"!a1b2c3d4\"", "Ridge Repeater (RIDG)", NoteInFile: true),
             new ScriptSuggestion("!deadbeef", "\"!deadbeef\"", "Bob's Handheld (BOB)", NoteInFile: true),
         ],
-        Credentials: ["openweather"]);
+        Credentials: ["openweather"],
+        Geofences:
+        [
+            new ScriptSuggestion("North Gate", "North Gate", "circle, 500 m"),
+            new ScriptSuggestion("Yes", "\"Yes\"", "box"),
+        ]);
 
     /// <summary>Completes at the end of the text, which is where a caret sits
     /// while someone is typing the line.</summary>
@@ -85,15 +90,16 @@ public class ScriptCompletionTests
     }
 
     [Fact]
-    public void A_Condition_Offers_Nodes_But_Not_The_Sender_Placeholder()
+    public void A_Condition_Offers_Nodes_And_This_Node_But_Not_The_Sender_Placeholder()
     {
         // from:/not_from: are matched against literal ids by the engine, so
-        // {from.id} in one would never match anything.
+        // {from.id} in one would never match anything. {my.id} is the exception
+        // — the engine resolves that one against this node.
         foreach (var key in new[] { "from", "not_from" })
         {
             var result = At($"condition:\n  - {key}: ");
             Assert.NotNull(result);
-            Assert.Equal(["!a1b2c3d4", "!deadbeef"], result!.Suggestions.Select(s => s.Label));
+            Assert.Equal(["{my.id}", "!a1b2c3d4", "!deadbeef"], result!.Suggestions.Select(s => s.Label));
         }
     }
 
@@ -178,5 +184,42 @@ public class ScriptCompletionTests
         // closes rather than showing an empty panel.
         const string credential = "action:\n  - http:\n      credential: ";
         Assert.Null(ScriptCompletion.Suggest(credential, credential.Length, ScriptCompletionSource.Empty));
+    }
+
+    [Fact]
+    public void A_Geofence_Trigger_Offers_The_Fences_On_The_Map_And_Any()
+    {
+        var result = At("trigger:\n  - geofence: ");
+
+        Assert.NotNull(result);
+        Assert.Equal(["any", "North Gate", "Yes"], result!.Suggestions.Select(s => s.Label));
+    }
+
+    [Fact]
+    public void A_Geofence_Name_Is_Matched_On_What_Has_Been_Typed()
+    {
+        var result = At("trigger:\n  - geofence: Nor");
+
+        Assert.NotNull(result);
+        Assert.Equal(["North Gate"], result!.Suggestions.Select(s => s.Label));
+        // The typed prefix is what gets replaced, not the whole value.
+        Assert.Equal(3, result.Length);
+    }
+
+    /// <summary>A fence name is inserted quoted only when YAML would otherwise
+    /// read it as something else — the list shows the bare name either way.</summary>
+    [Fact]
+    public void A_Fence_Name_YAML_Would_Misread_Is_Inserted_Quoted()
+    {
+        Assert.Equal("North Gate", ScriptCompletion.QuoteForYaml("North Gate"));
+        Assert.Equal("\"Yes\"", ScriptCompletion.QuoteForYaml("Yes"));
+        Assert.Equal("\"3\"", ScriptCompletion.QuoteForYaml("3"));
+        Assert.Equal("\"#3\"", ScriptCompletion.QuoteForYaml("#3"));
+        Assert.Equal("\"Gate: North\"", ScriptCompletion.QuoteForYaml("Gate: North"));
+        // A quote inside the value is only a quote — YAML reads a plain scalar
+        // to the end of the line, so this needs no wrapping.
+        Assert.Equal("He said \"go\"", ScriptCompletion.QuoteForYaml("He said \"go\""));
+        // One that opens the value does, and is escaped on the way in.
+        Assert.Equal("\"\\\"Home\\\"\"", ScriptCompletion.QuoteForYaml("\"Home\""));
     }
 }

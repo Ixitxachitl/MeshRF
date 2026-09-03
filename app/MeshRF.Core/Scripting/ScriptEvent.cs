@@ -14,6 +14,10 @@ public enum ScriptEventKind
     /// <summary>A Quick send button was pressed. Carries no sender, but does
     /// carry the destination chosen for it.</summary>
     QuickSend,
+    /// <summary>A node crossed into or out of a waypoint's geofence. Carries
+    /// the node that crossed as its sender, but no packet: the crossing is
+    /// something this app worked out, not something anybody transmitted.</summary>
+    Geofence,
 }
 
 /// <summary>This node, as scripts see it.</summary>
@@ -71,14 +75,45 @@ public sealed record ScriptEvent
     /// a destination but no sender.</summary>
     public uint ToNode { get; init; }
 
+    /// <summary>Name of the fence that was crossed, for
+    /// <see cref="ScriptEventKind.Geofence"/>. The waypoint's display name,
+    /// which is what a script names — a waypoint that expires and is dropped
+    /// again is a new record with a new id but the same name.</summary>
+    public string GeofenceName { get; init; } = string.Empty;
+
+    /// <summary>Whether the crossing was inbound. False is an exit.</summary>
+    public bool GeofenceEntered { get; init; }
+
+    /// <summary>
+    /// Whether a packet this node decoded produced the event, so the signal
+    /// fields below mean something.
+    /// </summary>
+    /// <remarks>
+    /// Only a geofence crossing can go either way: somebody else's arrives in
+    /// their position packet, ours comes out of a transmission that is never
+    /// decoded back. Everything else that names a sender was heard by
+    /// definition.
+    /// </remarks>
+    public bool FromPacket { get; init; }
+
     /// <summary>Node an answer goes to: the peer chosen for a button press, the
     /// sender for anything that arrived over the air.</summary>
     public uint DestinationNode => Kind == ScriptEventKind.QuickSend ? ToNode : FromNode;
 
-    /// <summary>Whether somebody put this event on the air, so conditions about
-    /// them (from:, snr_above:, hops_below:) have something to read.</summary>
+    /// <summary>
+    /// Whether somebody put this event on the air, so conditions about the
+    /// packet it arrived in (snr_above:, hops_below:) have something to read.
+    /// </summary>
+    /// <remarks>
+    /// A geofence crossing qualifies when somebody else's position packet
+    /// caused it, and does not when our own position did: those signal
+    /// conditions then fail closed, which is the direction to be wrong in for
+    /// something that keys up a transmitter. from:/favorite:/has_key: work
+    /// either way — they ask about the node, not about the hop it came over.
+    /// </remarks>
     public bool HasSender => Kind is ScriptEventKind.Text or ScriptEventKind.NewNode
-                                  or ScriptEventKind.Reaction;
+                                  or ScriptEventKind.Reaction
+                          || (Kind == ScriptEventKind.Geofence && FromPacket);
 
     /// <summary>Whether this event knows where a message would go. Only a
     /// schedule does not: it is neither on a channel nor aimed at anyone.</summary>
@@ -118,8 +153,16 @@ public sealed record ScriptEvent
     /// PKC-sealed.</summary>
     public bool SenderHasKey { get; init; }
 
-    /// <summary>Packet the event came from, so a reply can thread under it and
-    /// a reaction can target it.</summary>
+    /// <summary>
+    /// Packet the event came from, so a reply can thread under it and a
+    /// reaction can target it.
+    /// </summary>
+    /// <remarks>
+    /// Left 0 on a geofence crossing even when a packet did cause it: that
+    /// packet is a position, and a reply threaded under one renders as a quote
+    /// of nothing. Zero is what makes reply_link: and react: skip themselves
+    /// with no special case for the kind.
+    /// </remarks>
     public uint PacketId { get; init; }
 
     /// <summary>The glyph, for <see cref="ScriptEventKind.Reaction"/>.</summary>

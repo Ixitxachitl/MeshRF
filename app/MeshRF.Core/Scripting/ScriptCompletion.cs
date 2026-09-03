@@ -24,12 +24,15 @@ public readonly record struct ScriptSuggestion(
 /// <param name="Channels">Configured channel names, in tab order.</param>
 /// <param name="Nodes">Known nodes, already formatted as id + name.</param>
 /// <param name="Credentials">Names of the stored API credentials.</param>
+/// <param name="Geofences">Names of the waypoints that carry a fence, which are
+/// the only ones a <c>geofence:</c> trigger could ever fire on.</param>
 public sealed record ScriptCompletionSource(
     IReadOnlyList<ScriptSuggestion> Channels,
     IReadOnlyList<ScriptSuggestion> Nodes,
-    IReadOnlyList<string> Credentials)
+    IReadOnlyList<string> Credentials,
+    IReadOnlyList<ScriptSuggestion> Geofences)
 {
-    public static readonly ScriptCompletionSource Empty = new([], [], []);
+    public static readonly ScriptCompletionSource Empty = new([], [], [], []);
 }
 
 /// <summary>An offer: what to show, and what part of the file it replaces.</summary>
@@ -51,11 +54,11 @@ public sealed record ScriptCompletionResult(
 /// does: what to suggest is a question about the vocabulary, answerable from a
 /// string and a caret index, and testable without a text box. The window's job
 /// is to show the list and splice the chosen value in.</para>
-/// <para>Only value positions are offered, and only the four keys that name
-/// something this node already knows — a channel, a node, a credential. The
-/// keys themselves are in the Help window, and a completion list that tried to
-/// cover the whole vocabulary would be in the way while typing rather than
-/// useful.</para>
+/// <para>Only value positions are offered, and only the keys that name
+/// something this node already knows — a channel, a node, a credential, a
+/// fence on the map. The keys themselves are in the Help window, and a
+/// completion list that tried to cover the whole vocabulary would be in the
+/// way while typing rather than useful.</para>
 /// </remarks>
 public static class ScriptCompletion
 {
@@ -118,6 +121,39 @@ public static class ScriptCompletion
             AllowComment: text[caret..lineEnd].Trim().Length == 0);
     }
 
+    /// <summary>
+    /// Wraps a value in double quotes when YAML would otherwise read it as
+    /// something other than the text it is.
+    /// </summary>
+    /// <remarks>
+    /// Waypoint names are typed by people and can be anything — "Gate: North",
+    /// "#3", "Yes". Quoting unconditionally would put quotes round the ordinary
+    /// ones too, which reads as though they were needed; quoting never would
+    /// let a suggestion break the file it was inserted into.
+    /// </remarks>
+    /// <summary>Words a YAML reader may take for a boolean rather than for the
+    /// text they are. YAML 1.1's set, which is wider than "true" and "false" —
+    /// a waypoint called "No" is a name, not an answer.</summary>
+    private static readonly HashSet<string> YamlBooleans = new(StringComparer.OrdinalIgnoreCase)
+        { "y", "n", "yes", "no", "true", "false", "on", "off", "null", "~" };
+
+    public static string QuoteForYaml(string value)
+    {
+        if (value.Length == 0) return "\"\"";
+
+        bool needs =
+            value != value.Trim()
+            || value.Contains(": ", StringComparison.Ordinal)
+            || value.EndsWith(':')
+            || value.Contains(" #", StringComparison.Ordinal)
+            || "-?:,[]{}#&*!|>'\"%@`".Contains(value[0])
+            || YamlBooleans.Contains(value)
+            || double.TryParse(value, System.Globalization.NumberStyles.Any,
+                               System.Globalization.CultureInfo.InvariantCulture, out _);
+
+        return needs ? $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"" : value;
+    }
+
     private static IReadOnlyList<ScriptSuggestion>? For(
         string key, ScriptCompletionSource source) => key switch
     {
@@ -140,9 +176,31 @@ public static class ScriptCompletion
             .. source.Nodes,
         ],
 
-        "from" or "not_from" => source.Nodes,
+        // {my.id} leads: it is the answer for the one script that has to
+        // exclude the person running it — a geofence: greeting, which this node
+        // can set off by walking into its own fence.
+        "from" or "not_from" =>
+        [
+            new ScriptSuggestion("{my.id}", "\"{my.id}\"", "this node"),
+            .. source.Nodes,
+        ],
 
         "credential" => [.. source.Credentials.Select(c => new ScriptSuggestion(c, "stored credential"))],
+
+        "require_key" =>
+        [
+            new ScriptSuggestion("true", "only send if it can be PKC-sealed — an unsealed DM is binned by the peer"),
+            new ScriptSuggestion("false", "send either way"),
+        ],
+
+        // "any" first, for the same reason {primary} leads the channels: it is
+        // the answer that needs no list, and a fence list is a snapshot of what
+        // happens to be on the map right now.
+        "geofence" =>
+        [
+            new ScriptSuggestion("any", "any fence, whichever is crossed"),
+            .. source.Geofences,
+        ],
 
         _ => null,
     };

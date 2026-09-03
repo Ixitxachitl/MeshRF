@@ -140,7 +140,36 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             .Take(200)
             .Select(n => new ScriptSuggestion(
                 $"!{n.NodeNum:x8}", $"\"!{n.NodeNum:x8}\"", NodeNote(n), NoteInFile: true))],
-        Credentials: [.. ScriptCredentials.Select(c => c.Name).Where(n => n.Length > 0)]);
+        Credentials: [.. ScriptCredentials.Select(c => c.Name).Where(n => n.Length > 0)],
+        // Fenced waypoints only: a geofence: trigger on a plain point could
+        // never fire. By name rather than by id, and deduplicated by it, since
+        // the name is what the trigger matches — two nodes may have dropped
+        // markers that mean the same fence.
+        Geofences: [.. _rxHost.Waypoints
+            .Where(w => w.HasGeofence && !w.IsExpired && w.DisplayName.Length > 0)
+            .GroupBy(w => w.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+            .Select(g => new ScriptSuggestion(
+                g.Key, ScriptCompletion.QuoteForYaml(g.Key), GeofenceNote(g.First())))]);
+
+    /// <summary>
+    /// Whether a direct message to this node can be PKC-sealed, which is the
+    /// same question <c>SendTextAsync</c> asks before choosing an encoder.
+    /// </summary>
+    /// <remarks>
+    /// Named for what it decides rather than for the keys it reads, because
+    /// what a script wants to know is whether the message will actually be
+    /// delivered: firmware rejects a legacy DM outright (Router.cpp,
+    /// "Rejecting legacy DM"), so an unsealed one is airtime spent on nothing.
+    /// </remarks>
+    private bool CanSealTo(uint to) => TryPkcKeysFor(to, out _, out _);
+
+    /// <summary>What a fence is, in the few words that fit beside its name:
+    /// which shape it is, and how big when that is a single number.</summary>
+    private static string GeofenceNote(WaypointRecord wp) =>
+        wp is { HasCircularGeofence: true, HasBoundingBoxGeofence: false }
+            ? $"circle, {wp.GeofenceRadius} m"
+            : wp.GeofenceKindText.ToLowerInvariant();
 
     /// <summary>What a node id is, in the few words that fit beside it and in
     /// the comment the editor writes after it.</summary>
@@ -184,6 +213,9 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             _rxHost.Waypoints.Any(w => w.WaypointId == waypointId && w.FromNode == _rxHost.MyNodeNum);
         _rxHost.ScriptSelfProvider = BuildScriptSelf;
         _rxHost.ScriptEventObserved = OnScriptEvent;
+        // Lets the crossing detector track a fence nothing else would: one whose
+        // waypoint asks for no chime, but which a script names.
+        _rxHost.GeofenceWatched = _scriptEngine.WatchesGeofence;
         _scriptHttp.Credentials = this;
 
         // First run: put the samples where the Scripts window can show them.
@@ -803,6 +835,18 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                     _rxHost.Log("scripts: nothing sent — the message came out empty once filled in");
                     return;
                 }
+                // Asked to seal or say nothing. Firmware bins a text message
+                // addressed to it that decrypted with the channel key, so
+                // without their public key this would be transmitted and then
+                // thrown away at the far end — the airtime is spent either way,
+                // and only one of the two delivers anything.
+                if (action.RequireKey && !CanSealTo(to))
+                {
+                    _rxHost.Log(
+                        $"scripts: nothing sent — no public key for {_rxHost.NodeDisplayName(to)}, " +
+                        "and require_key: is set");
+                    return;
+                }
                 await SendTextAsync(channel, to, text, action.ReplyId,
                                     ReplyContextFor(run, action.ReplyId), messages, action.Hops);
                 break;
@@ -834,6 +878,11 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             // would size it is not necessarily the thing that triggered the run.
             case ScriptActionKind.NodeInfo:
                 HandleAutoReplyRequest(PortNum.NodeInfo, action.ToNode, action.ChannelName, (byte)HopLimit);
+                break;
+
+            case ScriptActionKind.RequestNodeInfo:
+                await RequestNodeInfo(_rxHost.Nodes.FirstOrDefault(n => n.NodeNum == action.ToNode)
+                                      ?? new NodeRecord { NodeNum = action.ToNode });
                 break;
 
             case ScriptActionKind.Position:

@@ -66,6 +66,22 @@ public enum ScriptTriggerKind
     At,
     /// <summary>Fires when its button in the Quick send bar is pressed.</summary>
     QuickSend,
+    /// <summary>A node crosses a waypoint's geofence.</summary>
+    Geofence,
+}
+
+/// <summary>Which way across a fence a <see cref="ScriptTriggerKind.Geofence"/>
+/// trigger answers.</summary>
+public enum ScriptGeofenceCrossing
+{
+    /// <summary>Inbound only. The default: arriving is what a fence is
+    /// usually watched for, and a trigger that fired twice as often as
+    /// intended would key up twice as often too.</summary>
+    Enter,
+    /// <summary>Outbound only.</summary>
+    Exit,
+    /// <summary>Either direction. <c>{geofence.event}</c> says which.</summary>
+    Both,
 }
 
 public sealed class ScriptTrigger
@@ -74,9 +90,22 @@ public sealed class ScriptTrigger
 
     /// <summary>Regex for <see cref="ScriptTriggerKind.Text"/>, the bare command
     /// word for <see cref="ScriptTriggerKind.Command"/>, the emoji (empty =
-    /// any) for <see cref="ScriptTriggerKind.Reaction"/>, and the button label
-    /// for <see cref="ScriptTriggerKind.QuickSend"/>.</summary>
+    /// any) for <see cref="ScriptTriggerKind.Reaction"/>, the button label
+    /// for <see cref="ScriptTriggerKind.QuickSend"/>, and the fence name
+    /// (empty = any) for <see cref="ScriptTriggerKind.Geofence"/>.</summary>
     public string Pattern { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Direction a <see cref="ScriptTriggerKind.Geofence"/> trigger answers,
+    /// from its <c>on:</c> key.
+    /// </summary>
+    /// <remarks>
+    /// Independent of the waypoint's own notify_on_enter/notify_on_exit, which
+    /// govern the chime and the channel note. A script watching a fence sees
+    /// every crossing of it and narrows here, so automation can be added to a
+    /// fence without also turning its alerts on.
+    /// </remarks>
+    public ScriptGeofenceCrossing Crossing { get; init; } = ScriptGeofenceCrossing.Enter;
 
     /// <summary>Where a <see cref="ScriptTriggerKind.QuickSend"/> button sends:
     /// <see cref="QuickSendAsk"/> to choose at the moment it is pressed, the
@@ -168,6 +197,10 @@ public enum ScriptActionKind
     React,
     Position,
     NodeInfo,
+    /// <summary>Ask a node to send its NodeInfo, rather than advertising ours.
+    /// The only way a script can learn a peer's public key, and therefore the
+    /// only way it can reach somebody it has never heard from by DM.</summary>
+    RequestNodeInfo,
     Traceroute,
     /// <summary>Call a REST endpoint and keep the answer for a later action to
     /// say. Transmits nothing itself.</summary>
@@ -204,6 +237,20 @@ public sealed record ScriptAction
     /// <summary>Set reply_id on the outgoing message so clients thread it under
     /// the triggering one. Always on for <c>reply:</c>.</summary>
     public bool ReplyLink { get; init; }
+
+    /// <summary>
+    /// Send only if the message can be PKC-sealed, for a <c>send:</c> addressed
+    /// to a node.
+    /// </summary>
+    /// <remarks>
+    /// Not a privacy preference: firmware drops a text message addressed to it
+    /// that decrypted with the channel key ("Rejecting legacy DM",
+    /// Router.cpp), so without the peer's public key a DM is transmitted and
+    /// then binned at the far end. This is how a script declines to spend the
+    /// airtime — usually after a <c>nodeinfo: request:</c> and a
+    /// <c>delay:</c> failed to produce a key.
+    /// </remarks>
+    public bool RequireKey { get; init; }
 
     /// <summary>
     /// Hop limit for this one message, or null to use the app's configured

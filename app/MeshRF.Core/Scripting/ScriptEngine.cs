@@ -64,6 +64,20 @@ public sealed class ScriptEngine
     public event Action<string>? Diagnostic;
 
     /// <summary>
+    /// Whether any armed script watches the named fence.
+    /// </summary>
+    /// <remarks>
+    /// Asked by the crossing detector, which otherwise only tracks fences whose
+    /// waypoint asks for a chime. A script is a second reason to track one, and
+    /// the detector has no business knowing what a trigger looks like.
+    /// </remarks>
+    public bool WatchesGeofence(string name) =>
+        _scripts.Any(loaded => loaded.Script.Triggers.Any(t =>
+            t.Kind == ScriptTriggerKind.Geofence &&
+            (t.Pattern.Length == 0 ||
+             string.Equals(t.Pattern, name, StringComparison.OrdinalIgnoreCase))));
+
+    /// <summary>
     /// Replaces the loaded set with the enabled, valid scripts from
     /// <paramref name="files"/>, keeping the order given. Disabled and broken
     /// files are ignored — the Scripts window is where those get reported, and
@@ -157,7 +171,13 @@ public sealed class ScriptEngine
         // transmissions before they reach the host, so this is the belt to that
         // braces — but it is the guard that makes a two-node feedback loop
         // impossible rather than merely unlikely.
-        if (evt.FromNode != 0 && evt.FromNode == evt.Self.NodeNum) return [];
+        //
+        // A geofence crossing is exempt, and has to be: it is caused by where
+        // this node is, not by anything it said, so it cannot feed back — and
+        // "tell somebody when I get home" is the thing a fence around home is
+        // for.
+        if (evt.Kind != ScriptEventKind.Geofence
+            && evt.FromNode != 0 && evt.FromNode == evt.Self.NodeNum) return [];
 
         var runs = new List<ScriptRun>();
         foreach (var loaded in _scripts)
@@ -249,6 +269,22 @@ public sealed class ScriptEngine
                         return true;
                     break;
 
+                case ScriptTriggerKind.Geofence when evt.Kind == ScriptEventKind.Geofence:
+                {
+                    var crossed = evt.GeofenceEntered
+                        ? ScriptGeofenceCrossing.Enter
+                        : ScriptGeofenceCrossing.Exit;
+                    if (trigger.Crossing != ScriptGeofenceCrossing.Both && trigger.Crossing != crossed)
+                        break;
+                    // An empty pattern is the "any fence" form. Names are
+                    // compared without case, like every other name in the
+                    // vocabulary.
+                    if (trigger.Pattern.Length == 0 ||
+                        string.Equals(trigger.Pattern, evt.GeofenceName, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                    break;
+                }
+
                 case ScriptTriggerKind.Reaction when evt.Kind == ScriptEventKind.Reaction:
                     // An empty pattern is the "any" form.
                     if (trigger.Pattern.Length == 0 ||
@@ -318,12 +354,12 @@ public sealed class ScriptEngine
                 return evt.Channel.Length == 0 || !NamesArrivingChannel(condition.Values, evt);
 
             case ScriptConditionKind.From:
-                return evt.FromNode != 0 && MatchesNode(condition.Values, evt.FromNode);
+                return evt.FromNode != 0 && MatchesNode(condition.Values, evt.FromNode, evt.Self.NodeNum);
 
             case ScriptConditionKind.NotFrom:
                 // The inverse is vacuously true with no sender: a timer event
                 // is not from anybody, so it is not from the excluded node.
-                return evt.FromNode == 0 || !MatchesNode(condition.Values, evt.FromNode);
+                return evt.FromNode == 0 || !MatchesNode(condition.Values, evt.FromNode, evt.Self.NodeNum);
 
             case ScriptConditionKind.SnrAbove:
                 return evt.SnrDb is { } snr && snr > condition.Number;
@@ -384,14 +420,36 @@ public sealed class ScriptEngine
     private static bool InWindow(TimeOnly now, TimeOnly start, TimeOnly end) =>
         start <= end ? now >= start && now < end : now >= start || now < end;
 
-    private static bool MatchesNode(IReadOnlyList<string> values, uint nodeNum)
+    /// <summary>
+    /// Whether <paramref name="nodeNum"/> is one of the ids a from:/not_from:
+    /// listed.
+    /// </summary>
+    /// <remarks>
+    /// <c>{my.id}</c> is the one placeholder allowed here, and it is resolved
+    /// rather than parsed. A geofence crossing is the only event this node can
+    /// set off itself, and <c>not_from: ["{my.id}"]</c> is how a script that
+    /// greets arrivals stops greeting the person running it. Writing the id out
+    /// by hand would work too, until the node was renumbered.
+    /// </remarks>
+    private static bool MatchesNode(IReadOnlyList<string> values, uint nodeNum, uint selfNodeNum)
     {
         foreach (var value in values)
         {
+            if (IsSelfToken(value))
+            {
+                // Fails closed with no identity rather than matching node 0,
+                // which is the broadcast address and nobody's id.
+                if (selfNodeNum != 0 && selfNodeNum == nodeNum) return true;
+                continue;
+            }
             if (TryParseNodeId(value) == nodeNum) return true;
         }
         return false;
     }
+
+    /// <summary>Whether a from:/not_from: entry is the "this node" token.</summary>
+    public static bool IsSelfToken(string value) =>
+        string.Equals(value.Trim(), "{my.id}", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Parses <c>!a1b2c3d4</c> (or the bare hex) to a node number.
     /// Returns 0 for anything else, which every caller treats as "no
@@ -481,7 +539,8 @@ public sealed class ScriptEngine
                 {
                     return new ResolvedAction(
                         ScriptActionKind.Send, action.Text,
-                        replyTo, replyChannel, 0, TimeSpan.Zero, Hops: action.Hops);
+                        replyTo, replyChannel, 0, TimeSpan.Zero,
+                        Hops: action.Hops, RequireKey: action.RequireKey);
                 }
 
                 uint to = 0;
@@ -500,7 +559,7 @@ public sealed class ScriptEngine
                     ScriptActionKind.Send, action.Text,
                     to, action.Channel,
                     action.ReplyLink && evt.Kind != ScriptEventKind.Timer ? evt.PacketId : 0,
-                    TimeSpan.Zero, Hops: action.Hops);
+                    TimeSpan.Zero, Hops: action.Hops, RequireKey: action.RequireKey);
             }
 
             case ScriptActionKind.Http:
@@ -548,6 +607,7 @@ public sealed class ScriptEngine
 
             case ScriptActionKind.Position:
             case ScriptActionKind.NodeInfo:
+            case ScriptActionKind.RequestNodeInfo:
             case ScriptActionKind.Traceroute:
                 if (evt.FromNode == 0)
                 {

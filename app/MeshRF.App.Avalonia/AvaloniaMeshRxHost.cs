@@ -1302,7 +1302,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     LocationHistoryRecorded?.Invoke(header.From, new NodeLocationHistoryRecord(
                         id, header.From, when, lat, lon, result.Position.AltitudeM));
                 }
-                EvaluateGeofenceCrossing(header.From, lat, lon);
+                EvaluateGeofenceCrossing(header.From, lat, lon, snrDb, packetRssiDbm, hopsAway);
                 MarkNodeDirty(header.From);
                 break;
 
@@ -1662,25 +1662,93 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// unknown as "outside" would fire a spurious enter for every node already
     /// sitting inside a fence when the app starts.
     /// </remarks>
-    public void EvaluateGeofenceCrossing(uint nodeNum, double lat, double lon)
+    public void EvaluateGeofenceCrossing(
+        uint nodeNum, double lat, double lon,
+        float? snrDb = null, float? rssiDbm = null, byte? hopsAway = null)
     {
         if (nodeNum == 0 || Waypoints.Count == 0) return;
 
         foreach (var wp in Waypoints)
         {
             if (!wp.HasGeofence || wp.IsExpired) continue;
-            if (!wp.NotifyOnEnter && !wp.NotifyOnExit) continue;
+            // A script watching the fence is the second reason to track it. The
+            // waypoint's own notify flags govern the chime and the channel note
+            // and nothing else, so automation can be hung on a fence without
+            // also turning its alerts on for everyone.
+            bool watched = GeofenceWatched?.Invoke(wp.DisplayName) == true;
+            if (!wp.NotifyOnEnter && !wp.NotifyOnExit && !watched) continue;
             if (wp.NotifyFavoritesOnly && _nodeStore.Get(nodeNum)?.Favorite != true) continue;
 
-            bool inside = Geofence.Contains(wp, lat, lon);
             var key = (wp.Id, nodeNum);
             bool hadPrior = _geofenceInsideState.TryGetValue(key, out bool wasInside);
+
+            // Leaving takes a margin, arriving does not: a node sitting on the
+            // boundary reports positions either side of it on GPS noise alone,
+            // and each of those would otherwise be a crossing — a chime, and
+            // now possibly a transmission.
+            bool inside = Geofence.Contains(
+                wp, lat, lon, hadPrior && wasInside ? Geofence.ExitMarginMetres : 0);
+
             _geofenceInsideState[key] = inside;
             if (!hadPrior || inside == wasInside) continue;
 
             if (inside && wp.NotifyOnEnter) RaiseGeofenceAlert(wp, nodeNum, entered: true);
             else if (!inside && wp.NotifyOnExit) RaiseGeofenceAlert(wp, nodeNum, entered: false);
+
+            if (watched)
+                RaiseGeofenceCrossing(wp, nodeNum, entered: inside, lat, lon, snrDb, rssiDbm, hopsAway);
         }
+    }
+
+    /// <summary>
+    /// Whether an armed script watches the named fence, so the detector tracks
+    /// it even when the waypoint asks for no alert of its own. Left null,
+    /// nothing is watched.
+    /// </summary>
+    public Func<string, bool>? GeofenceWatched { get; set; }
+
+    /// <summary>
+    /// Hands a crossing to the script engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>Carries the crossing position rather than the node table's, so a
+    /// script asking an API about where somebody is asks about where they were
+    /// when they crossed.</para>
+    /// <para>Somebody else's crossing came out of their position packet, so it
+    /// carries that packet's signal too. Ours came from a transmission that is
+    /// never decoded back and carries none, which is what makes
+    /// snr_above:/hops_below: fail closed on our own crossings rather than
+    /// pass on a default.</para>
+    /// </remarks>
+    private void RaiseGeofenceCrossing(
+        WaypointRecord wp, uint nodeNum, bool entered, double lat, double lon,
+        float? snrDb, float? rssiDbm, byte? hopsAway)
+    {
+        if (ScriptEventObserved is not { } observer || IsNodeIgnored(nodeNum)) return;
+
+        var node = _nodeStore.Get(nodeNum);
+        observer(new ScriptEvent
+        {
+            Kind = ScriptEventKind.Geofence,
+            GeofenceName = wp.DisplayName,
+            GeofenceEntered = entered,
+            FromNode = nodeNum,
+            FromShort = node?.ShortName ?? string.Empty,
+            FromLong = string.IsNullOrEmpty(node?.LongName) ? NodeDisplayName(nodeNum) : node!.LongName,
+            FromLatitude = lat,
+            FromLongitude = lon,
+            Channel = wp.Channel,
+            IsPrimaryChannel = !string.IsNullOrEmpty(wp.Channel) &&
+                               FindChannelByName(wp.Channel) is { Index: 0 },
+            FromPacket = hopsAway is not null,
+            SnrDb = snrDb,
+            RssiDbm = rssiDbm,
+            Hops = hopsAway ?? 0,
+            SenderIsFavorite = node?.Favorite == true,
+            SenderHasKey = !string.IsNullOrEmpty(node?.PublicKey),
+            Self = ScriptSelfProvider?.Invoke() ?? ScriptSelf.Unknown,
+            At = DateTimeOffset.Now,
+        });
     }
 
     /// <summary>Posts a crossing to the waypoint's channel, persists it so it

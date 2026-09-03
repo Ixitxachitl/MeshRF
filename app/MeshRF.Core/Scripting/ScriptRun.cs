@@ -23,6 +23,9 @@ namespace MeshRF.Scripting;
 /// <param name="Hops">Hop limit for a send:, or null for the app's configured
 /// limit. A waypoint's is on <see cref="ScriptWaypoint.Hops"/> instead, since a
 /// feed sync places markers without ever building one of these.</param>
+/// <param name="RequireKey">Skip this send: unless the message can be
+/// PKC-sealed. Checked by the sender, where the peer's key is already read —
+/// see <see cref="ScriptAction.RequireKey"/> for why it is not a preference.</param>
 public sealed record ResolvedAction(
     ScriptActionKind Kind,
     string Text,
@@ -35,7 +38,8 @@ public sealed record ResolvedAction(
     ScriptRequirement? Require = null,
     ScriptRequirement? When = null,
     ScriptRingtone? Ringtone = null,
-    byte? Hops = null)
+    byte? Hops = null,
+    bool RequireKey = false)
 {
     /// <summary>Whether this action puts a frame on the air. http: makes a
     /// network request, require: only decides, and ring: is a noise on this
@@ -54,10 +58,11 @@ public sealed record ResolvedAction(
         ScriptActionKind.Reply or ScriptActionKind.Send =>
             $"{(Kind == ScriptActionKind.Reply ? "reply" : "send")} to " +
             $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}: \"{expandedText}\"" +
-            DescribeHops(Hops),
+            DescribeHops(Hops) + (RequireKey ? ", sealed only" : ""),
         ScriptActionKind.React => $"react {expandedText} to packet {ReplyId:x8}",
         ScriptActionKind.Position => $"send position to {nameOf(ToNode)}",
         ScriptActionKind.NodeInfo => $"send node info to {nameOf(ToNode)}",
+        ScriptActionKind.RequestNodeInfo => $"request node info from {nameOf(ToNode)}",
         ScriptActionKind.Traceroute => $"traceroute to {nameOf(ToNode)}",
         ScriptActionKind.Http => $"{Http?.Method.ToString().ToUpperInvariant()} {expandedText}",
         ScriptActionKind.Waypoint =>

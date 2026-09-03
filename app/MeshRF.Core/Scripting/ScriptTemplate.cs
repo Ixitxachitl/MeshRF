@@ -124,7 +124,23 @@ public static class ScriptTemplate
             case "from.lat": return Coordinate(evt.FromLatitude);
             case "from.lon": return Coordinate(evt.FromLongitude);
 
+            // "true"/"false" rather than empty/non-empty, so a when: reads as
+            // equals: false. Frozen with the rest of the snapshot: it answers
+            // "did we hold their key when this happened", which is exactly what
+            // decides whether asking for it is worth the airtime.
+            case "from.has_key": return evt.SenderHasKey ? "true" : "false";
+
             case "channel": return evt.Channel;
+
+            // Empty off a geofence trigger rather than literal: a script that
+            // also answers messages should read as a sentence with a gap in it,
+            // not print "{geofence}" over the air.
+            case "geofence": return evt.GeofenceName;
+            case "geofence.event":
+                return evt.Kind == ScriptEventKind.Geofence
+                    ? evt.GeofenceEntered ? "entered" : "exited"
+                    : string.Empty;
+
             case "snr": return Number(evt.SnrDb, "0.#");
             case "rssi": return Number(evt.RssiDbm, "0");
             case "hops": return evt.Hops.ToString(CultureInfo.InvariantCulture);

@@ -23,7 +23,7 @@ public static class ScriptParser
         ["enabled", "alias", "mode", "trigger", "condition", "action", "limits"];
 
     private static readonly string[] TriggerKinds =
-        ["text", "command", "new_node", "reaction", "every", "at", "quick_send"];
+        ["text", "command", "new_node", "reaction", "every", "at", "quick_send", "geofence"];
 
     private static readonly string[] ConditionKinds =
         ["scope", "channel", "not_channel", "from", "not_from", "snr_above", "hops_below", "between",
@@ -47,7 +47,10 @@ public static class ScriptParser
     private static readonly string[] RequireKeys =
         [.. RequireComparisons, "value", "ignore_case"];
 
-    private static readonly string[] SendKeys = ["to", "channel", "text", "reply_link", "hops"];
+    private static readonly string[] SendKeys =
+        ["to", "channel", "text", "reply_link", "hops", "require_key"];
+
+    private static readonly string[] NodeInfoKeys = ["request"];
 
     private static readonly string[] HttpKeys =
         ["url", "method", "credential", "json", "save_as", "timeout", "body", "content_type", "optional", "headers"];
@@ -742,6 +745,45 @@ public static class ScriptParser
                 };
             }
 
+            case "geofence":
+            {
+                RejectUnknownKeys(map, [.. kinds, "on"], "trigger option", problems);
+                // The fence is named, not identified: a waypoint expires and is
+                // dropped again as a new record with a new id, and a script
+                // that stopped working when its fence was refreshed would be
+                // useless on something as temporary as a waypoint.
+                var fence = (AsScalar(value, problems, "geofence") ?? string.Empty).Trim();
+                if (fence.Length == 0)
+                {
+                    problems.Add(ScriptProblem.Error(line, column,
+                        "geofence: needs the name of a waypoint that has a fence, or 'any'"));
+                    return null;
+                }
+                if (string.Equals(fence, "any", StringComparison.OrdinalIgnoreCase)) fence = string.Empty;
+
+                var direction = (ReadString(map, "on", problems) ?? string.Empty).Trim();
+                ScriptGeofenceCrossing crossing;
+                switch (direction.ToLowerInvariant())
+                {
+                    case "": crossing = ScriptGeofenceCrossing.Enter; break;
+                    case "enter": crossing = ScriptGeofenceCrossing.Enter; break;
+                    case "exit": crossing = ScriptGeofenceCrossing.Exit; break;
+                    case "both": crossing = ScriptGeofenceCrossing.Both; break;
+                    default:
+                        problems.Add(ScriptProblem.Error(line, column,
+                            $"on: has to be enter, exit or both, not '{direction}'"));
+                        return null;
+                }
+
+                return new ScriptTrigger
+                {
+                    Kind = ScriptTriggerKind.Geofence,
+                    Pattern = fence,
+                    Crossing = crossing,
+                    Line = line,
+                };
+            }
+
             case "reaction":
             {
                 RejectUnknownKeys(map, kinds, "trigger option", problems);
@@ -830,9 +872,15 @@ public static class ScriptParser
                 {
                     foreach (var v in values)
                     {
-                        if (LooksLikeNodeId(v)) continue;
+                        // {my.id} is the one placeholder these accept: it is
+                        // resolved against this node rather than parsed, so a
+                        // script excluding itself survives a renumbering. Every
+                        // other placeholder would be matched against a literal
+                        // and never hit anything, which is why they stay errors.
+                        if (LooksLikeNodeId(v) || ScriptEngine.IsSelfToken(v)) continue;
                         problems.Add(ScriptProblem.Error(line, column,
-                            $"{kind}: '{v}' is not a node id — use the !a1b2c3d4 form shown in the Nodes table"));
+                            $"{kind}: '{v}' is not a node id — use the !a1b2c3d4 form shown in the " +
+                            "Nodes table, or \"{my.id}\" for this node"));
                         return null;
                     }
                 }
@@ -1018,6 +1066,15 @@ public static class ScriptParser
                         $"send: to: '{to}' is not a node id — use the !a1b2c3d4 form, or a placeholder like {{from.id}}"));
                     return null;
                 }
+                bool requireKey = ReadBool(send, "require_key", problems) ?? false;
+                // Only a DM can be sealed at all — a channel message is
+                // encrypted with a key everyone on it already has.
+                if (requireKey && channel.Length > 0)
+                {
+                    problems.Add(ScriptProblem.Error(line, column,
+                        "send: require_key: only applies to a to: — a channel message is not sealed to anyone"));
+                    return null;
+                }
                 WarnUnknownPlaceholders(text, line, column, problems);
                 WarnUnknownPlaceholders(to, line, column, problems);
                 WarnLongMessage(text, line, column, problems);
@@ -1028,6 +1085,7 @@ public static class ScriptParser
                     To = to,
                     Channel = channel,
                     ReplyLink = ReadBool(send, "reply_link", problems) ?? false,
+                    RequireKey = requireKey,
                     Hops = ReadHops(send, problems, "send"),
                     Line = line,
                 };
@@ -1043,6 +1101,22 @@ public static class ScriptParser
                 }
                 WarnUnknownPlaceholders(emoji, line, column, problems);
                 return new ScriptAction { Kind = ScriptActionKind.React, Text = emoji, Line = line };
+            }
+
+            // The mapping form, which today carries one option: whether to ask
+            // for the peer's NodeInfo instead of advertising ours. The scalar
+            // form below still means "send ours".
+            case "nodeinfo" when value is YamlMappingNode nodeInfoMap:
+            {
+                RejectUnknownKeys(nodeInfoMap, NodeInfoKeys, "nodeinfo option", problems);
+                bool request = ReadBool(nodeInfoMap, "request", problems) ?? false;
+                if (!request)
+                {
+                    problems.Add(ScriptProblem.Error(line, column,
+                        "nodeinfo: needs request: true — write 'nodeinfo: true' to send yours instead"));
+                    return null;
+                }
+                return new ScriptAction { Kind = ScriptActionKind.RequestNodeInfo, Line = line };
             }
 
             case "position":
