@@ -141,4 +141,46 @@ public class GeofenceTests
         Assert.True(Geofence.Contains(wp, 89.95, 0, Geofence.ExitMarginMetres));
         Assert.False(Geofence.Contains(wp, 0, 0, Geofence.ExitMarginMetres));
     }
+
+    /// <summary>
+    /// A rectangular fence drives a crossing exactly like a circular one. The
+    /// detector's rule is expressed here against the geometry — enter on the
+    /// fence as drawn, leave only once clear of it by the margin — because a
+    /// box converts that margin from metres into degrees per axis, which is
+    /// the one part of it that is shape-specific.
+    /// </summary>
+    [Fact]
+    public void ABoxFenceEntersAndLeavesUnderTheSameRuleACircleDoes()
+    {
+        var wp = Box(west: -122.5, south: 37.0, east: -122.0, north: 37.5);
+
+        bool inside = false;
+        bool Step(double lat, double lon) =>
+            inside = Geofence.Contains(wp, lat, lon, inside ? Geofence.ExitMarginMetres : 0);
+
+        Assert.False(Step(37.6, -122.25));      // well north of it
+        Assert.True(Step(37.4, -122.25));       // arrived
+        Assert.True(Step(37.5001, -122.25));    // ~11 m past the edge: still in
+        Assert.True(Step(37.50015, -122.25));   // ~17 m past: still in
+        Assert.False(Step(37.5005, -122.25));   // ~56 m past: gone
+
+        // And the same on the longitude axis, where the conversion depends on
+        // latitude rather than being a constant.
+        Assert.True(Step(37.25, -122.25));
+        Assert.True(Step(37.25, -121.9999));    // ~9 m past the eastern edge
+        Assert.False(Step(37.25, -121.9995));   // ~44 m past it
+    }
+
+    /// <summary>A box-only waypoint is a fence as far as everything that reads
+    /// one is concerned — the crossing detector and the script editor both gate
+    /// on HasGeofence, not on there being a radius.</summary>
+    [Fact]
+    public void ABoxOnlyWaypointCountsAsFenced()
+    {
+        var wp = Box(west: -122.5, south: 37.0, east: -122.0, north: 37.5);
+
+        Assert.True(wp.HasGeofence);
+        Assert.False(wp.HasCircularGeofence);
+        Assert.Equal("Box", wp.GeofenceKindText);
+    }
 }
