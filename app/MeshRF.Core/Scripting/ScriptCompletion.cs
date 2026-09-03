@@ -74,10 +74,18 @@ public static class ScriptCompletion
         @"^\s*(?:-\s+)?(?<key>[a-z_]+)\s*:(?<value>[^:#]*)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
 
-    /// <summary>Separators a value may hold before the token being typed, so
-    /// <c>channel: [Test, Wea</c> completes "Wea" rather than the whole
-    /// list.</summary>
-    private static readonly char[] Separators = [' ', '[', ','];
+    /// <summary>
+    /// Separators a value may hold before the token being typed, so
+    /// <c>channel: [Test, Wea</c> completes "Wea" rather than the whole list.
+    /// </summary>
+    /// <remarks>
+    /// A space is deliberately not one of them. It only ever separates entries
+    /// after one of these, and the spaces following a separator are skipped
+    /// past instead — a waypoint is very often called "North Gate", and
+    /// treating the space as a break made the list re-offer everything at
+    /// "North " and then vanish at "North Ga".
+    /// </remarks>
+    private static readonly char[] Separators = ['[', ','];
 
     public static ScriptCompletionResult? Suggest(string text, int caret, ScriptCompletionSource source)
     {
@@ -100,6 +108,9 @@ public static class ScriptCompletion
 
         var value = match.Groups["value"].Value;
         int cut = value.LastIndexOfAny(Separators) + 1;
+        // Past the space after "key:" and after each list comma, so those are
+        // not read as part of what has been typed.
+        while (cut < value.Length && value[cut] == ' ') cut++;
         int start = lineStart + match.Groups["value"].Index + cut;
 
         // The opening quote stays inside the replaced span, because the

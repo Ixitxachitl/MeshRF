@@ -222,4 +222,39 @@ public class ScriptCompletionTests
         // One that opens the value does, and is escaped on the way in.
         Assert.Equal("\"\\\"Home\\\"\"", ScriptCompletion.QuoteForYaml("\"Home\""));
     }
+
+    /// <summary>
+    /// A waypoint is very often called "North Gate", and the list has to keep
+    /// narrowing across the space. Treating a space as a separator used to
+    /// re-offer the whole list at "North " and then close at "North Ga",
+    /// leaving the name half-typed with nothing to accept.
+    /// </summary>
+    [Fact]
+    public void A_Name_With_A_Space_Keeps_Narrowing_Past_It()
+    {
+        foreach (var typed in new[] { "N", "North", "North ", "North Ga", "North Gate" })
+        {
+            var text = $"trigger:\n  - geofence: {typed}";
+            var result = ScriptCompletion.Suggest(text, text.Length, Known);
+
+            Assert.NotNull(result);
+            Assert.Equal("North Gate", Assert.Single(result!.Suggestions).Label);
+            // The whole of what has been typed is replaced, spaces and all, so
+            // accepting cannot leave "North North Gate" behind.
+            Assert.Equal(typed.Length, result.Length);
+            Assert.Equal(text.Length - typed.Length, result.Start);
+        }
+    }
+
+    /// <summary>The space after a list's comma is still skipped, which is what
+    /// the separator was really for.</summary>
+    [Fact]
+    public void A_Space_After_A_List_Comma_Is_Not_Part_Of_The_Entry()
+    {
+        var result = At("condition:\n  - channel: [LongFast, Te");
+
+        Assert.NotNull(result);
+        Assert.Equal("Test", Assert.Single(result!.Suggestions).Label);
+        Assert.Equal("Te".Length, result.Length);
+    }
 }
