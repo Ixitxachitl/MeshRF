@@ -847,6 +847,14 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                         "and require_key: is set");
                     return;
                 }
+                // Open the conversation only now, with every guard passed: a
+                // tab for a message the script decided not to send would be an
+                // empty room nobody asked for. Find-or-create, so an already
+                // open one is reused with its history intact — and without
+                // this, a DM to somebody there was no tab for was transmitted
+                // and filed but shown nowhere until the tab was opened by hand.
+                if (to != 0xFFFFFFFFu) messages = _rxHost.OpenConversation(to).Messages;
+
                 await SendTextAsync(channel, to, text, action.ReplyId,
                                     ReplyContextFor(run, action.ReplyId), messages, action.Hops);
                 break;
@@ -1073,6 +1081,10 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         {
             // A DM. The channel is only the legacy fallback when PKC isn't
             // available; SendTextAsync decides which is used.
+            //
+            // Only an already-open tab is reported here, deliberately: this
+            // runs before the guards that can call the send off, and opening
+            // one is the caller's to do once it knows the message is going.
             var conversation = Tabs.OfType<ConversationTabViewModel>()
                                    .FirstOrDefault(t => t.NodeNum == action.ToNode);
             return (PrimaryChannel(), action.ToNode, conversation?.Messages);
