@@ -64,9 +64,9 @@ action:
 
 limits:
   # Per node, so greeting one arrival does not silence the next person's. Long
-  # enough that somebody working near the boundary is not greeted repeatedly —
-  # the fence itself only reports a departure once you are 25 m clear of it,
-  # and this is the second line of defence.
+  # enough that somebody working near the boundary is not greeted repeatedly:
+  # crossings are only as frequent as position reports, but a fence small
+  # enough to walk in and out of could still produce a few.
   cooldown: 30m
   per_node: true
   max_per_hour: 6

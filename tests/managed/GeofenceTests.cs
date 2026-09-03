@@ -99,76 +99,26 @@ public class GeofenceTests
     }
 
     /// <summary>
-    /// The margin the crossing detector applies on the way out. A node parked
-    /// on the boundary reports positions either side of it on GPS noise alone,
-    /// and each of those would be a crossing — a chime, and a transmission when
-    /// a script watches the fence.
+    /// A rectangular fence drives a crossing exactly like a circular one, and
+    /// on the boundary as drawn — no margin either way, since a node only
+    /// reports a position once it has actually moved.
     /// </summary>
     [Fact]
-    public void AMarginKeepsAPointJustOutsideTheFenceInside()
-    {
-        // ~13 m north of a 500 m fence's edge: outside as drawn, inside once
-        // the exit margin is applied.
-        var wp = Circle(37.5, -122.0, 500);
-        Assert.False(Geofence.Contains(wp, 37.50461, -122.0));
-        Assert.True(Geofence.Contains(wp, 37.50461, -122.0, Geofence.ExitMarginMetres));
-
-        // Far enough out that the margin does not save it either.
-        Assert.False(Geofence.Contains(wp, 37.509, -122.0, Geofence.ExitMarginMetres));
-    }
-
-    [Fact]
-    public void AMarginGrowsABoundingBoxInBothAxes()
-    {
-        var wp = Box(west: -122.5, south: 37.0, east: -122.0, north: 37.5);
-
-        // ~11 m north of the top edge, and ~9 m east of the right one.
-        Assert.False(Geofence.Contains(wp, 37.5001, -122.25));
-        Assert.True(Geofence.Contains(wp, 37.5001, -122.25, Geofence.ExitMarginMetres));
-        Assert.False(Geofence.Contains(wp, 37.25, -121.9999));
-        Assert.True(Geofence.Contains(wp, 37.25, -121.9999, Geofence.ExitMarginMetres));
-
-        // A degree out is beyond any margin.
-        Assert.False(Geofence.Contains(wp, 38.5, -122.25, Geofence.ExitMarginMetres));
-    }
-
-    /// <summary>The longitude conversion divides by a cosine that goes to zero
-    /// at the poles, so the margin path has to stay finite there.</summary>
-    [Fact]
-    public void AMarginAtThePoleDoesNotBlowUp()
-    {
-        var wp = Box(west: -1, south: 89.9, east: 1, north: 90);
-        Assert.True(Geofence.Contains(wp, 89.95, 0, Geofence.ExitMarginMetres));
-        Assert.False(Geofence.Contains(wp, 0, 0, Geofence.ExitMarginMetres));
-    }
-
-    /// <summary>
-    /// A rectangular fence drives a crossing exactly like a circular one. The
-    /// detector's rule is expressed here against the geometry — enter on the
-    /// fence as drawn, leave only once clear of it by the margin — because a
-    /// box converts that margin from metres into degrees per axis, which is
-    /// the one part of it that is shape-specific.
-    /// </summary>
-    [Fact]
-    public void ABoxFenceEntersAndLeavesUnderTheSameRuleACircleDoes()
+    public void ABoxFenceEntersAndLeavesOnTheBoundaryAsDrawn()
     {
         var wp = Box(west: -122.5, south: 37.0, east: -122.0, north: 37.5);
 
         bool inside = false;
-        bool Step(double lat, double lon) =>
-            inside = Geofence.Contains(wp, lat, lon, inside ? Geofence.ExitMarginMetres : 0);
+        bool Step(double lat, double lon) => inside = Geofence.Contains(wp, lat, lon);
 
         Assert.False(Step(37.6, -122.25));      // well north of it
         Assert.True(Step(37.4, -122.25));       // arrived
-        Assert.True(Step(37.5001, -122.25));    // ~11 m past the edge: still in
-        Assert.True(Step(37.50015, -122.25));   // ~17 m past: still in
-        Assert.False(Step(37.5005, -122.25));   // ~56 m past: gone
+        Assert.True(Step(37.5, -122.25));       // exactly on the northern edge
+        Assert.False(Step(37.5001, -122.25));   // ~11 m past it: gone
 
-        // And the same on the longitude axis, where the conversion depends on
-        // latitude rather than being a constant.
+        // And the same on the longitude axis.
         Assert.True(Step(37.25, -122.25));
-        Assert.True(Step(37.25, -121.9999));    // ~9 m past the eastern edge
-        Assert.False(Step(37.25, -121.9995));   // ~44 m past it
+        Assert.False(Step(37.25, -121.9999));   // ~9 m past the eastern edge
     }
 
     /// <summary>A box-only waypoint is a fence as far as everything that reads

@@ -1679,16 +1679,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             if (!wp.NotifyOnEnter && !wp.NotifyOnExit && !watched) continue;
             if (wp.NotifyFavoritesOnly && _nodeStore.Get(nodeNum)?.Favorite != true) continue;
 
+            bool inside = Geofence.Contains(wp, lat, lon);
             var key = (wp.Id, nodeNum);
             bool hadPrior = _geofenceInsideState.TryGetValue(key, out bool wasInside);
-
-            // Leaving takes a margin, arriving does not: a node sitting on the
-            // boundary reports positions either side of it on GPS noise alone,
-            // and each of those would otherwise be a crossing — a chime, and
-            // now possibly a transmission.
-            bool inside = Geofence.Contains(
-                wp, lat, lon, hadPrior && wasInside ? Geofence.ExitMarginMetres : 0);
-
             _geofenceInsideState[key] = inside;
             if (!hadPrior || inside == wasInside) continue;
 
