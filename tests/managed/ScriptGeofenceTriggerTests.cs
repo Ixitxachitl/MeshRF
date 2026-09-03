@@ -610,4 +610,56 @@ public class ScriptGeofenceTriggerTests
         Assert.True(result.IsValid, result.FirstError?.ToString());
         Assert.Equal(string.Empty, Assert.Single(result.Script!.Triggers).Pattern);
     }
+
+    /// <summary>
+    /// Which quotes in a script are load-bearing and which are habit. A fence
+    /// name is an ordinary YAML scalar: spaces and all, it needs none. What
+    /// does need them is a value opening with a brace — a placeholder — since
+    /// that starts a flow mapping, and a name carrying ": ", which starts a
+    /// nested key. The editor's suggestions follow the same rule, so a name it
+    /// inserts bare is not missing anything.
+    /// </summary>
+    [Theory]
+    [InlineData("\"Alta\"", "Alta")]
+    [InlineData("Alta", "Alta")]
+    [InlineData("\"North Gate\"", "North Gate")]
+    [InlineData("North Gate", "North Gate")]
+    public void A_Fence_Name_Reads_The_Same_Quoted_Or_Not(string written, string expected)
+    {
+        var result = ScriptParser.Parse(
+            $"trigger:\n  - geofence: {written}\naction:\n  - log: \"x\"");
+
+        Assert.True(result.IsValid, result.FirstError?.ToString());
+        Assert.Equal(expected, Assert.Single(result.Script!.Triggers).Pattern);
+    }
+
+    [Fact]
+    public void A_Name_Carrying_A_Colon_Does_Need_Its_Quotes()
+    {
+        Assert.False(ScriptParser.Parse(
+            "trigger:\n  - geofence: Gate: North\naction:\n  - log: \"x\"").IsValid);
+
+        var quoted = ScriptParser.Parse(
+            "trigger:\n  - geofence: \"Gate: North\"\naction:\n  - log: \"x\"");
+        Assert.True(quoted.IsValid, quoted.FirstError?.ToString());
+        Assert.Equal("Gate: North", Assert.Single(quoted.Script!.Triggers).Pattern);
+
+        // Which is exactly the rule the editor applies when it inserts one.
+        Assert.Equal("North Gate", ScriptCompletion.QuoteForYaml("North Gate"));
+        Assert.Equal("\"Gate: North\"", ScriptCompletion.QuoteForYaml("Gate: North"));
+    }
+
+    /// <summary>A placeholder's quotes are not optional: a bare {from.id}
+    /// opens a YAML flow mapping and the value stops being a value.</summary>
+    [Fact]
+    public void A_Placeholder_Does_Need_Its_Quotes()
+    {
+        const string body = "trigger:\n  - geofence: any\naction:\n  - send:\n      to: ";
+
+        Assert.False(ScriptParser.Parse($"{body}{{from.id}}\n      text: \"hi\"").IsValid);
+
+        var quoted = ScriptParser.Parse($"{body}\"{{from.id}}\"\n      text: \"hi\"");
+        Assert.True(quoted.IsValid, quoted.FirstError?.ToString());
+        Assert.Equal("{from.id}", Assert.Single(quoted.Script!.Actions).To);
+    }
 }

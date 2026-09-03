@@ -142,9 +142,16 @@ public static class ScriptCompletion
     /// ones too, which reads as though they were needed; quoting never would
     /// let a suggestion break the file it was inserted into.
     /// </remarks>
-    /// <summary>Words a YAML reader may take for a boolean rather than for the
-    /// text they are. YAML 1.1's set, which is wider than "true" and "false" —
-    /// a waypoint called "No" is a name, not an answer.</summary>
+    /// <summary>
+    /// Words a YAML reader may take for a boolean rather than for the text they
+    /// are. YAML 1.1's set, which is wider than "true" and "false".
+    /// </summary>
+    /// <remarks>
+    /// Belt and braces for this parser, which walks the representation model
+    /// and keeps a plain scalar as written — a waypoint called "No" survives
+    /// unquoted here. The quotes are for everything else that reads these
+    /// files, and for the reader: a name is a name, not an answer.
+    /// </remarks>
     private static readonly HashSet<string> YamlBooleans = new(StringComparer.OrdinalIgnoreCase)
         { "y", "n", "yes", "no", "true", "false", "on", "off", "null", "~" };
 

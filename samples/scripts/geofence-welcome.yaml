@@ -23,7 +23,10 @@ enabled: false
 alias: Welcome arrivals at the gate
 
 trigger:
-  - geofence: "North Gate"
+  # Bare, which is what the editor's list inserts and what a plain name needs.
+  # Quotes only matter for a name YAML would read as something else — one
+  # carrying ": ", or opening with a character it reserves.
+  - geofence: North Gate
     # enter is the default. both would greet people on the way out too, and
     # {geofence.event} would then say which happened.
     on: enter
@@ -53,7 +56,8 @@ action:
       equals: false
 
   - send:
-      # Straight to whoever arrived.
+      # Straight to whoever arrived. These quotes are not optional, unlike the
+      # fence name's: a bare {from.id} opens a YAML flow mapping.
       to: "{from.id}"
       text: "Welcome to {geofence}, {from.short}. Water and shade by the barn."
       # They never answered, so the greeting would be binned on arrival. Say
