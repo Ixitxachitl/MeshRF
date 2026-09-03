@@ -29,6 +29,10 @@ public enum PortNum
     StoreForwardPlusPlus = 35,
     NodeStatus         = 36,
     MeshBeacon         = 37,
+    // Acknowledged paging. Declared so a packet on it decodes as itself rather
+    // than as a failed decrypt; nothing reads PagingPacket yet, and no firmware
+    // sends one.
+    Paging             = 38,
     Serial             = 64,
     StoreForward       = 65,
     RangeTest          = 66,
