@@ -1302,7 +1302,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     LocationHistoryRecorded?.Invoke(header.From, new NodeLocationHistoryRecord(
                         id, header.From, when, lat, lon, result.Position.AltitudeM));
                 }
-                EvaluateGeofenceCrossing(header.From, lat, lon, snrDb, packetRssiDbm, hopsAway);
+                // The position the node table held before the upsert above, so a
+                // node heard for the first time from inside a fence reads as an
+                // arrival rather than as state we happened to be missing.
+                EvaluateGeofenceCrossing(header.From, lat, lon,
+                                         previous?.Latitude, previous?.Longitude,
+                                         snrDb, packetRssiDbm, hopsAway);
                 MarkNodeDirty(header.From);
                 break;
 
@@ -1645,25 +1650,21 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     private bool IsNodeRtttlMuted(uint nodeNum) => _nodeStore.Get(nodeNum)?.MuteRtttl == true;
 
-    // Whether a node was last seen inside a given geofence, keyed by waypoint
-    // and node. Only a change of state is an event, so the previous answer has
-    // to be remembered; without it every position report inside a fence would
-    // alert again.
-    private readonly Dictionary<(long WaypointId, uint NodeNum), bool> _geofenceInsideState = new();
+    private readonly GeofenceTracker _geofences = new();
 
     /// <summary>
     /// Raises enter/exit alerts for a node's new position. Called for received
     /// positions and for our own, so a fence around home reports us arriving
     /// the same way it reports anyone else.
     /// </summary>
-    /// <remarks>
-    /// The first position seen for a (fence, node) pair records state without
-    /// alerting: with no prior reading there is no crossing, and treating an
-    /// unknown as "outside" would fire a spurious enter for every node already
-    /// sitting inside a fence when the app starts.
-    /// </remarks>
+    /// <param name="lastKnownLat">Where this node was understood to be before
+    /// this report, read from the node table before the table was updated. Lets
+    /// a crossing be recognised across a restart, and makes the first position
+    /// ever heard from inside a fence an arrival — see
+    /// <see cref="GeofenceTracker.Evaluate"/>.</param>
     public void EvaluateGeofenceCrossing(
         uint nodeNum, double lat, double lon,
+        double? lastKnownLat = null, double? lastKnownLon = null,
         float? snrDb = null, float? rssiDbm = null, byte? hopsAway = null)
     {
         if (nodeNum == 0 || Waypoints.Count == 0) return;
@@ -1679,17 +1680,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             if (!wp.NotifyOnEnter && !wp.NotifyOnExit && !watched) continue;
             if (wp.NotifyFavoritesOnly && _nodeStore.Get(nodeNum)?.Favorite != true) continue;
 
-            bool inside = Geofence.Contains(wp, lat, lon);
-            var key = (wp.Id, nodeNum);
-            bool hadPrior = _geofenceInsideState.TryGetValue(key, out bool wasInside);
-            _geofenceInsideState[key] = inside;
-            if (!hadPrior || inside == wasInside) continue;
+            var crossing = _geofences.Evaluate(wp, nodeNum, lat, lon, lastKnownLat, lastKnownLon);
+            if (crossing == GeofenceCrossing.None) continue;
 
-            if (inside && wp.NotifyOnEnter) RaiseGeofenceAlert(wp, nodeNum, entered: true);
-            else if (!inside && wp.NotifyOnExit) RaiseGeofenceAlert(wp, nodeNum, entered: false);
+            bool entered = crossing == GeofenceCrossing.Entered;
+            if (entered && wp.NotifyOnEnter) RaiseGeofenceAlert(wp, nodeNum, entered: true);
+            else if (!entered && wp.NotifyOnExit) RaiseGeofenceAlert(wp, nodeNum, entered: false);
 
             if (watched)
-                RaiseGeofenceCrossing(wp, nodeNum, entered: inside, lat, lon, snrDb, rssiDbm, hopsAway);
+                RaiseGeofenceCrossing(wp, nodeNum, entered, lat, lon, snrDb, rssiDbm, hopsAway);
         }
     }
 
@@ -1825,7 +1824,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 id, MyNodeNum, now.UtcDateTime, latitude, longitude, altitudeM));
         }
 
-        EvaluateGeofenceCrossing(MyNodeNum, latitude, longitude);
+        EvaluateGeofenceCrossing(MyNodeNum, latitude, longitude,
+                                 previous?.Latitude, previous?.Longitude);
         MarkNodeDirty(MyNodeNum);
     }
 
