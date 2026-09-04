@@ -198,6 +198,10 @@ public partial class RadioViewModel
         if (wp.AltitudeM is int alt)
             sb.Append("  ").Append(DisplayUnits.FormatAltitude(alt, CurrentUnitSystem));
         if (!string.IsNullOrWhiteSpace(wp.Description)) sb.Append('\n').Append(wp.Description);
+        // Who draws it, which is not who can read it: a directed marker still
+        // travels under the channel key named above.
+        if (wp.IsDirected)
+            sb.Append("\nAddressed to ").Append(_rxHost.NodeDisplayName(wp.ToNode));
         if (wp.LockedTo != 0)
             sb.Append("\nLocked to !").Append(wp.LockedTo.ToString("x8", CultureInfo.InvariantCulture));
         if (wp.GeofenceRadius > 0)
@@ -456,6 +460,7 @@ public partial class RadioViewModel
                 WaypointId = waypointId,
                 PacketId = packetId,
                 Channel = selectedChannel.Name,
+                ToNode = to ?? 0,
                 Name = name,
                 Description = description,
                 Icon = icon,

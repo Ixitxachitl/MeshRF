@@ -39,6 +39,25 @@ public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChange
     public uint ExpireEpoch { get; set; }
 
     /// <summary>
+    /// Node the marker was addressed to, or 0 for one broadcast to a channel.
+    /// </summary>
+    /// <remarks>
+    /// Says who draws it, not who may read it: a directed marker still travels
+    /// under a channel key, so everyone on that channel can decrypt it and
+    /// simply declines to put it on the map. Distinct from
+    /// <see cref="LockedTo"/>, which says who may change it — a marker can be
+    /// addressed to one node and locked to another, or to neither.
+    /// </remarks>
+    public uint ToNode { get; set; }
+
+    /// <summary>Whether the marker names a recipient rather than going to a
+    /// whole channel.</summary>
+    public bool IsDirected => ToNode != 0;
+
+    /// <summary>Recipient for the list, empty for a broadcast.</summary>
+    public string ToId => IsDirected ? $"!{ToNode:x8}" : string.Empty;
+
+    /// <summary>
     /// Node this waypoint is locked to, or 0 for one anybody may edit.
     /// </summary>
     /// <remarks>

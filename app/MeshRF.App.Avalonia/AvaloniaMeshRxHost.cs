@@ -1885,6 +1885,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             WaypointId = waypointId,
             PacketId = header.PacketId,
             Channel = result.ChannelName,
+            // Broadcast is the absence of an address, not an address of its own.
+            ToNode = header.IsBroadcast ? 0 : header.To,
             Name = wp.Name,
             Description = wp.Description,
             Icon = wp.Icon,

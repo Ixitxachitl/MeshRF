@@ -1129,6 +1129,7 @@
                                 <DataGridTextColumn Header="Description" Width="2*" Binding="{Binding Description}" />
                                 <DataGridTextColumn Header="From" Width="96" Binding="{Binding FromId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Channel" Width="110" Binding="{Binding ChannelText}" />
+                                <DataGridTextColumn Header="To" Width="96" Binding="{Binding ToId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Lat" Width="88" Binding="{Binding Latitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Lon" Width="88" Binding="{Binding Longitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Status" Width="74" Binding="{Binding ExpiryStatus}" />

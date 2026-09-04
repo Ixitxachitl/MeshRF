@@ -73,6 +73,10 @@ public sealed class WaypointStore : IDisposable
         EnsureColumn("notify_on_enter", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("notify_on_exit", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("notify_favorites_only", "INTEGER NOT NULL DEFAULT 0");
+        // Later still. A row written before this defaults to 0, which reads as
+        // a broadcast — right for every marker that predates addressing being
+        // recorded, since nothing else on those rows could say otherwise.
+        EnsureColumn("to_node", "INTEGER NOT NULL DEFAULT 0");
     }
 
     /// <summary>
@@ -148,14 +152,14 @@ public sealed class WaypointStore : IDisposable
                     (from_node, waypoint_id, packet_id, channel,
                      name, description, icon,
                      latitude, longitude, altitude_m,
-                     expire_epoch, locked_to, rx_epoch,
+                     expire_epoch, locked_to, to_node, rx_epoch,
                      geofence_radius, bbox_west, bbox_south, bbox_east, bbox_north,
                      notify_on_enter, notify_on_exit, notify_favorites_only)
                 VALUES
                     ($from, $wid, $pid, $chan,
                      $name, $desc, $icon,
                      $lat, $lon, $alt,
-                     $exp, $lock, $rx,
+                     $exp, $lock, $to, $rx,
                      $geor, $bw, $bs, $be, $bn,
                      $nen, $nex, $nfav)
                 ON CONFLICT(waypoint_id) DO UPDATE SET
@@ -169,6 +173,7 @@ public sealed class WaypointStore : IDisposable
                     altitude_m            = excluded.altitude_m,
                     expire_epoch          = excluded.expire_epoch,
                     locked_to             = excluded.locked_to,
+                    to_node               = excluded.to_node,
                     rx_epoch              = MAX(excluded.rx_epoch, waypoints.rx_epoch),
                     geofence_radius       = excluded.geofence_radius,
                     bbox_west             = excluded.bbox_west,
@@ -192,6 +197,7 @@ public sealed class WaypointStore : IDisposable
             cmd.Parameters.AddWithValue("$alt", (object?)rec.AltitudeM ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$exp", rec.ExpireEpoch);
             cmd.Parameters.AddWithValue("$lock", rec.LockedTo);
+            cmd.Parameters.AddWithValue("$to", rec.ToNode);
             cmd.Parameters.AddWithValue("$rx", rec.RxEpoch);
             cmd.Parameters.AddWithValue("$geor", rec.GeofenceRadius);
             cmd.Parameters.AddWithValue("$bw", (object?)rec.BboxWest ?? DBNull.Value);
@@ -272,6 +278,7 @@ public sealed class WaypointStore : IDisposable
             AltitudeM   = Nullable<int>("altitude_m"),
             ExpireEpoch = (uint)r.GetInt64(r.GetOrdinal("expire_epoch")),
             LockedTo    = (uint)r.GetInt64(r.GetOrdinal("locked_to")),
+            ToNode      = (uint)r.GetInt64(r.GetOrdinal("to_node")),
             RxEpoch     = r.GetInt64(r.GetOrdinal("rx_epoch")),
             GeofenceRadius = (uint)r.GetInt64(r.GetOrdinal("geofence_radius")),
             BboxWest    = Nullable<double>("bbox_west"),

@@ -78,4 +78,47 @@ public class WaypointRecordTests
 
         Assert.Equal("LongFast", new WaypointRecord { Channel = "LongFast" }.ChannelText);
     }
+
+    /// <summary>
+    /// The recipient of a directed marker. Says who draws it, not who can read
+    /// it — a directed waypoint still travels under a channel key, so it is
+    /// independent of both the channel and the lock.
+    /// </summary>
+    [Fact]
+    public void ADirectedWaypointNamesItsRecipient()
+    {
+        var directed = new WaypointRecord { Channel = "LongFast", ToNode = 0xa1b2c3d4 };
+
+        Assert.True(directed.IsDirected);
+        Assert.Equal("!a1b2c3d4", directed.ToId);
+        // The channel it travelled under is still the channel.
+        Assert.Equal("LongFast", directed.ChannelText);
+    }
+
+    [Fact]
+    public void ABroadcastWaypointNamesNobody()
+    {
+        var broadcast = new WaypointRecord { Channel = "LongFast" };
+
+        Assert.False(broadcast.IsDirected);
+        // Empty rather than "!00000000": the column should be blank on the
+        // rows that went to a whole channel, which is most of them.
+        Assert.Equal(string.Empty, broadcast.ToId);
+    }
+
+    /// <summary>Addressing and locking are different questions, and a marker
+    /// can answer them differently.</summary>
+    [Fact]
+    public void AddressingIsIndependentOfTheLock()
+    {
+        var wp = new WaypointRecord
+        {
+            ToNode = 0xa1b2c3d4,
+            LockedTo = 0xdeadbeef,
+            ViewerNodeNum = 0xdeadbeef,
+        };
+
+        Assert.Equal("!a1b2c3d4", wp.ToId);
+        Assert.True(wp.IsLockedToUs);
+    }
 }
