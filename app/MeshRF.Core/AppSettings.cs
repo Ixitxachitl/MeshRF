@@ -401,6 +401,17 @@ public sealed class AppSettings
     public int PathLossSampleCount { get; set; }
     public DateTime? PathLossFittedUtc { get; set; }
 
+    /// <summary>Whether the exponent was measured or held at free space because
+    /// the neighbours could not pin one down. Stored because it decides how far
+    /// the model may be carried: one that never measured a falloff knows
+    /// nothing about longer ranges, and a prediction that forgets this reads as
+    /// authoritative when it is not.</summary>
+    public bool PathLossExponentFitted { get; set; }
+
+    /// <summary>The furthest neighbour the fit was measured over. Everything
+    /// past it is extrapolation.</summary>
+    public double PathLossFurthestSampleM { get; set; }
+
     /// <summary>What the peers are taken to be transmitting at. Meshtastic
     /// carries no such field, so this is the one number in the calibration that
     /// has to be told rather than measured. 22 dBm is the stock setting for

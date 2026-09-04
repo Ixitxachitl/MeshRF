@@ -260,6 +260,8 @@ public partial class PathLossWindow : Window
         _settings.PathLossOffsetDb = fit.OffsetDb;
         _settings.PathLossRmsDb = fit.RmsResidualDb;
         _settings.PathLossSampleCount = fit.SampleCount;
+        _settings.PathLossExponentFitted = fit.ExponentFitted;
+        _settings.PathLossFurthestSampleM = fit.FurthestSampleM;
         _settings.PathLossFittedUtc = DateTime.UtcNow;
         _settings.Save();
 
@@ -275,6 +277,8 @@ public partial class PathLossWindow : Window
         _settings.PathLossOffsetDb = null;
         _settings.PathLossRmsDb = null;
         _settings.PathLossSampleCount = 0;
+        _settings.PathLossExponentFitted = false;
+        _settings.PathLossFurthestSampleM = 0;
         _settings.PathLossFittedUtc = null;
         _settings.Save();
 

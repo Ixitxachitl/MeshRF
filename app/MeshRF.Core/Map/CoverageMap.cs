@@ -33,7 +33,8 @@ public readonly record struct CoverageSpoke(
 public sealed record CoverageRing(
     GeoPoint Centre,
     IReadOnlyList<CoverageSpoke> Spokes,
-    double UnobstructedRangeM)
+    double UnobstructedRangeM,
+    bool RangeWasCapped = false)
 {
     public double FurthestReachM => Spokes.Count == 0 ? 0 : Spokes.Max(s => s.ReachM);
 
@@ -52,6 +53,12 @@ public sealed record CoverageRing(
 /// one. Without it the sweep spends free-space loss, which over anywhere with
 /// trees or buildings draws a ring far larger than the station really has.
 /// </param>
+/// <param name="MaxCredibleRangeM">How far the caller is willing to have the
+/// model asked about, or zero for no limit. Beyond the ranges a model was
+/// fitted over it is extrapolating, and a log-distance model extrapolated two
+/// orders of magnitude past its data will happily draw a ring across a
+/// continent. Stopping at a stated distance is honest; drawing that ring is
+/// not.</param>
 public sealed record CoverageOptions(
     GeoPoint Centre,
     double MyAntennaM,
@@ -65,6 +72,7 @@ public sealed record CoverageOptions(
     double NoiseFigureDb = LinkBudget.DefaultNoiseFigureDb,
     double RequiredMarginDb = 6.0,
     PathLossFit? Calibration = null,
+    double MaxCredibleRangeM = 0,
     int Bearings = 180,
     double EarthRadiusFactor = 4.0 / 3.0);
 
@@ -184,11 +192,20 @@ public static class CoverageMap
             options, centreGround, txM, allowedLoss, wavelength, effectiveRadius,
             BudgetRangeM(options), ReferenceSamples);
 
+        // The model stops being evidence before it stops producing numbers.
+        // Capping the reference rather than the drawn edge keeps the reading
+        // coherent: a direction that runs to the cap met nothing, which is
+        // Clear, and one cut short by ground is still judged against what the
+        // rest of the ring managed.
+        bool capped = options.MaxCredibleRangeM > 0 && coarse > options.MaxCredibleRangeM;
+        if (capped) coarse = options.MaxCredibleRangeM;
+
         // Looking past it is wasted work — nothing out there closes even with
         // no terrain at all — and it also sets how finely each bearing is
         // stepped, so a station that only reaches a few kilometres reads its
-        // terrain at a few tens of metres.
-        double maxRange = coarse * 1.05;
+        // terrain at a few tens of metres. A capped sweep takes no headroom
+        // past the cap: there is nothing out there it is willing to claim.
+        double maxRange = capped ? coarse : coarse * 1.05;
         double spacing = maxRange / RadialSamples;
 
         double unobstructed = OpenGroundReach(
@@ -207,7 +224,7 @@ public static class CoverageMap
             spokes[bearingIndex] = new CoverageSpoke(bearing, reach, Classify(reach, unobstructed));
         });
 
-        return new CoverageRing(options.Centre, spokes, unobstructed);
+        return new CoverageRing(options.Centre, spokes, unobstructed, capped);
     }
 
     /// <summary>Level ground everywhere, for measuring the reference reach.

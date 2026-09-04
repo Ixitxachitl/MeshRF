@@ -156,6 +156,13 @@ public partial class MapPanel : UserControl
         _coverageRun = cts;
 
         var (sf, bwKhz, _) = _viewModel.EffectiveLoraParams;
+
+        // The one measured distance available, and the bound on how far any of
+        // this may be carried. Read before the sweep so it can shape it rather
+        // than merely annotate it afterwards.
+        double measuredM = FurthestHeardDirectM(_viewModel, new GeoPoint(lat, lon));
+        var calibration = FittedPathLoss(_settings);
+
         var options = new CoverageOptions(
             Centre: new GeoPoint(lat, lon),
             MyAntennaM: _settings.LinkProfileMyAntennaM,
@@ -166,7 +173,8 @@ public partial class MapPanel : UserControl
             FrequencyMhz: _viewModel.CenterFreqMHz,
             BandwidthKhz: bwKhz,
             SpreadingFactor: sf,
-            Calibration: FittedPathLoss(_settings));
+            Calibration: calibration,
+            MaxCredibleRangeM: CredibleRangeM(calibration, measuredM));
 
         _viewModel.StatusText = "Sweeping coverage…";
         try
@@ -196,10 +204,6 @@ public partial class MapPanel : UserControl
                 return;
             }
 
-            // The one number on the map that was measured rather than
-            // modelled. A ring an order of magnitude larger than it is a ring
-            // built on assumptions that do not hold here.
-            double measured = FurthestHeardDirectM(_viewModel, options.Centre);
             var units = _viewModel.CurrentUnitSystem;
 
             string note =
@@ -207,9 +211,9 @@ public partial class MapPanel : UserControl
                 (options.Calibration is null ? " · free space" : " · calibrated") +
                 $" · terrain {TerrainGrid.MetresPerPixel(area.Zoom, options.Centre.Lat):0} m/px";
 
-            Canvas.ShowCoverage(ring, note, measured, units);
+            Canvas.ShowCoverage(ring, note, measuredM, units);
 
-            _viewModel.StatusText = CoverageSummary(ring, area, measured, options, units);
+            _viewModel.StatusText = CoverageSummary(ring, area, measuredM, options, units);
         }
         catch (OperationCanceledException)
         {
@@ -261,12 +265,38 @@ public partial class MapPanel : UserControl
             parts.Add("nothing heard directly yet to check it against");
         }
 
-        if (options.Calibration is null)
-            parts.Add("free-space loss — calibrate path loss to draw the range this site actually has");
+        if (ring.RangeWasCapped)
+            parts.Add("stopped where the model runs out of evidence, not where the signal does");
+
+        parts.Add(options.Calibration switch
+        {
+            null => "free-space loss — calibrate path loss to draw the range this site actually has",
+            { ExponentFitted: false } => "the calibration never measured a falloff, so it says nothing " +
+                                         "about longer ranges — it needs neighbours spread across range",
+            { IsPlausible: false } => "the fitted exponent is outside what real environments produce",
+            _ => $"calibrated, n = {options.Calibration.Exponent:0.00}",
+        });
 
         if (!area.Complete) parts.Add("some terrain missing");
 
         return string.Join(" · ", parts);
+    }
+
+    /// <summary>
+    /// How far out this station's models may honestly be asked about.
+    ///
+    /// A calibration is evidence only over the ranges it was measured across,
+    /// and stretches a little past them. Failing that, the furthest node heard
+    /// directly is the only distance anything here has been checked at. With
+    /// neither, there is no bound to give and the ring runs to wherever the
+    /// link budget and the horizon take it — which is what the summary warns
+    /// about.
+    /// </summary>
+    private static double CredibleRangeM(PathLossFit? calibration, double measuredM)
+    {
+        double fromFit = calibration?.CredibleRangeM ?? 0;
+        double fromMeasurement = measuredM > 0 ? measuredM * PathLossFit.ExtrapolationFactor : 0;
+        return Math.Max(fromFit, fromMeasurement);
     }
 
     /// <summary>The applied path-loss calibration, if there is one. Without it
@@ -275,7 +305,10 @@ public partial class MapPanel : UserControl
     private static PathLossFit? FittedPathLoss(AppSettings settings) =>
         settings is { PathLossExponent: double exponent, PathLossOffsetDb: double offset }
             ? new PathLossFit(exponent, offset, settings.PathLossRmsDb ?? 0,
-                              settings.PathLossSampleCount, ExponentFitted: true, OffsetFitted: true)
+                              settings.PathLossSampleCount,
+                              ExponentFitted: settings.PathLossExponentFitted,
+                              OffsetFitted: true,
+                              FurthestSampleM: settings.PathLossFurthestSampleM)
             : null;
 
     /// <summary>Binds the panel to the view model and restores saved map

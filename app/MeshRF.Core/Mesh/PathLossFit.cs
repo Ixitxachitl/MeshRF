@@ -35,7 +35,8 @@ public sealed record PathLossFit(
     double RmsResidualDb,
     int SampleCount,
     bool ExponentFitted,
-    bool OffsetFitted)
+    bool OffsetFitted,
+    double FurthestSampleM = 0)
 {
     /// <summary>The exponent of free space, and the value the fit falls back to
     /// when the samples cannot pin one down.</summary>
@@ -51,6 +52,27 @@ public sealed record PathLossFit(
     /// factor of two is the least that separates a real trend from the scatter
     /// of a handful of readings.</summary>
     public const double MinLogDistanceSpread = 0.3;
+
+    /// <summary>How far past its furthest neighbour a fitted model may be
+    /// believed. A log-distance model is an extrapolation the moment it leaves
+    /// the ranges it was measured over; three times is a stretch a careful
+    /// person would accept, and a hundred times is arithmetic, not evidence.
+    /// </summary>
+    public const double ExtrapolationFactor = 3.0;
+
+    /// <summary>The same allowance when the exponent was never measured. A fit
+    /// holding the exponent at free space knows one thing — how strong signals
+    /// were at about one range — and knows nothing whatever about how they fall
+    /// off, which is precisely what carrying it to a longer range asks of it.
+    /// </summary>
+    public const double UnfittedExtrapolationFactor = 1.5;
+
+    /// <summary>The furthest range this model has any business being asked
+    /// about, or zero when the neighbours it came from are not known.</summary>
+    public double CredibleRangeM =>
+        FurthestSampleM <= 0
+            ? 0
+            : FurthestSampleM * (ExponentFitted ? ExtrapolationFactor : UnfittedExtrapolationFactor);
 
     /// <summary>Whether the fitted exponent is inside the range real
     /// environments produce. Outside it the samples are telling a story about
@@ -138,7 +160,8 @@ public sealed record PathLossFit(
             RmsResidualDb: Math.Sqrt(sumSquares / samples.Count),
             SampleCount: samples.Count,
             ExponentFitted: canFitExponent,
-            OffsetFitted: true);
+            OffsetFitted: true,
+            FurthestSampleM: samples.Max(s => s.DistanceM));
     }
 
     /// <summary>What this model gets wrong about one neighbour: positive when

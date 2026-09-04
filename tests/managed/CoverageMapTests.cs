@@ -207,6 +207,64 @@ public class CoverageMapTests
     }
 
     [Fact]
+    public void TheSweepStopsWhereTheCallerSaysTheEvidenceDoes()
+    {
+        // The failure this guards against: a model fitted over a mile and a
+        // half, carried two hundred miles, drawing a ring across a continent.
+        var uncapped = CoverageMap.Build(new FlatGround(200), Options())!;
+        var capped = CoverageMap.Build(
+            new FlatGround(200), Options() with { MaxCredibleRangeM = 4000 })!;
+
+        Assert.False(uncapped.RangeWasCapped);
+        Assert.True(capped.RangeWasCapped);
+        Assert.InRange(capped.UnobstructedRangeM, 3800, 4000);
+        Assert.True(capped.UnobstructedRangeM < uncapped.UnobstructedRangeM / 10);
+    }
+
+    [Fact]
+    public void ACapWiderThanTheStationReachesChangesNothing()
+    {
+        var plain = CoverageMap.Build(new FlatGround(200), Options())!;
+        var generous = CoverageMap.Build(
+            new FlatGround(200), Options() with { MaxCredibleRangeM = 10_000_000 })!;
+
+        Assert.False(generous.RangeWasCapped);
+        Assert.Equal(plain.UnobstructedRangeM, generous.UnobstructedRangeM, 3);
+    }
+
+    [Fact]
+    public void ACappedRingStillReadsAsClearWhereNothingStoppedIt()
+    {
+        // The cap moves the reference rather than clipping the drawing, so a
+        // direction that ran to it met nothing and says so. Judging against the
+        // uncapped reach instead would paint the whole ring as blocked.
+        var capped = CoverageMap.Build(
+            new FlatGround(200), Options() with { MaxCredibleRangeM = 4000 })!;
+
+        Assert.All(capped.Spokes, s => Assert.Equal(CoverageQuality.Clear, s.Quality));
+    }
+
+    [Fact]
+    public void AFitThatNeverMeasuredAFalloffIsCarriedLessFarThanOneThatDid()
+    {
+        var measured = new PathLossFit(3.2, 0, 3, 8, ExponentFitted: true,
+                                       OffsetFitted: true, FurthestSampleM: 2000);
+        var held = new PathLossFit(2.0, -29.7, 2.4, 4, ExponentFitted: false,
+                                   OffsetFitted: true, FurthestSampleM: 2000);
+
+        Assert.True(held.CredibleRangeM < measured.CredibleRangeM);
+        Assert.Equal(6000, measured.CredibleRangeM, 3);
+        Assert.Equal(3000, held.CredibleRangeM, 3);
+    }
+
+    [Fact]
+    public void AFitFromNowhereKnownHasNoCredibleRange()
+    {
+        var unknown = new PathLossFit(3.0, 0, 3, 8, ExponentFitted: true, OffsetFitted: true);
+        Assert.Equal(0, unknown.CredibleRangeM);
+    }
+
+    [Fact]
     public void MorePowerReachesFurther()
     {
         var low = CoverageMap.Build(new FlatGround(200), Options(txPowerDbm: 14))!;

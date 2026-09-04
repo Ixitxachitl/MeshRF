@@ -227,7 +227,10 @@ public partial class LinkProfileWindow : Window
         }
 
         var fit = new PathLossFit(exponent, offset, _settings.PathLossRmsDb ?? 0,
-                                  _settings.PathLossSampleCount, ExponentFitted: true, OffsetFitted: true);
+                                  _settings.PathLossSampleCount,
+                                  ExponentFitted: _settings.PathLossExponentFitted,
+                                  OffsetFitted: true,
+                                  FurthestSampleM: _settings.PathLossFurthestSampleM);
         double clutter = fit.ExcessOverFreeSpaceDb(distanceM);
         double margin = LinkBudget.MarginDb(freeSpaceRxPowerDbm - clutter, sf, bwKhz);
 
@@ -240,11 +243,23 @@ public partial class LinkProfileWindow : Window
         CalibratedMarginText.Text = $"{margin:0.0} dB";
         CalibratedMarginText.Foreground = margin >= 10 ? Clear : margin > 0 ? Marginal : Blocked;
 
+        // A fit whose exponent was held at free space is a reading taken at one
+        // range. It is worth showing at this link's range, and worth saying so.
+        bool beyondEvidence = fit.CredibleRangeM > 0 && distanceM > fit.CredibleRangeM;
+        if (!fit.ExponentFitted || beyondEvidence) ClutterText.Foreground = Blocked;
+
         ToolTip.SetTip(CalibratedHeader,
             $"n = {exponent:0.00}, offset {offset:+0.0;-0.0;0.0} dB, fitted to " +
             $"{_settings.PathLossSampleCount} neighbour{(_settings.PathLossSampleCount == 1 ? "" : "s")}" +
             (_settings.PathLossFittedUtc is DateTime when
                 ? $" on {when.ToLocalTime():d}"
+                : string.Empty) +
+            (fit.ExponentFitted
+                ? string.Empty
+                : ". The exponent was never measured — this is one range's reading carried across.") +
+            (beyondEvidence
+                ? $" This link is past the {DisplayUnits.FormatShortDistance(fit.CredibleRangeM, _units)} " +
+                  "the fit has evidence for."
                 : string.Empty));
     }
 
