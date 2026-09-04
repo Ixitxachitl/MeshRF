@@ -472,17 +472,31 @@ public sealed class MapCanvas : Control
     private static readonly Pen CoverageEdgePen = new(new SolidColorBrush(Color.Parse("#CCFFFFFF")), 1.0);
     private static readonly IBrush LegendBackground = new SolidColorBrush(Color.Parse("#CC202020"));
 
+    private static readonly Pen MeasuredReachPen =
+        new(new SolidColorBrush(Color.Parse("#4FC3F7")), 1.6) { DashStyle = new DashStyle([6, 4], 0) };
+
     private CoverageRing? _coverage;
     private string _coverageNote = string.Empty;
+    private double _measuredReachM;
+    private UnitSystem _coverageUnits = UnitSystem.Metric;
 
     /// <summary>Shows a coverage sweep over the basemap, or clears it with
     /// null. The ring is held in geographic coordinates and projected on every
     /// render, so it stays put under a pan or a zoom rather than needing to be
     /// swept again.</summary>
-    public void ShowCoverage(CoverageRing? ring, string note = "")
+    /// <param name="measuredReachM">How far this station has actually heard a
+    /// node directly, drawn as a circle beside the predicted ring. Zero to leave
+    /// it off. It is the only number on the map that was measured rather than
+    /// modelled, so a prediction wildly larger than it is a prediction to
+    /// distrust.</param>
+    public void ShowCoverage(
+        CoverageRing? ring, string note = "", double measuredReachM = 0,
+        UnitSystem units = UnitSystem.Metric)
     {
         _coverage = ring;
+        _coverageUnits = units;
         _coverageNote = note;
+        _measuredReachM = measuredReachM;
         InvalidateVisual();
     }
 
@@ -553,6 +567,33 @@ public sealed class MapCanvas : Control
             ctx.EndFigure(true);
         }
         context.DrawGeometry(null, CoverageEdgePen, outline);
+
+        DrawMeasuredReach(context, ring.Centre, originX, originY);
+    }
+
+    /// <summary>The furthest a node has actually been heard from here, as a
+    /// circle. Drawn as a geographic circle rather than a screen one, so it
+    /// stays honest at any latitude and zoom.</summary>
+    private void DrawMeasuredReach(
+        DrawingContext context, GeoPoint centre, double originX, double originY)
+    {
+        if (_measuredReachM <= 0) return;
+
+        const int steps = 90;
+        var circle = new StreamGeometry();
+        using (var ctx = circle.Open())
+        {
+            for (int i = 0; i <= steps; i++)
+            {
+                var at = CoverageMap.Along(centre, 360.0 * i / steps, _measuredReachM);
+                var point = new Point(
+                    LonToX(at.Lon, _zoom) - originX, LatToY(at.Lat, _zoom) - originY);
+                if (i == 0) ctx.BeginFigure(point, isFilled: false);
+                else ctx.LineTo(point);
+            }
+            ctx.EndFigure(true);
+        }
+        context.DrawGeometry(null, MeasuredReachPen, circle);
     }
 
     /// <summary>What the three colours mean, plus what the sweep found. Drawn
@@ -570,9 +611,11 @@ public sealed class MapCanvas : Control
         ];
 
         const double pad = 6, swatch = 10, lineHeight = 15;
-        double boxHeight = pad * 2 + lineHeight * entries.Length
-                         + (_coverageNote.Length > 0 ? lineHeight : 0);
-        double boxWidth = 168;
+        int lines = entries.Length
+                  + (_measuredReachM > 0 ? 1 : 0)
+                  + (_coverageNote.Length > 0 ? 1 : 0);
+        double boxHeight = pad * 2 + lineHeight * lines;
+        double boxWidth = 190;
         double top = height - boxHeight - 8;
 
         context.FillRectangle(LegendBackground, new Rect(8, top, boxWidth, boxHeight), 3);
@@ -584,6 +627,22 @@ public sealed class MapCanvas : Control
             context.DrawRectangle(null, CoverageEdgePen, new Rect(8 + pad, y + 2, swatch, swatch));
             var text = new FormattedText(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
                                          LabelTypeface, 11, Brushes.White);
+            context.DrawText(text, new Point(8 + pad + swatch + 6, y));
+            y += lineHeight;
+        }
+
+        // The measured circle last in the list and drawn as a line rather than
+        // a swatch, because it is a different kind of thing to the three above
+        // it: those are predicted, this one happened.
+        if (_measuredReachM > 0)
+        {
+            double midline = y + 2 + swatch / 2;
+            context.DrawLine(MeasuredReachPen,
+                new Point(8 + pad, midline), new Point(8 + pad + swatch, midline));
+            var text = new FormattedText(
+                $"Heard direct  {DisplayUnits.FormatShortDistance(_measuredReachM, _coverageUnits)}",
+                CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                LabelTypeface, 11, Brushes.White);
             context.DrawText(text, new Point(8 + pad + swatch + 6, y));
             y += lineHeight;
         }

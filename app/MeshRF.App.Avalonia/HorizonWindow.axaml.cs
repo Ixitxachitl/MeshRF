@@ -23,16 +23,21 @@ public partial class HorizonWindow : Window
     private static readonly IBrush Good = new SolidColorBrush(Color.Parse("#66BB6A"));
     private static readonly IBrush Caution = new SolidColorBrush(Color.Parse("#FFB74D"));
 
-    /// <summary>Ranges the sweep offers, in metres. A near radius is read at a
-    /// deep zoom where a garden wall is a pixel or two across; a far one steps
-    /// back to fit the disc in a sensible number of tiles.</summary>
-    private static readonly (string Label, double Metres)[] Radii =
-    [
-        ("2 km", 2_000),
-        ("5 km", 5_000),
-        ("15 km", 15_000),
-        ("40 km", 40_000),
-    ];
+    /// <summary>Ranges the sweep offers, in whichever units the app is set to.
+    /// Round numbers in the user's own units rather than converted ones: a
+    /// picker offering "1.2 mi" is a conversion showing through, not a choice
+    /// anyone would make.
+    ///
+    /// A near radius is read at a deep zoom where a garden wall is a pixel or
+    /// two across; a far one steps back to fit the disc in a sensible number of
+    /// tiles.</summary>
+    private static (string Label, double Metres)[] RadiiFor(UnitSystem units) =>
+        DisplayUnits.IsImperial(units)
+            ? [("1 mi", 1_609.344), ("3 mi", 4_828.032),
+               ("10 mi", 16_093.44), ("25 mi", 40_233.6)]
+            : [("2 km", 2_000), ("5 km", 5_000), ("15 km", 15_000), ("40 km", 40_000)];
+
+    private (string Label, double Metres)[] _radii = [];
 
     private RadioViewModel? _vm;
     private AppSettings? _settings;
@@ -71,8 +76,13 @@ public partial class HorizonWindow : Window
         MyHeightBox.Text = FormatHeight(_settings.LinkProfileMyAntennaM);
         PeerHeightBox.Text = FormatHeight(_settings.LinkProfilePeerAntennaM);
 
-        RadiusCombo.ItemsSource = Radii.Select(r => r.Label).ToList();
-        RadiusCombo.SelectedIndex = Array.FindIndex(Radii, r => r.Metres == _radiusM);
+        // The default sits nearest whichever offered range is closest to it,
+        // so switching units lands on the same view of the world rather than
+        // on whatever index happened to match.
+        _radii = RadiiFor(_units);
+        _radiusM = _radii.MinBy(r => Math.Abs(r.Metres - _radiusM)).Metres;
+        RadiusCombo.ItemsSource = _radii.Select(r => r.Label).ToList();
+        RadiusCombo.SelectedIndex = Array.FindIndex(_radii, r => r.Metres == _radiusM);
 
         AttributionText.Text = TerrainTiles.Attribution;
         HeaderText.Text = $"Skyline from {_centre.Lat:F5}, {_centre.Lon:F5}";
@@ -88,10 +98,10 @@ public partial class HorizonWindow : Window
     private void OnRadiusChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_vm is null) return;
-        if (RadiusCombo.SelectedIndex is int index and >= 0 && index < Radii.Length)
+        if (RadiusCombo.SelectedIndex is int index and >= 0 && index < _radii.Length)
         {
-            if (Radii[index].Metres == _radiusM) return;
-            _radiusM = Radii[index].Metres;
+            if (_radii[index].Metres == _radiusM) return;
+            _radiusM = _radii[index].Metres;
             _ = SweepAsync();
         }
     }

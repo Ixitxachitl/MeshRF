@@ -57,7 +57,17 @@ public sealed class PathLossSurvey
 
     /// <summary>The neighbours worth measuring, nearest first.</summary>
     public static IReadOnlyList<NodeRecord> Candidates(
-        IEnumerable<NodeRecord> nodes, PathLossSurveyOptions options, uint myNodeNum)
+        IEnumerable<NodeRecord> nodes, PathLossSurveyOptions options, uint myNodeNum) =>
+        Candidates(nodes, options.Home, myNodeNum, options.MinDistanceM, options.MaxDistanceM);
+
+    /// <summary>
+    /// The same selection without a whole survey's worth of radio settings, for
+    /// callers that only want to know which nodes this station has genuinely
+    /// heard for itself and how far away they are.
+    /// </summary>
+    public static IReadOnlyList<NodeRecord> Candidates(
+        IEnumerable<NodeRecord> nodes, GeoPoint home, uint myNodeNum,
+        double minDistanceM = 100, double maxDistanceM = 100_000)
     {
         var candidates = new List<(NodeRecord Node, double Distance)>();
 
@@ -69,12 +79,12 @@ public sealed class PathLossSurvey
             if (node.SnrDb is not float) continue;
             if (node.Latitude is not double lat || node.Longitude is not double lon) continue;
 
-            double distance = Geodesy.DistanceM(options.Home, new GeoPoint(lat, lon));
+            double distance = Geodesy.DistanceM(home, new GeoPoint(lat, lon));
 
             // Too close and the position fuzzing Meshtastic applies is a large
             // fraction of the range; too far and the node is reporting a
             // position it does not have.
-            if (distance < options.MinDistanceM || distance > options.MaxDistanceM) continue;
+            if (distance < minDistanceM || distance > maxDistanceM) continue;
 
             candidates.Add((node, distance));
         }

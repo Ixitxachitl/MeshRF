@@ -196,15 +196,20 @@ public partial class MapPanel : UserControl
                 return;
             }
 
-            string note =
-                $"to {DisplayUnits.FormatShortDistance(ring.UnobstructedRangeM, _viewModel.CurrentUnitSystem)} open" +
-                (options.Calibration is null ? " · free space" : " · calibrated") +
-                $" · z{area.Zoom}";
+            // The one number on the map that was measured rather than
+            // modelled. A ring an order of magnitude larger than it is a ring
+            // built on assumptions that do not hold here.
+            double measured = FurthestHeardDirectM(_viewModel, options.Centre);
+            var units = _viewModel.CurrentUnitSystem;
 
-            Canvas.ShowCoverage(ring, note);
-            _viewModel.StatusText =
-                $"Coverage swept: {ring.Spokes.Count} bearings over {area.TileCount} terrain tiles" +
-                (area.Complete ? string.Empty : ", some of it missing");
+            string note =
+                $"to {DisplayUnits.FormatShortDistance(ring.UnobstructedRangeM, units)} open" +
+                (options.Calibration is null ? " · free space" : " · calibrated") +
+                $" · terrain {TerrainGrid.MetresPerPixel(area.Zoom, options.Centre.Lat):0} m/px";
+
+            Canvas.ShowCoverage(ring, note, measured, units);
+
+            _viewModel.StatusText = CoverageSummary(ring, area, measured, options, units);
         }
         catch (OperationCanceledException)
         {
@@ -215,6 +220,53 @@ public partial class MapPanel : UserControl
             if (ReferenceEquals(_coverageRun, cts)) _coverageRun = null;
             cts.Dispose();
         }
+    }
+
+    /// <summary>How far this station has actually heard a node for itself —
+    /// zero hops, over the air. Zero when it has heard none, which is its own
+    /// answer: there is nothing to check the prediction against.</summary>
+    private static double FurthestHeardDirectM(RadioViewModel vm, GeoPoint home)
+    {
+        var direct = PathLossSurvey.Candidates(vm.Nodes, home, vm.MyNodeNum);
+        return direct.Count == 0
+            ? 0
+            : direct.Max(n => Geodesy.DistanceM(home, new GeoPoint(n.Latitude!.Value, n.Longitude!.Value)));
+    }
+
+    /// <summary>
+    /// What the sweep found, and how much of it to believe. A ring drawn on
+    /// free-space loss over anywhere with trees or buildings promises range the
+    /// station does not have, and at these ranges the terrain is read too
+    /// coarsely to argue back — so the line says which of those apply rather
+    /// than reporting a number that looks authoritative.
+    /// </summary>
+    private static string CoverageSummary(
+        CoverageRing ring, TerrainArea area, double measuredM,
+        CoverageOptions options, UnitSystem units)
+    {
+        var parts = new List<string>
+        {
+            $"Coverage swept: {ring.Spokes.Count} bearings over {area.TileCount} terrain tiles",
+        };
+
+        if (measuredM > 0)
+        {
+            double ratio = ring.UnobstructedRangeM / measuredM;
+            parts.Add(
+                $"furthest heard direct {DisplayUnits.FormatShortDistance(measuredM, units)}" +
+                (ratio >= 3 ? $", so this ring claims {ratio:0}× what the radio has managed" : string.Empty));
+        }
+        else
+        {
+            parts.Add("nothing heard directly yet to check it against");
+        }
+
+        if (options.Calibration is null)
+            parts.Add("free-space loss — calibrate path loss to draw the range this site actually has");
+
+        if (!area.Complete) parts.Add("some terrain missing");
+
+        return string.Join(" · ", parts);
     }
 
     /// <summary>The applied path-loss calibration, if there is one. Without it
