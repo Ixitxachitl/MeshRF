@@ -675,6 +675,7 @@ public partial class MapPanel : UserControl
     /// station in clutter actually has.</summary>
     private static PathLossFit? FittedPathLoss(AppSettings settings) =>
         settings is { PathLossExponent: double exponent, PathLossOffsetDb: double offset }
+            && PathLossFit.IsPlausibleExponent(exponent)
             ? new PathLossFit(exponent, offset, settings.PathLossRmsDb ?? 0,
                               settings.PathLossSampleCount,
                               ExponentFitted: settings.PathLossExponentFitted,

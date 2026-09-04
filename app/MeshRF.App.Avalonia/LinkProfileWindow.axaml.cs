@@ -295,7 +295,11 @@ public partial class LinkProfileWindow : Window
     /// </summary>
     private void ShowCalibrated(double distanceM, double freeSpaceRxPowerDbm, int sf, double bwKhz)
     {
-        if (_settings is not { PathLossExponent: double exponent, PathLossOffsetDb: double offset })
+        // Plausibility checked here too, not only where the sweep checks it. A
+        // calibration stored before this app refused to store an impossible
+        // one would otherwise still be spent on every profile drawn.
+        if (_settings is not { PathLossExponent: double exponent, PathLossOffsetDb: double offset }
+            || !PathLossFit.IsPlausibleExponent(exponent))
         {
             CalibratedHeader.IsVisible = false;
             ClutterLabel.IsVisible = false;

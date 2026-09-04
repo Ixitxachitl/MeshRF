@@ -36,7 +36,8 @@ public sealed record PathLossFit(
     int SampleCount,
     bool ExponentFitted,
     bool OffsetFitted,
-    double FurthestSampleM = 0)
+    double FurthestSampleM = 0,
+    bool RangesInconsistent = false)
 {
     /// <summary>The exponent of free space, and the value the fit falls back to
     /// when the samples cannot pin one down.</summary>
@@ -74,11 +75,18 @@ public sealed record PathLossFit(
             ? 0
             : FurthestSampleM * (ExponentFitted ? ExtrapolationFactor : UnfittedExtrapolationFactor);
 
+    /// <summary>Whether an exponent is one a real environment could produce.
+    /// </summary>
+    /// <remarks>Static so a stored calibration can be checked before being
+    /// applied to anything, without rebuilding the fit that produced it.
+    /// </remarks>
+    public static bool IsPlausibleExponent(double exponent) => exponent is >= 1.5 and <= 6.0;
+
     /// <summary>Whether the fitted exponent is inside the range real
     /// environments produce. Outside it the samples are telling a story about
     /// bad positions or a directional antenna rather than about propagation.
     /// </summary>
-    public bool IsPlausible => Exponent is >= 1.5 and <= 6.0;
+    public bool IsPlausible => IsPlausibleExponent(Exponent);
 
     /// <summary>Total path loss this model predicts at a range.</summary>
     public double PathLossDb(double distanceM, double frequencyMhz) =>
@@ -119,7 +127,10 @@ public sealed record PathLossFit(
         bool canFitExponent =
             samples.Count >= MinSamplesForExponent && spread >= MinLogDistanceSpread;
 
-        double exponent, offset;
+        double exponent = FreeSpaceExponent, offset = 0;
+        bool fitted = false;
+        bool rangesInconsistent = false;
+
         if (canFitExponent)
         {
             double n = samples.Count;
@@ -132,10 +143,32 @@ public sealed record PathLossFit(
             }
 
             double denominator = n * sxx - sx * sx;
-            exponent = (n * sxy - sx * sy) / denominator;
-            offset = (sy - exponent * sx) / n;
+            double slope = (n * sxy - sx * sy) / denominator;
+
+            // A slope at or below zero says signal grew stronger the further
+            // away the neighbour was, which no environment does. What it
+            // actually means is that the ranges are not ranges: nodes sharing
+            // a site, or reporting positions coarse or wrong enough that the
+            // distances between them are invented.
+            //
+            // Refused rather than reported, because every quality signal a
+            // reader would check looks fine in this case. Points that are all
+            // really at one distance sit tightly on whatever line is drawn
+            // through them, so the residual comes out small and the fit reads
+            // as excellent while the exponent is impossible.
+            if (slope > 0)
+            {
+                exponent = slope;
+                offset = (sy - exponent * sx) / n;
+                fitted = true;
+            }
+            else
+            {
+                rangesInconsistent = true;
+            }
         }
-        else
+
+        if (!fitted)
         {
             // Not enough to separate the two, so the distance behaviour is left
             // at free space and everything the neighbours show beyond it is
@@ -159,7 +192,8 @@ public sealed record PathLossFit(
             OffsetDb: offset,
             RmsResidualDb: Math.Sqrt(sumSquares / samples.Count),
             SampleCount: samples.Count,
-            ExponentFitted: canFitExponent,
+            ExponentFitted: fitted,
+            RangesInconsistent: rangesInconsistent,
             OffsetFitted: true,
             FurthestSampleM: samples.Max(s => s.DistanceM));
     }

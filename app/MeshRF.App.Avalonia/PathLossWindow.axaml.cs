@@ -364,7 +364,9 @@ public partial class PathLossWindow : Window
             : Caution;
 
         ExponentNoteText.Text =
-            !fit.ExponentFitted
+            fit.RangesInconsistent
+                ? "Held at free space: these readings get stronger with distance, which no environment does. The ranges are not ranges — nodes sharing a site, or reporting positions too coarse to tell apart."
+            : !fit.ExponentFitted
                 ? $"Held at free space: {(EnoughSamples(fit) ? "the neighbours are all at much the same range" : "too few neighbours")} to measure a falloff. The offset carries what they show."
             : !fit.IsPlausible
                 ? "Outside the range real environments produce — check the outliers in the table."
@@ -377,7 +379,15 @@ public partial class PathLossWindow : Window
         CountText.Text = fit.SampleCount.ToString(CultureInfo.CurrentCulture);
         RmsText.Foreground = fit.RmsResidualDb <= 6 ? Good : fit.RmsResidualDb <= 12 ? Caution : Bad;
 
-        ApplyButton.IsEnabled = true;
+        // An exponent outside what any environment produces would poison every
+        // prediction that consumed it, so it cannot be stored at all. The
+        // held-at-free-space cases stay applicable: they carry a measured
+        // offset and say honestly that they know nothing about falloff.
+        ApplyButton.IsEnabled = fit.IsPlausible;
+        ToolTip.SetTip(ApplyButton, fit.IsPlausible
+            ? null
+            : "This model is not physically possible, so it cannot be applied");
+
         StatusText.Text =
             $"{_rows.Count} direct neighbour{(_rows.Count == 1 ? "" : "s")} measured, " +
             $"{fit.SampleCount} in the fit  ·  at 5 km this model predicts " +

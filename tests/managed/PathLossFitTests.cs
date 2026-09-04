@@ -171,4 +171,104 @@ public class PathLossFitTests
         Assert.Throws<ArgumentException>(() =>
             PathLossFit.Fit([new PathLossSample(1, 0, 100)], Freq));
     }
+
+    // -- Ranges that are not ranges -----------------------------------------
+
+    /// <summary>Neighbours built from the live database of a station whose
+    /// direct contacts all share one site: the reported ranges differ, the
+    /// physical ranges do not, so the readings strengthen with distance.
+    /// </summary>
+    private static PathLossSample[] CoLocated()
+    {
+        // Reported range, measured SNR. Loss falls as reported range rises,
+        // which is the signature of positions that are coarse, wrong, or all
+        // the same place.
+        (uint Id, double D, double Snr)[] rows =
+        [
+            (1, 259.4, 27.2),
+            (2, 2829.1, 31.2),
+            (3, 2829.1, 36.7),
+            (4, 1500.0, 33.0),
+        ];
+        return rows.Select(r => new PathLossSample(r.Id, r.D, 140.32 - r.Snr)).ToArray();
+    }
+
+    [Fact]
+    public void SignalThatStrengthensWithDistanceIsRefusedRatherThanFitted()
+    {
+        var fit = PathLossFit.Fit(CoLocated(), Freq)!;
+
+        Assert.True(fit.RangesInconsistent);
+        Assert.False(fit.ExponentFitted);
+        Assert.Equal(PathLossFit.FreeSpaceExponent, fit.Exponent);
+    }
+
+    [Fact]
+    public void SuchAFitIsStillApplicableAsAnOffset()
+    {
+        // Held at free space is not the same as worthless: the level those
+        // neighbours were heard at is real, and it is only the falloff that
+        // could not be measured.
+        var fit = PathLossFit.Fit(CoLocated(), Freq)!;
+
+        Assert.True(fit.IsPlausible);
+        Assert.Equal(4, fit.SampleCount);
+    }
+
+    [Fact]
+    public void TheTightResidualOfCoLocatedSamplesCannotBeTrustedAsQuality()
+    {
+        // Why this is refused rather than merely flagged. Points that are all
+        // really at one distance sit tightly on whatever line is drawn through
+        // them, so every quality signal a reader checks looks excellent while
+        // the exponent is impossible.
+        double slope = Slope(CoLocated(), Freq);
+
+        Assert.True(slope < 0, $"the raw slope should be negative, got {slope:F2}");
+
+        static double Slope(IReadOnlyList<PathLossSample> samples, double freq)
+        {
+            double reference = LinkBudget.FreeSpacePathLossAtOneMetreDb(freq);
+            int n = samples.Count;
+            double sx = 0, sy = 0, sxx = 0, sxy = 0;
+            foreach (var s in samples)
+            {
+                double x = 10 * Math.Log10(s.DistanceM);
+                double y = s.PropagationLossDb - reference;
+                sx += x; sy += y; sxx += x * x; sxy += x * y;
+            }
+            return (n * sxy - sx * sy) / (n * sxx - sx * sx);
+        }
+    }
+
+    [Fact]
+    public void AnHonestFitIsNotFlaggedAsInconsistent()
+    {
+        var fit = PathLossFit.Fit(From(3.0, 0, 400, 1600, 5000, 14000), Freq)!;
+
+        Assert.False(fit.RangesInconsistent);
+        Assert.True(fit.ExponentFitted);
+    }
+
+    [Fact]
+    public void TooFewNeighboursIsNotTheSameComplaintAsImpossibleRanges()
+    {
+        // The two hold the exponent for different reasons and the window says
+        // different things about them, so they must not be conflated.
+        var tooFew = PathLossFit.Fit(From(2.0, 12, 500, 2000, 6000), Freq)!;
+
+        Assert.False(tooFew.ExponentFitted);
+        Assert.False(tooFew.RangesInconsistent);
+    }
+
+    [Fact]
+    public void AStoredExponentCanBeCheckedWithoutRefittingIt()
+    {
+        // What the link profile and the sweep both consult before spending a
+        // calibration saved by an earlier version.
+        Assert.True(PathLossFit.IsPlausibleExponent(2.0));
+        Assert.True(PathLossFit.IsPlausibleExponent(3.4));
+        Assert.False(PathLossFit.IsPlausibleExponent(-0.657));
+        Assert.False(PathLossFit.IsPlausibleExponent(9.0));
+    }
 }
