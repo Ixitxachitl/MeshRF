@@ -1061,11 +1061,12 @@
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Width="Auto" SortMemberPath="HopsAway">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="🐇" ToolTip.Tip="Hops away" />
+                                    <TextBlock Text="🐇" ToolTip.Tip="Hops away. A bracketed figure is the best path this node has actually been heard over, when its last packet took a longer one." />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
-                                        <TextBlock Text="{Binding HopsAway}"
+                                        <TextBlock Text="{Binding HopsDisplay}"
+                                                   ToolTip.Tip="{Binding HopsTip}"
                                                    Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>

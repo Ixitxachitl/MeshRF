@@ -114,15 +114,25 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// for itself and it knows where it was at the time.</summary>
     private void RecordSurveySighting(uint nodeNum, byte hopsAway, bool viaMqtt, float? snrDb)
     {
-        if (!SurveyRecording) return;
         if (!TryGetHomeLocation(out double myLat, out double myLon)) return;
 
         var peer = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
         if (peer?.Latitude is not double peerLat || peer.Longitude is not double peerLon) return;
 
-        Survey.Record(
-            nodeNum, hopsAway, viaMqtt, snrDb,
-            new GeoPoint(myLat, myLon), new GeoPoint(peerLat, peerLon), DateTime.UtcNow);
+        var mine = new GeoPoint(myLat, myLon);
+        var theirs = new GeoPoint(peerLat, peerLon);
+
+        // Always, not only while surveying. What path a node has been heard
+        // over is a standing fact about the mesh; the survey log is a separate
+        // thing the user switches on to go and collect readings. Anything that
+        // arrived over MQTT is excluded — none of it crossed the air to us, so
+        // its hop count says nothing about an RF path.
+        if (!viaMqtt)
+            _nodeStore.RecordDirectness(nodeNum, hopsAway, snrDb, peer.RssiDbm, mine, theirs);
+
+        if (!SurveyRecording) return;
+
+        Survey.Record(nodeNum, hopsAway, viaMqtt, snrDb, mine, theirs, DateTime.UtcNow);
     }
 
     public ObservableCollection<string> LogLines => _rxHost.LogLines;

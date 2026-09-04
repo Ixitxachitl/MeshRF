@@ -62,6 +62,19 @@ public sealed class PathLossSurvey
 
     public PathLossSurvey(TerrainTiles terrain) => _terrain = terrain;
 
+    /// <summary>
+    /// The SNR this node was heard at over a direct path, or null if it never
+    /// has been from where both ends are now.
+    /// </summary>
+    /// <remarks>The reading has to travel with the hop count it was measured
+    /// on. Counting a node as direct because of an earlier hearing and then
+    /// reading today's SNR — measured on a relayed hop, over somebody else's
+    /// path — would be worse than leaving it out altogether.</remarks>
+    public static float? DirectSnrDb(NodeRecord node, DateTimeOffset now) =>
+        node.HopsAway == 0 ? node.SnrDb
+        : Directness.HeardDirect(node.BestPath, now) ? node.BestPath!.Value.SnrDb
+        : null;
+
     /// <summary>The neighbours worth measuring, nearest first.</summary>
     public static IReadOnlyList<NodeRecord> Candidates(
         IEnumerable<NodeRecord> nodes, PathLossSurveyOptions options, uint myNodeNum) =>
@@ -77,13 +90,20 @@ public sealed class PathLossSurvey
         double minDistanceM = 100, double maxDistanceM = 100_000)
     {
         var candidates = new List<(NodeRecord Node, double Distance)>();
+        var now = DateTimeOffset.UtcNow;
 
         foreach (var node in nodes)
         {
             if (node.NodeNum == myNodeNum) continue;
-            if (node.HopsAway != 0) continue;
             if (node.SeenViaMqtt == true) continue;
-            if (node.SnrDb is not float) continue;
+
+            // Not node.HopsAway, and not node.SnrDb. Both describe the last
+            // packet, and a direct neighbour whose path faded for one
+            // transmission has a relayed hop count and a relayed reading
+            // sitting on its row. Dropping those loses exactly the far, weak,
+            // intermittent neighbours the fit most needs, which drags the
+            // fitted exponent shallow.
+            if (DirectSnrDb(node, now) is not float) continue;
             if (node.Latitude is not double lat || node.Longitude is not double lon) continue;
 
             double distance = Geodesy.DistanceM(home, new GeoPoint(lat, lon));
@@ -112,6 +132,7 @@ public sealed class PathLossSurvey
     {
         var observations = new List<PathLossObservation>(candidates.Count);
         double noiseFloor = LinkBudget.NoiseFloorDbm(options.BandwidthKhz, options.NoiseFigureDb);
+        var now = DateTimeOffset.UtcNow;
 
         for (int i = 0; i < candidates.Count; i++)
         {
@@ -119,7 +140,7 @@ public sealed class PathLossSurvey
 
             var node = candidates[i];
             var peer = new GeoPoint(node.Latitude!.Value, node.Longitude!.Value);
-            double snr = node.SnrDb!.Value;
+            double snr = DirectSnrDb(node, now)!.Value;
 
             double diffraction = 0;
             bool terrainKnown = false;

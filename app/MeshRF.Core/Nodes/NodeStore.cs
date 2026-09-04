@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using MeshRF.Map;
+using MeshRF.Mesh;
 using Microsoft.Data.Sqlite;
 
 namespace MeshRF.Nodes;
@@ -154,6 +156,18 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("ch2_current_ma", "REAL");
         AddColumnIfMissing("ch3_voltage_v",  "REAL");
         AddColumnIfMissing("ch3_current_ma", "REAL");
+
+        // The best path a node has been heard over, and the geometry it was
+        // heard at, so a move can invalidate it. Kept beside hops_away rather
+        // than replacing it -- see MeshRF.Mesh.Directness.
+        AddColumnIfMissing("best_hops",        "INTEGER");
+        AddColumnIfMissing("best_hops_epoch",  "INTEGER");
+        AddColumnIfMissing("best_hops_snr",    "REAL");
+        AddColumnIfMissing("best_hops_rssi",   "REAL");
+        AddColumnIfMissing("best_hops_my_lat", "REAL");
+        AddColumnIfMissing("best_hops_my_lon", "REAL");
+        AddColumnIfMissing("best_hops_pr_lat", "REAL");
+        AddColumnIfMissing("best_hops_pr_lon", "REAL");
 
         using var history = _conn.CreateCommand();
         history.CommandText = """
@@ -462,6 +476,59 @@ public sealed class NodeStore : IDisposable
             SnrDb = snrDb,
             HopsAway = hopsAway,
         });
+    }
+
+    /// <summary>
+    /// Folds one hearing into the node's best-known path.
+    /// </summary>
+    /// <remarks>
+    /// <para>Its own statement rather than part of <c>Upsert</c> on purpose.
+    /// That one COALESCEs every column, so it can only ever fill a value in,
+    /// and the case this exists for is clearing one: a node that has moved
+    /// must lose its old path outright.</para>
+    /// <para>Does nothing without both positions. Whether the old hearing
+    /// still applies is a question about geometry, and a sighting that cannot
+    /// answer it must not overwrite one that could.</para>
+    /// </remarks>
+    public void RecordDirectness(
+        uint nodeNum, byte hopsAway, float? snrDb, float? rssiDbm,
+        GeoPoint? mine, GeoPoint? theirs, DateTimeOffset? when = null)
+    {
+        ThrowIfDisposed();
+        if (mine is not { } myPos || theirs is not { } peerPos) return;
+
+        var fresh = new DirectSighting(
+            hopsAway, when ?? DateTimeOffset.UtcNow, snrDb, rssiDbm, myPos, peerPos);
+
+        lock (_gate)
+        {
+            var stored = Get(nodeNum)?.BestPath;
+            var keep = Directness.Reconcile(stored, fresh);
+
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE nodes SET
+                    best_hops        = $hops,
+                    best_hops_epoch  = $epoch,
+                    best_hops_snr    = $snr,
+                    best_hops_rssi   = $rssi,
+                    best_hops_my_lat = $mylat,
+                    best_hops_my_lon = $mylon,
+                    best_hops_pr_lat = $prlat,
+                    best_hops_pr_lon = $prlon
+                WHERE node_num = $node_num
+                """;
+            cmd.Parameters.AddWithValue("$node_num", nodeNum);
+            cmd.Parameters.AddWithValue("$hops", keep.HopsAway);
+            cmd.Parameters.AddWithValue("$epoch", keep.When.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$snr", (object?)keep.SnrDb ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$rssi", (object?)keep.RssiDbm ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$mylat", keep.Mine.Lat);
+            cmd.Parameters.AddWithValue("$mylon", keep.Mine.Lon);
+            cmd.Parameters.AddWithValue("$prlat", keep.Theirs.Lat);
+            cmd.Parameters.AddWithValue("$prlon", keep.Theirs.Lon);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public NodeRecord? Get(uint nodeNum)
@@ -996,6 +1063,14 @@ public sealed class NodeStore : IDisposable
             SnrDb          = Nullable<float>("snr_db"),
             RssiDbm        = Nullable<float>("rssi_dbm"),
             HopsAway       = Nullable<byte>("hops_away"),
+            BestHops        = Nullable<byte>("best_hops"),
+            BestHopsEpoch   = Nullable<long>("best_hops_epoch"),
+            BestHopsSnrDb   = Nullable<float>("best_hops_snr"),
+            BestHopsRssiDbm = Nullable<float>("best_hops_rssi"),
+            BestHopsMyLat   = Nullable<double>("best_hops_my_lat"),
+            BestHopsMyLon   = Nullable<double>("best_hops_my_lon"),
+            BestHopsPeerLat = Nullable<double>("best_hops_pr_lat"),
+            BestHopsPeerLon = Nullable<double>("best_hops_pr_lon"),
             Latitude       = Nullable<double>("latitude"),
             Longitude      = Nullable<double>("longitude"),
             AltitudeM      = Nullable<int>("altitude_m"),

@@ -128,7 +128,75 @@ public sealed class NodeRecord : INotifyPropertyChanged
 
     public float? SnrDb       { get; set; }
     public float? RssiDbm     { get; set; }
+
+    /// <summary>Hops the most recent packet took, as the protocol reports it.
+    /// </summary>
+    /// <remarks>A property of that packet rather than of this node: the
+    /// firmware overwrites it on every sighting, so a direct neighbour whose
+    /// path faded once reads as relayed from then on. See
+    /// <see cref="BestPath"/> for the question the RF tools actually ask.
+    /// </remarks>
     public byte?  HopsAway    { get; set; }
+
+    // The best path this node has been heard over at the geometry it is at
+    // now, kept beside the protocol's value rather than replacing it. Cleared
+    // whenever either end moves -- see MeshRF.Mesh.Directness.
+    public byte?   BestHops        { get; set; }
+    public long?   BestHopsEpoch   { get; set; }
+    public float?  BestHopsSnrDb   { get; set; }
+    public float?  BestHopsRssiDbm { get; set; }
+    public double? BestHopsMyLat   { get; set; }
+    public double? BestHopsMyLon   { get; set; }
+    public double? BestHopsPeerLat { get; set; }
+    public double? BestHopsPeerLon { get; set; }
+
+    /// <summary>The stored hearing, or null when this node has never been
+    /// heard with both positions known.</summary>
+    public Mesh.DirectSighting? BestPath =>
+        BestHops is { } hops && BestHopsEpoch is { } epoch
+            && BestHopsMyLat is { } myLat && BestHopsMyLon is { } myLon
+            && BestHopsPeerLat is { } peerLat && BestHopsPeerLon is { } peerLon
+            ? new Mesh.DirectSighting(
+                hops, DateTimeOffset.FromUnixTimeSeconds(epoch),
+                BestHopsSnrDb, BestHopsRssiDbm,
+                new Map.GeoPoint(myLat, myLon), new Map.GeoPoint(peerLat, peerLon))
+            : null;
+
+    /// <summary>Whether this node has been heard over a direct path from where
+    /// both ends are now, whatever its last packet did.</summary>
+    public bool HeardDirect(DateTimeOffset now) => Mesh.Directness.HeardDirect(BestPath, now);
+
+    /// <summary>The best hop count still worth believing, or null when there is
+    /// no usable hearing on file.</summary>
+    private byte? BestHopsNow =>
+        BestPath is { } best && Mesh.Directness.IsFresh(best, DateTimeOffset.UtcNow)
+            ? best.HopsAway
+            : null;
+
+    /// <summary>The hops cell: what the last packet did, and in brackets the
+    /// best this node has actually been heard over when the two disagree.
+    /// </summary>
+    /// <remarks>Both, never one. The bare protocol figure hides a direct
+    /// neighbour whose path faded once; replacing it would put this app at odds
+    /// with the radio's own node list and every other client.</remarks>
+    public string HopsDisplay =>
+        HopsAway is not { } hops ? string.Empty
+        : BestHopsNow is { } best && best != hops ? $"{hops} ({best})"
+        : hops.ToString();
+
+    /// <summary>Why the hops cell reads as it does.</summary>
+    public string HopsTip =>
+        HopsAway is not { } hops ? "Never heard from"
+        : BestHopsNow is { } best && best != hops
+            ? $"Last packet arrived over {hops} hop{(hops == 1 ? "" : "s")}, " +
+              $"but this node has been heard at {best} from where both ends are now" +
+              (BestPath is { } b ? $" ({Age(DateTimeOffset.UtcNow - b.When)} ago)" : string.Empty)
+        : $"Last packet arrived over {hops} hop{(hops == 1 ? "" : "s")}";
+
+    private static string Age(TimeSpan since) =>
+        since.TotalMinutes < 90 ? $"{Math.Max(1, (int)since.TotalMinutes)} min"
+        : since.TotalHours < 36 ? $"{(int)since.TotalHours} h"
+        : $"{(int)since.TotalDays} d";
     public double? Latitude   { get; set; }
     public double? Longitude  { get; set; }
     public int?    AltitudeM  { get; set; }
