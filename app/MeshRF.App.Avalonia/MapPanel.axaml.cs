@@ -287,6 +287,17 @@ public partial class MapPanel : UserControl
         OnRequestCoverageFrom(lat, lon);
     }
 
+    /// <summary>"Link profile from this node…" on a node row: settles the near
+    /// end only, since a profile needs two. The far end is the node picked
+    /// next, from its marker or from the grid.</summary>
+    public void ChooseNodeAsProfileOrigin(NodeRecord node)
+    {
+        if (!ChooseNode(node, out _, out _)) return;
+        if (_viewModel is null) return;
+        _viewModel.StatusText =
+            $"Profiling from {node.LongName}. Pick a node to draw the profile to.";
+    }
+
     /// <summary>"Horizon from this node…" on a node row.</summary>
     public async Task ShowHorizonFromNodeAsync(NodeRecord node)
     {

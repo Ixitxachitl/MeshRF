@@ -844,7 +844,8 @@
                                 <MenuItem Header="Show on map" Click="OnShowOnMap" />
                                 <MenuItem Header="Telemetry history…" Click="OnOpenNodeTelemetryHistory" />
                                 <MenuItem Header="Location history…" Click="OnOpenNodeLocationHistory" />
-                                <MenuItem Header="Link profile…" Click="OnOpenNodeLinkProfile" />
+                                <MenuItem Header="Link profile to this node…" Click="OnOpenNodeLinkProfile" />
+                                <MenuItem Header="Link profile from this node…" Click="OnChooseNodeAsProfileOrigin" />
                                 <MenuItem Header="Coverage from this node" Click="OnSweepCoverageFromNode" />
                                 <MenuItem Header="Horizon from this node…" Click="OnOpenNodeHorizon" />
                                 <Separator />

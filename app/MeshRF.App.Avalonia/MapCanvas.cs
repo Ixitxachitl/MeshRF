@@ -1795,6 +1795,12 @@ public sealed class MapCanvas : Control
 
     private const string NoPositionTip = "This node has not reported a position";
 
+    /// <summary>What to call a node in a status line.</summary>
+    private static string DisplayName(NodeRecord node) =>
+        !string.IsNullOrWhiteSpace(node.LongName) ? node.LongName
+        : !string.IsNullOrWhiteSpace(node.ShortName) ? node.ShortName
+        : $"!{node.NodeNum:x8}";
+
     /// <summary>Moves the chosen point onto a node and runs one of the tools
     /// from it. The point stays afterwards, as it does when dropped on bare
     /// ground, so the other tools can be asked about the same node without
@@ -1912,20 +1918,44 @@ public sealed class MapCanvas : Control
         // node under the pointer is harder to find than one that explains
         // itself.
         bool positioned = node.Latitude is not null && node.Longitude is not null;
-        bool haveBothEnds = positioned
+
+        // A profile from the chosen point to the node it was set to is a path
+        // from somewhere to itself. Easily reached, since "Coverage from this
+        // node" leaves the point sitting on this very marker.
+        bool originIsThisNode = positioned && ChosenPoint is { } origin
+            && Geodesy.DistanceM(origin, new GeoPoint(node.Latitude!.Value, node.Longitude!.Value)) < 1;
+
+        bool haveBothEnds = positioned && !originIsThisNode
             && (ChosenPoint is not null || _vm.TryGetHomeLocation(out _, out _));
-        var linkProfile = new MenuItem
+
+        // Two directions, because a node can be either end. The far end is the
+        // old behaviour; the near end is what bare ground has always offered
+        // and a node could not, which made siting relative to an existing node
+        // mean dropping a point on its marker by eye.
+        var profileTo = new MenuItem
         {
-            Header = ChosenPoint is null
-                ? "Link profile…"
-                : "Link profile from chosen point…",
+            Header = "Link profile to this node…",
             IsEnabled = haveBothEnds,
         };
-        if (!haveBothEnds)
-            ToolTip.SetTip(linkProfile, !positioned
-                ? NoPositionTip
-                : "Set your own location first");
-        linkProfile.Click += (_, _) => RequestLinkProfile?.Invoke(node);
+
+        // Says where it draws from whether or not it is enabled: the origin is
+        // the part that is not visible from the entry being clicked.
+        ToolTip.SetTip(profileTo,
+            !positioned ? NoPositionTip
+            : originIsThisNode ? "The chosen point is this node — pick a different far end"
+            : ChosenPoint is not null ? "From the chosen point"
+            : haveBothEnds ? "From this station"
+            : "Set your own location first");
+        profileTo.Click += (_, _) => RequestLinkProfile?.Invoke(node);
+
+        var profileFrom = new MenuItem
+        {
+            Header = "Link profile from this node…",
+            IsEnabled = positioned,
+        };
+        if (!positioned) ToolTip.SetTip(profileFrom, NoPositionTip);
+        profileFrom.Click += (_, _) => ChooseNodeAsPoint(node, (_, _) =>
+            _vm.StatusText = $"Profiling from {DisplayName(node)}. Pick a node to draw the profile to.");
 
         // The same two tools bare ground offers, aimed at where a node already
         // is. Dropping a chosen point on a marker by eye lands tens of metres
@@ -1955,7 +1985,8 @@ public sealed class MapCanvas : Control
         return Menu(
             Item("Message", _vm.MessageNodeCommand, node),
             new Separator(),
-            linkProfile,
+            profileTo,
+            profileFrom,
             coverageHere,
             horizonHere,
             new Separator(),
