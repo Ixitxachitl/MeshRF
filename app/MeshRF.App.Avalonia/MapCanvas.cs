@@ -50,7 +50,7 @@ public sealed class MapCanvas : Control
         string Id, string UrlTemplate, string Subdomains, string Attribution,
         double Brightness = 1.0, double Gamma = 1.0,
         bool Invert = false, double HueRotate = 0.0, double Saturation = 1.0,
-        string? StyleUrl = null)
+        string? StyleUrl = null, int DeepestZoom = MaxZoom)
     {
         /// <summary>A vector provider names a style rather than a tile URL:
         /// the tiles it draws are rasterised here from geometry.</summary>
@@ -100,6 +100,16 @@ public sealed class MapCanvas : Control
     /// not yet available" placeholder above it, so the dark map is OSM's own
     /// tiles inverted: they carry full detail across the whole zoom range and
     /// need no key.</summary>
+    /// <summary>Contour lines and hillshading, which is the basemap the RF
+    /// tools want under them: a coverage ring over a topographic map shows the
+    /// ridge that shaped it. Published only to zoom 17, and its tiles are a
+    /// volunteer service — see <see cref="TileProvider.DeepestZoom"/>, which
+    /// stops the map asking for tiles that do not exist.</summary>
+    private static readonly TileProvider TopoTiles = new(
+        "opentopo", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "abc",
+        "© OpenTopoMap (CC-BY-SA) · © OpenStreetMap contributors" + GestureHint,
+        DeepestZoom: 17);
+
     private static readonly TileProvider DarkTiles = new(
         "osmdark", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "abc",
         "© OpenStreetMap contributors" + GestureHint,
@@ -108,7 +118,7 @@ public sealed class MapCanvas : Control
     /// <summary>No "Auto" entry, unlike MeshRF.App: that option exists to
     /// follow a light/dark app theme, and this app's shell is always dark.</summary>
     public static readonly IReadOnlyList<string> MapTileThemeOptions =
-        ["Dark", "Dark (Vector)", "Light", "Street", "Satellite"];
+        ["Dark", "Dark (Vector)", "Light", "Street", "Topographic", "Satellite"];
 
     private const string DefaultTileTheme = "Dark";
 
@@ -127,6 +137,7 @@ public sealed class MapCanvas : Control
     {
         "Dark (Vector)" => VectorDarkTiles,
         "Light" => LightTiles,
+        "Topographic" => TopoTiles,
         "Street" => StreetTiles,
         "Satellite" => SatelliteTiles,
         _ => DarkTiles,
@@ -1732,7 +1743,7 @@ public sealed class MapCanvas : Control
 
     private void ZoomAt(Point anchor, int delta)
     {
-        int newZoom = Math.Clamp(_zoom + delta, MinZoom, MaxZoom);
+        int newZoom = Math.Clamp(_zoom + delta, MinZoom, CurrentTiles.DeepestZoom);
         if (newZoom == _zoom) return;
 
         // Keep the geographic point under the cursor fixed across the zoom.
@@ -1815,6 +1826,11 @@ public sealed class MapCanvas : Control
     /// tab, a window not yet open) missed the notification.</summary>
     private void ApplyTileTheme()
     {
+        // Switching to a shallower provider while zoomed past what it publishes
+        // would otherwise leave a blank map and a run of requests for tiles
+        // that have never existed.
+        _zoom = Math.Min(_zoom, CurrentTiles.DeepestZoom);
+
         AttributionChanged?.Invoke();
         InvalidateVisual();
     }
@@ -1831,7 +1847,7 @@ public sealed class MapCanvas : Control
     {
         _centerLat = ClampLat(lat);
         _centerLon = NormalizeLon(lon);
-        _zoom = Math.Clamp(zoom, MinZoom, MaxZoom);
+        _zoom = Math.Clamp(zoom, MinZoom, CurrentTiles.DeepestZoom);
         _userMovedView = true;
         InvalidateVisual();
     }

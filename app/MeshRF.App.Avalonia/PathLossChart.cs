@@ -134,7 +134,7 @@ public sealed class PathLossChart : Control
         context.DrawLine(AxisPen, new Point(LeftPad, floor), new Point(LeftPad + plotW, floor));
 
         // Excess loss, in whole decibels.
-        foreach (double db in Ticks(minY, maxY, 5))
+        foreach (double db in AxisTicks.Between(minY, maxY, 5))
         {
             double py = y(db);
             if (py < TopPad - 1 || py > floor + 1) continue;
@@ -162,23 +162,5 @@ public sealed class PathLossChart : Control
                 context.DrawText(text, new Point(px - text.Width / 2, floor + 4));
             }
         }
-    }
-
-    /// <summary>Round tick values spanning a range, as in the link profile's
-    /// elevation axis.</summary>
-    private static IEnumerable<double> Ticks(double lo, double hi, int target)
-    {
-        double span = hi - lo;
-        if (span <= 0 || target < 1) yield break;
-
-        double rough = span / target;
-        double magnitude = Math.Pow(10, Math.Floor(Math.Log10(rough)));
-        double normalised = rough / magnitude;
-        double step = (normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10) * magnitude;
-
-        // Normalised through zero: a tick landing on negative zero prints as
-        // "-0", which reads as a bug in the axis rather than as the origin.
-        for (double t = Math.Ceiling(lo / step) * step; t <= hi + step * 1e-9; t += step)
-            yield return t == 0 ? 0 : t;
     }
 }

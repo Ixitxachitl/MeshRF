@@ -178,7 +178,7 @@ public sealed class HorizonChart : Control
         context.DrawLine(AxisPen, new Point(LeftPad, TopPad), new Point(LeftPad, floor));
         context.DrawLine(AxisPen, new Point(LeftPad, floor), new Point(LeftPad + plotW, floor));
 
-        foreach (double angle in Ticks(minAngle, maxAngle, 6))
+        foreach (double angle in AxisTicks.Between(minAngle, maxAngle, 6))
         {
             double py = y(angle);
             if (py < TopPad - 1 || py > floor + 1) continue;
@@ -204,21 +204,5 @@ public sealed class HorizonChart : Control
                                          LabelTypeface, 11, AxisText);
             context.DrawText(text, new Point(px - text.Width / 2, floor + 4));
         }
-    }
-
-    /// <summary>Round tick values spanning a range, as the other charts use.
-    /// </summary>
-    private static IEnumerable<double> Ticks(double lo, double hi, int target)
-    {
-        double span = hi - lo;
-        if (span <= 0 || target < 1) yield break;
-
-        double rough = span / target;
-        double magnitude = Math.Pow(10, Math.Floor(Math.Log10(rough)));
-        double normalised = rough / magnitude;
-        double step = (normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10) * magnitude;
-
-        for (double t = Math.Ceiling(lo / step) * step; t <= hi + step * 1e-9; t += step)
-            yield return t == 0 ? 0 : t;
     }
 }

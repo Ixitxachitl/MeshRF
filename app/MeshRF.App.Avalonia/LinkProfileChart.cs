@@ -223,7 +223,7 @@ public sealed class LinkProfileChart : Control
         // Elevation, in whatever the user reads altitudes in.
         double loDisplay = imperial ? minY * 3.28083989501312 : minY;
         double hiDisplay = imperial ? maxY * 3.28083989501312 : maxY;
-        foreach (double tick in Ticks(loDisplay, hiDisplay, 5))
+        foreach (double tick in AxisTicks.Between(loDisplay, hiDisplay, 5))
         {
             double metres = imperial ? tick / 3.28083989501312 : tick;
             double py = y(metres);
@@ -240,7 +240,7 @@ public sealed class LinkProfileChart : Control
         double spanDisplay = imperial
             ? profile.DistanceM / 1609.344
             : profile.DistanceM / 1000.0;
-        foreach (double tick in Ticks(0, spanDisplay, 5))
+        foreach (double tick in AxisTicks.Between(0, spanDisplay, 5))
         {
             double metres = imperial ? tick * 1609.344 : tick * 1000.0;
             if (metres > profile.DistanceM) continue;
@@ -252,23 +252,5 @@ public sealed class LinkProfileChart : Control
                 FlowDirection.LeftToRight, LabelTypeface, 10, AxisText);
             context.DrawText(text, new Point(px - text.Width / 2, floor + 4));
         }
-    }
-
-    /// <summary>Round tick values spanning a range — 1, 2 or 5 times a power of
-    /// ten, so the labels read as numbers a person would choose.</summary>
-    private static IEnumerable<double> Ticks(double lo, double hi, int target)
-    {
-        double span = hi - lo;
-        if (span <= 0 || target < 1) yield break;
-
-        double rough = span / target;
-        double magnitude = Math.Pow(10, Math.Floor(Math.Log10(rough)));
-        double normalised = rough / magnitude;
-        double step = (normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10) * magnitude;
-
-        // Normalised through zero: a tick landing on negative zero prints as
-        // "-0", which reads as a bug in the axis rather than as the origin.
-        for (double t = Math.Ceiling(lo / step) * step; t <= hi + step * 1e-9; t += step)
-            yield return t == 0 ? 0 : t;
     }
 }
