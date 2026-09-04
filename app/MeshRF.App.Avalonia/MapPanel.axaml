@@ -64,6 +64,15 @@
                               Content="⁙" IsChecked="True"
                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                               IsCheckedChanged="OnClusterToggle" ToolTip.Tip="Cluster overlapping nodes" />
+                <!-- A layer over the basemap, like the two toggles above it,
+                     rather than a window like the buttons in the panel beside.
+                     The shaded disc reads as an area; the ring above it is
+                     already spoken for by follow. -->
+                <ToggleButton x:Name="CoverageButton" Width="28" Height="28" FontSize="13" Padding="0"
+                              Content="◍"
+                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              IsCheckedChanged="OnCoverageToggle"
+                              ToolTip.Tip="Coverage: sweep the compass for how far this station reaches. Green is the range open ground would give, amber is terrain cutting it back, red is a direction stopped close in." />
             </StackPanel>
         </Border>
 
@@ -98,12 +107,6 @@
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                         Click="OnOpenPathLoss"
                         ToolTip.Tip="Fit a path-loss model to every direct neighbour, and apply it to link predictions" />
-
-                <ToggleButton x:Name="CoverageButton" Content="Coverage"
-                              Height="24" FontSize="11" Margin="0,4,0,0"
-                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                              IsCheckedChanged="OnCoverageToggle"
-                              ToolTip.Tip="Sweep the compass for how far this station reaches. Green is the range open ground would give, amber is terrain cutting it back, red is a direction stopped close in. Uses the fitted path loss when one has been applied." />
 
                 <Button x:Name="HorizonButton" Content="Horizon…"
                         Height="24" FontSize="11" Margin="0,4,0,0"
