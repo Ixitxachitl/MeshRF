@@ -1126,8 +1126,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         _nodeStore.RecordSighting(fromNode, rssiDbm: rssiDbm, snrDb: snrDb, hopsAway: hopsAway, seenViaMqtt: viaMqtt);
         MarkNodeDirty(fromNode);
 
+        // Taken after the upsert, so the peer's position is whatever this
+        // packet just carried rather than what it had a moment ago.
+        SurveySighting?.Invoke(fromNode, hopsAway, viaMqtt, snrDb);
+
         if (firstSighting) RaiseNewNode(fromNode, snrDb, rssiDbm, hopsAway);
     }
+
+    /// <summary>Every sighting, for the survey log to write down if it is
+    /// recording. Raised rather than written here: whether a packet is worth
+    /// recording depends on where this station was standing, which is the view
+    /// model's business and not the receiver's.</summary>
+    public event Action<uint, byte, bool, float?>? SurveySighting;
 
     /// <summary>True when this node number has no record yet, so the packet
     /// being handled is the first time it has ever been heard. Must be called

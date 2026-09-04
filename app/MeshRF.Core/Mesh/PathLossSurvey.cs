@@ -148,6 +148,68 @@ public sealed class PathLossSurvey
         return observations;
     }
 
+    /// <summary>
+    /// Turns binned survey readings into observations, reading the terrain
+    /// between this station and each peer once per bin.
+    ///
+    /// The terrain is looked up from the station's own position, which is where
+    /// the survey's own <c>my_lat</c> differs — a driven survey was recorded
+    /// from all over. That is a deliberate simplification: the fit is a model of
+    /// this site, and the bins exist to average a peer's readings rather than to
+    /// place each one. A survey walked far from home is better fitted from
+    /// wherever it was walked.
+    /// </summary>
+    public async Task<IReadOnlyList<PathLossObservation>> MeasureBinsAsync(
+        IReadOnlyList<SurveyBin> bins,
+        IReadOnlyDictionary<uint, (string Name, GeoPoint At)> peers,
+        PathLossSurveyOptions options,
+        IProgress<int>? completed = null,
+        CancellationToken ct = default)
+    {
+        var observations = new List<PathLossObservation>(bins.Count);
+        double noiseFloor = LinkBudget.NoiseFloorDbm(options.BandwidthKhz, options.NoiseFigureDb);
+
+        // One terrain read per peer, not per bin: every bin from the same node
+        // walks the same ground.
+        var diffractionByPeer = new Dictionary<uint, (double LossDb, bool Known)>();
+
+        for (int i = 0; i < bins.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var bin = bins[i];
+            if (!peers.TryGetValue(bin.NodeNum, out var peer)) continue;
+
+            if (!diffractionByPeer.TryGetValue(bin.NodeNum, out var terrainLoss))
+            {
+                var path = await _terrain.SampleAsync(options.Home, peer.At, ct).ConfigureAwait(false);
+                terrainLoss = path is null
+                    ? (0, false)
+                    : (LinkProfile.Build(path.Ground, options.MyAntennaM, options.PeerAntennaM,
+                                         options.FrequencyMhz).DiffractionLossDb,
+                       path.Complete);
+                diffractionByPeer[bin.NodeNum] = terrainLoss;
+            }
+
+            double receivedPower = bin.MeanSnrDb + noiseFloor;
+            double totalLoss = options.AssumedPeerTxPowerDbm + options.PeerGainDbi + options.MyGainDbi
+                             - receivedPower;
+
+            observations.Add(new PathLossObservation(
+                NodeNum: bin.NodeNum,
+                Name: $"{peer.Name} ({bin.Count} readings)",
+                DistanceM: bin.DistanceM,
+                MeasuredSnrDb: bin.MeanSnrDb,
+                DiffractionLossDb: terrainLoss.LossDb,
+                PropagationLossDb: totalLoss - terrainLoss.LossDb,
+                TerrainKnown: terrainLoss.Known));
+
+            completed?.Report(i + 1);
+        }
+
+        return observations;
+    }
+
     private static string DisplayName(NodeRecord node) =>
         !string.IsNullOrWhiteSpace(node.LongName) ? node.LongName
         : !string.IsNullOrWhiteSpace(node.ShortName) ? node.ShortName

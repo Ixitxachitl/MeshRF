@@ -11,6 +11,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.Channels;
 using MeshRF.Location;
+using MeshRF.Map;
 using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
@@ -84,6 +85,45 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <summary>Our own node number, or zero before one is known. Public so a
     /// view can tell our entry in <see cref="Nodes"/> from the mesh's.</summary>
     public uint MyNodeNum => _rxHost.MyNodeNum;
+
+    /// <summary>Where directly-heard packets are written down, when recording
+    /// is on. Public so the calibration can read the log back.</summary>
+    public SurveyLog Survey { get; } = new();
+
+    /// <summary>Whether every directly-heard packet is recorded along with
+    /// where this station was standing.
+    ///
+    /// The point of it is a station on the move. Sitting still it records the
+    /// same neighbours at the same ranges over and over, which averages away
+    /// the fading and is worth having; driving, it measures them across a
+    /// spread of ranges, which is the one thing a path-loss fit cannot get from
+    /// a node list and cannot do without.</summary>
+    [ObservableProperty]
+    private bool _surveyRecording;
+
+    partial void OnSurveyRecordingChanged(bool value)
+    {
+        _settings.SurveyRecording = value;
+        SaveSettings();
+        StatusText = value
+            ? $"Recording survey to {Survey.FilePath}"
+            : "Survey recording stopped.";
+    }
+
+    /// <summary>Writes one sighting down, if it is one this station measured
+    /// for itself and it knows where it was at the time.</summary>
+    private void RecordSurveySighting(uint nodeNum, byte hopsAway, bool viaMqtt, float? snrDb)
+    {
+        if (!SurveyRecording) return;
+        if (!TryGetHomeLocation(out double myLat, out double myLon)) return;
+
+        var peer = Nodes.FirstOrDefault(n => n.NodeNum == nodeNum);
+        if (peer?.Latitude is not double peerLat || peer.Longitude is not double peerLon) return;
+
+        Survey.Record(
+            nodeNum, hopsAway, viaMqtt, snrDb,
+            new GeoPoint(myLat, myLon), new GeoPoint(peerLat, peerLon), DateTime.UtcNow);
+    }
 
     public ObservableCollection<string> LogLines => _rxHost.LogLines;
 
@@ -950,6 +990,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedHopLimit = _settings.HopLimit;
         var savedOkToMqtt = _settings.OkToMqtt;
         var savedIgnoreMqtt = _settings.IgnoreMqtt;
+        var savedSurveyRecording = _settings.SurveyRecording;
         var savedHomeLatitude = _settings.HomeLatitude;
         var savedHomeLongitude = _settings.HomeLongitude;
         var savedHomeAltitude = _settings.HomeAltitude;
@@ -1032,6 +1073,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.UnknownNodeHeard += HandleUnknownNodeHeard;
         _rxHost.TelemetryReplyRequested += HandleTelemetryReplyRequest;
         _rxHost.AckRequested += SendAck;
+        _rxHost.SurveySighting += RecordSurveySighting;
         _rxHost.RoutingReplyReceived += CancelAckRetransmit;
         _rxHost.DecodedPacketForFeed += AppendDecodedPacketJson;
         _rxHost.LocationHistoryRecorded += OnLocationHistoryRecorded;
@@ -1156,6 +1198,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         HopLimit = Math.Clamp(savedHopLimit, 0, 7);
         OkToMqtt = savedOkToMqtt;
         IgnoreMqtt = savedIgnoreMqtt;
+        SurveyRecording = savedSurveyRecording;
         HomeLatitudeText = savedHomeLatitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
         HomeLongitudeText = savedHomeLongitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
         // Written in metres, then re-expressed by OnUnitSystemNameChanged below

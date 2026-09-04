@@ -396,6 +396,11 @@ public sealed class AppSettings
     /// a constant.</summary>
     public double CoverageRequiredMarginDb { get; set; } = 6;
 
+    /// <summary>Whether every directly-heard packet is written to the survey
+    /// log along with where this station was standing. Off by default: it is a
+    /// deliberate act, and it writes a row per packet.</summary>
+    public bool SurveyRecording { get; set; }
+
     /// <summary>How far the horizon sweep looks. Remembered because it is a
     /// question about a place — the ridge at the end of the street or the hills
     /// behind it — and the answer does not change between sittings.</summary>

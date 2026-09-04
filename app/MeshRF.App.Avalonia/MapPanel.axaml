@@ -114,6 +114,12 @@
                         Click="OnOpenPathLoss"
                         ToolTip.Tip="Fit a path-loss model to every direct neighbour, and apply it to link predictions" />
 
+                <ToggleButton x:Name="SurveyButton" Content="Record survey"
+                              Height="24" FontSize="11" Margin="0,4,0,0"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              IsChecked="{Binding SurveyRecording, Mode=TwoWay}"
+                              ToolTip.Tip="Write down every packet heard directly, with where this station was standing. Drive with it on and the same neighbour is measured at fifty ranges instead of one, which is what the path-loss fit needs and cannot get from the node list." />
+
                 <Button x:Name="HorizonButton" Content="Horizon…"
                         Height="24" FontSize="11" Margin="0,4,0,0"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"

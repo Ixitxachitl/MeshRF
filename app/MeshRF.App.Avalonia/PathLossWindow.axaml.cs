@@ -120,10 +120,27 @@ public partial class PathLossWindow : Window
 
         ClearButton.IsEnabled = _settings.PathLossExponent is not null;
 
+        int surveyed = _vm.Survey.Read().Count;
+        SourceCombo.ItemsSource = new[]
+        {
+            "Node list",
+            surveyed > 0 ? $"Survey ({surveyed:N0})" : "Survey (empty)",
+        };
+        SourceCombo.SelectedIndex = surveyed > 0 ? 1 : 0;
+
         _ = MeasureAsync();
     }
 
     private void OnRemeasure(object? sender, RoutedEventArgs e) => _ = MeasureAsync();
+
+    /// <summary>Which readings to fit. Changing it refits from scratch, since
+    /// the two sources produce entirely different observations.</summary>
+    private void OnSourceChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_vm is not null && IsLoaded) _ = MeasureAsync();
+    }
+
+    private bool UsingSurvey => SourceCombo.SelectedIndex == 1;
 
     private async Task MeasureAsync()
     {
@@ -135,6 +152,12 @@ public partial class PathLossWindow : Window
 
         PersistInputs();
         var options = Options();
+
+        if (UsingSurvey)
+        {
+            await MeasureSurveyAsync(options, cts).ConfigureAwait(true);
+            return;
+        }
 
         var candidates = PathLossSurvey.Candidates(_vm.Nodes, options, _vm.MyNodeNum);
         if (candidates.Count == 0)
@@ -189,6 +212,67 @@ public partial class PathLossWindow : Window
             }
             cts.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Fits from the recorded survey instead of the node list.
+    ///
+    /// The difference that matters is not the count. A node list offers one
+    /// packet per neighbour at whatever range it happens to sit, so a station
+    /// whose neighbours share a mast can never measure a falloff; a survey
+    /// offers many packets per neighbour across every range it was carried
+    /// through, which both averages away the fading in a single reading and
+    /// gives the fit the lever arm it needs.
+    /// </summary>
+    private async Task MeasureSurveyAsync(PathLossSurveyOptions options, CancellationTokenSource cts)
+    {
+        var samples = _vm!.Survey.Read();
+        var bins = SurveyLog.Bin(samples);
+
+        var peers = _vm.Nodes
+            .Where(n => n.Latitude is not null && n.Longitude is not null)
+            .GroupBy(n => n.NodeNum)
+            .ToDictionary(
+                g => g.Key,
+                g => (Name: !string.IsNullOrWhiteSpace(g.First().LongName)
+                          ? g.First().LongName
+                          : $"!{g.Key:x8}",
+                      At: new GeoPoint(g.First().Latitude!.Value, g.First().Longitude!.Value)));
+
+        var usable = bins.Where(b => peers.ContainsKey(b.NodeNum)).ToList();
+        if (usable.Count == 0)
+        {
+            _rows.Clear();
+            Chart.Show([], null, _frequencyMhz, _units);
+            BusyText.Text = samples.Count == 0
+                ? "No survey recorded yet. Turn recording on and drive."
+                : "The survey has no readings from a node whose position is known.";
+            BusyOverlay.IsVisible = true;
+            StatusText.Text = $"{samples.Count:N0} readings recorded, none usable yet.";
+            ApplyButton.IsEnabled = false;
+            return;
+        }
+
+        BusyText.Text = $"Reading terrain to {usable.Select(b => b.NodeNum).Distinct().Count()} peers…";
+        var progress = new Progress<int>(done =>
+            BusyText.Text = $"Reading terrain… {done} of {usable.Count}");
+
+        var survey = new PathLossSurvey(SharedTerrain.Tiles);
+        var observations = await survey
+            .MeasureBinsAsync(usable, peers, options, progress, cts.Token)
+            .ConfigureAwait(true);
+        if (cts.IsCancellationRequested) return;
+
+        _rows.Clear();
+        foreach (var observation in observations)
+        {
+            var row = new PathLossRow(observation, _units, _frequencyMhz);
+            row.PropertyChanged += OnRowChanged;
+            _rows.Add(row);
+        }
+
+        BusyOverlay.IsVisible = false;
+        Refit();
     }
 
     private void OnRowChanged(object? sender, PropertyChangedEventArgs e)

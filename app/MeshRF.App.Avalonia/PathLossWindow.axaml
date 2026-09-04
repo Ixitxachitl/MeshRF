@@ -126,8 +126,14 @@
                     <TextBlock Classes="figure" x:Name="CountText" Text="—" />
                 </StackPanel>
 
-                <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="Assumptions"
-                           FontWeight="SemiBold" Margin="0,10,0,6" />
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Readings"
+                           FontWeight="SemiBold" Margin="0,10,0,6"
+                           VerticalAlignment="Center" />
+                <ComboBox  Grid.Row="5" Grid.Column="1" x:Name="SourceCombo"
+                           Height="22" FontSize="11" Margin="0,8,0,4"
+                           HorizontalAlignment="Stretch"
+                           SelectionChanged="OnSourceChanged"
+                           ToolTip.Tip="Where the readings come from. The node list gives one packet per neighbour at whatever range it sits; a survey gives many packets per neighbour across every range you carried the radio through." />
 
                 <TextBlock Grid.Row="6" Grid.Column="0" Classes="field" Text="Peer TX (dBm)" />
                 <TextBox   Grid.Row="6" Grid.Column="1" x:Name="PeerTxPowerBox" Margin="0,0,0,4"

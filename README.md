@@ -249,6 +249,11 @@ one RF-switch line, not two.
   bearing is walked outward to where contiguous coverage ends, judged against
   the range the same radio gets over open ground, and the fitted path loss is
   used in place of free space wherever a calibration has been applied.
+- Survey recording: every directly-heard packet written to a CSV along with
+  where this station was standing, which turns a client with a GPS into the
+  survey instrument the path-loss fit needs. Readings are binned by peer and by
+  range and averaged, so a driven survey measures one neighbour at many ranges
+  instead of at one — the lever arm a node list cannot provide.
 - Coverage and horizon can be swept from any point on the map, not only from
   this station — right-click bare ground — which turns "what do I reach" into
   "what would a node here reach".
