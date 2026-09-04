@@ -171,6 +171,21 @@ public partial class MapPanel : UserControl
         if (CoverageButton.IsChecked == true) OnCoverageToggle(sender, e);
     }
 
+    /// <summary>Shows or hides the shading over a sweep already on screen. The
+    /// bitmap is kept either way, so this costs nothing and the sweep is not
+    /// run again.</summary>
+    private void OnHeatmapToggle(object? sender, RoutedEventArgs e)
+    {
+        if (_settings is null) return;
+
+        bool wanted = HeatmapButton.IsChecked == true;
+        if (wanted == _settings.CoverageHeatmap) return;
+
+        _settings.CoverageHeatmap = wanted;
+        _settings.Save();
+        Canvas.SetHeatmapVisible(wanted);
+    }
+
     /// <summary>Buildings are fetched from a shared public service, so the
     /// toggle is a deliberate act rather than something on by default. A sweep
     /// already showing is redone, since the answer changes.</summary>
@@ -528,6 +543,8 @@ public partial class MapPanel : UserControl
         Canvas.LoadFromSettings(settings);
 
         BuildingsButton.IsChecked = settings.BuildingLossEnabled;
+        HeatmapButton.IsChecked = settings.CoverageHeatmap;
+        Canvas.SetHeatmapVisible(settings.CoverageHeatmap);
         CoverageMarginCombo.ItemsSource = CoverageMargins.Select(m => m.Label).ToList();
         CoverageMarginCombo.SelectedIndex = Math.Max(0, Array.FindIndex(
             CoverageMargins, m => Math.Abs(m.Db - settings.CoverageRequiredMarginDb) < 0.001));

@@ -64,15 +64,54 @@
                               Content="⁙" IsChecked="True"
                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                               IsCheckedChanged="OnClusterToggle" ToolTip.Tip="Cluster overlapping nodes" />
-                <!-- A layer over the basemap, like the two toggles above it,
-                     rather than a window like the buttons in the panel beside.
-                     The shaded disc reads as an area; the ring above it is
-                     already spoken for by follow. -->
-                <ToggleButton x:Name="CoverageButton" Width="28" Height="28" FontSize="13" Padding="0"
-                              Content="◍"
+                <!-- Layers over the basemap, like the two toggles above them,
+                     rather than windows like the buttons on the toolbar. The
+                     glyphs are deliberately unlike each other and unlike the
+                     rings above: waves spreading, a dithered field, a divided
+                     block. Two patterned squares were indistinguishable at
+                     28px, which is why the last one is a bold line rather than
+                     more texture. -->
+                <ToggleButton x:Name="CoverageButton" Width="28" Height="28" FontSize="14" Padding="0"
+                              Content="≋"
                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                               IsCheckedChanged="OnCoverageToggle"
-                              ToolTip.Tip="Coverage: sweep the compass for how far this station reaches. Green is the range open ground would give, amber is terrain cutting it back, red is a direction stopped close in." />
+                              ToolTip.Tip="Coverage — sweep the compass for how far this station reaches" />
+                <ToggleButton x:Name="HeatmapButton" Width="28" Height="28" FontSize="13" Padding="0"
+                              Content="▒"
+                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              IsCheckedChanged="OnHeatmapToggle"
+                              ToolTip.Tip="Shade the swept field by the odds of a packet decoding, instead of showing each bearing's verdict on its own. Needs a coverage sweep to shade." />
+                <ToggleButton x:Name="BuildingsButton" Width="28" Height="28" FontSize="14" Padding="0"
+                              Content="◫"
+                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              IsCheckedChanged="OnBuildingsToggle"
+                              ToolTip.Tip="Charge link predictions for the buildings a path crosses, using footprints from OpenStreetMap. Defaults to 10.8 dB per building plus 0.3 dB per 100 m inside — figures measured somewhere else, so treat them as a starting point and let the path-loss fit correct them." />
+            </StackPanel>
+        </Border>
+
+        <!-- The things that open a window, rather than draw a layer. Centred
+             at the top so they clear the rail on the left and the waypoint
+             composer on the right, whatever the map is doing underneath. -->
+        <Border HorizontalAlignment="Center" VerticalAlignment="Top"
+                Margin="0,8,0,0" Padding="4,3"
+                Background="#CC202020" CornerRadius="3"
+                BorderBrush="#553A3A3A" BorderThickness="1">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button x:Name="PathLossButton" Content="Path loss…"
+                        Height="24" FontSize="11" Padding="10,0"
+                        VerticalContentAlignment="Center"
+                        Click="OnOpenPathLoss"
+                        ToolTip.Tip="Fit a path-loss model to every direct neighbour, and apply it to link predictions" />
+                <Button x:Name="HorizonButton" Content="Horizon…"
+                        Height="24" FontSize="11" Padding="10,0"
+                        VerticalContentAlignment="Center"
+                        Click="OnOpenHorizon"
+                        ToolTip.Tip="The 360° skyline from this antenna, with every positioned node plotted against it" />
+                <ToggleButton x:Name="SurveyButton" Content="Record survey"
+                              Height="24" FontSize="11" Padding="10,0"
+                              VerticalContentAlignment="Center"
+                              IsChecked="{Binding SurveyRecording, Mode=TwoWay}"
+                              ToolTip.Tip="Write down every packet heard directly, with where this station was standing. Drive with it on and the same neighbour is measured at fifty ranges instead of one, which is what the path-loss fit needs and cannot get from the node list." />
             </StackPanel>
         </Border>
 
@@ -106,37 +145,16 @@
                           SelectionChanged="OnMapTileThemeChanged"
                           ToolTip.Tip="Tile provider for the basemap" />
 
-                <TextBlock Text="Coverage margin" FontSize="11" Margin="0,6,0,3" Foreground="#DDDDDD" />
+                <!-- Only while there is a sweep for it to change. It is a
+                     setting for the coverage layer, not for the map. -->
+                <TextBlock Text="Coverage margin" FontSize="11" Margin="0,6,0,3" Foreground="#DDDDDD"
+                           IsVisible="{Binding #CoverageButton.IsChecked}" />
                 <ComboBox x:Name="CoverageMarginCombo" Height="24" FontSize="11"
                           HorizontalAlignment="Stretch"
+                          IsVisible="{Binding #CoverageButton.IsChecked}"
                           SelectionChanged="OnCoverageMarginChanged"
                           ToolTip.Tip="Headroom over the demodulator's floor that still counts as reach. Zero is the cliff edge, where fading alone drops the link; ten is somewhere a packet reliably gets through. It moves the ring a long way." />
 
-                <!-- Station-wide rather than per-node, so it belongs on the map
-                     chrome and not in a marker's menu. -->
-                <Button x:Name="PathLossButton" Content="Path loss…"
-                        Height="24" FontSize="11" Margin="0,8,0,0"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                        Click="OnOpenPathLoss"
-                        ToolTip.Tip="Fit a path-loss model to every direct neighbour, and apply it to link predictions" />
-
-                <ToggleButton x:Name="BuildingsButton" Content="Buildings"
-                              Height="24" FontSize="11" Margin="0,4,0,0"
-                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                              IsCheckedChanged="OnBuildingsToggle"
-                              ToolTip.Tip="Charge link predictions for the buildings a path crosses, using footprints from OpenStreetMap. Defaults to 10.8 dB per building plus 0.3 dB per 100 m inside — figures measured somewhere else, so treat them as a starting point and let the path-loss fit correct them." />
-
-                <ToggleButton x:Name="SurveyButton" Content="Record survey"
-                              Height="24" FontSize="11" Margin="0,4,0,0"
-                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                              IsChecked="{Binding SurveyRecording, Mode=TwoWay}"
-                              ToolTip.Tip="Write down every packet heard directly, with where this station was standing. Drive with it on and the same neighbour is measured at fifty ranges instead of one, which is what the path-loss fit needs and cannot get from the node list." />
-
-                <Button x:Name="HorizonButton" Content="Horizon…"
-                        Height="24" FontSize="11" Margin="0,4,0,0"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                        Click="OnOpenHorizon"
-                        ToolTip.Tip="The 360° skyline from this antenna, with every positioned node plotted against it" />
             </StackPanel>
         </Border>
 

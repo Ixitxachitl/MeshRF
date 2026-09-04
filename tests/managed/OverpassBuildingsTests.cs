@@ -122,10 +122,11 @@ public class OverpassBuildingsTests
     }
 
     [Fact]
-    public void AskingAboutNoAreaFetchesNothing()
+    public async Task AskingAboutNoAreaFetchesNothing()
     {
         using var buildings = new OverpassBuildings();
 
-        Assert.Equal(0, buildings.AroundAsync(new GeoPoint(0, 0), 0).Result.Count);
+        var index = await buildings.AroundAsync(new GeoPoint(0, 0), 0);
+        Assert.Equal(0, index.Count);
     }
 }

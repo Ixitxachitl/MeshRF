@@ -409,6 +409,12 @@ public sealed class AppSettings
     /// honest answer until someone asks for more.</summary>
     public bool BuildingLossEnabled { get; set; }
 
+    /// <summary>Whether a swept coverage field is shaded, or shown as the
+    /// per-bearing wedges alone. On by default: the shading carries the
+    /// gradient at the boundary and the islands past an obstruction, which the
+    /// wedges cannot.</summary>
+    public bool CoverageHeatmap { get; set; } = true;
+
     /// <summary>Flat charge for each footprint a path enters — the two walls.
     /// The default is MeshLab RF's, from a paired field survey of its own
     /// region rather than a law of nature.</summary>

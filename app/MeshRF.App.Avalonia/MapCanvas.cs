@@ -500,6 +500,21 @@ public sealed class MapCanvas : Control
     private string _coverageNote = string.Empty;
     private double _measuredReachM;
     private CoverageHeatmap? _heatmap;
+    private bool _heatmapVisible = true;
+
+    /// <summary>Whether a painted field is being drawn. Painted or not is a
+    /// question about the sweep; drawn or not is a question about the view, and
+    /// keeping them apart means toggling costs nothing.</summary>
+    private bool ShowingHeatmap => _heatmap is not null && _heatmapVisible;
+
+    /// <summary>Shows or hides the shaded field over a sweep already on
+    /// screen. The bitmap is kept either way, so this is instant.</summary>
+    public void SetHeatmapVisible(bool visible)
+    {
+        if (_heatmapVisible == visible) return;
+        _heatmapVisible = visible;
+        InvalidateVisual();
+    }
     private UnitSystem _coverageUnits = UnitSystem.Metric;
 
     /// <summary>Shows a coverage sweep over the basemap, or clears it with
@@ -562,7 +577,7 @@ public sealed class MapCanvas : Control
         // translucent washes over one another read as neither. The heatmap says
         // how good the link is everywhere, and the outline below still says
         // where contiguous coverage ends, which is what the wedges were for.
-        if (_heatmap is null) DrawQualityWedges(context, ring, centre, edges);
+        if (!ShowingHeatmap) DrawQualityWedges(context, ring, centre, edges);
 
         DrawReachOutline(context, edges);
         DrawMeasuredReach(context, ring.Centre, originX, originY);
@@ -625,7 +640,7 @@ public sealed class MapCanvas : Control
     /// corners at the current zoom.</summary>
     private void DrawHeatmap(DrawingContext context, double originX, double originY)
     {
-        if (_heatmap is not { } heatmap) return;
+        if (!ShowingHeatmap || _heatmap is not { } heatmap) return;
 
         double left = LonToX(heatmap.West, _zoom) - originX;
         double right = LonToX(heatmap.East, _zoom) - originX;
@@ -676,7 +691,7 @@ public sealed class MapCanvas : Control
         // a field they are bands of link odds, shading every point; without one
         // they are per-bearing verdicts, and the counts are what there is to
         // say.
-        (IBrush Fill, string Label)[] entries = _heatmap is not null
+        (IBrush Fill, string Label)[] entries = ShowingHeatmap
             ?
             [
                 (CoverageClearFill, "Reliable"),
