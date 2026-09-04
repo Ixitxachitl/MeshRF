@@ -46,6 +46,7 @@ public partial class MapPanel : UserControl
         Canvas.RequestLinkProfile += OnRequestLinkProfile;
         Canvas.RequestCoverageFrom += OnRequestCoverageFrom;
         Canvas.RequestHorizonFrom += OnRequestHorizonFrom;
+        Canvas.RequestLinkProfileTo += OnRequestLinkProfileTo;
         Canvas.ChosenPointCleared += OnChosenPointCleared;
     }
 
@@ -102,21 +103,12 @@ public partial class MapPanel : UserControl
             return;
         }
 
-        // The chosen point wins over this station when there is one.
-        double lat, lon;
-        if (Canvas.ChosenPoint is { } chosen)
-        {
-            // Kept, not spent: a candidate site is usually profiled to several
-            // nodes in turn.
-            (lat, lon) = (chosen.Lat, chosen.Lon);
-        }
-        else if (!_viewModel.TryGetHomeLocation(out lat, out lon))
-        {
-            _viewModel.StatusText = "Set your own location, or drop a start point, before drawing a link profile.";
-            return;
-        }
+        // Kept, not spent: a candidate site is usually profiled to several
+        // nodes in turn.
+        if (!Origin(out var from, out string fromName)) return;
 
-        await LinkProfileWindow.ShowForAsync(owner, _viewModel, _settings, node, lat, lon);
+        await LinkProfileWindow.ShowForAsync(
+            owner, _viewModel, _settings, node, from.Lat, from.Lon, fromName);
     }
 
     /// <summary>"Path loss…" on the map chrome: fits a model to every direct
@@ -340,6 +332,43 @@ public partial class MapPanel : UserControl
     private void OnChosenPointCleared()
     {
         if (CoverageButton.IsChecked == true) OnCoverageToggle(this, new RoutedEventArgs());
+    }
+
+    /// <summary>"Link profile to here…" on bare map: a profile whose far end is
+    /// a place rather than a node.</summary>
+    private async void OnRequestLinkProfileTo(double lat, double lon)
+    {
+        if (_viewModel is null || _settings is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        if (!Origin(out var from, out string fromName)) return;
+
+        await LinkProfileWindow.ShowBetweenAsync(
+            owner, _viewModel, _settings, from, new GeoPoint(lat, lon), fromName, "Map point");
+    }
+
+    /// <summary>Where the RF tools are working from, and what to call it. The
+    /// chosen point wins over this station when there is one.</summary>
+    private bool Origin(out GeoPoint from, out string name)
+    {
+        if (Canvas.ChosenPoint is { } chosen)
+        {
+            (from, name) = (chosen, "Chosen point");
+            return true;
+        }
+
+        if (_viewModel is not null && _viewModel.TryGetHomeLocation(out double lat, out double lon))
+        {
+            (from, name) = (new GeoPoint(lat, lon), "This station");
+            return true;
+        }
+
+        from = default;
+        name = string.Empty;
+        if (_viewModel is not null)
+            _viewModel.StatusText =
+                "Set your own location, or choose a start point, before drawing a link profile.";
+        return false;
     }
 
     /// <summary>"Horizon from here…" on bare map: the skyline a node put there
@@ -606,8 +635,8 @@ public partial class MapPanel : UserControl
             parts.Add(buildings switch
             {
                 { Count: > 0 } => $"{buildings.Count:N0} buildings charged for",
-                { LookupFailed: true } =>
-                    "buildings are on, but OpenStreetMap could not be reached — swept on terrain alone",
+                { LookupFailed: true, Explanation: { } why } =>
+                    $"buildings are on, but {why} — swept on terrain alone",
                 _ => "buildings are on, but none are mapped around here",
             });
 

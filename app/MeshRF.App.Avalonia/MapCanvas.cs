@@ -1773,6 +1773,10 @@ public sealed class MapCanvas : Control
     /// <summary>The same, for the skyline.</summary>
     public event Action<double, double>? RequestHorizonFrom;
 
+    /// <summary>A profile whose far end is a place rather than a node, drawn
+    /// from wherever the tools are working from.</summary>
+    public event Action<double, double>? RequestLinkProfileTo;
+
     /// <summary>The chosen point was cleared, so anything drawn from it wants
     /// redoing from this station.</summary>
     public event Action? ChosenPointCleared;
@@ -1859,14 +1863,35 @@ public sealed class MapCanvas : Control
         // node picked next — from its marker or from the grid — finishes it,
         // and the point stays afterwards so the next node can be profiled from
         // the same spot.
-        var profile = new MenuItem { Header = "Link profile from here…" };
-        profile.Click += (_, _) =>
+        var profileFrom = new MenuItem { Header = "Link profile from here…" };
+        profileFrom.Click += (_, _) =>
         {
             SetChosenPoint(lat, lon);
-            _vm.StatusText = "Point chosen. Pick a node to draw the profile to.";
+            _vm.StatusText =
+                "Point chosen. Pick a node, or right-click a second place, to draw the profile to.";
         };
 
-        var items = new List<Control> { coverage, horizon, profile };
+        // The far end of a profile had to be a node, so two places neither of
+        // which has a radio yet — the question behind siting a pair at once —
+        // could not be asked at all.
+        var here = new GeoPoint(lat, lon);
+        bool originIsHere = ChosenPoint is { } origin && Geodesy.DistanceM(origin, here) < 1;
+        bool haveOrigin = !originIsHere
+            && (ChosenPoint is not null || _vm.TryGetHomeLocation(out _, out _));
+
+        var profileTo = new MenuItem
+        {
+            Header = "Link profile to here…",
+            IsEnabled = haveOrigin,
+        };
+        ToolTip.SetTip(profileTo,
+            originIsHere ? "This is the chosen point — pick a different far end"
+            : ChosenPoint is not null ? "From the chosen point"
+            : haveOrigin ? "From this station"
+            : "Set your own location, or choose a start point, first");
+        profileTo.Click += (_, _) => RequestLinkProfileTo?.Invoke(lat, lon);
+
+        var items = new List<Control> { coverage, horizon, profileFrom, profileTo };
 
         if (ChosenPoint is not null)
         {

@@ -45,9 +45,12 @@ public partial class LinkProfileWindow : Window
 
     /// <summary>Opens the profile from this station to a node. The caller has
     /// already established that both ends have a position.</summary>
+    /// <param name="fromName">What to call the near end in the header. The
+    /// origin is not always this station, and a header that says it is when the
+    /// profile was drawn from a chosen point is simply wrong.</param>
     public static async Task ShowForAsync(
         Window owner, RadioViewModel vm, AppSettings settings, NodeRecord node,
-        double fromLat, double fromLon)
+        double fromLat, double fromLon, string fromName = "This station")
     {
         if (node.Latitude is not double toLat || node.Longitude is not double toLon) return;
 
@@ -59,13 +62,45 @@ public partial class LinkProfileWindow : Window
             _from = new GeoPoint(fromLat, fromLon),
             _to = new GeoPoint(toLat, toLon),
             _units = vm.CurrentUnitSystem,
+            _fromName = fromName,
         };
         window.Prepare();
         await window.ShowDialog(owner);
     }
 
+    /// <summary>
+    /// A profile between two places on the map, neither of which is a node.
+    ///
+    /// The far end no longer has to be something the mesh knows about, which is
+    /// the question behind siting two nodes at once: neither exists yet, so
+    /// neither can be picked from the node list. Everything the window draws is
+    /// geometry and terrain; the measured-SNR comparison is the only part that
+    /// needed a node, and it simply does not appear.
+    /// </summary>
+    public static async Task ShowBetweenAsync(
+        Window owner, RadioViewModel vm, AppSettings settings,
+        GeoPoint from, GeoPoint to, string fromName, string toName)
+    {
+        var window = new LinkProfileWindow
+        {
+            _vm = vm,
+            _settings = settings,
+            _from = from,
+            _to = to,
+            _units = vm.CurrentUnitSystem,
+            _fromName = fromName,
+            _toName = toName,
+        };
+        window.Prepare();
+        await window.ShowDialog(owner);
+    }
+
+    private string _fromName = "This station";
+    private string? _toName;
+
     private string PeerName =>
-        !string.IsNullOrWhiteSpace(_node?.LongName) ? _node!.LongName
+        _toName is not null ? _toName
+        : !string.IsNullOrWhiteSpace(_node?.LongName) ? _node!.LongName
         : !string.IsNullOrWhiteSpace(_node?.ShortName) ? _node!.ShortName
         : _node is null ? "peer" : $"!{_node.NodeNum:x8}";
 
@@ -74,7 +109,7 @@ public partial class LinkProfileWindow : Window
         if (_vm is null || _settings is null) return;
 
         Title = $"Link Profile — {PeerName}";
-        HeaderText.Text = $"This station  →  {PeerName}";
+        HeaderText.Text = $"{_fromName}  →  {PeerName}";
 
         string heightUnit = DisplayUnits.AltitudeUnitShort(_units);
         MyHeightLabel.Text = $"My antenna ({heightUnit})";
@@ -215,8 +250,8 @@ public partial class LinkProfileWindow : Window
         // worse than saying nothing.
         CaveatText.Text = !_settings.BuildingLossEnabled
             ? "Terrain only. Buildings, trees and fading are not modelled, so a clear path here can still fail in the field."
-            : _buildingExtract.LookupFailed
-                ? "Terrain only — buildings are switched on but OpenStreetMap could not be reached, so none were charged for. Trees and fading are never modelled."
+            : _buildingExtract is { LookupFailed: true, Explanation: { } why }
+                ? $"Terrain only — buildings are switched on, but {why}, so none were charged for. Trees and fading are never modelled."
                 : crossed.Count > 0
                     ? $"Terrain and {crossed.Count} building{(crossed.Count == 1 ? "" : "s")} on this path. Trees and fading are not modelled, and the building figures are a starting point the path-loss fit is meant to correct."
                     : "Terrain only on this path — buildings are switched on, but none are mapped along it. Trees and fading are not modelled.";
@@ -315,11 +350,19 @@ public partial class LinkProfileWindow : Window
     {
         if (_node?.SnrDb is not float measured)
         {
-            MeasuredCaption.Text = "Last measured SNR";
+            // A place on the map has never transmitted, so there is nothing to
+            // compare the prediction against and never will be — a different
+            // thing from a node that simply has not been heard yet.
+            MeasuredCaption.Text = "Measured SNR";
             MeasuredText.Text = "—";
             MeasuredText.Foreground = Foreground;
+            ToolTip.SetTip(MeasuredText, _node is null
+                ? "Nothing transmits from a place on the map, so this path is prediction only"
+                : "Nothing heard from this node yet");
             return;
         }
+
+        ToolTip.SetTip(MeasuredText, null);
 
         if (_node.HopsAway is not (null or 0))
         {
