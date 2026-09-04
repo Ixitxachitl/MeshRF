@@ -242,6 +242,12 @@ Terrain-aware link and coverage prediction, calibrated against what the radio
 has actually heard. Elevation comes from Terrarium tiles on AWS Open Data and
 building footprints from OpenStreetMap through Overpass; neither needs a key.
 
+The propagation model follows **[MeshLab RF](https://github.com/HarukiToreda/MeshLab-RF)**
+by [Haruki Toreda](https://github.com/HarukiToreda) (MIT), adapted for a live
+client that has measurements of its own rather than a simulator that must go
+and collect them. The knife-edge diffraction, Fresnel clearance, link budget
+and building-attenuation figures are all its work.
+
 - **Link profile** between this station — or any point on the map — and a
   positioned node: terrain cross-section, the first Fresnel zone, single
   knife-edge diffraction loss (ITU-R P.526), and the LoRa link budget for the
@@ -267,7 +273,9 @@ building footprints from OpenStreetMap through Overpass; neither needs a key.
   station's position at the time, which turns a client with a GPS into the
   survey instrument the fit needs. Readings are binned per peer per range and
   averaged, so a driven survey measures one neighbour at many ranges instead of
-  at one.
+  at one. Surveys import and export as CSV, since recording happens wherever
+  the GPS is and the fit is read back at the station; importing merges, so
+  several drives accumulate.
 - **Building attenuation** charges a path for the footprints it crosses, in the
   profile, the sweep and the calibration alike. Off by default, since it puts
   the app on a shared public service.
@@ -662,8 +670,8 @@ Upstream references influencing licensing and implementation include:
 - [meshtastic/protobufs](https://github.com/meshtastic/protobufs) (linked as
   `third_party/meshtastic_protobufs`)
 - [meshtastic/firmware](https://github.com/meshtastic/firmware)
-- [MeshLab RF](https://github.com/HarukiToreda/MeshLab-RF) (MIT), whose
-  propagation model the link profile follows
+- [MeshLab RF](https://github.com/HarukiToreda/MeshLab-RF) by Haruki Toreda
+  (MIT), whose propagation model the RF planning tools follow
 - [Overpass](https://overpass-api.de/), for the OpenStreetMap building
   footprints the obstruction model uses
 - [Nominatim](https://nominatim.org/) and
