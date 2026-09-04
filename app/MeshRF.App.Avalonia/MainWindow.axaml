@@ -845,6 +845,8 @@
                                 <MenuItem Header="Telemetry history…" Click="OnOpenNodeTelemetryHistory" />
                                 <MenuItem Header="Location history…" Click="OnOpenNodeLocationHistory" />
                                 <MenuItem Header="Link profile…" Click="OnOpenNodeLinkProfile" />
+                                <MenuItem Header="Coverage from this node" Click="OnSweepCoverageFromNode" />
+                                <MenuItem Header="Horizon from this node…" Click="OnOpenNodeHorizon" />
                                 <Separator />
                                 <MenuItem Header="Request node info"
                                           Command="{Binding #RootWindow.DataContext.RequestNodeInfoCommand}"

@@ -1793,6 +1793,19 @@ public sealed class MapCanvas : Control
         InvalidateVisual();
     }
 
+    private const string NoPositionTip = "This node has not reported a position";
+
+    /// <summary>Moves the chosen point onto a node and runs one of the tools
+    /// from it. The point stays afterwards, as it does when dropped on bare
+    /// ground, so the other tools can be asked about the same node without
+    /// choosing it again.</summary>
+    private void ChooseNodeAsPoint(NodeRecord node, Action<double, double>? tool)
+    {
+        if (node.Latitude is not { } lat || node.Longitude is not { } lon) return;
+        SetChosenPoint(lat, lon);
+        tool?.Invoke(lat, lon);
+    }
+
     public void ClearChosenPoint()
     {
         if (ChosenPoint is null) return;
@@ -1898,7 +1911,8 @@ public sealed class MapCanvas : Control
         // and disabled with the reason: an entry that comes and goes with the
         // node under the pointer is harder to find than one that explains
         // itself.
-        bool haveBothEnds = node.Latitude is not null && node.Longitude is not null
+        bool positioned = node.Latitude is not null && node.Longitude is not null;
+        bool haveBothEnds = positioned
             && (ChosenPoint is not null || _vm.TryGetHomeLocation(out _, out _));
         var linkProfile = new MenuItem
         {
@@ -1908,15 +1922,42 @@ public sealed class MapCanvas : Control
             IsEnabled = haveBothEnds,
         };
         if (!haveBothEnds)
-            ToolTip.SetTip(linkProfile, node.Latitude is null
-                ? "This node has not reported a position"
+            ToolTip.SetTip(linkProfile, !positioned
+                ? NoPositionTip
                 : "Set your own location first");
         linkProfile.Click += (_, _) => RequestLinkProfile?.Invoke(node);
+
+        // The same two tools bare ground offers, aimed at where a node already
+        // is. Dropping a chosen point on a marker by eye lands tens of metres
+        // out at most zooms, and on a ridge that is the difference between the
+        // near side and the far one; taking the node's own coordinates is both
+        // exact and what the question actually means.
+        var coverageHere = new MenuItem
+        {
+            Header = "Coverage from this node",
+            IsEnabled = positioned,
+        };
+        coverageHere.Click += (_, _) => ChooseNodeAsPoint(node, RequestCoverageFrom);
+
+        var horizonHere = new MenuItem
+        {
+            Header = "Horizon from this node…",
+            IsEnabled = positioned,
+        };
+        horizonHere.Click += (_, _) => ChooseNodeAsPoint(node, RequestHorizonFrom);
+
+        if (!positioned)
+        {
+            ToolTip.SetTip(coverageHere, NoPositionTip);
+            ToolTip.SetTip(horizonHere, NoPositionTip);
+        }
 
         return Menu(
             Item("Message", _vm.MessageNodeCommand, node),
             new Separator(),
             linkProfile,
+            coverageHere,
+            horizonHere,
             new Separator(),
             Item("Request node info", _vm.RequestNodeInfoCommand, node),
             Item("Exchange node info", _vm.ExchangeNodeInfoCommand, node),

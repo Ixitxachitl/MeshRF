@@ -272,6 +272,46 @@ public partial class MapPanel : UserControl
     /// while tiles are still being fetched for the last one.</summary>
     private CancellationTokenSource? _coverageRun;
 
+    /// <summary>
+    /// "Coverage from this node" on a node row, matching the marker menu's
+    /// entry.
+    ///
+    /// There is one chosen point however it was set, so aiming the tools at a
+    /// node replaces a point dropped on bare ground and dropping one on bare
+    /// ground replaces a node — the question is always "from this spot", and
+    /// only the way of naming the spot differs.
+    /// </summary>
+    public void SweepCoverageFromNode(NodeRecord node)
+    {
+        if (!ChooseNode(node, out double lat, out double lon)) return;
+        OnRequestCoverageFrom(lat, lon);
+    }
+
+    /// <summary>"Horizon from this node…" on a node row.</summary>
+    public async Task ShowHorizonFromNodeAsync(NodeRecord node)
+    {
+        if (!ChooseNode(node, out double lat, out double lon)) return;
+        await HorizonFromAsync(lat, lon);
+    }
+
+    /// <summary>Moves the chosen point onto a node, or says why it cannot.
+    /// </summary>
+    private bool ChooseNode(NodeRecord node, out double lat, out double lon)
+    {
+        (lat, lon) = (0, 0);
+        if (_viewModel is null) return false;
+
+        if (node.Latitude is not { } nodeLat || node.Longitude is not { } nodeLon)
+        {
+            _viewModel.StatusText = $"{node.LongName} has not reported a position.";
+            return false;
+        }
+
+        Canvas.SetChosenPoint(nodeLat, nodeLon);
+        (lat, lon) = (nodeLat, nodeLon);
+        return true;
+    }
+
     /// <summary>"Coverage from here" on bare map: sweep as though a node stood
     /// at the chosen point, with this station's antenna and radio. The canvas
     /// has already recorded the point; this just runs the sweep.</summary>
@@ -293,7 +333,10 @@ public partial class MapPanel : UserControl
 
     /// <summary>"Horizon from here…" on bare map: the skyline a node put there
     /// would see.</summary>
-    private async void OnRequestHorizonFrom(double lat, double lon)
+    private async void OnRequestHorizonFrom(double lat, double lon) =>
+        await HorizonFromAsync(lat, lon);
+
+    private async Task HorizonFromAsync(double lat, double lon)
     {
         if (_viewModel is null || _settings is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;

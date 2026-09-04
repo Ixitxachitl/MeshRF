@@ -281,6 +281,10 @@ and building-attenuation figures are all its work.
   the app on a shared public service.
 - A **chosen point** on the map runs any of it from somewhere other than this
   station, which turns "what do I reach" into "what would a node here reach".
+  Set it by right-clicking bare ground, or pick an existing node — on the map or
+  in the Nodes table — to ask about where one already is. There is one point
+  however it was set, so either replaces the other. A sweep from elsewhere uses
+  your own antenna and modem settings, since the mesh does not report a peer's.
 
 ### UI and Workflow
 

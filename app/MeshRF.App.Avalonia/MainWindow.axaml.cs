@@ -583,6 +583,22 @@ public partial class MainWindow : Window
         await Map.ShowLinkProfileAsync(node);
     }
 
+    /// <summary>"Coverage from this node" and "Horizon from this node…" on a
+    /// node row. Both move the map's chosen point onto the node, replacing
+    /// whatever it was set to before, so the RF tools answer about that node
+    /// until the point is moved or cleared.</summary>
+    private void OnSweepCoverageFromNode(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        Map.SweepCoverageFromNode(node);
+    }
+
+    private async void OnOpenNodeHorizon(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        await Map.ShowHorizonFromNodeAsync(node);
+    }
+
     // The DM tab's own DataContext is the conversation, so it is already the
     // instance HistoryConversationFor would hand back for an open tab.
     private void OnOpenConversationTelemetryHistory(object? sender, RoutedEventArgs e)
