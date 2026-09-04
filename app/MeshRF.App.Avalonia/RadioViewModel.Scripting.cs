@@ -586,11 +586,13 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         // unprompted, so there is no message for a placeholder to come from.
         var to = ScriptEngine.TryParseNodeId(sync.Waypoint.To);
         var channel = to != 0
-            ? PrimaryChannel()
+            ? DirectedWaypointChannel()
             : ResolveScriptChannel(sync.Waypoint.Channel, "sync")?.Config;
         if (channel is null)
         {
-            _rxHost.Log("sync: nothing sent — no channel to send on");
+            _rxHost.Log(to != 0
+                ? "sync: nothing sent — the primary channel is disabled, so an addressed marker has no key to travel under"
+                : "sync: nothing sent — no channel to send on");
             return;
         }
 
@@ -957,11 +959,13 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         // drawing it rather than keeping it from them. The primary is what
         // carries it, the same channel a scripted DM falls back to.
         var channel = action.ToNode != 0
-            ? PrimaryChannel()
+            ? DirectedWaypointChannel()
             : ResolveScriptChannel(waypoint.Channel, "scripts")?.Config;
         if (channel is null)
         {
-            _rxHost.Log("scripts: waypoint skipped — no channel to send it on");
+            _rxHost.Log(action.ToNode != 0
+                ? "scripts: waypoint skipped — the primary channel is disabled, so an addressed marker has no key to travel under"
+                : "scripts: waypoint skipped — no channel to send it on");
             return;
         }
 

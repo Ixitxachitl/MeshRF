@@ -397,11 +397,20 @@ public partial class RadioViewModel
             return;
         }
 
+        // An addressed marker takes the primary by role, the same choice a
+        // script's waypoint: makes. Without this it fell through to whichever
+        // channel tab happened to be first, since the picker names no channel
+        // for a DM and a conversation tab is not a channel tab — so the same
+        // marker rode a different key depending on how it was sent.
         var selectedChannel = channel
-            ?? _rxHost.FindChannelByName((SelectedTab as ChannelTabViewModel)?.Config.Name);
+            ?? (to is not null
+                ? DirectedWaypointChannel()
+                : _rxHost.FindChannelByName((SelectedTab as ChannelTabViewModel)?.Config.Name));
         if (selectedChannel is null)
         {
-            StatusText = "No enabled channel to send waypoint on.";
+            StatusText = to is not null
+                ? "The primary channel is disabled, so an addressed waypoint has no key to travel under."
+                : "No enabled channel to send waypoint on.";
             return;
         }
 

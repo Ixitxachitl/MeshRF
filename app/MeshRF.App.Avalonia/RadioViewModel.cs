@@ -2703,6 +2703,22 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private bool CanTransmit =>
         _core?.CanTransmit == true && IsRunning && _rxHost.MyNodeNum != 0;
 
+    /// <summary>
+    /// The channel a marker addressed to one node travels under: the primary,
+    /// named by role, and only when it can actually carry something.
+    /// </summary>
+    /// <remarks>
+    /// The address says who draws a marker, not which channel carries it, so
+    /// something has to choose — and every path that sends one has to choose
+    /// the same way, or the same marker rides a different key depending on
+    /// whether a script or the map sent it. A disabled channel is no answer:
+    /// it has neither key nor hash, so this reports none rather than handing
+    /// back something that cannot be encoded, and the caller says so in its
+    /// own words.
+    /// </remarks>
+    private ChannelConfig? DirectedWaypointChannel() =>
+        PrimaryChannel() is { IsDisabled: false } primary ? primary : null;
+
     private ChannelConfig? PrimaryChannel() =>
         (Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
          ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault())?.Config;
