@@ -14,6 +14,16 @@ public sealed record TerrainPath(
     int TileCount,
     bool Complete);
 
+/// <summary>Terrain over a disc, for reading the ground in every direction at
+/// once. <paramref name="Complete"/> is false when some tile in the area could
+/// not be fetched, which leaves holes the sweep will stop at rather than see
+/// through.</summary>
+public sealed record TerrainArea(
+    TerrainGrid Grid,
+    int Zoom,
+    int TileCount,
+    bool Complete);
+
 /// <summary>
 /// Fetches Terrarium elevation tiles and samples ground height along a path.
 ///
@@ -44,6 +54,16 @@ public sealed class TerrainTiles : IDisposable
     /// exceed this is read at a shallower zoom instead — coarser terrain is a
     /// far better trade than a few hundred requests.</summary>
     private const int MaxTilesPerPath = 48;
+
+    /// <summary>How many tiles a whole disc may pull. Higher than one path's
+    /// budget because an area is what a coverage sweep reads, and stepping the
+    /// zoom back to fit costs resolution over the entire ring rather than along
+    /// one line.</summary>
+    private const int MaxTilesPerArea = 144;
+
+    /// <summary>Steps a sweep is expected to take from the centre to the edge.
+    /// Terrain finer than that is fetched and never looked at.</summary>
+    private const int AreaSamples = 220;
 
     private static readonly TimeSpan CacheStaleAfter = TimeSpan.FromDays(1);
     private const long CacheMaxBytes = 256L * 1024 * 1024;
@@ -113,6 +133,77 @@ public sealed class TerrainTiles : IDisposable
         if (anyHole && !FillHoles(ground)) return null;
 
         return new TerrainPath(ground, zoom, tiles.Count, !anyHole);
+    }
+
+    /// <summary>Loads the terrain covering a disc around a point, for anything that
+    /// has to read the ground in every direction rather than along one line.
+    /// Returns null when nothing over the area could be read.</summary>
+    public async Task<TerrainArea?> LoadAreaAsync(
+        GeoPoint centre, double radiusM, CancellationToken ct = default)
+    {
+        if (radiusM <= 0 || double.IsNaN(radiusM)) return null;
+
+        // No finer than the sweep that will read it, and no deeper than a disc
+        // this size can afford. Each step back quarters the tiles.
+        int zoom = Math.Min(
+            TerrainGrid.MaxZoom,
+            TerrainGrid.ZoomForSpacing(radiusM / AreaSamples, centre.Lat));
+
+        HashSet<(int X, int Y)> needed;
+        while (true)
+        {
+            needed = TilesWithin(centre, radiusM, zoom);
+            if (needed.Count <= MaxTilesPerArea || zoom <= 7) break;
+            zoom--;
+        }
+
+        var tiles = await FetchAsync(needed, zoom, ct).ConfigureAwait(false);
+        if (tiles.Count == 0) return null;
+
+        return new TerrainArea(
+            new TerrainGrid(zoom, tiles), zoom, tiles.Count, tiles.Count == needed.Count);
+    }
+
+    /// <summary>The tiles a disc touches. Tested against the circle rather than
+    /// its bounding box, which would fetch a quarter more tiles than the sweep
+    /// ever reads.</summary>
+    private static HashSet<(int X, int Y)> TilesWithin(GeoPoint centre, double radiusM, int zoom)
+    {
+        int span = 1 << zoom;
+        double metresPerTile = TerrainGrid.TileSize * TerrainGrid.MetresPerPixel(zoom, centre.Lat);
+        double reachOfATile = metresPerTile * 0.708; // half a tile's diagonal
+
+        // A degree of latitude is very nearly constant; longitude narrows with
+        // the cosine, which at high latitude is most of the difference.
+        double dLat = radiusM / 111_320.0;
+        double dLon = radiusM / (111_320.0 * Math.Max(0.01, Math.Cos(centre.Lat * Math.PI / 180.0)));
+
+        var (minX, minY) = TerrainGrid.TileFor(
+            Math.Min(85.0, centre.Lat + dLat), centre.Lon - dLon, zoom);
+        var (maxX, maxY) = TerrainGrid.TileFor(
+            Math.Max(-85.0, centre.Lat - dLat), centre.Lon + dLon, zoom);
+
+        var tiles = new HashSet<(int X, int Y)>();
+        for (int y = minY; y <= maxY; y++)
+        {
+            if (y < 0 || y >= span) continue;
+            for (int x = minX; x <= maxX; x++)
+            {
+                int wrapped = ((x % span) + span) % span;
+                if (Geodesy.DistanceM(centre, TileCentre(wrapped, y, zoom)) <= radiusM + reachOfATile)
+                    tiles.Add((wrapped, y));
+            }
+        }
+        return tiles;
+    }
+
+    private static GeoPoint TileCentre(int x, int y, int zoom)
+    {
+        double span = 1 << zoom;
+        double lon = (x + 0.5) / span * 360.0 - 180.0;
+        double n = Math.PI - 2 * Math.PI * (y + 0.5) / span;
+        double lat = 180.0 / Math.PI * Math.Atan(Math.Sinh(n));
+        return new GeoPoint(lat, lon);
     }
 
     /// <summary>The distinct tiles a sampled line passes through.</summary>

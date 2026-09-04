@@ -85,6 +85,25 @@ public static class LinkBudget
         return FreeSpacePathLossAtOneMetreDb(frequencyMhz) + 20 * Math.Log10(distanceM);
     }
 
+    /// <summary>
+    /// How far a link reaches before it has spent a given number of decibels —
+    /// the log-distance model run backwards.
+    /// </summary>
+    /// <param name="lossDb">The loss budget to spend.</param>
+    /// <param name="exponent">Path-loss exponent; 2 is free space. A fitted
+    /// value from <see cref="PathLossFit"/> gives the range this station
+    /// actually gets rather than the range a vacuum would.</param>
+    /// <param name="offsetDb">Constant term of the same model.</param>
+    public static double RangeForLossDb(
+        double lossDb, double frequencyMhz, double exponent = 2.0, double offsetDb = 0)
+    {
+        if (exponent <= 0)
+            throw new ArgumentOutOfRangeException(nameof(exponent), "the exponent has to be positive");
+
+        double spent = lossDb - offsetDb - FreeSpacePathLossAtOneMetreDb(frequencyMhz);
+        return Math.Pow(10, spent / (10 * exponent));
+    }
+
     /// <summary>What arrives at the receiver's input.</summary>
     /// <param name="txPowerDbm">Conducted power at the transmitter's antenna port.</param>
     /// <param name="txGainDbi">Transmitting antenna gain, net of its feedline.</param>

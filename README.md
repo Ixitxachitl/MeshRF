@@ -244,6 +244,11 @@ one RF-switch line, not two.
   to each one taken out first. The fitted exponent says how fast signal falls
   off at this site; applying it puts that clutter loss into every link
   prediction. Outliers are visible as residuals and can be dropped from the fit.
+- Coverage ring over the map: a compass sweep of how far the station reaches in
+  each direction, coloured by whether terrain cost that direction anything. Each
+  bearing is walked outward to where contiguous coverage ends, judged against
+  the range the same radio gets over open ground, and the fitted path loss is
+  used in place of free space wherever a calibration has been applied.
 
 ### UI and Workflow
 

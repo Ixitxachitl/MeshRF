@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using MeshRF.Map;
+using MeshRF.Mesh;
 using MeshRF.Nodes;
 using MeshRF.Waypoints;
 
@@ -103,6 +105,111 @@ public partial class MapPanel : UserControl
 
         await PathLossWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
     }
+
+    /// <summary>Supersedes an earlier sweep: the toggle can be flipped again
+    /// while tiles are still being fetched for the last one.</summary>
+    private CancellationTokenSource? _coverageRun;
+
+    /// <summary>
+    /// The "Coverage" toggle: sweeps the compass from this station and draws
+    /// how far it reaches in each direction.
+    ///
+    /// Run on demand rather than kept live. A sweep reads terrain over the
+    /// whole disc and takes a moment on a cold cache, and the answer only
+    /// changes when the station moves or its radio settings do — neither of
+    /// which happens while someone is looking at the map.
+    /// </summary>
+    private async void OnCoverageToggle(object? sender, RoutedEventArgs e)
+    {
+        _coverageRun?.Cancel();
+
+        if (CoverageButton.IsChecked != true)
+        {
+            Canvas.ShowCoverage(null);
+            return;
+        }
+
+        if (_viewModel is null || _settings is null) return;
+        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon))
+        {
+            _viewModel.StatusText = "Set your own location before sweeping coverage.";
+            CoverageButton.IsChecked = false;
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _coverageRun = cts;
+
+        var (sf, bwKhz, _) = _viewModel.EffectiveLoraParams;
+        var options = new CoverageOptions(
+            Centre: new GeoPoint(lat, lon),
+            MyAntennaM: _settings.LinkProfileMyAntennaM,
+            PeerAntennaM: _settings.LinkProfilePeerAntennaM,
+            MyGainDbi: _settings.LinkProfileMyGainDbi,
+            PeerGainDbi: _settings.LinkProfilePeerGainDbi,
+            TxPowerDbm: _viewModel.IsTxSx1262 ? _viewModel.Sx1262TxPowerDbm : 22,
+            FrequencyMhz: _viewModel.CenterFreqMHz,
+            BandwidthKhz: bwKhz,
+            SpreadingFactor: sf,
+            Calibration: FittedPathLoss(_settings));
+
+        _viewModel.StatusText = "Sweeping coverage…";
+        try
+        {
+            // The sweep itself is arithmetic over an in-memory grid, but it is
+            // hundreds of radials of it, so it goes off the UI thread with the
+            // tile fetch rather than after it.
+            var result = await Task.Run<(TerrainArea Area, CoverageRing? Ring)?>(async () =>
+            {
+                // The open-ground reach, not the link budget's own: at LoRa
+                // sensitivity the budget runs to hundreds of kilometres, and a
+                // disc that size would be fetched at a zoom too coarse to see
+                // any terrain at all.
+                double radius = CoverageMap.OpenGroundRangeM(options) * 1.05;
+                var area = await SharedTerrain.Tiles
+                    .LoadAreaAsync(options.Centre, radius, cts.Token)
+                    .ConfigureAwait(false);
+                return area is null ? null : (area, CoverageMap.Build(area.Grid, options));
+            }, cts.Token).ConfigureAwait(true);
+
+            if (cts.IsCancellationRequested) return;
+
+            if (result is not { Ring: { } ring, Area: { } area })
+            {
+                _viewModel.StatusText = "No elevation data around this location.";
+                CoverageButton.IsChecked = false;
+                return;
+            }
+
+            string note =
+                $"to {DisplayUnits.FormatShortDistance(ring.UnobstructedRangeM, _viewModel.CurrentUnitSystem)} open" +
+                (options.Calibration is null ? " · free space" : " · calibrated") +
+                $" · z{area.Zoom}";
+
+            Canvas.ShowCoverage(ring, note);
+            _viewModel.StatusText =
+                $"Coverage swept: {ring.Spokes.Count} bearings over {area.TileCount} terrain tiles" +
+                (area.Complete ? string.Empty : ", some of it missing");
+        }
+        catch (OperationCanceledException)
+        {
+            // The toggle was flipped again, or the panel went away.
+        }
+        finally
+        {
+            if (ReferenceEquals(_coverageRun, cts)) _coverageRun = null;
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>The applied path-loss calibration, if there is one. Without it
+    /// the sweep spends free-space loss, which draws a ring far larger than any
+    /// station in clutter actually has.</summary>
+    private static PathLossFit? FittedPathLoss(AppSettings settings) =>
+        settings is { PathLossExponent: double exponent, PathLossOffsetDb: double offset }
+            ? new PathLossFit(exponent, offset, settings.PathLossRmsDb ?? 0,
+                              settings.PathLossSampleCount, ExponentFitted: true, OffsetFitted: true)
+            : null;
 
     /// <summary>Binds the panel to the view model and restores saved map
     /// preferences. Called once from MainWindow.</summary>

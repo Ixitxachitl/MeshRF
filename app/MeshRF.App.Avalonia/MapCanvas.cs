@@ -446,14 +446,155 @@ public sealed class MapCanvas : Control
         var (originX, originY) = Origin;
         DrawTiles(context, originX, originY, w, h);
 
+        // Under the track and the markers: coverage is ground the map is about,
+        // not something drawn on top of what the map is about.
+        DrawCoverage(context, originX, originY);
         DrawTrack(context, originX, originY);
 
         _hitTargets.Clear();
-        if (_vm is null) return;
+        if (_vm is not null)
+        {
+            DrawPendingBoundingBox(context, originX, originY);
+            DrawMarkers(context, originX, originY, w, h);
+            DrawSpider(context);
+        }
 
-        DrawPendingBoundingBox(context, originX, originY);
-        DrawMarkers(context, originX, originY, w, h);
-        DrawSpider(context);
+        // Last, and outside the view-model guard: the legend explains the ring,
+        // so it belongs over the markers and wherever the ring can be shown.
+        DrawCoverageLegend(context, h);
+    }
+
+    // -- Coverage ring ------------------------------------------------------
+
+    private static readonly IBrush CoverageClearFill = new SolidColorBrush(Color.Parse("#66BB6A"), 0.22);
+    private static readonly IBrush CoverageWeakFill = new SolidColorBrush(Color.Parse("#FFB74D"), 0.22);
+    private static readonly IBrush CoverageBlockedFill = new SolidColorBrush(Color.Parse("#EF5350"), 0.22);
+    private static readonly Pen CoverageEdgePen = new(new SolidColorBrush(Color.Parse("#CCFFFFFF")), 1.0);
+    private static readonly IBrush LegendBackground = new SolidColorBrush(Color.Parse("#CC202020"));
+
+    private CoverageRing? _coverage;
+    private string _coverageNote = string.Empty;
+
+    /// <summary>Shows a coverage sweep over the basemap, or clears it with
+    /// null. The ring is held in geographic coordinates and projected on every
+    /// render, so it stays put under a pan or a zoom rather than needing to be
+    /// swept again.</summary>
+    public void ShowCoverage(CoverageRing? ring, string note = "")
+    {
+        _coverage = ring;
+        _coverageNote = note;
+        InvalidateVisual();
+    }
+
+    public bool HasCoverage => _coverage is not null;
+
+    /// <summary>
+    /// The ring as a fan of wedges from the station, one per bearing, coloured
+    /// by how that direction fared.
+    ///
+    /// Three geometries rather than one per wedge: a sweep is a couple of
+    /// hundred bearings and the map redraws on every pan, so batching by colour
+    /// turns a few hundred draw calls a frame into three.
+    /// </summary>
+    private void DrawCoverage(DrawingContext context, double originX, double originY)
+    {
+        if (_coverage is not { Spokes.Count: > 2 } ring) return;
+
+        var centre = new Point(
+            LonToX(ring.Centre.Lon, _zoom) - originX,
+            LatToY(ring.Centre.Lat, _zoom) - originY);
+
+        var edges = new Point[ring.Spokes.Count];
+        for (int i = 0; i < ring.Spokes.Count; i++)
+        {
+            var spoke = ring.Spokes[i];
+            var at = CoverageMap.Along(ring.Centre, spoke.BearingDegrees, spoke.ReachM);
+            edges[i] = new Point(LonToX(at.Lon, _zoom) - originX, LatToY(at.Lat, _zoom) - originY);
+        }
+
+        var wedges = new Dictionary<CoverageQuality, StreamGeometryContext>();
+        var geometries = new Dictionary<CoverageQuality, StreamGeometry>();
+        foreach (var quality in new[] { CoverageQuality.Clear, CoverageQuality.Weakened, CoverageQuality.Blocked })
+        {
+            var geometry = new StreamGeometry();
+            geometries[quality] = geometry;
+            wedges[quality] = geometry.Open();
+        }
+
+        for (int i = 0; i < ring.Spokes.Count; i++)
+        {
+            int next = (i + 1) % ring.Spokes.Count;
+
+            // The worse of the two ends owns the wedge between them, so a
+            // boundary reads as the start of the trouble rather than the end.
+            var quality = (CoverageQuality)Math.Max(
+                (int)ring.Spokes[i].Quality, (int)ring.Spokes[next].Quality);
+
+            var ctx = wedges[quality];
+            ctx.BeginFigure(centre, isFilled: true);
+            ctx.LineTo(edges[i]);
+            ctx.LineTo(edges[next]);
+            ctx.EndFigure(true);
+        }
+
+        foreach (var ctx in wedges.Values) ctx.Dispose();
+
+        context.DrawGeometry(CoverageClearFill, null, geometries[CoverageQuality.Clear]);
+        context.DrawGeometry(CoverageWeakFill, null, geometries[CoverageQuality.Weakened]);
+        context.DrawGeometry(CoverageBlockedFill, null, geometries[CoverageQuality.Blocked]);
+
+        // The outer boundary on its own, so the reach reads as an edge rather
+        // than as wherever the translucent fills happen to stop.
+        var outline = new StreamGeometry();
+        using (var ctx = outline.Open())
+        {
+            ctx.BeginFigure(edges[0], isFilled: false);
+            for (int i = 1; i < edges.Length; i++) ctx.LineTo(edges[i]);
+            ctx.EndFigure(true);
+        }
+        context.DrawGeometry(null, CoverageEdgePen, outline);
+    }
+
+    /// <summary>What the three colours mean, plus what the sweep found. Drawn
+    /// only while a ring is shown, in the one corner the map's own chrome
+    /// leaves free.</summary>
+    private void DrawCoverageLegend(DrawingContext context, double height)
+    {
+        if (_coverage is not { } ring) return;
+
+        (IBrush Fill, string Label)[] entries =
+        [
+            (CoverageClearFill, $"Clear  {ring.CountOf(CoverageQuality.Clear)}"),
+            (CoverageWeakFill, $"Weakened  {ring.CountOf(CoverageQuality.Weakened)}"),
+            (CoverageBlockedFill, $"Blocked  {ring.CountOf(CoverageQuality.Blocked)}"),
+        ];
+
+        const double pad = 6, swatch = 10, lineHeight = 15;
+        double boxHeight = pad * 2 + lineHeight * entries.Length
+                         + (_coverageNote.Length > 0 ? lineHeight : 0);
+        double boxWidth = 168;
+        double top = height - boxHeight - 8;
+
+        context.FillRectangle(LegendBackground, new Rect(8, top, boxWidth, boxHeight), 3);
+
+        double y = top + pad;
+        foreach (var (fill, label) in entries)
+        {
+            context.FillRectangle(fill, new Rect(8 + pad, y + 2, swatch, swatch));
+            context.DrawRectangle(null, CoverageEdgePen, new Rect(8 + pad, y + 2, swatch, swatch));
+            var text = new FormattedText(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                                         LabelTypeface, 11, Brushes.White);
+            context.DrawText(text, new Point(8 + pad + swatch + 6, y));
+            y += lineHeight;
+        }
+
+        if (_coverageNote.Length > 0)
+        {
+            var note = new FormattedText(_coverageNote, CultureInfo.CurrentCulture,
+                                         FlowDirection.LeftToRight, LabelTypeface, 10,
+                                         new SolidColorBrush(Color.Parse("#BBBBBB")));
+            context.DrawText(note, new Point(8 + pad, y));
+        }
     }
 
     // -- Track overlay (location history) -----------------------------------

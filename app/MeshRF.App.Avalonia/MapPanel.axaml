@@ -98,6 +98,12 @@
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                         Click="OnOpenPathLoss"
                         ToolTip.Tip="Fit a path-loss model to every direct neighbour, and apply it to link predictions" />
+
+                <ToggleButton x:Name="CoverageButton" Content="Coverage"
+                              Height="24" FontSize="11" Margin="0,4,0,0"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              IsCheckedChanged="OnCoverageToggle"
+                              ToolTip.Tip="Sweep the compass for how far this station reaches. Green is the range open ground would give, amber is terrain cutting it back, red is a direction stopped close in. Uses the fitted path loss when one has been applied." />
             </StackPanel>
         </Border>
 

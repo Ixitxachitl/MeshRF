@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 namespace MeshRF.Map;
 
+/// <summary>Somewhere ground height can be read from. Small enough that a test
+/// can stand in a hand-built ridge where the real thing would need tiles.
+/// </summary>
+public interface IElevationSource
+{
+    /// <summary>Ground metres above the ellipsoid, or null where nothing is
+    /// known. A null is a hole in the data, never a zero.</summary>
+    double? ElevationAt(double lat, double lon);
+}
+
 /// <summary>
 /// Ground elevation looked up from a set of already-fetched Terrarium tiles.
 ///
@@ -14,7 +24,7 @@ namespace MeshRF.Map;
 /// elevation maths testable without a network and lets the caller decide how
 /// tiles are cached — see <see cref="TerrainTiles"/>.
 /// </summary>
-public sealed class TerrainGrid
+public sealed class TerrainGrid : IElevationSource
 {
     public const int TileSize = 256;
 
