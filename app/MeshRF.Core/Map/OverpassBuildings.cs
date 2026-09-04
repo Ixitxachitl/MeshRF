@@ -12,11 +12,15 @@ namespace MeshRF.Map;
 /// any buildings here, or the service could not be reached — and a prediction
 /// that quietly drops the buildings it was asked for should say which.
 /// </summary>
+/// <param name="RadiusM">How far out the footprints actually reach, which is
+/// not always what was asked for: a box too heavy for the service is retried
+/// smaller rather than abandoned.</param>
 public sealed record BuildingExtract(
     BuildingIndex Index,
     bool LookupFailed,
     BuildingLookupFailure Failure = BuildingLookupFailure.None,
-    TimeSpan? RetryAfter = null)
+    TimeSpan? RetryAfter = null,
+    double RadiusM = 0)
 {
     public static readonly BuildingExtract None = new(BuildingIndex.Empty, false);
 
@@ -117,10 +121,22 @@ public sealed class OverpassBuildings : IDisposable
 
     public const string Attribution = "Buildings: © OpenStreetMap contributors (via Overpass)";
 
-    /// <summary>Largest square this will ask for, in metres of half-width. A
-    /// city's buildings are tens of thousands of polygons and the service is
-    /// shared; past this the answer is to zoom in rather than to wait.</summary>
-    public const double MaxRadiusM = 6_000;
+    /// <summary>Largest square this will ask for, in metres of half-width.
+    /// </summary>
+    /// <remarks>Measured rather than guessed. Over Minneapolis, a 6 km
+    /// half-width returned 95 MB in 2m26s — past this client's patience, never
+    /// mind the service's — while 2.5 km returned 10 MB in 12s. Payload grows
+    /// faster than area, so the cap is where a dense city still answers in a
+    /// reasonable time; downtown San Francisco at 6 km was simply shed.
+    /// Buildings also matter most near the station, where the Fresnel zone is
+    /// tight, so the ground given up is the ground that mattered least.
+    /// </remarks>
+    public const double MaxRadiusM = 2_500;
+
+    /// <summary>Smallest box worth falling back to. Below this the extract
+    /// covers so little of the path that saying "no buildings" is closer to the
+    /// truth than charging for the few around the antenna.</summary>
+    public const double MinRadiusM = 1_000;
 
     /// <summary>How long a cached extract is trusted. Buildings change slowly,
     /// and a week is what MeshLab RF settled on for the same data.</summary>
@@ -137,7 +153,7 @@ public sealed class OverpassBuildings : IDisposable
 
         // Overpass can take a while to answer a large box, and answering slowly
         // is normal rather than a fault.
-        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
         if (!_http.DefaultRequestHeaders.Contains("User-Agent"))
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("MeshRF/1.0 (+https://github.com/meshrf)");
     }
@@ -154,6 +170,26 @@ public sealed class OverpassBuildings : IDisposable
         if (radiusM <= 0) return BuildingExtract.None;
         radiusM = Math.Min(radiusM, MaxRadiusM);
 
+        BuildingExtract last = BuildingExtract.None;
+        for (double r = radiusM; r >= MinRadiusM; r /= 2)
+        {
+            last = await FetchAsync(centre, r, ct).ConfigureAwait(false);
+            if (!last.LookupFailed || ct.IsCancellationRequested) return last;
+
+            // Only a box that was too heavy is worth re-asking smaller. Rate
+            // limiting, a cool-off and a dead network all give the same answer
+            // however little is asked for, so retrying just spends slots.
+            if (last.Failure is not (BuildingLookupFailure.ServerBusy or BuildingLookupFailure.TimedOut))
+                return last;
+        }
+
+        return last;
+    }
+
+    /// <summary>One attempt at one box.</summary>
+    private async Task<BuildingExtract> FetchAsync(
+        GeoPoint centre, double radiusM, CancellationToken ct)
+    {
         double dLat = radiusM / 111_320.0;
         double dLon = radiusM / (111_320.0 * Math.Max(0.01, Math.Cos(centre.Lat * Math.PI / 180)));
 
@@ -161,7 +197,8 @@ public sealed class OverpassBuildings : IDisposable
         double west = centre.Lon - dLon, east = centre.Lon + dLon;
 
         var file = Path.Combine(_cacheDir, CacheName(south, west, north, east));
-        if (Fresh(file) && ReadCache(file) is { } cached) return new BuildingExtract(cached, false);
+        if (Fresh(file) && ReadCache(file) is { } cached)
+            return new BuildingExtract(cached, false, RadiusM: radiusM);
 
         // Still inside a backoff from an earlier refusal, which is a failure
         // that has not stopped being one just because it is not being retried.
@@ -215,7 +252,7 @@ public sealed class OverpassBuildings : IDisposable
         catch (IOException) { /* the cache is an optimisation */ }
         catch (UnauthorizedAccessException) { /* the cache is an optimisation */ }
 
-        return new BuildingExtract(new BuildingIndex(Parse(json)), false);
+        return new BuildingExtract(new BuildingIndex(Parse(json)), false, RadiusM: radiusM);
     }
 
     /// <summary>

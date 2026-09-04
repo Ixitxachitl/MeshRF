@@ -281,7 +281,9 @@ and building-attenuation figures are all its work.
   the app on a shared public service. A lookup that does not happen says which
   of rate limiting, an overloaded server, a timeout, no network, or an
   unexpired backoff was responsible, rather than collapsing all five into
-  "could not be reached".
+  "could not be reached". Footprints are fetched within 2.5 km — a measured
+  limit, since a 6 km box over a city runs to 95 MB and minutes — and a box too
+  heavy for the service is halved and re-asked rather than abandoned.
 - A **chosen point** on the map runs any of it from somewhere other than this
   station, which turns "what do I reach" into "what would a node here reach".
   Set it by right-clicking bare ground, or pick an existing node — on the map or

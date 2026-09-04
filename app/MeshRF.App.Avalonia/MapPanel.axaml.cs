@@ -643,9 +643,10 @@ public partial class MapPanel : UserControl
             // Overpass is asked for a bounded box, so a sweep wider than that
             // has buildings for its middle and none for its edges. Saying so
             // beats letting the far side look mysteriously clear.
-            if (buildings.Count > 0 && ring.UnobstructedRangeM > OverpassBuildings.MaxRadiusM)
+            if (buildings.Count > 0 && buildings.RadiusM > 0
+                && ring.UnobstructedRangeM > buildings.RadiusM)
                 parts.Add(
-                    $"buildings only within {DisplayUnits.FormatShortDistance(OverpassBuildings.MaxRadiusM, units)} " +
+                    $"buildings only within {DisplayUnits.FormatShortDistance(buildings.RadiusM, units)} " +
                     "of the centre; beyond that the sweep sees terrain alone");
         }
 

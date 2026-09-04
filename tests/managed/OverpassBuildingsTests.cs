@@ -209,4 +209,69 @@ public class OverpassBuildingsTests
         Assert.True(waiting.LookupFailed);
         Assert.Contains("retrying in 30 seconds", waiting.Explanation!, StringComparison.Ordinal);
     }
+
+    // -- Asking for less when the service says no ---------------------------
+
+    [Fact]
+    public void TheRequestedAreaIsCappedAtSomethingTheServiceCanAnswer()
+    {
+        // Measured, not chosen: 6 km over Minneapolis is 95 MB and two and a
+        // half minutes, which no client timeout survives.
+        Assert.True(OverpassBuildings.MaxRadiusM <= 2_500,
+            "a cap this large asks for payloads that time out");
+        Assert.True(OverpassBuildings.MinRadiusM < OverpassBuildings.MaxRadiusM,
+            "the fallback has to be smaller than the first attempt");
+    }
+
+    [Fact]
+    public void OnlyAQueryTooHeavyToAnswerIsWorthReAskingSmaller()
+    {
+        // The distinction the retry turns on. A smaller box changes the answer
+        // for a shed query and changes nothing for a dead network, so retrying
+        // the rest just spends slots against a two-slot allowance.
+        Assert.True(WorthRetrying(BuildingLookupFailure.ServerBusy));
+        Assert.True(WorthRetrying(BuildingLookupFailure.TimedOut));
+
+        Assert.False(WorthRetrying(BuildingLookupFailure.RateLimited));
+        Assert.False(WorthRetrying(BuildingLookupFailure.Offline));
+        Assert.False(WorthRetrying(BuildingLookupFailure.CoolingOff));
+        Assert.False(WorthRetrying(BuildingLookupFailure.Refused));
+
+        static bool WorthRetrying(BuildingLookupFailure why) =>
+            why is BuildingLookupFailure.ServerBusy or BuildingLookupFailure.TimedOut;
+    }
+
+    [Fact]
+    public void HalvingFromTheCapReachesTheFloorInACoupleOfAttempts()
+    {
+        // Each shed attempt costs the service's full query timeout, so the
+        // ladder has to be short enough that a failure is not a four-minute
+        // wait before the user is told anything.
+        int attempts = 0;
+        for (double r = OverpassBuildings.MaxRadiusM; r >= OverpassBuildings.MinRadiusM; r /= 2)
+            attempts++;
+
+        Assert.InRange(attempts, 1, 3);
+    }
+
+    [Fact]
+    public void AnExtractSaysHowFarOutItsBuildingsActuallyReach()
+    {
+        // The sweep tells the user buildings stop somewhere. Quoting the cap
+        // rather than what was fetched would name the wrong distance whenever
+        // the first attempt was shed and a smaller one answered.
+        var full = new BuildingExtract(BuildingIndex.Empty, false, RadiusM: 2_500);
+        var reduced = new BuildingExtract(BuildingIndex.Empty, false, RadiusM: 1_250);
+
+        Assert.Equal(2_500, full.RadiusM);
+        Assert.Equal(1_250, reduced.RadiusM);
+        Assert.NotEqual(full.RadiusM, reduced.RadiusM);
+    }
+
+    [Fact]
+    public void AFailedLookupCoversNoGroundAtAll()
+    {
+        Assert.Equal(0, BuildingExtract.Failed(BuildingLookupFailure.ServerBusy).RadiusM);
+        Assert.Equal(0, BuildingExtract.Unavailable.RadiusM);
+    }
 }
