@@ -249,6 +249,10 @@ one RF-switch line, not two.
   bearing is walked outward to where contiguous coverage ends, judged against
   the range the same radio gets over open ground, and the fitted path loss is
   used in place of free space wherever a calibration has been applied.
+- Coverage heatmap: the swept field shaded by the odds of a packet decoding —
+  reliable through marginal to fringe — so the gradient either side of the
+  boundary is visible, along with the coverage islands past an obstruction that
+  a single ring edge deliberately will not claim.
 - Horizon panorama: the 360° skyline from this antenna, shaded by how far away
   the ground defining it is, with every positioned node plotted where it would
   appear against it — green where the terrain leaves a clear sight of it, red

@@ -123,6 +123,29 @@ public static class LinkBudget
         double receivedPowerDbm, double bandwidthKhz, double noiseFigureDb = DefaultNoiseFigureDb) =>
         receivedPowerDbm - NoiseFloorDbm(bandwidthKhz, noiseFigureDb);
 
+    /// <summary>
+    /// The chance a packet decodes at a given margin.
+    ///
+    /// A link does not switch from working to not working at a threshold: it
+    /// fades by a few decibels minute to minute, so a path sitting on its own
+    /// sensitivity is a coin toss rather than a wall. This is the logistic
+    /// curve that reading implies — a half at zero margin, nearly certain a few
+    /// decibels above, nearly hopeless a few below.
+    /// </summary>
+    /// <param name="spreadDb">How quickly the odds change with margin, which is
+    /// really how much the path fades. Three decibels suits the slow fading of
+    /// a fixed link; somewhere windy or mobile spreads wider.</param>
+    public static double DecodeProbability(double marginDb, double spreadDb = 3.0)
+    {
+        if (spreadDb <= 0)
+            throw new ArgumentOutOfRangeException(nameof(spreadDb), "the spread has to be positive");
+
+        // Saturating rather than overflowing: a margin of a few hundred
+        // decibels is arithmetic a caller can reach, and Exp of it is infinity.
+        double z = Math.Clamp(marginDb / spreadDb, -40, 40);
+        return 1.0 / (1.0 + Math.Exp(-z));
+    }
+
     /// <summary>How many decibels of headroom the link has over the point where
     /// packets stop decoding. Zero is the cliff edge, not a working link:
     /// fading alone moves a path by several decibels minute to minute.</summary>

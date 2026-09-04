@@ -264,6 +264,74 @@ public class CoverageMapTests
         Assert.Equal(0, unknown.CredibleRangeM);
     }
 
+    // -- The margin field ---------------------------------------------------
+
+    [Fact]
+    public void TheSweepReportsMarginEverywhereItLooked()
+    {
+        var ring = CoverageMap.Build(new FlatGround(200), Options())!;
+        var field = ring.Field!;
+
+        Assert.Equal(72, field.Bearings);
+        Assert.Equal(field.Bearings * field.Samples, field.MarginDb.Length);
+        Assert.True(field.RadiusM >= ring.UnobstructedRangeM);
+    }
+
+    [Fact]
+    public void MarginFallsAwayWithRange()
+    {
+        var field = CoverageMap.Build(new FlatGround(200), Options())!.Field!;
+
+        double near = field.MarginAt(0, field.RadiusM * 0.1)!.Value;
+        double far = field.MarginAt(0, field.RadiusM * 0.9)!.Value;
+        Assert.True(near > far, $"near {near:F1} dB should beat far {far:F1} dB");
+    }
+
+    [Fact]
+    public void TheEdgeOfTheRingIsWhereTheMarginRunsOut()
+    {
+        var options = Options();
+        var ring = CoverageMap.Build(new FlatGround(200), options)!;
+
+        double atEdge = ring.Field!.MarginAt(0, ring.Spokes[0].ReachM)!.Value;
+        Assert.InRange(atEdge, options.RequiredMarginDb - 2, options.RequiredMarginDb + 4);
+    }
+
+    [Fact]
+    public void ThereIsNoMarginPastWhereTheSweepLooked()
+    {
+        var field = CoverageMap.Build(new FlatGround(200), Options())!.Field!;
+
+        Assert.Null(field.MarginAt(0, field.RadiusM * 1.5));
+        Assert.Null(field.MarginAt(0, 0));
+    }
+
+    [Fact]
+    public void TheFieldKeepsGoingPastAnObstructionSoIslandsAreVisible()
+    {
+        // The ring stops at the wall by design. The field must not: ground
+        // beyond it is a real place a packet can reach from somewhere else, and
+        // a heatmap that stopped where the ring did would hide it.
+        var terrain = new WalledGround(200, 120, 2000, 600, 60, 120);
+        var ring = CoverageMap.Build(terrain, Options(Clutter))!;
+
+        var blocked = ring.Spokes.First(s => s.BearingDegrees is >= 85 and <= 95);
+        double beyond = blocked.ReachM + 800;
+        Assert.True(beyond < ring.Field!.RadiusM);
+
+        Assert.NotNull(ring.Field.MarginAt(blocked.BearingDegrees, beyond));
+    }
+
+    [Fact]
+    public void BearingsWrapRoundRatherThanFallingOffTheEnd()
+    {
+        var field = CoverageMap.Build(new FlatGround(200), Options())!.Field!;
+        double range = field.RadiusM * 0.5;
+
+        Assert.Equal(field.MarginAt(0, range)!.Value, field.MarginAt(360, range)!.Value, 3);
+        Assert.Equal(field.MarginAt(350, range)!.Value, field.MarginAt(-10, range)!.Value, 3);
+    }
+
     [Fact]
     public void MorePowerReachesFurther()
     {

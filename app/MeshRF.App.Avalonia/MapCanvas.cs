@@ -56,6 +56,11 @@ public sealed class MapCanvas : Control
         /// the tiles it draws are rasterised here from geometry.</summary>
         public bool IsVector => StyleUrl is not null;
 
+        /// <summary>No basemap at all. For working offline, and for looking at
+        /// an overlay — a coverage field, a recorded track — without a map
+        /// underneath competing with it.</summary>
+        public bool IsBlank => UrlTemplate.Length == 0 && StyleUrl is null;
+
         public bool NeedsPostProcess =>
             Brightness != 1.0 || Gamma != 1.0 || Invert || HueRotate != 0.0 || Saturation != 1.0;
     }
@@ -105,6 +110,10 @@ public sealed class MapCanvas : Control
     /// ridge that shaped it. Published only to zoom 17, and its tiles are a
     /// volunteer service — see <see cref="TileProvider.DeepestZoom"/>, which
     /// stops the map asking for tiles that do not exist.</summary>
+    /// <summary>Draws nothing and fetches nothing.</summary>
+    private static readonly TileProvider NoTiles = new(
+        "none", string.Empty, string.Empty, "No basemap" + GestureHint);
+
     private static readonly TileProvider TopoTiles = new(
         "opentopo", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "abc",
         "© OpenTopoMap (CC-BY-SA) · © OpenStreetMap contributors" + GestureHint,
@@ -118,7 +127,7 @@ public sealed class MapCanvas : Control
     /// <summary>No "Auto" entry, unlike MeshRF.App: that option exists to
     /// follow a light/dark app theme, and this app's shell is always dark.</summary>
     public static readonly IReadOnlyList<string> MapTileThemeOptions =
-        ["Dark", "Dark (Vector)", "Light", "Street", "Topographic", "Satellite"];
+        ["Dark", "Dark (Vector)", "Light", "Street", "Topographic", "Satellite", "None"];
 
     private const string DefaultTileTheme = "Dark";
 
@@ -138,6 +147,7 @@ public sealed class MapCanvas : Control
         "Dark (Vector)" => VectorDarkTiles,
         "Light" => LightTiles,
         "Topographic" => TopoTiles,
+        "None" => NoTiles,
         "Street" => StreetTiles,
         "Satellite" => SatelliteTiles,
         _ => DarkTiles,
@@ -489,6 +499,7 @@ public sealed class MapCanvas : Control
     private CoverageRing? _coverage;
     private string _coverageNote = string.Empty;
     private double _measuredReachM;
+    private CoverageHeatmap? _heatmap;
     private UnitSystem _coverageUnits = UnitSystem.Metric;
 
     /// <summary>Shows a coverage sweep over the basemap, or clears it with
@@ -508,6 +519,11 @@ public sealed class MapCanvas : Control
         _coverageUnits = units;
         _coverageNote = note;
         _measuredReachM = measuredReachM;
+
+        // Painted once here rather than per frame: it is a bitmap in
+        // Web-Mercator space, so every later pan and zoom is a transform.
+        _heatmap = ring?.Field is { } field ? CoverageHeatmap.Paint(field) : null;
+
         InvalidateVisual();
     }
 
@@ -525,6 +541,11 @@ public sealed class MapCanvas : Control
     {
         if (_coverage is not { Spokes.Count: > 2 } ring) return;
 
+        // The field first, under the wedges: it carries the gradient and the
+        // islands the ring cannot, and the wedges say where contiguous
+        // coverage ends.
+        DrawHeatmap(context, originX, originY);
+
         var centre = new Point(
             LonToX(ring.Centre.Lon, _zoom) - originX,
             LatToY(ring.Centre.Lat, _zoom) - originY);
@@ -537,6 +558,21 @@ public sealed class MapCanvas : Control
             edges[i] = new Point(LonToX(at.Lon, _zoom) - originX, LatToY(at.Lat, _zoom) - originY);
         }
 
+        // With a field painted underneath, the wedges are dropped: two
+        // translucent washes over one another read as neither. The heatmap says
+        // how good the link is everywhere, and the outline below still says
+        // where contiguous coverage ends, which is what the wedges were for.
+        if (_heatmap is null) DrawQualityWedges(context, ring, centre, edges);
+
+        DrawReachOutline(context, edges);
+        DrawMeasuredReach(context, ring.Centre, originX, originY);
+    }
+
+    /// <summary>The ring as a fan of wedges coloured by how each direction
+    /// fared, for when there is no field to shade instead.</summary>
+    private static void DrawQualityWedges(
+        DrawingContext context, CoverageRing ring, Point centre, Point[] edges)
+    {
         var wedges = new Dictionary<CoverageQuality, StreamGeometryContext>();
         var geometries = new Dictionary<CoverageQuality, StreamGeometry>();
         foreach (var quality in new[] { CoverageQuality.Clear, CoverageQuality.Weakened, CoverageQuality.Blocked })
@@ -567,9 +603,13 @@ public sealed class MapCanvas : Control
         context.DrawGeometry(CoverageClearFill, null, geometries[CoverageQuality.Clear]);
         context.DrawGeometry(CoverageWeakFill, null, geometries[CoverageQuality.Weakened]);
         context.DrawGeometry(CoverageBlockedFill, null, geometries[CoverageQuality.Blocked]);
+    }
 
-        // The outer boundary on its own, so the reach reads as an edge rather
-        // than as wherever the translucent fills happen to stop.
+    /// <summary>Where contiguous coverage ends, drawn on its own so the reach
+    /// reads as an edge rather than as wherever a translucent fill stops.
+    /// </summary>
+    private static void DrawReachOutline(DrawingContext context, Point[] edges)
+    {
         var outline = new StreamGeometry();
         using (var ctx = outline.Open())
         {
@@ -578,8 +618,26 @@ public sealed class MapCanvas : Control
             ctx.EndFigure(true);
         }
         context.DrawGeometry(null, CoverageEdgePen, outline);
+    }
 
-        DrawMeasuredReach(context, ring.Centre, originX, originY);
+    /// <summary>Places the painted field on the map. The bitmap covers a fixed
+    /// square of the world, so putting it down is a matter of projecting two
+    /// corners at the current zoom.</summary>
+    private void DrawHeatmap(DrawingContext context, double originX, double originY)
+    {
+        if (_heatmap is not { } heatmap) return;
+
+        double left = LonToX(heatmap.West, _zoom) - originX;
+        double right = LonToX(heatmap.East, _zoom) - originX;
+        double top = LatToY(heatmap.North, _zoom) - originY;
+        double bottom = LatToY(heatmap.South, _zoom) - originY;
+        if (right - left < 1 || bottom - top < 1) return;
+
+        var size = heatmap.Bitmap.PixelSize;
+        context.DrawImage(
+            heatmap.Bitmap,
+            new Rect(0, 0, size.Width, size.Height),
+            new Rect(left, top, right - left, bottom - top));
     }
 
     /// <summary>The furthest a node has actually been heard from here, as a
@@ -614,12 +672,23 @@ public sealed class MapCanvas : Control
     {
         if (_coverage is not { } ring) return;
 
-        (IBrush Fill, string Label)[] entries =
-        [
-            (CoverageClearFill, $"Clear  {ring.CountOf(CoverageQuality.Clear)}"),
-            (CoverageWeakFill, $"Weakened  {ring.CountOf(CoverageQuality.Weakened)}"),
-            (CoverageBlockedFill, $"Blocked  {ring.CountOf(CoverageQuality.Blocked)}"),
-        ];
+        // The swatches mean different things depending on what was drawn. With
+        // a field they are bands of link odds, shading every point; without one
+        // they are per-bearing verdicts, and the counts are what there is to
+        // say.
+        (IBrush Fill, string Label)[] entries = _heatmap is not null
+            ?
+            [
+                (CoverageClearFill, "Reliable"),
+                (CoverageWeakFill, "Marginal"),
+                (CoverageBlockedFill, "Fringe"),
+            ]
+            :
+            [
+                (CoverageClearFill, $"Clear  {ring.CountOf(CoverageQuality.Clear)}"),
+                (CoverageWeakFill, $"Weakened  {ring.CountOf(CoverageQuality.Weakened)}"),
+                (CoverageBlockedFill, $"Blocked  {ring.CountOf(CoverageQuality.Blocked)}"),
+            ];
 
         const double pad = 6, swatch = 10, lineHeight = 15;
 
@@ -754,6 +823,8 @@ public sealed class MapCanvas : Control
 
     private void DrawTiles(DrawingContext context, double originX, double originY, double w, double h)
     {
+        if (CurrentTiles.IsBlank) return;
+
         var provider = CurrentTiles;
         int n = 1 << _zoom;
         int firstTileX = (int)Math.Floor(originX / TileSize);

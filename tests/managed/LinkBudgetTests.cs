@@ -92,6 +92,56 @@ public class LinkBudgetTests
     }
 
     [Fact]
+    public void APathSittingOnItsSensitivityIsACoinToss()
+    {
+        // The whole point of reading margin as odds rather than as a wall.
+        Assert.Equal(0.5, LinkBudget.DecodeProbability(0), 6);
+    }
+
+    [Fact]
+    public void MoreMarginMeansBetterOdds()
+    {
+        double previous = 0;
+        for (double margin = -15; margin <= 15; margin += 1)
+        {
+            double odds = LinkBudget.DecodeProbability(margin);
+            Assert.True(odds > previous, $"odds should climb with margin, {margin} dB gave {odds:F4}");
+            Assert.InRange(odds, 0, 1);
+            previous = odds;
+        }
+    }
+
+    [Fact]
+    public void AHealthyMarginIsNearlyCertainAndADeficitNearlyHopeless()
+    {
+        Assert.True(LinkBudget.DecodeProbability(10) > 0.95);
+        Assert.True(LinkBudget.DecodeProbability(-10) < 0.05);
+    }
+
+    [Fact]
+    public void AWiderSpreadSoftensTheEdge()
+    {
+        // Somewhere the path fades more, the same margin is less of a promise.
+        Assert.True(LinkBudget.DecodeProbability(6, spreadDb: 9)
+                  < LinkBudget.DecodeProbability(6, spreadDb: 2));
+    }
+
+    [Fact]
+    public void AnAbsurdMarginSaturatesRatherThanOverflowing()
+    {
+        // Reachable arithmetic: a free-space budget at close range runs to
+        // hundreds of decibels, and Exp of that is infinity.
+        Assert.Equal(1.0, LinkBudget.DecodeProbability(5000), 6);
+        Assert.Equal(0.0, LinkBudget.DecodeProbability(-5000), 6);
+    }
+
+    [Fact]
+    public void ASpreadOfZeroIsRefusedRatherThanDividedBy()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => LinkBudget.DecodeProbability(3, 0));
+    }
+
+    [Fact]
     public void ASlowerPresetReachesFurtherThanAFasterOneAtTheSamePower()
     {
         // The whole reason LongFast outranges ShortFast: SF11/250k against

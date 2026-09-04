@@ -20,6 +20,49 @@ public enum CoverageQuality
     Blocked,
 }
 
+/// <summary>
+/// The link margin everywhere the sweep looked, as a polar grid of bearings by
+/// range.
+///
+/// The ring reports where contiguous coverage ends, which is the honest answer
+/// to "how far do I reach". This is the other half of the picture: the hilltop
+/// past a blocked valley that the ring deliberately will not claim, and the
+/// gradient either side of the boundary that a single edge cannot show.
+/// </summary>
+public sealed record CoverageField(
+    GeoPoint Centre, double SpacingM, int Bearings, int Samples, float[] MarginDb)
+{
+    /// <summary>How far out the grid was filled.</summary>
+    public double RadiusM => Samples * SpacingM;
+
+    /// <summary>
+    /// The margin at a point, interpolated between the four surrounding grid
+    /// cells, or null past the edge of the sweep.
+    /// </summary>
+    public double? MarginAt(double bearingDegrees, double distanceM)
+    {
+        if (distanceM <= 0 || distanceM > RadiusM) return null;
+
+        // Bearing wraps; range does not. The grid holds sample k at range
+        // (k + 1) × spacing, so the first ring of cells sits one step out.
+        double b = ((bearingDegrees % 360) + 360) % 360 / 360.0 * Bearings;
+        double s = distanceM / SpacingM - 1;
+        if (s < 0) s = 0;
+
+        int b0 = (int)Math.Floor(b), s0 = (int)Math.Floor(s);
+        double bf = b - b0, sf = s - s0;
+
+        int b1 = (b0 + 1) % Bearings;
+        b0 %= Bearings;
+        int s1 = Math.Min(s0 + 1, Samples - 1);
+        s0 = Math.Min(s0, Samples - 1);
+
+        double near = MarginDb[b0 * Samples + s0] + (MarginDb[b1 * Samples + s0] - MarginDb[b0 * Samples + s0]) * bf;
+        double far = MarginDb[b0 * Samples + s1] + (MarginDb[b1 * Samples + s1] - MarginDb[b0 * Samples + s1]) * bf;
+        return near + (far - near) * sf;
+    }
+}
+
 /// <summary>One compass direction's result.</summary>
 public readonly record struct CoverageSpoke(
     double BearingDegrees, double ReachM, CoverageQuality Quality);
@@ -34,7 +77,8 @@ public sealed record CoverageRing(
     GeoPoint Centre,
     IReadOnlyList<CoverageSpoke> Spokes,
     double UnobstructedRangeM,
-    bool RangeWasCapped = false)
+    bool RangeWasCapped = false,
+    CoverageField? Field = null)
 {
     public double FurthestReachM => Spokes.Count == 0 ? 0 : Spokes.Max(s => s.ReachM);
 
@@ -214,17 +258,28 @@ public static class CoverageMap
 
         var spokes = new CoverageSpoke[options.Bearings];
 
+        // Margin everywhere, not just at the boundary. Filling it costs the
+        // walk continuing past the first failure instead of stopping there,
+        // which is the same arithmetic either way — the reach is still read off
+        // where it first fails.
+        var margins = new float[options.Bearings * RadialSamples];
+        double headroom = gains - sensitivity;
+
         Parallel.For(0, options.Bearings, bearingIndex =>
         {
             double bearing = 360.0 * bearingIndex / options.Bearings;
             double reach = Sweep(
                 terrain, options, bearing, centreGround, txM, allowedLoss,
-                wavelength, effectiveRadius, spacing, maxRange);
+                wavelength, effectiveRadius, spacing, maxRange,
+                field: margins, fieldOffset: bearingIndex * RadialSamples, headroom: headroom);
 
             spokes[bearingIndex] = new CoverageSpoke(bearing, reach, Classify(reach, unobstructed));
         });
 
-        return new CoverageRing(options.Centre, spokes, unobstructed, capped);
+        var field = new CoverageField(
+            options.Centre, spacing, options.Bearings, RadialSamples, margins);
+
+        return new CoverageRing(options.Centre, spokes, unobstructed, capped, field);
     }
 
     /// <summary>Level ground everywhere, for measuring the reference reach.
@@ -260,7 +315,8 @@ public static class CoverageMap
         IElevationSource terrain, CoverageOptions options, double bearingDegrees,
         double centreGround, double txM, double allowedLoss,
         double wavelength, double effectiveRadius, double spacing, double maxRange,
-        int samples = RadialSamples)
+        int samples = RadialSamples,
+        float[]? field = null, int fieldOffset = 0, double headroom = 0)
     {
         // Ground under the bearing, filled in as the walk goes out, so a
         // direction that stops early never reads terrain past where it stopped.
@@ -269,6 +325,7 @@ public static class CoverageMap
 
         double fresnelScale = Math.Sqrt(2 / wavelength);
         double reached = 0;
+        bool failed = false;
 
         for (int k = 1; k <= samples; k++)
         {
@@ -297,9 +354,13 @@ public static class CoverageMap
             }
 
             double loss = PathLossDb(distance, options) + LinkProfile.KnifeEdgeLossDb(worstV);
-            if (loss > allowedLoss) break;
+            if (field is not null) field[fieldOffset + k - 1] = (float)(headroom - loss);
 
-            reached = distance;
+            // The reach is the first failure, but the walk carries on so the
+            // field behind it is filled: a hilltop past a blocked valley is a
+            // real place, and the ring alone would never show it.
+            if (loss > allowedLoss) { failed = true; continue; }
+            if (!failed) reached = distance;
         }
 
         return reached;

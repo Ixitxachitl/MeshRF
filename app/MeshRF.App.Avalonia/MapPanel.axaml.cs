@@ -319,7 +319,9 @@ public partial class MapPanel : UserControl
     {
         var parts = new List<string>
         {
-            $"Coverage swept: {ring.Spokes.Count} bearings over {area.TileCount} terrain tiles",
+            $"Coverage swept: {ring.CountOf(CoverageQuality.Clear)} bearings clear, " +
+            $"{ring.CountOf(CoverageQuality.Weakened)} weakened, " +
+            $"{ring.CountOf(CoverageQuality.Blocked)} blocked, over {area.TileCount} terrain tiles",
         };
 
         if (measuredM > 0)
