@@ -46,6 +46,7 @@ public partial class MapPanel : UserControl
         Canvas.RequestLinkProfile += OnRequestLinkProfile;
         Canvas.RequestCoverageFrom += OnRequestCoverageFrom;
         Canvas.RequestHorizonFrom += OnRequestHorizonFrom;
+        Canvas.ChosenPointCleared += OnChosenPointCleared;
     }
 
     /// <summary>"Edit…" on a waypoint marker's context menu, and a double-click
@@ -101,9 +102,17 @@ public partial class MapPanel : UserControl
             return;
         }
 
-        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon))
+        // The chosen point wins over this station when there is one.
+        double lat, lon;
+        if (Canvas.ChosenPoint is { } chosen)
         {
-            _viewModel.StatusText = "Set your own location before drawing a link profile.";
+            // Kept, not spent: a candidate site is usually profiled to several
+            // nodes in turn.
+            (lat, lon) = (chosen.Lat, chosen.Lon);
+        }
+        else if (!_viewModel.TryGetHomeLocation(out lat, out lon))
+        {
+            _viewModel.StatusText = "Set your own location, or drop a start point, before drawing a link profile.";
             return;
         }
 
@@ -263,23 +272,23 @@ public partial class MapPanel : UserControl
     /// while tiles are still being fetched for the last one.</summary>
     private CancellationTokenSource? _coverageRun;
 
-    /// <summary>Where the next sweep runs from, when it is somewhere other than
-    /// this station. Cleared when the toggle is used on its own, so the button
-    /// always means "from here" and the menu entry always means "from
-    /// there".</summary>
-    private GeoPoint? _coverageOrigin;
-
     /// <summary>"Coverage from here" on bare map: sweep as though a node stood
-    /// at that point, with this station's antenna and radio.</summary>
+    /// at the chosen point, with this station's antenna and radio. The canvas
+    /// has already recorded the point; this just runs the sweep.</summary>
     private void OnRequestCoverageFrom(double lat, double lon)
     {
-        _coverageOrigin = new GeoPoint(lat, lon);
-
         // Re-enter through the toggle so there is one path that runs a sweep.
-        // Already on, and it has to be nudged: the origin changed, which the
+        // Already on, and it has to be nudged: the point changed, which the
         // checked state cannot express.
         if (CoverageButton.IsChecked == true) OnCoverageToggle(this, new RoutedEventArgs());
         else CoverageButton.IsChecked = true;
+    }
+
+    /// <summary>The point went away, so anything drawn from it is redrawn from
+    /// this station.</summary>
+    private void OnChosenPointCleared()
+    {
+        if (CoverageButton.IsChecked == true) OnCoverageToggle(this, new RoutedEventArgs());
     }
 
     /// <summary>"Horizon from here…" on bare map: the skyline a node put there
@@ -307,7 +316,8 @@ public partial class MapPanel : UserControl
 
         if (CoverageButton.IsChecked != true)
         {
-            _coverageOrigin = null;
+            // The point outlives the layer. Switching coverage off is not a way
+            // of saying "and forget where I was asking about".
             Canvas.ShowCoverage(null);
             return;
         }
@@ -315,9 +325,9 @@ public partial class MapPanel : UserControl
         if (_viewModel is null || _settings is null) return;
 
         double lat, lon;
-        if (_coverageOrigin is { } dropped)
+        if (Canvas.ChosenPoint is { } chosen)
         {
-            (lat, lon) = (dropped.Lat, dropped.Lon);
+            (lat, lon) = (chosen.Lat, chosen.Lon);
         }
         else if (!_viewModel.TryGetHomeLocation(out lat, out lon))
         {
@@ -336,7 +346,7 @@ public partial class MapPanel : UserControl
         // than merely annotate it afterwards.
         // Only meaningful about this station: what a dropped point has "heard
         // directly" is nothing, since every reading was taken from here.
-        double measuredM = _coverageOrigin is null
+        double measuredM = Canvas.ChosenPoint is null
             ? FurthestHeardDirectM(_viewModel, new GeoPoint(lat, lon))
             : 0;
         var calibration = FittedPathLoss(_settings);
@@ -363,7 +373,7 @@ public partial class MapPanel : UserControl
             // The sweep itself is arithmetic over an in-memory grid, but it is
             // hundreds of radials of it, so it goes off the UI thread with the
             // tile fetch rather than after it.
-            var result = await Task.Run<(TerrainArea Area, CoverageRing? Ring)?>(async () =>
+            var result = await Task.Run<(TerrainArea Area, CoverageRing? Ring, int Footprints)?>(async () =>
             {
                 // The radius the sweep will actually walk, cap included. The
                 // open-ground reach alone is the wrong number to fetch by: a
@@ -384,12 +394,14 @@ public partial class MapPanel : UserControl
                 var area = await SharedTerrain.Tiles
                     .LoadAreaAsync(options.Centre, radius, cts.Token)
                     .ConfigureAwait(false);
-                return area is null ? null : (area, CoverageMap.Build(area.Grid, sweepOptions));
+                return area is null
+                    ? null
+                    : (area, CoverageMap.Build(area.Grid, sweepOptions), footprints.Count);
             }, cts.Token).ConfigureAwait(true);
 
             if (cts.IsCancellationRequested) return;
 
-            if (result is not { Ring: { } ring, Area: { } area })
+            if (result is not { Ring: { } ring, Area: { } area, Footprints: var usedFootprints })
             {
                 _viewModel.StatusText = "No elevation data around this location.";
                 CoverageButton.IsChecked = false;
@@ -399,7 +411,7 @@ public partial class MapPanel : UserControl
             var units = _viewModel.CurrentUnitSystem;
 
             string note =
-                (_coverageOrigin is null ? string.Empty : "from a dropped point · ") +
+                (Canvas.ChosenPoint is null ? string.Empty : "from the chosen point · ") +
                 $"to {DisplayUnits.FormatShortDistance(ring.UnobstructedRangeM, units)} open" +
                 (options.Calibration is null ? " · free space" : " · calibrated") +
                 $" · terrain {TerrainGrid.MetresPerPixel(area.Zoom, options.Centre.Lat):0} m/px";
@@ -408,7 +420,8 @@ public partial class MapPanel : UserControl
 
             _viewModel.StatusText =
                 CoverageSummary(ring, area, measuredM, applied, calibration, units,
-                                fromDroppedPoint: _coverageOrigin is not null);
+                                fromChosenPoint: Canvas.ChosenPoint is not null,
+                                footprints: usedFootprints);
         }
         catch (OperationCanceledException)
         {
@@ -457,7 +470,7 @@ public partial class MapPanel : UserControl
     private static string CoverageSummary(
         CoverageRing ring, TerrainArea area, double measuredM,
         PathLossFit? applied, PathLossFit? onFile, UnitSystem units,
-        bool fromDroppedPoint)
+        bool fromChosenPoint, int footprints)
     {
         var parts = new List<string>
         {
@@ -475,7 +488,7 @@ public partial class MapPanel : UserControl
         }
         else
         {
-            parts.Add(fromDroppedPoint
+            parts.Add(fromChosenPoint
                 ? "nothing measured from a point nobody is standing at, so there is no check on this"
                 : "nothing heard directly yet to check it against");
         }
@@ -499,6 +512,19 @@ public partial class MapPanel : UserControl
                 "produce — swept on free space instead",
             _ => "free-space loss — calibrate path loss to draw the range this site actually has",
         });
+
+        if (footprints > 0)
+        {
+            parts.Add($"{footprints:N0} buildings charged for");
+
+            // Overpass is asked for a bounded box, so a sweep wider than that
+            // has buildings for its middle and none for its edges. Saying so
+            // beats letting the far side look mysteriously clear.
+            if (ring.UnobstructedRangeM > OverpassBuildings.MaxRadiusM)
+                parts.Add(
+                    $"buildings only within {DisplayUnits.FormatShortDistance(OverpassBuildings.MaxRadiusM, units)} " +
+                    "of the centre; beyond that the sweep sees terrain alone");
+        }
 
         if (!area.Complete) parts.Add("some terrain missing");
 

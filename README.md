@@ -263,9 +263,10 @@ one RF-switch line, not two.
   survey instrument the path-loss fit needs. Readings are binned by peer and by
   range and averaged, so a driven survey measures one neighbour at many ranges
   instead of at one — the lever arm a node list cannot provide.
-- Coverage and horizon can be swept from any point on the map, not only from
-  this station — right-click bare ground — which turns "what do I reach" into
-  "what would a node here reach".
+- A chosen point: right-click bare ground to work the RF tools from somewhere
+  other than this station — coverage, the horizon, and link profiles to any
+  node. One point, marked on the map, kept until it is cleared, since siting a
+  node means asking several questions about the same spot.
 - Coverage heatmap: the swept field shaded by the odds of a packet decoding —
   reliable through marginal to fringe — so the gradient either side of the
   boundary is visible, along with the coverage islands past an obstruction that

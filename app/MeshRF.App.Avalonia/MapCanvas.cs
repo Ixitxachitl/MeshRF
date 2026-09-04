@@ -476,6 +476,7 @@ public sealed class MapCanvas : Control
         if (_vm is not null)
         {
             DrawPendingBoundingBox(context, originX, originY);
+            DrawPendingLinkProfile(context, originX, originY);
             DrawMarkers(context, originX, originY, w, h);
             DrawSpider(context);
         }
@@ -530,6 +531,7 @@ public sealed class MapCanvas : Control
         CoverageRing? ring, string note = "", double measuredReachM = 0,
         UnitSystem units = UnitSystem.Metric)
     {
+
         _coverage = ring;
         _coverageUnits = units;
         _coverageNote = note;
@@ -1436,6 +1438,36 @@ public sealed class MapCanvas : Control
         context.DrawRectangle(GeofenceFill, GeofencePen, rect);
     }
 
+    private static readonly Pen ChosenPointPen =
+        new(new SolidColorBrush(Color.Parse("#FFD479")), 1.4);
+
+    /// <summary>
+    /// A point the user picked for a tool to work from, marked so the choice is
+    /// visible rather than only announced.
+    ///
+    /// One shape for all of them. A dropped point is the same kind of thing
+    /// whichever tool asked for it, and a ring centred somewhere unexpected is
+    /// a great deal easier to understand with a crosshair on it.
+    /// </summary>
+    private void DrawChosenPoint(
+        DrawingContext context, GeoPoint at, string label, double originX, double originY)
+    {
+        double px = LonToX(at.Lon, _zoom) - originX;
+        double py = LatToY(at.Lat, _zoom) - originY;
+
+        context.DrawEllipse(null, ChosenPointPen, new Point(px, py), 7, 7);
+        context.DrawLine(ChosenPointPen, new Point(px - 12, py), new Point(px + 12, py));
+        context.DrawLine(ChosenPointPen, new Point(px, py - 12), new Point(px, py + 12));
+
+        DrawLabel(context, label, px + 14, py - 7);
+    }
+
+    private void DrawPendingLinkProfile(DrawingContext context, double originX, double originY)
+    {
+        if (ChosenPoint is { } chosen)
+            DrawChosenPoint(context, chosen, "chosen point", originX, originY);
+    }
+
     private void DrawPendingBoundingBox(DrawingContext context, double originX, double originY)
     {
         if (_vm is null) return;
@@ -1717,6 +1749,34 @@ public sealed class MapCanvas : Control
     /// <summary>The same, for the skyline.</summary>
     public event Action<double, double>? RequestHorizonFrom;
 
+    /// <summary>The chosen point was cleared, so anything drawn from it wants
+    /// redoing from this station.</summary>
+    public event Action? ChosenPointCleared;
+
+    /// <summary>
+    /// A place on the map the RF tools work from instead of this station.
+    ///
+    /// One point, not one per tool. Siting a node means asking several
+    /// questions about the same spot — what does it reach, what can it see,
+    /// what is the path to each of these three nodes — so the point stays until
+    /// it is cleared rather than being spent by whichever tool used it last.
+    /// </summary>
+    public GeoPoint? ChosenPoint { get; private set; }
+
+    public void SetChosenPoint(double lat, double lon)
+    {
+        ChosenPoint = new GeoPoint(lat, lon);
+        InvalidateVisual();
+    }
+
+    public void ClearChosenPoint()
+    {
+        if (ChosenPoint is null) return;
+        ChosenPoint = null;
+        InvalidateVisual();
+        ChosenPointCleared?.Invoke();
+    }
+
     // -- Marker context menu ------------------------------------------------
 
     /// <summary>
@@ -1739,12 +1799,51 @@ public sealed class MapCanvas : Control
         if (_vm is null) return null;
 
         var coverage = new MenuItem { Header = "Coverage from here" };
-        coverage.Click += (_, _) => RequestCoverageFrom?.Invoke(lat, lon);
+        coverage.Click += (_, _) =>
+        {
+            SetChosenPoint(lat, lon);
+            RequestCoverageFrom?.Invoke(lat, lon);
+        };
 
         var horizon = new MenuItem { Header = "Horizon from here…" };
-        horizon.Click += (_, _) => RequestHorizonFrom?.Invoke(lat, lon);
+        horizon.Click += (_, _) =>
+        {
+            SetChosenPoint(lat, lon);
+            RequestHorizonFrom?.Invoke(lat, lon);
+        };
 
-        return Menu(coverage, horizon);
+        // A profile needs a far end, so this only chooses the near one. The
+        // node picked next — from its marker or from the grid — finishes it,
+        // and the point stays afterwards so the next node can be profiled from
+        // the same spot.
+        var profile = new MenuItem { Header = "Link profile from here…" };
+        profile.Click += (_, _) =>
+        {
+            SetChosenPoint(lat, lon);
+            _vm.StatusText = "Point chosen. Pick a node to draw the profile to.";
+        };
+
+        var items = new List<Control> { coverage, horizon, profile };
+
+        if (ChosenPoint is not null)
+        {
+            items.Add(new Separator());
+
+            var move = new MenuItem { Header = "Move chosen point here" };
+            move.Click += (_, _) => SetChosenPoint(lat, lon);
+
+            var clear = new MenuItem { Header = "Clear chosen point" };
+            clear.Click += (_, _) =>
+            {
+                ClearChosenPoint();
+                _vm.StatusText = "Chosen point cleared. The tools work from this station again.";
+            };
+
+            items.Add(move);
+            items.Add(clear);
+        }
+
+        return Menu([.. items]);
     }
 
     private ContextMenu? BuildMarkerMenu(RadioViewModel.MapMarker? marker)
@@ -1776,10 +1875,12 @@ public sealed class MapCanvas : Control
         // node under the pointer is harder to find than one that explains
         // itself.
         bool haveBothEnds = node.Latitude is not null && node.Longitude is not null
-            && _vm.TryGetHomeLocation(out _, out _);
+            && (ChosenPoint is not null || _vm.TryGetHomeLocation(out _, out _));
         var linkProfile = new MenuItem
         {
-            Header = "Link profile…",
+            Header = ChosenPoint is null
+                ? "Link profile…"
+                : "Link profile from chosen point…",
             IsEnabled = haveBothEnds,
         };
         if (!haveBothEnds)
