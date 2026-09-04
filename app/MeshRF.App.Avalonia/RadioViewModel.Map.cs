@@ -192,6 +192,7 @@ public partial class RadioViewModel
         var sb = new System.Text.StringBuilder();
         sb.Append(string.IsNullOrWhiteSpace(wp.IconText) ? wp.DisplayName : $"{wp.IconText} {wp.DisplayName}")
           .Append("\nFrom ").Append(_rxHost.NodeDisplayName(wp.FromNode))
+          .Append(" on ").Append(wp.ChannelText)
           .Append('\n').Append(wp.Latitude.ToString("F5", CultureInfo.InvariantCulture))
           .Append(", ").Append(wp.Longitude.ToString("F5", CultureInfo.InvariantCulture));
         if (wp.AltitudeM is int alt)

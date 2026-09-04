@@ -61,4 +61,21 @@ public class WaypointRecordTests
         Assert.NotNull(wp.ExpireTime);
         Assert.Equal("ACTIVE", wp.ExpiryStatus);
     }
+
+    /// <summary>
+    /// The channel a waypoint is tied to, as the list and the map tooltip show
+    /// it. Not decoration: this is the name a resend looks up and the room a
+    /// geofence crossing is posted into, so a row that cannot say which channel
+    /// it belongs to cannot explain either failing.
+    /// </summary>
+    [Fact]
+    public void ChannelTextNamesThePrimaryByRoleWhenTheRecordHasNoName()
+    {
+        // A default-preset primary has no name of its own, so the field is
+        // legitimately empty on a marker that came in on one.
+        Assert.Equal("(primary)", new WaypointRecord { Channel = "" }.ChannelText);
+        Assert.Equal("(primary)", new WaypointRecord { Channel = "   " }.ChannelText);
+
+        Assert.Equal("LongFast", new WaypointRecord { Channel = "LongFast" }.ChannelText);
+    }
 }

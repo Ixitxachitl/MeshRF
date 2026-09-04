@@ -106,6 +106,20 @@ public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChange
         _ => "Point",
     };
 
+    /// <summary>
+    /// The channel for the list, naming the primary by role when the record
+    /// carries no name for it.
+    /// </summary>
+    /// <remarks>
+    /// Worth showing rather than leaving implicit: this is the channel a resend
+    /// looks up by name, and the one a geofence crossing is posted into, so a
+    /// marker whose channel is not on this mesh fails both in ways nothing else
+    /// on the row would explain. A default-preset primary has no name of its
+    /// own, which is why an empty one is a label rather than a blank.
+    /// </remarks>
+    public string ChannelText =>
+        string.IsNullOrWhiteSpace(Channel) ? "(primary)" : Channel;
+
     public long RxEpoch { get; set; }
 
     public DateTime RxTime =>
