@@ -1392,6 +1392,11 @@ public sealed class MapCanvas : Control
     /// <summary>"Delete" was chosen on a node marker, for the same reason.</summary>
     public event Action<NodeRecord>? RequestDeleteNode;
 
+    /// <summary>"Link profile" was chosen on a node marker. Offered only when
+    /// both ends have a position, since a cross-section needs two points.
+    /// </summary>
+    public event Action<NodeRecord>? RequestLinkProfile;
+
     // -- Marker context menu ------------------------------------------------
 
     /// <summary>
@@ -1424,8 +1429,28 @@ public sealed class MapCanvas : Control
 
         var deleteNode = new MenuItem { Header = "Delete" };
         deleteNode.Click += (_, _) => RequestDeleteNode?.Invoke(node);
+
+        // Needs a position at both ends. Shown either way rather than hidden,
+        // and disabled with the reason: an entry that comes and goes with the
+        // node under the pointer is harder to find than one that explains
+        // itself.
+        bool haveBothEnds = node.Latitude is not null && node.Longitude is not null
+            && _vm.TryGetHomeLocation(out _, out _);
+        var linkProfile = new MenuItem
+        {
+            Header = "Link profile…",
+            IsEnabled = haveBothEnds,
+        };
+        if (!haveBothEnds)
+            ToolTip.SetTip(linkProfile, node.Latitude is null
+                ? "This node has not reported a position"
+                : "Set your own location first");
+        linkProfile.Click += (_, _) => RequestLinkProfile?.Invoke(node);
+
         return Menu(
             Item("Message", _vm.MessageNodeCommand, node),
+            new Separator(),
+            linkProfile,
             new Separator(),
             Item("Request node info", _vm.RequestNodeInfoCommand, node),
             Item("Exchange node info", _vm.ExchangeNodeInfoCommand, node),

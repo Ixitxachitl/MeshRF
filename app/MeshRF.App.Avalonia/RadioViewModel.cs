@@ -308,6 +308,19 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>What the radio is actually configured for: the custom SF/BW/CR
+    /// where they differ from the preset, the preset's own values otherwise.
+    /// </summary>
+    public (byte Sf, double BwKhz, byte Cr) EffectiveLoraParams
+    {
+        get
+        {
+            if (IsCustomLoraParams) return (OverrideSf, OverrideBwKhz, OverrideCr);
+            var p = LoraParamsHelper.FromPreset(SelectedPreset, ChannelPlan.IsWideLora(SelectedRegion));
+            return (p.Sf, p.BwKhz, p.Cr);
+        }
+    }
+
     [ObservableProperty]
     private byte _lnaGainDb = 24;
 
@@ -460,22 +473,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (payloadBytes <= 0) return;
 
-        int sf; double bwHz; int cr;
-        if (IsCustomLoraParams)
-        {
-            sf = OverrideSf;
-            bwHz = OverrideBwKhz * 1000.0;
-            cr = OverrideCr;
-        }
-        else
-        {
-            var p = LoraParamsHelper.FromPreset(SelectedPreset, ChannelPlan.IsWideLora(SelectedRegion));
-            sf = p.Sf;
-            bwHz = p.BwKhz * 1000.0;
-            cr = p.Cr;
-        }
+        var (sf, bwKhz, cr) = EffectiveLoraParams;
         _airtime.Record(AirtimeTracker.EstimateAirtimeMs(
-            sf, bwHz, cr, payloadBytes,
+            sf, bwKhz * 1000.0, cr, payloadBytes,
             AirtimeTracker.PreambleSymbolsFor(ChannelPlan.IsWideLora(SelectedRegion))), isTx);
     }
 

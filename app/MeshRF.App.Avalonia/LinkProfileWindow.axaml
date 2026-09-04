@@ -1,0 +1,152 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.LinkProfileWindow"
+        Title="Link Profile"
+        Width="1020" Height="700" MinWidth="820" MinHeight="560"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Window.Styles>
+        <!-- The caption above each figure. Small and quiet so the numbers
+             themselves carry the panel. -->
+        <Style Selector="TextBlock.caption">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+        </Style>
+        <Style Selector="TextBlock.figure">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+        </Style>
+        <Style Selector="StackPanel.tile">
+            <Setter Property="Margin" Value="0,0,18,6" />
+        </Style>
+        <!-- One label and one box per row, matching the config windows. -->
+        <Style Selector="TextBlock.field">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+    </Window.Styles>
+
+    <Grid Margin="8" ColumnDefinitions="*,8,240">
+
+        <Grid Grid.Column="0" RowDefinitions="Auto,*,Auto,Auto">
+
+            <TextBlock Grid.Row="0" x:Name="HeaderText" FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis" Margin="0,0,0,6" />
+
+            <Border Grid.Row="1" BorderThickness="1"
+                    Background="{DynamicResource BrushPanelBackground}"
+                    BorderBrush="{DynamicResource BrushPanelBorder}">
+                <Panel>
+                    <local:LinkProfileChart x:Name="Chart" />
+                    <!-- Sits over the chart rather than replacing it, so a
+                         recompute leaves the previous profile visible instead
+                         of blanking the window while tiles are fetched. -->
+                    <Border x:Name="BusyOverlay" IsVisible="False"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Background="#CC202020" CornerRadius="3" Padding="14,8">
+                        <TextBlock x:Name="BusyText" Text="Fetching terrain…" />
+                    </Border>
+                </Panel>
+            </Border>
+
+            <!-- Eight figures rather than a table: each is read on its own, and
+                 a table would imply an ordering between them that isn't there. -->
+            <Grid Grid.Row="2" Margin="2,8,0,0"
+                  ColumnDefinitions="*,*,*,*" RowDefinitions="Auto,Auto">
+                <StackPanel Grid.Row="0" Grid.Column="0" Classes="tile">
+                    <TextBlock Classes="caption" Text="Distance" />
+                    <TextBlock Classes="figure" x:Name="DistanceText" />
+                </StackPanel>
+                <StackPanel Grid.Row="0" Grid.Column="1" Classes="tile">
+                    <TextBlock Classes="caption" Text="Path" />
+                    <TextBlock Classes="figure" x:Name="VerdictText" />
+                </StackPanel>
+                <StackPanel Grid.Row="0" Grid.Column="2" Classes="tile">
+                    <TextBlock Classes="caption" Text="Fresnel clearance" />
+                    <TextBlock Classes="figure" x:Name="ClearanceText" />
+                </StackPanel>
+                <StackPanel Grid.Row="0" Grid.Column="3" Classes="tile">
+                    <TextBlock Classes="caption" Text="Tightest point" />
+                    <TextBlock Classes="figure" x:Name="WorstText" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="0" Classes="tile">
+                    <TextBlock Classes="caption" Text="Free-space loss" />
+                    <TextBlock Classes="figure" x:Name="PathLossText" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="1" Classes="tile">
+                    <TextBlock Classes="caption" Text="Terrain loss" />
+                    <TextBlock Classes="figure" x:Name="DiffractionText" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="2" Classes="tile">
+                    <TextBlock Classes="caption" Text="Predicted SNR" />
+                    <TextBlock Classes="figure" x:Name="PredictedText" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="3" Classes="tile">
+                    <TextBlock Classes="caption" x:Name="MeasuredCaption" Text="Last measured SNR" />
+                    <TextBlock Classes="figure" x:Name="MeasuredText" />
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Grid.Row="3" x:Name="SourceText" FontSize="10" TextWrapping="Wrap"
+                       Foreground="{DynamicResource BrushSubtle}" Margin="2,2,0,0" />
+        </Grid>
+
+        <Border Grid.Column="2" BorderThickness="1" Padding="8"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto"
+                  ColumnDefinitions="Auto,*">
+
+                <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Stations"
+                           FontWeight="SemiBold" Margin="0,0,0,6" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Classes="field" x:Name="MyHeightLabel" Text="My antenna (m)" />
+                <TextBox   Grid.Row="1" Grid.Column="1" x:Name="MyHeightBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Height of your antenna above the ground it stands on, not above sea level" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Classes="field" x:Name="PeerHeightLabel" Text="Peer antenna (m)" />
+                <TextBox   Grid.Row="2" Grid.Column="1" x:Name="PeerHeightBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Height of the far antenna above its own ground" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Classes="field" Text="My gain (dBi)" />
+                <TextBox   Grid.Row="3" Grid.Column="1" x:Name="MyGainBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Antenna gain net of feedline loss. A stock whip is about 2 dBi." />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Classes="field" Text="Peer gain (dBi)" />
+                <TextBox   Grid.Row="4" Grid.Column="1" x:Name="PeerGainBox" Margin="0,0,0,4" />
+
+                <TextBlock Grid.Row="5" Grid.Column="0" Classes="field" Text="TX power (dBm)" />
+                <TextBox   Grid.Row="5" Grid.Column="1" x:Name="TxPowerBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Conducted power at the transmitting antenna port" />
+
+                <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Text="Radio"
+                           FontWeight="SemiBold" Margin="0,10,0,6" />
+
+                <TextBlock Grid.Row="7" Grid.Column="0" Classes="field" Text="Frequency" />
+                <TextBlock Grid.Row="7" Grid.Column="1" Classes="field" x:Name="FrequencyText" />
+
+                <TextBlock Grid.Row="8" Grid.Column="0" Classes="field" Text="Modem" />
+                <TextBlock Grid.Row="8" Grid.Column="1" Classes="field" x:Name="ModemText" />
+
+                <TextBlock Grid.Row="9" Grid.Column="0" Classes="field" Text="Sensitivity" />
+                <TextBlock Grid.Row="9" Grid.Column="1" Classes="field" x:Name="SensitivityText" />
+
+                <TextBlock Grid.Row="10" Grid.Column="0" Classes="field" Text="Link margin" />
+                <TextBlock Grid.Row="10" Grid.Column="1" Classes="field" x:Name="MarginText" />
+
+                <TextBlock Grid.Row="11" Grid.ColumnSpan="2" x:Name="CaveatText"
+                           FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"
+                           VerticalAlignment="Top"
+                           Foreground="{DynamicResource BrushSubtle}"
+                           Text="Terrain only. Buildings, trees and fading are not modelled, so a clear path here can still fail in the field." />
+
+                <Button Grid.Row="12" Grid.ColumnSpan="2" x:Name="RecomputeButton"
+                        Content="Recompute" HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" Margin="0,8,0,0"
+                        Click="OnRecompute" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

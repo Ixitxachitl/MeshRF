@@ -234,6 +234,11 @@ one RF-switch line, not two.
 - Filtering for nodes, telemetry presence, ignore state, and position-history
   presence.
 - Configurable map node label modes.
+- Link profile between this station and any positioned node: terrain
+  cross-section from Terrarium elevation tiles, first Fresnel zone, single
+  knife-edge diffraction loss, and the LoRa link budget for the modem in use.
+  Where the node is a direct neighbour the measured SNR is shown against the
+  predicted one, so the gap is the clutter the terrain model does not carry.
 
 ### UI and Workflow
 
@@ -623,6 +628,8 @@ Upstream references influencing licensing and implementation include:
 - [meshtastic/protobufs](https://github.com/meshtastic/protobufs) (linked as
   `third_party/meshtastic_protobufs`)
 - [meshtastic/firmware](https://github.com/meshtastic/firmware)
+- [MeshLab RF](https://github.com/HarukiToreda/MeshLab-RF) (MIT), whose
+  propagation model the link profile follows
 
 ## Disclaimer
 

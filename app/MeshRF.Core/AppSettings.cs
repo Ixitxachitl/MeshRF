@@ -374,6 +374,21 @@ public sealed class AppSettings
     public bool MapClusterNodes { get; set; } = true;
     public string MapTileTheme { get; set; } = "Auto";
 
+    // -- Link profile ------------------------------------------------------
+
+    // Antenna facts the elevation model cannot know. Heights are above the
+    // ground the station stands on, not above sea level: the terrain supplies
+    // the rest. Three metres is a mast on a roofline rather than a radio on a
+    // desk, which is what most fixed nodes actually are. The gains are a stock
+    // quarter-wave whip, net of feedline.
+    //
+    // The peer values are defaults for whichever node is being profiled, since
+    // nothing on the mesh reports how a node is mounted.
+    public double LinkProfileMyAntennaM { get; set; } = 3;
+    public double LinkProfilePeerAntennaM { get; set; } = 3;
+    public double LinkProfileMyGainDbi { get; set; } = 2.15;
+    public double LinkProfilePeerGainDbi { get; set; } = 2.15;
+
     // -- Node list filters -------------------------------------------------
 
     public string NodeFilterSearch { get; set; } = string.Empty;

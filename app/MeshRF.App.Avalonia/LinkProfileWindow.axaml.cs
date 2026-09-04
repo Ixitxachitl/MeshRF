@@ -1,0 +1,295 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+using System.Globalization;
+using Avalonia.Controls;
+using Avalonia.Interactivity;
+using Avalonia.Media;
+using MeshRF.Map;
+using MeshRF.Mesh;
+using MeshRF.Nodes;
+
+namespace MeshRF.AvaloniaApp;
+
+/// <summary>
+/// What the ground between this station and one peer does to the link: the
+/// terrain cross-section, the first Fresnel zone, and the loss a ridge in the
+/// way costs, set against what the radio should hear if the path were clear.
+///
+/// The prediction is terrain-only — no buildings, foliage or fading — so its
+/// job is to separate a path that is geometrically fine from one that is not,
+/// and to say how far a marginal one is from clearing. Where the peer is a
+/// direct neighbour the measured SNR is shown beside the predicted one: the gap
+/// between them is the clutter loss this model does not carry, which is the
+/// number worth knowing for a real site.
+/// </summary>
+public partial class LinkProfileWindow : Window
+{
+    private static readonly IBrush Clear = new SolidColorBrush(Color.Parse("#66BB6A"));
+    private static readonly IBrush Marginal = new SolidColorBrush(Color.Parse("#FFB74D"));
+    private static readonly IBrush Blocked = new SolidColorBrush(Color.Parse("#EF5350"));
+
+    /// <summary>Shared across every profile opened this session: the disk cache
+    /// and the failed-fetch backoff belong to the tile source, not to whichever
+    /// window happened to ask for a tile first.</summary>
+    private static readonly TerrainTiles s_terrain = new();
+
+    private RadioViewModel? _vm;
+    private AppSettings? _settings;
+    private NodeRecord? _node;
+    private GeoPoint _from;
+    private GeoPoint _to;
+    private UnitSystem _units;
+    private CancellationTokenSource? _running;
+
+    public LinkProfileWindow()
+    {
+        InitializeComponent();
+        Closed += (_, _) => _running?.Cancel();
+    }
+
+    /// <summary>Opens the profile from this station to a node. The caller has
+    /// already established that both ends have a position.</summary>
+    public static async Task ShowForAsync(
+        Window owner, RadioViewModel vm, AppSettings settings, NodeRecord node,
+        double fromLat, double fromLon)
+    {
+        if (node.Latitude is not double toLat || node.Longitude is not double toLon) return;
+
+        var window = new LinkProfileWindow
+        {
+            _vm = vm,
+            _settings = settings,
+            _node = node,
+            _from = new GeoPoint(fromLat, fromLon),
+            _to = new GeoPoint(toLat, toLon),
+            _units = vm.CurrentUnitSystem,
+        };
+        window.Prepare();
+        await window.ShowDialog(owner);
+    }
+
+    private string PeerName =>
+        !string.IsNullOrWhiteSpace(_node?.LongName) ? _node!.LongName
+        : !string.IsNullOrWhiteSpace(_node?.ShortName) ? _node!.ShortName
+        : _node is null ? "peer" : $"!{_node.NodeNum:x8}";
+
+    private void Prepare()
+    {
+        if (_vm is null || _settings is null) return;
+
+        Title = $"Link Profile — {PeerName}";
+        HeaderText.Text = $"This station  →  {PeerName}";
+
+        string heightUnit = DisplayUnits.AltitudeUnitShort(_units);
+        MyHeightLabel.Text = $"My antenna ({heightUnit})";
+        PeerHeightLabel.Text = $"Peer antenna ({heightUnit})";
+        MyHeightBox.Text = FormatHeight(_settings.LinkProfileMyAntennaM);
+        PeerHeightBox.Text = FormatHeight(_settings.LinkProfilePeerAntennaM);
+        MyGainBox.Text = _settings.LinkProfileMyGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
+        PeerGainBox.Text = _settings.LinkProfilePeerGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
+
+        // Seeded from the radio each time rather than persisted: the configured
+        // output power is the truth, and a stale copy here would quietly
+        // predict a link the radio cannot make.
+        TxPowerBox.Text = DefaultTxPowerDbm().ToString("0.#", CultureInfo.InvariantCulture);
+
+        var (sf, bwKhz, _) = _vm.EffectiveLoraParams;
+        FrequencyText.Text = $"{_vm.CenterFreqMHz:0.###} MHz";
+        ModemText.Text = $"SF{sf} · {bwKhz:0.#} kHz";
+        SensitivityText.Text = $"{LinkBudget.SensitivityDbm(sf, bwKhz):0.0} dBm";
+
+        _ = RecomputeAsync();
+    }
+
+    private double DefaultTxPowerDbm() =>
+        _vm is { IsTxSx1262: true } vm ? vm.Sx1262TxPowerDbm : 22;
+
+    private void OnRecompute(object? sender, RoutedEventArgs e) => _ = RecomputeAsync();
+
+    private async Task RecomputeAsync()
+    {
+        if (_vm is null || _settings is null) return;
+
+        // A second run supersedes the first: the inputs it was started with are
+        // no longer on screen, so its answer would be for a question nobody is
+        // asking any more.
+        _running?.Cancel();
+        var cts = new CancellationTokenSource();
+        _running = cts;
+
+        PersistInputs();
+
+        RecomputeButton.IsEnabled = false;
+        BusyText.Text = "Fetching terrain…";
+        BusyOverlay.IsVisible = true;
+
+        try
+        {
+            var terrain = await s_terrain.SampleAsync(_from, _to, cts.Token).ConfigureAwait(true);
+            if (cts.IsCancellationRequested) return;
+
+            if (terrain is null)
+            {
+                BusyText.Text = "No elevation data for this path.";
+                SourceText.Text = TerrainTiles.Attribution;
+                return;
+            }
+
+            BusyOverlay.IsVisible = false;
+            Render(terrain);
+        }
+        catch (OperationCanceledException)
+        {
+            // The window closed, or a newer run took over.
+        }
+        finally
+        {
+            if (ReferenceEquals(_running, cts))
+            {
+                RecomputeButton.IsEnabled = true;
+                _running = null;
+            }
+            cts.Dispose();
+        }
+    }
+
+    private void Render(TerrainPath terrain)
+    {
+        if (_vm is null || _settings is null) return;
+
+        var (sf, bwKhz, _) = _vm.EffectiveLoraParams;
+        double frequency = _vm.CenterFreqMHz;
+
+        var profile = LinkProfile.Build(
+            terrain.Ground,
+            _settings.LinkProfileMyAntennaM,
+            _settings.LinkProfilePeerAntennaM,
+            frequency);
+
+        Chart.Show(profile, _units, "This station", PeerName);
+
+        DistanceText.Text = DisplayUnits.FormatShortDistance(profile.DistanceM, _units);
+
+        (VerdictText.Text, VerdictText.Foreground) =
+            !profile.HasLineOfSight ? ("Obstructed", Blocked)
+            : !profile.IsFresnelClear ? ("Grazing", Marginal)
+            : ("Clear", Clear);
+
+        // How short the path is, and by how much: the second number is what a
+        // taller mast or a different site has to buy.
+        ClearanceText.Text = double.IsInfinity(profile.WorstClearanceRatio)
+            ? "—"
+            : profile.MetresShortOfClearance > 0
+                ? $"{profile.WorstClearanceRatio:0.00} × F1  (+{DisplayUnits.FormatShortDistance(profile.MetresShortOfClearance, _units)})"
+                : $"{profile.WorstClearanceRatio:0.00} × F1";
+        ClearanceText.Foreground = profile.IsFresnelClear ? Clear : Marginal;
+
+        WorstText.Text =
+            $"{DisplayUnits.FormatShortDistance(profile.Worst.DistanceM, _units)} in, " +
+            $"{DisplayUnits.FormatAltitude((int)Math.Round(profile.Worst.GroundM), _units)}";
+
+        double fspl = LinkBudget.FreeSpacePathLossDb(profile.DistanceM, frequency);
+        PathLossText.Text = $"{fspl:0.0} dB";
+        DiffractionText.Text = $"{profile.DiffractionLossDb:0.0} dB";
+        DiffractionText.Foreground = profile.DiffractionLossDb > 0 ? Marginal : Clear;
+
+        double rxPower = LinkBudget.ReceivedPowerDbm(
+            TxPowerDbm(), GainDbi(MyGainBox, _settings.LinkProfileMyGainDbi),
+            GainDbi(PeerGainBox, _settings.LinkProfilePeerGainDbi), fspl, profile.DiffractionLossDb);
+        double predictedSnr = LinkBudget.SnrDb(rxPower, bwKhz);
+        double margin = LinkBudget.MarginDb(rxPower, sf, bwKhz);
+
+        PredictedText.Text = $"{predictedSnr:0.0} dB";
+        MarginText.Text = $"{margin:0.0} dB";
+        MarginText.Foreground = margin >= 10 ? Clear : margin > 0 ? Marginal : Blocked;
+
+        ShowMeasured(predictedSnr);
+
+        SourceText.Text = string.Join("  ·  ",
+            $"Terrain zoom {terrain.Zoom} ({TerrainGrid.MetresPerPixel(terrain.Zoom, _from.Lat):0} m/px), " +
+            $"{terrain.TileCount} tiles",
+            terrain.Complete ? TerrainTiles.Attribution
+                             : "Part of this path had no elevation data and was bridged. " + TerrainTiles.Attribution);
+    }
+
+    /// <summary>The measured side of the comparison. Only a direct neighbour's
+    /// reading belongs beside a prediction for this path: a reading that
+    /// arrived through a relay measured the last hop, which is somewhere
+    /// else.</summary>
+    private void ShowMeasured(double predictedSnr)
+    {
+        if (_node?.SnrDb is not float measured)
+        {
+            MeasuredCaption.Text = "Last measured SNR";
+            MeasuredText.Text = "—";
+            MeasuredText.Foreground = Foreground;
+            return;
+        }
+
+        if (_node.HopsAway is not (null or 0))
+        {
+            MeasuredCaption.Text = $"Measured ({_node.HopsAway} hops away)";
+            MeasuredText.Text = $"{measured:0.0} dB";
+            MeasuredText.Foreground = Foreground;
+            return;
+        }
+
+        double delta = measured - predictedSnr;
+        MeasuredCaption.Text = "Measured SNR (direct)";
+        MeasuredText.Text = $"{measured:0.0} dB  ({delta:+0.0;-0.0;0.0})";
+
+        // A measurement close to the prediction means the terrain model
+        // accounts for the path. A large shortfall is the clutter this model
+        // does not carry — trees, walls, a bad antenna — and is the number to
+        // act on.
+        MeasuredText.Foreground = Math.Abs(delta) <= 6 ? Clear : delta < 0 ? Marginal : Foreground;
+    }
+
+    // -- Inputs -------------------------------------------------------------
+
+    /// <summary>Takes the panel's values into settings, leaving anything that
+    /// will not parse at its stored value and putting that value back in the
+    /// box, so the panel always shows what the numbers were computed from.
+    /// </summary>
+    private void PersistInputs()
+    {
+        if (_settings is null) return;
+
+        _settings.LinkProfileMyAntennaM = HeightM(MyHeightBox, _settings.LinkProfileMyAntennaM);
+        _settings.LinkProfilePeerAntennaM = HeightM(PeerHeightBox, _settings.LinkProfilePeerAntennaM);
+        _settings.LinkProfileMyGainDbi = GainDbi(MyGainBox, _settings.LinkProfileMyGainDbi);
+        _settings.LinkProfilePeerGainDbi = GainDbi(PeerGainBox, _settings.LinkProfilePeerGainDbi);
+
+        MyHeightBox.Text = FormatHeight(_settings.LinkProfileMyAntennaM);
+        PeerHeightBox.Text = FormatHeight(_settings.LinkProfilePeerAntennaM);
+        MyGainBox.Text = _settings.LinkProfileMyGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
+        PeerGainBox.Text = _settings.LinkProfilePeerGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
+        TxPowerBox.Text = TxPowerDbm().ToString("0.#", CultureInfo.InvariantCulture);
+
+        _settings.Save();
+    }
+
+    private const double FeetPerMetre = 3.28083989501312;
+
+    private string FormatHeight(double metres) =>
+        (DisplayUnits.IsImperial(_units) ? metres * FeetPerMetre : metres)
+            .ToString("0.#", CultureInfo.InvariantCulture);
+
+    /// <summary>A height box in metres. Clamped rather than refused: a negative
+    /// antenna is not a typo worth a dialog, and an absurd mast would only
+    /// stretch the chart.</summary>
+    private double HeightM(TextBox box, double fallback)
+    {
+        if (!TryNumber(box, out double value)) return fallback;
+        if (DisplayUnits.IsImperial(_units)) value /= FeetPerMetre;
+        return Math.Clamp(value, 0, 500);
+    }
+
+    private static double GainDbi(TextBox box, double fallback) =>
+        TryNumber(box, out double value) ? Math.Clamp(value, -20, 30) : fallback;
+
+    private double TxPowerDbm() =>
+        TryNumber(TxPowerBox, out double value) ? Math.Clamp(value, -20, 40) : DefaultTxPowerDbm();
+
+    private static bool TryNumber(TextBox box, out double value) =>
+        double.TryParse(box.Text?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+}

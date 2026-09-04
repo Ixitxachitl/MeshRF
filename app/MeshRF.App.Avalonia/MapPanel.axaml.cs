@@ -16,6 +16,11 @@ public partial class MapPanel : UserControl
 {
     private RadioViewModel? _viewModel;
 
+    /// <summary>Held so the link-profile window can read and write the antenna
+    /// facts it needs, which belong to the station rather than to one profile.
+    /// </summary>
+    private AppSettings? _settings;
+
     public MapPanel()
     {
         InitializeComponent();
@@ -35,6 +40,7 @@ public partial class MapPanel : UserControl
         Canvas.RequestEditWaypoint += OnRequestEditWaypoint;
         Canvas.RequestDeleteWaypoint += OnRequestDeleteWaypoint;
         Canvas.RequestDeleteNode += OnRequestDeleteNode;
+        Canvas.RequestLinkProfile += OnRequestLinkProfile;
     }
 
     /// <summary>"Edit…" on a waypoint marker's context menu, and a double-click
@@ -71,11 +77,23 @@ public partial class MapPanel : UserControl
         _viewModel.DeleteNodeCommand.Execute(node);
     }
 
+    /// <summary>"Link profile…" on a node marker's context menu: the terrain
+    /// cross-section from this station to that node.</summary>
+    private async void OnRequestLinkProfile(NodeRecord node)
+    {
+        if (_viewModel is null || _settings is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon)) return;
+
+        await LinkProfileWindow.ShowForAsync(owner, _viewModel, _settings, node, lat, lon);
+    }
+
     /// <summary>Binds the panel to the view model and restores saved map
     /// preferences. Called once from MainWindow.</summary>
     public void Attach(RadioViewModel viewModel, AppSettings settings)
     {
         _viewModel = viewModel;
+        _settings = settings;
         DataContext = viewModel;
         Canvas.Attach(viewModel);
         Canvas.LoadFromSettings(settings);
