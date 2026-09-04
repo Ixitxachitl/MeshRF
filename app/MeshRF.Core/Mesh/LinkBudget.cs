@@ -60,16 +60,29 @@ public static class LinkBudget
         int spreadingFactor, double bandwidthKhz, double noiseFigureDb = DefaultNoiseFigureDb) =>
         NoiseFloorDbm(bandwidthKhz, noiseFigureDb) + RequiredSnrDb(spreadingFactor);
 
+    /// <summary>Free-space loss over one metre. The reference every log-distance
+    /// model is anchored to: loss at range d is this plus 10 n log₁₀(d), and
+    /// free space is the case n = 2.</summary>
+    public static double FreeSpacePathLossAtOneMetreDb(double frequencyMhz)
+    {
+        if (frequencyMhz <= 0)
+            throw new ArgumentOutOfRangeException(nameof(frequencyMhz), "frequency has to be positive");
+
+        // 20 log₁₀(4π f / c), with the frequency taken in MHz.
+        return 20 * Math.Log10(frequencyMhz) + 20 * Math.Log10(4 * Math.PI * 1e6 / 299_792_458.0);
+    }
+
     /// <summary>Free-space spreading loss. The floor under every other loss
     /// term: no path does better than this.</summary>
     public static double FreeSpacePathLossDb(double distanceM, double frequencyMhz)
     {
         if (distanceM <= 0)
             throw new ArgumentOutOfRangeException(nameof(distanceM), "distance has to be positive");
-        if (frequencyMhz <= 0)
-            throw new ArgumentOutOfRangeException(nameof(frequencyMhz), "frequency has to be positive");
 
-        return 20 * Math.Log10(distanceM / 1000.0) + 20 * Math.Log10(frequencyMhz) + 32.44778;
+        // Derived from the one-metre reference rather than from the more
+        // familiar 32.44 dB km/MHz form, so the two cannot drift apart: the
+        // log-distance fit is anchored to the same number.
+        return FreeSpacePathLossAtOneMetreDb(frequencyMhz) + 20 * Math.Log10(distanceM);
     }
 
     /// <summary>What arrives at the receiver's input.</summary>

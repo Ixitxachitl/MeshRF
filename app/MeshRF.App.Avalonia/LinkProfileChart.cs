@@ -266,7 +266,9 @@ public sealed class LinkProfileChart : Control
         double normalised = rough / magnitude;
         double step = (normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10) * magnitude;
 
+        // Normalised through zero: a tick landing on negative zero prints as
+        // "-0", which reads as a bug in the axis rather than as the origin.
         for (double t = Math.Ceiling(lo / step) * step; t <= hi + step * 1e-9; t += step)
-            yield return t;
+            yield return t == 0 ? 0 : t;
     }
 }

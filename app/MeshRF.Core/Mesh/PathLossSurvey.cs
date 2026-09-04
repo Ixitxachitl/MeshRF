@@ -1,0 +1,145 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+using MeshRF.Map;
+using MeshRF.Nodes;
+
+namespace MeshRF.Mesh;
+
+/// <summary>The station's own facts, which no amount of received traffic
+/// reveals and which every observation is measured against.</summary>
+/// <param name="AssumedPeerTxPowerDbm">What the peers are taken to be running.
+/// Meshtastic reports no such field, so this is an assumption, and the error in
+/// it lands in the fitted offset rather than in the exponent — see
+/// <see cref="PathLossFit"/>.</param>
+public sealed record PathLossSurveyOptions(
+    GeoPoint Home,
+    double MyAntennaM,
+    double PeerAntennaM,
+    double MyGainDbi,
+    double PeerGainDbi,
+    double AssumedPeerTxPowerDbm,
+    double FrequencyMhz,
+    double BandwidthKhz,
+    double NoiseFigureDb = LinkBudget.DefaultNoiseFigureDb,
+    double MinDistanceM = 100,
+    double MaxDistanceM = 100_000);
+
+/// <summary>What one neighbour contributes. <paramref name="TerrainKnown"/> is
+/// false when no elevation could be read for the path, which leaves the terrain
+/// loss unaccounted for and would push it into the fit as if it were clutter.
+/// </summary>
+public sealed record PathLossObservation(
+    uint NodeNum,
+    string Name,
+    double DistanceM,
+    double MeasuredSnrDb,
+    double DiffractionLossDb,
+    double PropagationLossDb,
+    bool TerrainKnown)
+{
+    public PathLossSample ToSample() => new(NodeNum, DistanceM, PropagationLossDb);
+}
+
+/// <summary>
+/// Turns direct neighbours into path-loss observations: for each one, how far
+/// away it is, what the terrain between takes out, and how much loss is left
+/// for distance to account for.
+///
+/// Only nodes heard over the air at zero hops count. A relayed packet's SNR was
+/// measured on the last hop, which is a path between two other radios, and a
+/// packet that arrived over MQTT was not measured by this station's receiver at
+/// all — either one would be a reading of somewhere else entirely.
+/// </summary>
+public sealed class PathLossSurvey
+{
+    private readonly TerrainTiles _terrain;
+
+    public PathLossSurvey(TerrainTiles terrain) => _terrain = terrain;
+
+    /// <summary>The neighbours worth measuring, nearest first.</summary>
+    public static IReadOnlyList<NodeRecord> Candidates(
+        IEnumerable<NodeRecord> nodes, PathLossSurveyOptions options, uint myNodeNum)
+    {
+        var candidates = new List<(NodeRecord Node, double Distance)>();
+
+        foreach (var node in nodes)
+        {
+            if (node.NodeNum == myNodeNum) continue;
+            if (node.HopsAway != 0) continue;
+            if (node.SeenViaMqtt == true) continue;
+            if (node.SnrDb is not float) continue;
+            if (node.Latitude is not double lat || node.Longitude is not double lon) continue;
+
+            double distance = Geodesy.DistanceM(options.Home, new GeoPoint(lat, lon));
+
+            // Too close and the position fuzzing Meshtastic applies is a large
+            // fraction of the range; too far and the node is reporting a
+            // position it does not have.
+            if (distance < options.MinDistanceM || distance > options.MaxDistanceM) continue;
+
+            candidates.Add((node, distance));
+        }
+
+        candidates.Sort(static (a, b) => a.Distance.CompareTo(b.Distance));
+        return candidates.Select(c => c.Node).ToList();
+    }
+
+    /// <summary>Reads the terrain to each candidate and works out the loss its
+    /// measured SNR implies. Runs one node at a time: the tile cache makes
+    /// neighbours in the same direction nearly free, and a burst of parallel
+    /// fetches would only make the progress meaningless.</summary>
+    public async Task<IReadOnlyList<PathLossObservation>> MeasureAsync(
+        IReadOnlyList<NodeRecord> candidates,
+        PathLossSurveyOptions options,
+        IProgress<int>? completed = null,
+        CancellationToken ct = default)
+    {
+        var observations = new List<PathLossObservation>(candidates.Count);
+        double noiseFloor = LinkBudget.NoiseFloorDbm(options.BandwidthKhz, options.NoiseFigureDb);
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var node = candidates[i];
+            var peer = new GeoPoint(node.Latitude!.Value, node.Longitude!.Value);
+            double snr = node.SnrDb!.Value;
+
+            double diffraction = 0;
+            bool terrainKnown = false;
+
+            var terrain = await _terrain.SampleAsync(options.Home, peer, ct).ConfigureAwait(false);
+            if (terrain is not null)
+            {
+                var profile = LinkProfile.Build(
+                    terrain.Ground, options.MyAntennaM, options.PeerAntennaM, options.FrequencyMhz);
+                diffraction = profile.DiffractionLossDb;
+                terrainKnown = terrain.Complete;
+            }
+
+            // Back out the loss from the reading: a received power is an SNR
+            // above the floor, and everything between the two antenna ports had
+            // to account for the difference.
+            double receivedPower = snr + noiseFloor;
+            double totalLoss = options.AssumedPeerTxPowerDbm + options.PeerGainDbi + options.MyGainDbi
+                             - receivedPower;
+
+            observations.Add(new PathLossObservation(
+                NodeNum: node.NodeNum,
+                Name: DisplayName(node),
+                DistanceM: Geodesy.DistanceM(options.Home, peer),
+                MeasuredSnrDb: snr,
+                DiffractionLossDb: diffraction,
+                PropagationLossDb: totalLoss - diffraction,
+                TerrainKnown: terrainKnown));
+
+            completed?.Report(i + 1);
+        }
+
+        return observations;
+    }
+
+    private static string DisplayName(NodeRecord node) =>
+        !string.IsNullOrWhiteSpace(node.LongName) ? node.LongName
+        : !string.IsNullOrWhiteSpace(node.ShortName) ? node.ShortName
+        : $"!{node.NodeNum:x8}";
+}

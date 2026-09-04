@@ -239,6 +239,11 @@ one RF-switch line, not two.
   knife-edge diffraction loss, and the LoRa link budget for the modem in use.
   Where the node is a direct neighbour the measured SNR is shown against the
   predicted one, so the gap is the clutter the terrain model does not carry.
+- Path-loss calibration from that gap: a log-distance model fitted by least
+  squares to every direct neighbour heard over the air, with the terrain loss
+  to each one taken out first. The fitted exponent says how fast signal falls
+  off at this site; applying it puts that clutter loss into every link
+  prediction. Outliers are visible as residuals and can be dropped from the fit.
 
 ### UI and Workflow
 

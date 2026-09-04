@@ -389,6 +389,24 @@ public sealed class AppSettings
     public double LinkProfileMyGainDbi { get; set; } = 2.15;
     public double LinkProfilePeerGainDbi { get; set; } = 2.15;
 
+    // -- Path loss calibration ---------------------------------------------
+
+    // A log-distance model fitted to what this station has heard from its
+    // direct neighbours, and applied to link predictions as the clutter loss
+    // the terrain model does not carry. Null until a calibration has been run
+    // and applied; the rest describes how much that fit is worth.
+    public double? PathLossExponent { get; set; }
+    public double? PathLossOffsetDb { get; set; }
+    public double? PathLossRmsDb { get; set; }
+    public int PathLossSampleCount { get; set; }
+    public DateTime? PathLossFittedUtc { get; set; }
+
+    /// <summary>What the peers are taken to be transmitting at. Meshtastic
+    /// carries no such field, so this is the one number in the calibration that
+    /// has to be told rather than measured. 22 dBm is the stock setting for
+    /// most hardware.</summary>
+    public double PathLossAssumedPeerTxPowerDbm { get; set; } = 22;
+
     // -- Node list filters -------------------------------------------------
 
     public string NodeFilterSearch { get; set; } = string.Empty;

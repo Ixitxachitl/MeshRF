@@ -27,11 +27,6 @@ public partial class LinkProfileWindow : Window
     private static readonly IBrush Marginal = new SolidColorBrush(Color.Parse("#FFB74D"));
     private static readonly IBrush Blocked = new SolidColorBrush(Color.Parse("#EF5350"));
 
-    /// <summary>Shared across every profile opened this session: the disk cache
-    /// and the failed-fetch backoff belong to the tile source, not to whichever
-    /// window happened to ask for a tile first.</summary>
-    private static readonly TerrainTiles s_terrain = new();
-
     private RadioViewModel? _vm;
     private AppSettings? _settings;
     private NodeRecord? _node;
@@ -124,7 +119,7 @@ public partial class LinkProfileWindow : Window
 
         try
         {
-            var terrain = await s_terrain.SampleAsync(_from, _to, cts.Token).ConfigureAwait(true);
+            var terrain = await SharedTerrain.Tiles.SampleAsync(_from, _to, cts.Token).ConfigureAwait(true);
             if (cts.IsCancellationRequested) return;
 
             if (terrain is null)
@@ -202,6 +197,7 @@ public partial class LinkProfileWindow : Window
         MarginText.Text = $"{margin:0.0} dB";
         MarginText.Foreground = margin >= 10 ? Clear : margin > 0 ? Marginal : Blocked;
 
+        ShowCalibrated(profile.DistanceM, rxPower, sf, bwKhz);
         ShowMeasured(predictedSnr);
 
         SourceText.Text = string.Join("  ·  ",
@@ -209,6 +205,47 @@ public partial class LinkProfileWindow : Window
             $"{terrain.TileCount} tiles",
             terrain.Complete ? TerrainTiles.Attribution
                              : "Part of this path had no elevation data and was bridged. " + TerrainTiles.Attribution);
+    }
+
+    /// <summary>
+    /// The same link put through the path-loss model fitted to this station's
+    /// own neighbours, when one has been applied. Everything above this is
+    /// terrain and free space; this row is the clutter those two cannot see —
+    /// foliage, buildings, whatever else this site is surrounded by — measured
+    /// from traffic rather than assumed.
+    /// </summary>
+    private void ShowCalibrated(double distanceM, double freeSpaceRxPowerDbm, int sf, double bwKhz)
+    {
+        if (_settings is not { PathLossExponent: double exponent, PathLossOffsetDb: double offset })
+        {
+            CalibratedHeader.IsVisible = false;
+            ClutterLabel.IsVisible = false;
+            CalibratedMarginLabel.IsVisible = false;
+            ClutterText.Text = string.Empty;
+            CalibratedMarginText.Text = string.Empty;
+            return;
+        }
+
+        var fit = new PathLossFit(exponent, offset, _settings.PathLossRmsDb ?? 0,
+                                  _settings.PathLossSampleCount, ExponentFitted: true, OffsetFitted: true);
+        double clutter = fit.ExcessOverFreeSpaceDb(distanceM);
+        double margin = LinkBudget.MarginDb(freeSpaceRxPowerDbm - clutter, sf, bwKhz);
+
+        CalibratedHeader.IsVisible = true;
+        ClutterLabel.IsVisible = true;
+        CalibratedMarginLabel.IsVisible = true;
+
+        ClutterText.Text = $"{clutter:+0.0;-0.0;0.0} dB";
+        ClutterText.Foreground = clutter > 0 ? Marginal : Clear;
+        CalibratedMarginText.Text = $"{margin:0.0} dB";
+        CalibratedMarginText.Foreground = margin >= 10 ? Clear : margin > 0 ? Marginal : Blocked;
+
+        ToolTip.SetTip(CalibratedHeader,
+            $"n = {exponent:0.00}, offset {offset:+0.0;-0.0;0.0} dB, fitted to " +
+            $"{_settings.PathLossSampleCount} neighbour{(_settings.PathLossSampleCount == 1 ? "" : "s")}" +
+            (_settings.PathLossFittedUtc is DateTime when
+                ? $" on {when.ToLocalTime():d}"
+                : string.Empty));
     }
 
     /// <summary>The measured side of the comparison. Only a direct neighbour's

@@ -96,7 +96,7 @@
         <Border Grid.Column="2" BorderThickness="1" Padding="8"
                 Background="{DynamicResource BrushPanelBackground}"
                 BorderBrush="{DynamicResource BrushPanelBorder}">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto"
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto"
                   ColumnDefinitions="Auto,*">
 
                 <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Stations"
@@ -136,13 +136,28 @@
                 <TextBlock Grid.Row="10" Grid.Column="0" Classes="field" Text="Link margin" />
                 <TextBlock Grid.Row="10" Grid.Column="1" Classes="field" x:Name="MarginText" />
 
-                <TextBlock Grid.Row="11" Grid.ColumnSpan="2" x:Name="CaveatText"
+                <!-- Only shown once a calibration has been fitted and applied.
+                     Absent, the figures above are terrain and free space
+                     alone, which is what they say they are. -->
+                <TextBlock Grid.Row="11" Grid.ColumnSpan="2" x:Name="CalibratedHeader"
+                           Text="Calibrated" IsVisible="False"
+                           FontWeight="SemiBold" Margin="0,10,0,6" />
+
+                <TextBlock Grid.Row="12" Grid.Column="0" Classes="field" x:Name="ClutterLabel"
+                           Text="Clutter loss" IsVisible="False" />
+                <TextBlock Grid.Row="12" Grid.Column="1" Classes="field" x:Name="ClutterText" />
+
+                <TextBlock Grid.Row="13" Grid.Column="0" Classes="field" x:Name="CalibratedMarginLabel"
+                           Text="Link margin" IsVisible="False" />
+                <TextBlock Grid.Row="13" Grid.Column="1" Classes="field" x:Name="CalibratedMarginText" />
+
+                <TextBlock Grid.Row="14" Grid.ColumnSpan="2" x:Name="CaveatText"
                            FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"
                            VerticalAlignment="Top"
                            Foreground="{DynamicResource BrushSubtle}"
                            Text="Terrain only. Buildings, trees and fading are not modelled, so a clear path here can still fail in the field." />
 
-                <Button Grid.Row="12" Grid.ColumnSpan="2" x:Name="RecomputeButton"
+                <Button Grid.Row="15" Grid.ColumnSpan="2" x:Name="RecomputeButton"
                         Content="Recompute" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center" Margin="0,8,0,0"
                         Click="OnRecompute" />

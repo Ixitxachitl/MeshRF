@@ -80,6 +80,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public ObservableCollection<ITabItem> Tabs => _rxHost.Tabs;
     public ObservableCollection<NodeRecord> Nodes => _rxHost.Nodes;
     public ObservableCollection<WaypointRecord> Waypoints => _rxHost.Waypoints;
+
+    /// <summary>Our own node number, or zero before one is known. Public so a
+    /// view can tell our entry in <see cref="Nodes"/> from the mesh's.</summary>
+    public uint MyNodeNum => _rxHost.MyNodeNum;
+
     public ObservableCollection<string> LogLines => _rxHost.LogLines;
 
     /// <summary>The log panel's contents as one block of text.</summary>

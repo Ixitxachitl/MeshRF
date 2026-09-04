@@ -88,6 +88,22 @@ public partial class MapPanel : UserControl
         await LinkProfileWindow.ShowForAsync(owner, _viewModel, _settings, node, lat, lon);
     }
 
+    /// <summary>"Path loss…" on the map chrome: fits a model to every direct
+    /// neighbour at once, rather than to the one link a marker stands for.
+    /// </summary>
+    private async void OnOpenPathLoss(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || _settings is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon))
+        {
+            _viewModel.StatusText = "Set your own location before calibrating path loss.";
+            return;
+        }
+
+        await PathLossWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
+    }
+
     /// <summary>Binds the panel to the view model and restores saved map
     /// preferences. Called once from MainWindow.</summary>
     public void Attach(RadioViewModel viewModel, AppSettings settings)

@@ -1,0 +1,150 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.PathLossWindow"
+        Title="Path Loss Calibration"
+        Width="1060" Height="740" MinWidth="860" MinHeight="600"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Window.Styles>
+        <Style Selector="TextBlock.caption">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+        </Style>
+        <Style Selector="TextBlock.figure">
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+        </Style>
+        <Style Selector="TextBlock.field">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+    </Window.Styles>
+
+    <Grid Margin="8" ColumnDefinitions="*,8,250">
+
+        <Grid Grid.Column="0" RowDefinitions="Auto,*,6,220">
+
+            <TextBlock Grid.Row="0" x:Name="StatusText" Margin="0,0,0,6"
+                       TextTrimming="CharacterEllipsis" />
+
+            <Border Grid.Row="1" BorderThickness="1"
+                    Background="{DynamicResource BrushPanelBackground}"
+                    BorderBrush="{DynamicResource BrushPanelBorder}">
+                <Panel>
+                    <local:PathLossChart x:Name="Chart" />
+                    <Border x:Name="BusyOverlay" IsVisible="True"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Background="#CC202020" CornerRadius="3" Padding="14,8">
+                        <TextBlock x:Name="BusyText" Text="Reading terrain…" />
+                    </Border>
+                </Panel>
+            </Border>
+
+            <!-- Untick a neighbour to drop it from the fit. A node behind a
+                 hill this model cannot see, or reporting a fuzzed position, is
+                 visible here as a residual well outside the rest. -->
+            <!-- x:DataType is what types the column bindings: the rows are
+                 handed over in code, so there is no ItemsSource binding for the
+                 compiler to infer them from. -->
+            <DataGrid Grid.Row="3" x:Name="NodeGrid" x:DataType="local:PathLossRow"
+                      AutoGenerateColumns="False" IsReadOnly="False"
+                      GridLinesVisibility="Horizontal" CanUserResizeColumns="True">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="Use" Width="44"
+                                            Binding="{Binding Include, Mode=TwoWay}" />
+                    <DataGridTextColumn Header="Node" Width="*" MinWidth="120" IsReadOnly="True"
+                                        Binding="{Binding Name}" />
+                    <DataGridTextColumn Header="Range" Width="90" IsReadOnly="True"
+                                        Binding="{Binding Range}" />
+                    <DataGridTextColumn Header="SNR" Width="76" IsReadOnly="True"
+                                        Binding="{Binding Snr}" />
+                    <DataGridTextColumn Header="Terrain" Width="80" IsReadOnly="True"
+                                        Binding="{Binding TerrainLoss}" />
+
+                    <!-- A column is not a control, so its tooltip has to hang
+                         off a header it draws rather than off the column. -->
+                    <DataGridTextColumn Width="80" IsReadOnly="True" Binding="{Binding Excess}">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="Excess"
+                                       ToolTip.Tip="How much worse than free space this neighbour was heard, after terrain" />
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Width="86" IsReadOnly="True" Binding="{Binding Residual}">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="Residual"
+                                       ToolTip.Tip="How far this neighbour sits from the fitted model" />
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+
+        <Border Grid.Column="2" BorderThickness="1" Padding="8"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto"
+                  ColumnDefinitions="Auto,*">
+
+                <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Fitted model"
+                           FontWeight="SemiBold" Margin="0,0,0,6" />
+
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                    <TextBlock Classes="caption" Text="Path loss exponent" />
+                    <TextBlock Classes="figure" x:Name="ExponentText" Text="—" />
+                    <TextBlock Classes="caption" x:Name="ExponentNoteText" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                    <TextBlock Classes="caption" Text="Constant offset" />
+                    <TextBlock Classes="figure" x:Name="OffsetText" Text="—" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                    <TextBlock Classes="caption" Text="Scatter (RMS)" />
+                    <TextBlock Classes="figure" x:Name="RmsText" Text="—" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Margin="0,0,0,4">
+                    <TextBlock Classes="caption" Text="Neighbours used" />
+                    <TextBlock Classes="figure" x:Name="CountText" Text="—" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="Assumptions"
+                           FontWeight="SemiBold" Margin="0,10,0,6" />
+
+                <TextBlock Grid.Row="6" Grid.Column="0" Classes="field" Text="Peer TX (dBm)" />
+                <TextBox   Grid.Row="6" Grid.Column="1" x:Name="PeerTxPowerBox" Margin="0,0,0,4"
+                           ToolTip.Tip="What the other nodes are assumed to transmit at. The mesh does not report this, so an error here moves the offset, not the exponent." />
+
+                <TextBlock Grid.Row="7" Grid.Column="0" Classes="field" x:Name="MyHeightLabel" Text="My antenna (m)" />
+                <TextBox   Grid.Row="7" Grid.Column="1" x:Name="MyHeightBox" Margin="0,0,0,4" />
+
+                <TextBlock Grid.Row="8" Grid.Column="0" Classes="field" x:Name="PeerHeightLabel" Text="Peer antenna (m)" />
+                <TextBox   Grid.Row="8" Grid.Column="1" x:Name="PeerHeightBox" Margin="0,0,0,4" />
+
+                <Button Grid.Row="9" Grid.ColumnSpan="2" x:Name="RemeasureButton"
+                        Content="Re-measure" HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" Margin="0,6,0,0"
+                        Click="OnRemeasure"
+                        ToolTip.Tip="Read the terrain again with these assumptions" />
+
+                <TextBlock Grid.Row="10" Grid.ColumnSpan="2" x:Name="CaveatText"
+                           FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"
+                           VerticalAlignment="Top"
+                           Foreground="{DynamicResource BrushSubtle}"
+                           Text="Each reading is one packet's SNR, not an average, and peer transmit power is assumed rather than reported. Read the exponent as the finding and the offset as bookkeeping." />
+
+                <Button Grid.Row="11" Grid.ColumnSpan="2" x:Name="ApplyButton"
+                        Content="Apply to link predictions" HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" Margin="0,8,0,0"
+                        IsEnabled="False" Click="OnApply" />
+
+                <Button Grid.Row="12" Grid.ColumnSpan="2" x:Name="ClearButton"
+                        Content="Clear calibration" HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" Margin="0,4,0,0"
+                        Click="OnClear" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

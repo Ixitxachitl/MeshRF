@@ -90,6 +90,14 @@
                           HorizontalAlignment="Stretch"
                           SelectionChanged="OnMapTileThemeChanged"
                           ToolTip.Tip="Tile provider for the basemap" />
+
+                <!-- Station-wide rather than per-node, so it belongs on the map
+                     chrome and not in a marker's menu. -->
+                <Button x:Name="PathLossButton" Content="Path loss…"
+                        Height="24" FontSize="11" Margin="0,8,0,0"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                        Click="OnOpenPathLoss"
+                        ToolTip.Tip="Fit a path-loss model to every direct neighbour, and apply it to link predictions" />
             </StackPanel>
         </Border>
 
