@@ -174,7 +174,7 @@ public partial class MapPanel : UserControl
             BandwidthKhz: bwKhz,
             SpreadingFactor: sf,
             Calibration: calibration,
-            MaxCredibleRangeM: CredibleRangeM(calibration, measuredM));
+            MaxCredibleRangeM: CredibleRangeM(calibration));
 
         _viewModel.StatusText = "Sweeping coverage…";
         try
@@ -184,11 +184,15 @@ public partial class MapPanel : UserControl
             // tile fetch rather than after it.
             var result = await Task.Run<(TerrainArea Area, CoverageRing? Ring)?>(async () =>
             {
-                // The open-ground reach, not the link budget's own: at LoRa
-                // sensitivity the budget runs to hundreds of kilometres, and a
-                // disc that size would be fetched at a zoom too coarse to see
-                // any terrain at all.
+                // The radius the sweep will actually walk, cap included. The
+                // open-ground reach alone is the wrong number to fetch by: a
+                // sweep bounded to a few miles would still pull a disc hundreds
+                // across, and the zoom that disc forces reads terrain at a
+                // kilometre a pixel — which is how a bounded ring came out a
+                // perfect circle with nothing obstructed anywhere.
                 double radius = CoverageMap.OpenGroundRangeM(options) * 1.05;
+                if (options.MaxCredibleRangeM > 0)
+                    radius = Math.Min(radius, options.MaxCredibleRangeM);
                 var area = await SharedTerrain.Tiles
                     .LoadAreaAsync(options.Centre, radius, cts.Token)
                     .ConfigureAwait(false);
@@ -283,21 +287,19 @@ public partial class MapPanel : UserControl
     }
 
     /// <summary>
-    /// How far out this station's models may honestly be asked about.
+    /// How far out a fitted calibration may honestly be asked about, or zero
+    /// when there is nothing fitted to bound.
     ///
-    /// A calibration is evidence only over the ranges it was measured across,
-    /// and stretches a little past them. Failing that, the furthest node heard
-    /// directly is the only distance anything here has been checked at. With
-    /// neither, there is no bound to give and the ring runs to wherever the
-    /// link budget and the horizon take it — which is what the summary warns
-    /// about.
+    /// The bound is about extrapolation, so it applies only to a model that was
+    /// fitted to something. Free-space loss is physics with no fitted
+    /// parameters — optimistic over anywhere with clutter in it, but not
+    /// extrapolating from evidence it does not have, so it is warned about
+    /// rather than clipped. Clipping it to what this station happens to have
+    /// heard would be a different claim entirely, and a wrong one: a radio's
+    /// reach is not bounded by where somebody put a node.
     /// </summary>
-    private static double CredibleRangeM(PathLossFit? calibration, double measuredM)
-    {
-        double fromFit = calibration?.CredibleRangeM ?? 0;
-        double fromMeasurement = measuredM > 0 ? measuredM * PathLossFit.ExtrapolationFactor : 0;
-        return Math.Max(fromFit, fromMeasurement);
-    }
+    private static double CredibleRangeM(PathLossFit? calibration) =>
+        calibration?.CredibleRangeM ?? 0;
 
     /// <summary>The applied path-loss calibration, if there is one. Without it
     /// the sweep spends free-space loss, which draws a ring far larger than any

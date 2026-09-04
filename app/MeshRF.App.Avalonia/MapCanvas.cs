@@ -611,22 +611,38 @@ public sealed class MapCanvas : Control
         ];
 
         const double pad = 6, swatch = 10, lineHeight = 15;
-        int lines = entries.Length
-                  + (_measuredReachM > 0 ? 1 : 0)
-                  + (_coverageNote.Length > 0 ? 1 : 0);
+
+        // Laid out from the measured text rather than a guessed width: the note
+        // carries a distance, a source and a resolution, and how wide that runs
+        // depends on the units and on how far the station reaches.
+        var rows = entries
+            .Select(e => (e.Fill, Text: Row(e.Label)))
+            .ToList();
+
+        FormattedText? measured = _measuredReachM > 0
+            ? Row($"Heard direct  {DisplayUnits.FormatShortDistance(_measuredReachM, _coverageUnits)}")
+            : null;
+
+        FormattedText? note = _coverageNote.Length > 0
+            ? new FormattedText(_coverageNote, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                                LabelTypeface, 10, new SolidColorBrush(Color.Parse("#BBBBBB")))
+            : null;
+
+        double labelled = rows.Max(r => r.Text.Width);
+        if (measured is not null) labelled = Math.Max(labelled, measured.Width);
+
+        double boxWidth = Math.Max(swatch + 6 + labelled, note?.Width ?? 0) + pad * 2;
+        int lines = rows.Count + (measured is null ? 0 : 1) + (note is null ? 0 : 1);
         double boxHeight = pad * 2 + lineHeight * lines;
-        double boxWidth = 190;
         double top = height - boxHeight - 8;
 
         context.FillRectangle(LegendBackground, new Rect(8, top, boxWidth, boxHeight), 3);
 
         double y = top + pad;
-        foreach (var (fill, label) in entries)
+        foreach (var (fill, text) in rows)
         {
             context.FillRectangle(fill, new Rect(8 + pad, y + 2, swatch, swatch));
             context.DrawRectangle(null, CoverageEdgePen, new Rect(8 + pad, y + 2, swatch, swatch));
-            var text = new FormattedText(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                                         LabelTypeface, 11, Brushes.White);
             context.DrawText(text, new Point(8 + pad + swatch + 6, y));
             y += lineHeight;
         }
@@ -634,26 +650,20 @@ public sealed class MapCanvas : Control
         // The measured circle last in the list and drawn as a line rather than
         // a swatch, because it is a different kind of thing to the three above
         // it: those are predicted, this one happened.
-        if (_measuredReachM > 0)
+        if (measured is not null)
         {
             double midline = y + 2 + swatch / 2;
             context.DrawLine(MeasuredReachPen,
                 new Point(8 + pad, midline), new Point(8 + pad + swatch, midline));
-            var text = new FormattedText(
-                $"Heard direct  {DisplayUnits.FormatShortDistance(_measuredReachM, _coverageUnits)}",
-                CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                LabelTypeface, 11, Brushes.White);
-            context.DrawText(text, new Point(8 + pad + swatch + 6, y));
+            context.DrawText(measured, new Point(8 + pad + swatch + 6, y));
             y += lineHeight;
         }
 
-        if (_coverageNote.Length > 0)
-        {
-            var note = new FormattedText(_coverageNote, CultureInfo.CurrentCulture,
-                                         FlowDirection.LeftToRight, LabelTypeface, 10,
-                                         new SolidColorBrush(Color.Parse("#BBBBBB")));
-            context.DrawText(note, new Point(8 + pad, y));
-        }
+        if (note is not null) context.DrawText(note, new Point(8 + pad, y));
+
+        static FormattedText Row(string label) =>
+            new(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                LabelTypeface, 11, Brushes.White);
     }
 
     // -- Track overlay (location history) -----------------------------------
