@@ -367,7 +367,28 @@ public partial class MapPanel : UserControl
             MaxCredibleRangeM: CredibleRangeM(applied));
 
         var settings = _settings;
-        _viewModel.StatusText = "Sweeping coverage…";
+
+        // A sweep on a cold cache is mostly waiting: an Overpass query that can
+        // take a minute, then a hundred-odd terrain tiles. Saying which of
+        // those it is on beats one unchanging line for the whole of it.
+        void Busy(string message)
+        {
+            _viewModel.StatusText = message;
+            Canvas.ShowCoverageBusy(message);
+        }
+
+        var tileProgress = new Progress<(int Done, int Total)>(p =>
+            Busy(p.Total == 0
+                ? "Coverage: reading terrain…"
+                : $"Coverage: reading terrain… {p.Done} of {p.Total} tiles"));
+
+        Busy(settings.BuildingLossEnabled
+            ? "Coverage: reading buildings…"
+            : "Coverage: reading terrain…");
+
+        IProgress<int> progressSweeping = new Progress<int>(_ =>
+            Busy($"Coverage: sweeping {options.Bearings} bearings…"));
+
         try
         {
             // The sweep itself is arithmetic over an in-memory grid, but it is
@@ -396,11 +417,15 @@ public partial class MapPanel : UserControl
                     }
                     : options;
                 var area = await SharedTerrain.Tiles
-                    .LoadAreaAsync(options.Centre, radius, cts.Token)
+                    .LoadAreaAsync(options.Centre, radius, tileProgress, cts.Token)
                     .ConfigureAwait(false);
-                return area is null
-                    ? null
-                    : (area, CoverageMap.Build(area.Grid, sweepOptions), footprints);
+                if (area is null) return null;
+
+                // The arithmetic is fast but not instant — a couple of hundred
+                // radials with the diffraction walk on each — so it gets its
+                // own line rather than looking like a stalled download.
+                progressSweeping.Report(0);
+                return (area, CoverageMap.Build(area.Grid, sweepOptions), footprints);
             }, cts.Token).ConfigureAwait(true);
 
             if (cts.IsCancellationRequested) return;
@@ -434,6 +459,7 @@ public partial class MapPanel : UserControl
         }
         finally
         {
+            Canvas.ShowCoverageBusy(null);
             if (ReferenceEquals(_coverageRun, cts)) _coverageRun = null;
             cts.Dispose();
         }

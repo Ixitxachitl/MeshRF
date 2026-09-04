@@ -139,7 +139,8 @@ public sealed class TerrainTiles : IDisposable
     /// has to read the ground in every direction rather than along one line.
     /// Returns null when nothing over the area could be read.</summary>
     public async Task<TerrainArea?> LoadAreaAsync(
-        GeoPoint centre, double radiusM, CancellationToken ct = default)
+        GeoPoint centre, double radiusM,
+        IProgress<(int Done, int Total)>? progress = null, CancellationToken ct = default)
     {
         if (radiusM <= 0 || double.IsNaN(radiusM)) return null;
 
@@ -157,7 +158,7 @@ public sealed class TerrainTiles : IDisposable
             zoom--;
         }
 
-        var tiles = await FetchAsync(needed, zoom, ct).ConfigureAwait(false);
+        var tiles = await FetchAsync(needed, zoom, ct, progress).ConfigureAwait(false);
         if (tiles.Count == 0) return null;
 
         return new TerrainArea(
@@ -228,12 +229,20 @@ public sealed class TerrainTiles : IDisposable
     }
 
     private async Task<Dictionary<(int X, int Y), float[]>> FetchAsync(
-        IEnumerable<(int X, int Y)> wanted, int zoom, CancellationToken ct)
+        IEnumerable<(int X, int Y)> wanted, int zoom, CancellationToken ct,
+        IProgress<(int Done, int Total)>? progress = null)
     {
         var results = new Dictionary<(int X, int Y), float[]>();
         var gate = new object();
 
-        var work = wanted.Select(async key =>
+        // Counted rather than inferred from the results: a tile that failed to
+        // load is still one the caller has finished waiting for, and progress
+        // that stalls on a missing tile is worse than none.
+        var keys = wanted as IReadOnlyCollection<(int X, int Y)> ?? [.. wanted];
+        int done = 0, total = keys.Count;
+        progress?.Report((0, total));
+
+        var work = keys.Select(async key =>
         {
             await _fetchGate.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -241,7 +250,11 @@ public sealed class TerrainTiles : IDisposable
                 if (await LoadTileAsync(zoom, key.X, key.Y, ct).ConfigureAwait(false) is { } tile)
                     lock (gate) results[key] = tile;
             }
-            finally { _fetchGate.Release(); }
+            finally
+            {
+                _fetchGate.Release();
+                progress?.Report((Interlocked.Increment(ref done), total));
+            }
         });
 
         await Task.WhenAll(work).ConfigureAwait(false);

@@ -104,6 +104,44 @@ public class CoverageRenderTests(HeadlessAvalonia ui) : RenderTest(ui)
     });
 
     [Fact]
+    public void WhatASweepIsWaitingOnIsShownOnTheMap() => Ui(() =>
+    {
+        // A sweep on a cold cache pulls a hundred-odd terrain tiles and can sit
+        // for a minute. The status bar alone is the wrong place to say so — the
+        // user is looking at the map.
+        var canvas = new MapCanvas();
+        canvas.SetTileTheme("None");
+        canvas.CenterOn(Centre.Lat, Centre.Lon, zoom: 13);
+
+        var idle = Rendered.Draw(canvas, W, H);
+
+        canvas.ShowCoverageBusy("Coverage: reading terrain… 12 of 40 tiles");
+        var busy = Rendered.Draw(canvas, W, H);
+
+        // The chip sits bottom-left, where the legend goes once there is one.
+        var corner = new PixelRect(0, H - 60, 340, 60);
+        Assert.True(busy.CountInk(corner) > idle.CountInk(corner) + 200,
+            "no busy chip was drawn");
+    });
+
+    [Fact]
+    public void TheBusyChipGoesAwayWhenTheSweepDoes() => Ui(() =>
+    {
+        var canvas = new MapCanvas();
+        canvas.SetTileTheme("None");
+        canvas.CenterOn(Centre.Lat, Centre.Lon, zoom: 13);
+
+        canvas.ShowCoverageBusy("Coverage: reading buildings…");
+        int busy = Rendered.Draw(canvas, W, H).CountInk(new PixelRect(0, H - 60, 340, 60));
+
+        canvas.ShowCoverageBusy(null);
+        int cleared = Rendered.Draw(canvas, W, H).CountInk(new PixelRect(0, H - 60, 340, 60));
+
+        Assert.True(busy > 200, $"nothing was drawn to begin with ({busy} px)");
+        Assert.True(cleared < 40, $"the chip outlived the sweep ({cleared} px)");
+    });
+
+    [Fact]
     public void ClearingCoverageLeavesTheMapAlone() => Ui(() =>
     {
         var ring = CoverageMap.Build(new Ridged(), Options())!;

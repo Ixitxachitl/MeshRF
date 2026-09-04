@@ -123,6 +123,11 @@ public partial class HorizonWindow : Window
 
         var options = new HorizonOptions(
             _centre, _settings.LinkProfileMyAntennaM, _radiusM);
+
+        var tileProgress = new Progress<(int Done, int Total)>(p =>
+            BusyText.Text = p.Total == 0
+                ? "Reading terrain…"
+                : $"Reading terrain… {p.Done} of {p.Total} tiles");
         double peerAntennaM = _settings.LinkProfilePeerAntennaM;
 
         // Nodes with a position, named as the map names them. Read on the UI
@@ -142,7 +147,7 @@ public partial class HorizonWindow : Window
                                         IReadOnlyList<HorizonTarget> Targets)?>(async () =>
             {
                 var area = await SharedTerrain.Tiles
-                    .LoadAreaAsync(_centre, _radiusM, cts.Token)
+                    .LoadAreaAsync(_centre, _radiusM, tileProgress, cts.Token)
                     .ConfigureAwait(false);
                 if (area is null) return null;
 

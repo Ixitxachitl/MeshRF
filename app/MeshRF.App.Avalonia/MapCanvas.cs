@@ -500,6 +500,19 @@ public sealed class MapCanvas : Control
     private CoverageRing? _coverage;
     private string _coverageNote = string.Empty;
     private double _measuredReachM;
+    private string? _coverageBusy;
+
+    /// <summary>Shows what a sweep is waiting on, in the corner the legend
+    /// will occupy once there is one. On the map rather than only in the status
+    /// bar: a sweep on a cold cache pulls a hundred-odd terrain tiles and can
+    /// sit for a minute, and the place to say so is where the user is
+    /// looking.</summary>
+    public void ShowCoverageBusy(string? message)
+    {
+        if (_coverageBusy == message) return;
+        _coverageBusy = message;
+        InvalidateVisual();
+    }
     private CoverageHeatmap? _heatmap;
     private bool _heatmapVisible = true;
 
@@ -687,6 +700,17 @@ public sealed class MapCanvas : Control
     /// leaves free.</summary>
     private void DrawCoverageLegend(DrawingContext context, double height)
     {
+        if (_coverageBusy is { Length: > 0 } busy)
+        {
+            var text = new FormattedText(busy, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                                         LabelTypeface, 11, Brushes.White);
+            var box = new Rect(8, height - text.Height - 20, text.Width + 16, text.Height + 12);
+
+            context.FillRectangle(LegendBackground, box, 3);
+            context.DrawText(text, new Point(box.X + 8, box.Y + 6));
+            return;
+        }
+
         if (_coverage is not { } ring) return;
 
         // The swatches mean different things depending on what was drawn. With
