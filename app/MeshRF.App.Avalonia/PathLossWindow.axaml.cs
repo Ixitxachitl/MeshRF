@@ -163,9 +163,10 @@ public partial class PathLossWindow : Window
         {
             BusyText.Text = "Reading buildings…";
             BusyOverlay.IsVisible = true;
-            _buildings = await SharedTerrain
+            var extract = await SharedTerrain
                 .BuildingsAroundAsync(_settings, _home, OverpassBuildings.MaxRadiusM, cts.Token)
                 .ConfigureAwait(true);
+            _buildings = extract.Index;
             if (cts.IsCancellationRequested) return;
         }
         else if (!_settings.BuildingLossEnabled)

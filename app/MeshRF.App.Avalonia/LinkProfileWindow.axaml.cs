@@ -35,6 +35,7 @@ public partial class LinkProfileWindow : Window
     private UnitSystem _units;
     private CancellationTokenSource? _running;
     private BuildingIndex _buildings = BuildingIndex.Empty;
+    private BuildingExtract _buildingExtract = BuildingExtract.None;
 
     public LinkProfileWindow()
     {
@@ -130,12 +131,14 @@ public partial class LinkProfileWindow : Window
                 BusyText.Text = "Reading buildings…";
                 var middle = Geodesy.Interpolate(_from, _to, 0.5);
                 double reach = Geodesy.DistanceM(_from, _to) / 2 + 200;
-                _buildings = await SharedTerrain
+                _buildingExtract = await SharedTerrain
                     .BuildingsAroundAsync(_settings, middle, reach, cts.Token)
                     .ConfigureAwait(true);
+                _buildings = _buildingExtract.Index;
             }
             else
             {
+                _buildingExtract = BuildingExtract.None;
                 _buildings = BuildingIndex.Empty;
             }
 
@@ -206,6 +209,17 @@ public partial class LinkProfileWindow : Window
 
         var crossed = _buildings.AlongPath(_from, _to);
         double buildingLoss = SharedTerrain.LossModel(_settings).LossDb(crossed);
+
+        // The caveat has to follow what the model actually did. Saying
+        // buildings are not modelled while charging for eleven of them is
+        // worse than saying nothing.
+        CaveatText.Text = !_settings.BuildingLossEnabled
+            ? "Terrain only. Buildings, trees and fading are not modelled, so a clear path here can still fail in the field."
+            : _buildingExtract.LookupFailed
+                ? "Terrain only — buildings are switched on but OpenStreetMap could not be reached, so none were charged for. Trees and fading are never modelled."
+                : crossed.Count > 0
+                    ? $"Terrain and {crossed.Count} building{(crossed.Count == 1 ? "" : "s")} on this path. Trees and fading are not modelled, and the building figures are a starting point the path-loss fit is meant to correct."
+                    : "Terrain only on this path — buildings are switched on, but none are mapped along it. Trees and fading are not modelled.";
 
         // Terrain and buildings share a tile: they are the two things in the
         // way, and a path with both has one number for what the ground costs.

@@ -151,6 +151,9 @@
                            Text="Link margin" IsVisible="False" />
                 <TextBlock Grid.Row="13" Grid.Column="1" Classes="field" x:Name="CalibratedMarginText" />
 
+                <!-- Written at render time, since what is and is not modelled
+                     depends on whether buildings are switched on and whether
+                     any were found. -->
                 <TextBlock Grid.Row="14" Grid.ColumnSpan="2" x:Name="CaveatText"
                            FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"
                            VerticalAlignment="Top"

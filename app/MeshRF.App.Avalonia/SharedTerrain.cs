@@ -27,11 +27,11 @@ public static class SharedTerrain
     /// <summary>The footprints around a point, or an empty index when
     /// buildings are switched off. Keeps every caller from repeating the
     /// settings check.</summary>
-    public static Task<BuildingIndex> BuildingsAroundAsync(
+    public static Task<BuildingExtract> BuildingsAroundAsync(
         AppSettings settings, GeoPoint centre, double radiusM, CancellationToken ct = default) =>
         settings.BuildingLossEnabled
             ? Buildings.AroundAsync(centre, radiusM, ct)
-            : Task.FromResult(BuildingIndex.Empty);
+            : Task.FromResult(BuildingExtract.None);
 
     /// <summary>The loss model the user has configured.</summary>
     public static BuildingLossModel LossModel(AppSettings settings) =>

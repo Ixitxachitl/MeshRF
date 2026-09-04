@@ -126,7 +126,22 @@ public class OverpassBuildingsTests
     {
         using var buildings = new OverpassBuildings();
 
-        var index = await buildings.AroundAsync(new GeoPoint(0, 0), 0);
-        Assert.Equal(0, index.Count);
+        var extract = await buildings.AroundAsync(new GeoPoint(0, 0), 0);
+
+        Assert.Equal(0, extract.Count);
+        Assert.False(extract.LookupFailed);
+    }
+
+    [Fact]
+    public void NoneMappedAndCouldNotAskAreDifferentAnswers()
+    {
+        // They look identical on a map — no buildings drawn, nothing charged
+        // for — and identical to the toggle having done nothing at all. The
+        // caller can only say which if the lookup says which.
+        Assert.Equal(0, BuildingExtract.None.Count);
+        Assert.False(BuildingExtract.None.LookupFailed);
+
+        Assert.Equal(0, BuildingExtract.Unavailable.Count);
+        Assert.True(BuildingExtract.Unavailable.LookupFailed);
     }
 }

@@ -5,6 +5,21 @@ using System.Text.Json;
 
 namespace MeshRF.Map;
 
+/// <summary>What a lookup came back with, and whether it actually happened.
+///
+/// An empty index means one of two very different things — nobody has mapped
+/// any buildings here, or the service could not be reached — and a prediction
+/// that quietly drops the buildings it was asked for should say which.
+/// </summary>
+public sealed record BuildingExtract(BuildingIndex Index, bool LookupFailed)
+{
+    public static readonly BuildingExtract None = new(BuildingIndex.Empty, false);
+
+    public static readonly BuildingExtract Unavailable = new(BuildingIndex.Empty, true);
+
+    public int Count => Index.Count;
+}
+
 /// <summary>
 /// Fetches building footprints from OpenStreetMap through Overpass.
 ///
@@ -51,10 +66,10 @@ public sealed class OverpassBuildings : IDisposable
     /// when the service is unreachable: a prediction without buildings is worse
     /// but still a prediction, and the caller is told which it got.
     /// </summary>
-    public async Task<BuildingIndex> AroundAsync(
+    public async Task<BuildingExtract> AroundAsync(
         GeoPoint centre, double radiusM, CancellationToken ct = default)
     {
-        if (radiusM <= 0) return BuildingIndex.Empty;
+        if (radiusM <= 0) return BuildingExtract.None;
         radiusM = Math.Min(radiusM, MaxRadiusM);
 
         double dLat = radiusM / 111_320.0;
@@ -64,10 +79,12 @@ public sealed class OverpassBuildings : IDisposable
         double west = centre.Lon - dLon, east = centre.Lon + dLon;
 
         var file = Path.Combine(_cacheDir, CacheName(south, west, north, east));
-        if (Fresh(file) && ReadCache(file) is { } cached) return cached;
+        if (Fresh(file) && ReadCache(file) is { } cached) return new BuildingExtract(cached, false);
 
+        // Still inside a backoff from an earlier refusal, which is a failure
+        // that has not stopped being one just because it is not being retried.
         var key = file;
-        if (!_backoff.ShouldTry(key, DateTimeOffset.UtcNow)) return BuildingIndex.Empty;
+        if (!_backoff.ShouldTry(key, DateTimeOffset.UtcNow)) return BuildingExtract.Unavailable;
 
         string json;
         try
@@ -88,12 +105,12 @@ public sealed class OverpassBuildings : IDisposable
         catch (HttpRequestException)
         {
             _backoff.Failed(key, DateTimeOffset.UtcNow);
-            return BuildingIndex.Empty;
+            return BuildingExtract.Unavailable;
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
             _backoff.Failed(key, DateTimeOffset.UtcNow);
-            return BuildingIndex.Empty;
+            return BuildingExtract.Unavailable;
         }
 
         try
@@ -104,7 +121,7 @@ public sealed class OverpassBuildings : IDisposable
         catch (IOException) { /* the cache is an optimisation */ }
         catch (UnauthorizedAccessException) { /* the cache is an optimisation */ }
 
-        return new BuildingIndex(Parse(json));
+        return new BuildingExtract(new BuildingIndex(Parse(json)), false);
     }
 
     /// <summary>

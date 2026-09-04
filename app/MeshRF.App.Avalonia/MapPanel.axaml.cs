@@ -373,7 +373,7 @@ public partial class MapPanel : UserControl
             // The sweep itself is arithmetic over an in-memory grid, but it is
             // hundreds of radials of it, so it goes off the UI thread with the
             // tile fetch rather than after it.
-            var result = await Task.Run<(TerrainArea Area, CoverageRing? Ring, int Footprints)?>(async () =>
+            var result = await Task.Run<(TerrainArea Area, CoverageRing? Ring, BuildingExtract Buildings)?>(async () =>
             {
                 // The radius the sweep will actually walk, cap included. The
                 // open-ground reach alone is the wrong number to fetch by: a
@@ -389,19 +389,23 @@ public partial class MapPanel : UserControl
                     .BuildingsAroundAsync(settings, options.Centre, radius, cts.Token)
                     .ConfigureAwait(false);
                 var sweepOptions = footprints.Count > 0
-                    ? options with { Buildings = footprints, BuildingLoss = SharedTerrain.LossModel(settings) }
+                    ? options with
+                    {
+                        Buildings = footprints.Index,
+                        BuildingLoss = SharedTerrain.LossModel(settings),
+                    }
                     : options;
                 var area = await SharedTerrain.Tiles
                     .LoadAreaAsync(options.Centre, radius, cts.Token)
                     .ConfigureAwait(false);
                 return area is null
                     ? null
-                    : (area, CoverageMap.Build(area.Grid, sweepOptions), footprints.Count);
+                    : (area, CoverageMap.Build(area.Grid, sweepOptions), footprints);
             }, cts.Token).ConfigureAwait(true);
 
             if (cts.IsCancellationRequested) return;
 
-            if (result is not { Ring: { } ring, Area: { } area, Footprints: var usedFootprints })
+            if (result is not { Ring: { } ring, Area: { } area, Buildings: { } usedBuildings })
             {
                 _viewModel.StatusText = "No elevation data around this location.";
                 CoverageButton.IsChecked = false;
@@ -421,7 +425,8 @@ public partial class MapPanel : UserControl
             _viewModel.StatusText =
                 CoverageSummary(ring, area, measuredM, applied, calibration, units,
                                 fromChosenPoint: Canvas.ChosenPoint is not null,
-                                footprints: usedFootprints);
+                                buildings: usedBuildings,
+                                buildingsWanted: _settings.BuildingLossEnabled);
         }
         catch (OperationCanceledException)
         {
@@ -470,7 +475,7 @@ public partial class MapPanel : UserControl
     private static string CoverageSummary(
         CoverageRing ring, TerrainArea area, double measuredM,
         PathLossFit? applied, PathLossFit? onFile, UnitSystem units,
-        bool fromChosenPoint, int footprints)
+        bool fromChosenPoint, BuildingExtract buildings, bool buildingsWanted)
     {
         var parts = new List<string>
         {
@@ -513,14 +518,23 @@ public partial class MapPanel : UserControl
             _ => "free-space loss — calibrate path loss to draw the range this site actually has",
         });
 
-        if (footprints > 0)
+        // Asked for and not delivered is the case worth naming. An empty
+        // answer and a refused one look identical on the map, and both look
+        // exactly like the toggle having done nothing.
+        if (buildingsWanted)
         {
-            parts.Add($"{footprints:N0} buildings charged for");
+            parts.Add(buildings switch
+            {
+                { Count: > 0 } => $"{buildings.Count:N0} buildings charged for",
+                { LookupFailed: true } =>
+                    "buildings are on, but OpenStreetMap could not be reached — swept on terrain alone",
+                _ => "buildings are on, but none are mapped around here",
+            });
 
             // Overpass is asked for a bounded box, so a sweep wider than that
             // has buildings for its middle and none for its edges. Saying so
             // beats letting the far side look mysteriously clear.
-            if (ring.UnobstructedRangeM > OverpassBuildings.MaxRadiusM)
+            if (buildings.Count > 0 && ring.UnobstructedRangeM > OverpassBuildings.MaxRadiusM)
                 parts.Add(
                     $"buildings only within {DisplayUnits.FormatShortDistance(OverpassBuildings.MaxRadiusM, units)} " +
                     "of the centre; beyond that the sweep sees terrain alone");
