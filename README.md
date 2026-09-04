@@ -234,48 +234,45 @@ one RF-switch line, not two.
 - Filtering for nodes, telemetry presence, ignore state, and position-history
   presence.
 - Configurable map node label modes.
-- Link profile between this station and any positioned node: terrain
-  cross-section from Terrarium elevation tiles, first Fresnel zone, single
-  knife-edge diffraction loss, and the LoRa link budget for the modem in use.
-  Where the node is a direct neighbour the measured SNR is shown against the
-  predicted one, so the gap is the clutter the terrain model does not carry.
-- Path-loss calibration from that gap: a log-distance model fitted by least
-  squares to every direct neighbour heard over the air, with the terrain loss
-  to each one taken out first. The fitted exponent says how fast signal falls
-  off at this site; applying it puts that clutter loss into every link
-  prediction. Outliers are visible as residuals and can be dropped from the fit.
-- Coverage ring over the map: a compass sweep of how far the station reaches in
-  each direction, coloured by whether terrain cost that direction anything. Each
-  bearing is walked outward to where contiguous coverage ends, judged against
-  the range the same radio gets over open ground, and the fitted path loss is
-  used in place of free space wherever a calibration has been applied.
-- Building attenuation: OpenStreetMap footprints fetched through Overpass and
-  charged against every path that crosses them, in the link profile, the
-  coverage sweep and the calibration alike. Off by default, since it puts the
-  app on a shared public service. The defaults are MeshLab RF's field-survey
-  figures for its own region, so they are a starting point the path-loss fit is
-  meant to correct rather than constants to trust.
-- Place search on the map, and a topographic basemap alongside the street,
-  satellite and dark ones — plus "None", for working offline or reading an
-  overlay without a map competing with it.
-- Survey recording: every directly-heard packet written to a CSV along with
-  where this station was standing, which turns a client with a GPS into the
-  survey instrument the path-loss fit needs. Readings are binned by peer and by
-  range and averaged, so a driven survey measures one neighbour at many ranges
-  instead of at one — the lever arm a node list cannot provide.
-- A chosen point: right-click bare ground to work the RF tools from somewhere
-  other than this station — coverage, the horizon, and link profiles to any
-  node. One point, marked on the map, kept until it is cleared, since siting a
-  node means asking several questions about the same spot.
-- Coverage heatmap: the swept field shaded by the odds of a packet decoding —
-  reliable through marginal to fringe — so the gradient either side of the
-  boundary is visible, along with the coverage islands past an obstruction that
-  a single ring edge deliberately will not claim.
-- Horizon panorama: the 360° skyline from this antenna, shaded by how far away
-  the ground defining it is, with every positioned node plotted where it would
-  appear against it — green where the terrain leaves a clear sight of it, red
-  where a ridge is in the way. Geometry only, and the answer to how much mast
-  a hidden neighbour would take.
+- Basemaps including topographic and none, and place search by name.
+
+### RF Planning
+
+Terrain-aware link and coverage prediction, calibrated against what the radio
+has actually heard. Elevation comes from Terrarium tiles on AWS Open Data and
+building footprints from OpenStreetMap through Overpass; neither needs a key.
+
+- **Link profile** between this station — or any point on the map — and a
+  positioned node: terrain cross-section, the first Fresnel zone, single
+  knife-edge diffraction loss (ITU-R P.526), and the LoRa link budget for the
+  modem in use. Where the node is a direct neighbour its measured SNR is shown
+  against the predicted one, and the gap is the clutter the terrain model does
+  not carry.
+- **Path-loss calibration** from that gap: a log-distance model fitted by least
+  squares to every direct neighbour heard over the air, with terrain and
+  building loss taken out first. The exponent says how fast signal falls off at
+  this site; the offset absorbs what the mesh never reports, such as peer
+  transmit power. Outliers show as residuals and can be dropped from the fit,
+  and a fit that could not measure an exponent says so rather than pretending.
+- **Coverage** as a compass sweep of how far the station reaches, drawn either
+  as per-bearing verdicts or as a heatmap shaded by the odds of a packet
+  decoding — which also shows the coverage islands past an obstruction that a
+  single ring edge will not claim. Bounded by the range the calibration has
+  evidence for, rather than extrapolated past it.
+- **Horizon panorama**: the 360° skyline from the antenna, shaded by how far
+  away the ground defining it is, with every positioned node plotted where it
+  would appear against it. Geometry only, and the answer to how much mast a
+  hidden neighbour would take.
+- **Survey recording** writes every directly-heard packet to a CSV with the
+  station's position at the time, which turns a client with a GPS into the
+  survey instrument the fit needs. Readings are binned per peer per range and
+  averaged, so a driven survey measures one neighbour at many ranges instead of
+  at one.
+- **Building attenuation** charges a path for the footprints it crosses, in the
+  profile, the sweep and the calibration alike. Off by default, since it puts
+  the app on a shared public service.
+- A **chosen point** on the map runs any of it from somewhere other than this
+  station, which turns "what do I reach" into "what would a node here reach".
 
 ### UI and Workflow
 
