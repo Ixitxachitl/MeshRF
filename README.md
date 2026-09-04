@@ -259,7 +259,12 @@ and building-attenuation figures are all its work.
   building loss taken out first. The exponent says how fast signal falls off at
   this site; the offset absorbs what the mesh never reports, such as peer
   transmit power. Outliers show as residuals and can be dropped from the fit,
-  and a fit that could not measure an exponent says so rather than pretending.
+  and a fit that could not measure an exponent says so rather than pretending —
+  including the quiet case where the readings strengthen with reported distance,
+  which means the ranges are invented rather than that the model is subtle.
+  Direct neighbours are recognised from the best path they have actually been
+  heard over, tied to the geometry it was heard at, so one relayed duplicate no
+  longer drops a node out of the fit.
 - **Coverage** as a compass sweep of how far the station reaches, drawn either
   as per-bearing verdicts or as a heatmap shaded by the odds of a packet
   decoding — which also shows the coverage islands past an obstruction that a
