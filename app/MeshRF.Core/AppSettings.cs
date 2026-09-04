@@ -389,6 +389,18 @@ public sealed class AppSettings
     public double LinkProfileMyGainDbi { get; set; } = 2.15;
     public double LinkProfilePeerGainDbi { get; set; } = 2.15;
 
+    /// <summary>Headroom over the demodulator's floor that still counts as
+    /// reach when sweeping coverage. Zero is the cliff edge, where fading alone
+    /// drops the link; ten describes somewhere a packet reliably gets through.
+    /// It moves the ring materially, so it belongs to the user rather than to
+    /// a constant.</summary>
+    public double CoverageRequiredMarginDb { get; set; } = 6;
+
+    /// <summary>How far the horizon sweep looks. Remembered because it is a
+    /// question about a place — the ridge at the end of the street or the hills
+    /// behind it — and the answer does not change between sittings.</summary>
+    public double HorizonRadiusM { get; set; } = 15_000;
+
     // -- Path loss calibration ---------------------------------------------
 
     // A log-distance model fitted to what this station has heard from its

@@ -115,6 +115,8 @@ public partial class PathLossWindow : Window
         PeerHeightBox.Text = FormatHeight(_settings.LinkProfilePeerAntennaM);
         PeerTxPowerBox.Text =
             _settings.PathLossAssumedPeerTxPowerDbm.ToString("0.#", CultureInfo.InvariantCulture);
+        MyGainBox.Text = _settings.LinkProfileMyGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
+        PeerGainBox.Text = _settings.LinkProfilePeerGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
 
         ClearButton.IsEnabled = _settings.PathLossExponent is not null;
 
@@ -313,11 +315,15 @@ public partial class PathLossWindow : Window
         _settings.PathLossAssumedPeerTxPowerDbm =
             TryNumber(PeerTxPowerBox, out double tx) ? Math.Clamp(tx, -20, 40)
                                                      : _settings.PathLossAssumedPeerTxPowerDbm;
+        _settings.LinkProfileMyGainDbi = GainDbi(MyGainBox, _settings.LinkProfileMyGainDbi);
+        _settings.LinkProfilePeerGainDbi = GainDbi(PeerGainBox, _settings.LinkProfilePeerGainDbi);
 
         MyHeightBox.Text = FormatHeight(_settings.LinkProfileMyAntennaM);
         PeerHeightBox.Text = FormatHeight(_settings.LinkProfilePeerAntennaM);
         PeerTxPowerBox.Text =
             _settings.PathLossAssumedPeerTxPowerDbm.ToString("0.#", CultureInfo.InvariantCulture);
+        MyGainBox.Text = _settings.LinkProfileMyGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
+        PeerGainBox.Text = _settings.LinkProfilePeerGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
 
         _settings.Save();
     }
@@ -332,6 +338,9 @@ public partial class PathLossWindow : Window
         if (DisplayUnits.IsImperial(_units)) value /= FeetPerMetre;
         return Math.Clamp(value, 0, 500);
     }
+
+    private static double GainDbi(TextBox box, double fallback) =>
+        TryNumber(box, out double value) ? Math.Clamp(value, -20, 30) : fallback;
 
     private static bool TryNumber(TextBox box, out double value) =>
         double.TryParse(box.Text?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);

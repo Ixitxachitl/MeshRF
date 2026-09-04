@@ -572,6 +572,17 @@ public partial class MainWindow : Window
         LocationHistoryWindow.Show(this, _viewModel.HistoryConversationFor(node.NodeNum));
     }
 
+    /// <summary>"Link profile…" on a node row, matching the entry the map's
+    /// marker menu offers. Routed through the map panel rather than opening the
+    /// window here: the panel holds the one settings instance the RF tools
+    /// share, and a second copy loaded here would overwrite the first when
+    /// either saved.</summary>
+    private async void OnOpenNodeLinkProfile(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        await Map.ShowLinkProfileAsync(node);
+    }
+
     // The DM tab's own DataContext is the conversation, so it is already the
     // instance HistoryConversationFor would hand back for an open tab.
     private void OnOpenConversationTelemetryHistory(object? sender, RoutedEventArgs e)

@@ -99,7 +99,7 @@
         <Border Grid.Column="2" BorderThickness="1" Padding="8"
                 Background="{DynamicResource BrushPanelBackground}"
                 BorderBrush="{DynamicResource BrushPanelBorder}">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto"
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto"
                   ColumnDefinitions="Auto,*">
 
                 <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Fitted model"
@@ -139,24 +139,36 @@
                 <TextBlock Grid.Row="8" Grid.Column="0" Classes="field" x:Name="PeerHeightLabel" Text="Peer antenna (m)" />
                 <TextBox   Grid.Row="8" Grid.Column="1" x:Name="PeerHeightBox" Margin="0,0,0,4" />
 
-                <Button Grid.Row="9" Grid.ColumnSpan="2" x:Name="RemeasureButton"
+                <!-- Gains land in the offset decibel for decibel, so a fit made
+                     with the wrong ones is wrong by exactly that much. They
+                     belong beside the other assumptions rather than only in the
+                     link-profile window. -->
+                <TextBlock Grid.Row="9" Grid.Column="0" Classes="field" Text="My gain (dBi)" />
+                <TextBox   Grid.Row="9" Grid.Column="1" x:Name="MyGainBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Your antenna gain net of feedline loss. A stock whip is about 2 dBi." />
+
+                <TextBlock Grid.Row="10" Grid.Column="0" Classes="field" Text="Peer gain (dBi)" />
+                <TextBox   Grid.Row="10" Grid.Column="1" x:Name="PeerGainBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Gain assumed for the other nodes. Like their transmit power, the mesh does not report it, so an error here moves the offset rather than the exponent." />
+
+                <Button Grid.Row="11" Grid.ColumnSpan="2" x:Name="RemeasureButton"
                         Content="Re-measure" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center" Margin="0,6,0,0"
                         Click="OnRemeasure"
                         ToolTip.Tip="Read the terrain again with these assumptions" />
 
-                <TextBlock Grid.Row="10" Grid.ColumnSpan="2" x:Name="CaveatText"
+                <TextBlock Grid.Row="12" Grid.ColumnSpan="2" x:Name="CaveatText"
                            FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"
                            VerticalAlignment="Top"
                            Foreground="{DynamicResource BrushSubtle}"
                            Text="Each reading is one packet's SNR, not an average, and peer transmit power is assumed rather than reported. Read the exponent as the finding and the offset as bookkeeping." />
 
-                <Button Grid.Row="11" Grid.ColumnSpan="2" x:Name="ApplyButton"
+                <Button Grid.Row="13" Grid.ColumnSpan="2" x:Name="ApplyButton"
                         Content="Apply to link predictions" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center" Margin="0,8,0,0"
                         IsEnabled="False" Click="OnApply" />
 
-                <Button Grid.Row="12" Grid.ColumnSpan="2" x:Name="ClearButton"
+                <Button Grid.Row="14" Grid.ColumnSpan="2" x:Name="ClearButton"
                         Content="Clear calibration" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center" Margin="0,4,0,0"
                         Click="OnClear" />

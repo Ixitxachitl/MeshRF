@@ -81,11 +81,28 @@ public partial class MapPanel : UserControl
 
     /// <summary>"Link profile…" on a node marker's context menu: the terrain
     /// cross-section from this station to that node.</summary>
-    private async void OnRequestLinkProfile(NodeRecord node)
+    private async void OnRequestLinkProfile(NodeRecord node) => await ShowLinkProfileAsync(node);
+
+    /// <summary>The same profile, reachable from the node grid as well as from
+    /// the marker. Says why rather than doing nothing when an end is missing,
+    /// since a grid row gives no hint that a node has never reported where it
+    /// is.</summary>
+    public async Task ShowLinkProfileAsync(NodeRecord node)
     {
         if (_viewModel is null || _settings is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
-        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon)) return;
+
+        if (node.Latitude is null || node.Longitude is null)
+        {
+            _viewModel.StatusText = $"{node.LongName} has not reported a position.";
+            return;
+        }
+
+        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon))
+        {
+            _viewModel.StatusText = "Set your own location before drawing a link profile.";
+            return;
+        }
 
         await LinkProfileWindow.ShowForAsync(owner, _viewModel, _settings, node, lat, lon);
     }
@@ -119,6 +136,36 @@ public partial class MapPanel : UserControl
         }
 
         await HorizonWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
+    }
+
+    /// <summary>Margins the coverage sweep offers. Named rather than typed:
+    /// the number means nothing without knowing what it does to the ring, and
+    /// these are the few values anyone actually wants.</summary>
+    private static readonly (string Label, double Db)[] CoverageMargins =
+    [
+        ("0 dB (edge)", 0),
+        ("3 dB", 3),
+        ("6 dB", 6),
+        ("10 dB (reliable)", 10),
+        ("15 dB (solid)", 15),
+    ];
+
+    /// <summary>Changing the margin changes the ring, so a sweep already on
+    /// screen is redrawn rather than left showing the old answer under the new
+    /// setting.</summary>
+    private void OnCoverageMarginChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_settings is null) return;
+        if (CoverageMarginCombo.SelectedIndex is not (int index and >= 0)
+            || index >= CoverageMargins.Length) return;
+
+        double picked = CoverageMargins[index].Db;
+        if (Math.Abs(picked - _settings.CoverageRequiredMarginDb) < 0.001) return;
+
+        _settings.CoverageRequiredMarginDb = picked;
+        _settings.Save();
+
+        if (CoverageButton.IsChecked == true) OnCoverageToggle(sender, e);
     }
 
     /// <summary>Supersedes an earlier sweep: the toggle can be flipped again
@@ -174,6 +221,7 @@ public partial class MapPanel : UserControl
             FrequencyMhz: _viewModel.CenterFreqMHz,
             BandwidthKhz: bwKhz,
             SpreadingFactor: sf,
+            RequiredMarginDb: _settings.CoverageRequiredMarginDb,
             Calibration: applied,
             MaxCredibleRangeM: CredibleRangeM(applied));
 
@@ -347,6 +395,10 @@ public partial class MapPanel : UserControl
         DataContext = viewModel;
         Canvas.Attach(viewModel);
         Canvas.LoadFromSettings(settings);
+
+        CoverageMarginCombo.ItemsSource = CoverageMargins.Select(m => m.Label).ToList();
+        CoverageMarginCombo.SelectedIndex = Math.Max(0, Array.FindIndex(
+            CoverageMargins, m => Math.Abs(m.Db - settings.CoverageRequiredMarginDb) < 0.001));
         ClusterNodesButton.IsChecked = Canvas.ClusterNodes;
         MapTileThemeCombo.SelectedItem = Canvas.TileTheme;
         AttributionText.Text = Canvas.Attribution;

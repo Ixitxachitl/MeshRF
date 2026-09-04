@@ -100,6 +100,12 @@
                           SelectionChanged="OnMapTileThemeChanged"
                           ToolTip.Tip="Tile provider for the basemap" />
 
+                <TextBlock Text="Coverage margin" FontSize="11" Margin="0,6,0,3" Foreground="#DDDDDD" />
+                <ComboBox x:Name="CoverageMarginCombo" Height="24" FontSize="11"
+                          HorizontalAlignment="Stretch"
+                          SelectionChanged="OnCoverageMarginChanged"
+                          ToolTip.Tip="Headroom over the demodulator's floor that still counts as reach. Zero is the cliff edge, where fading alone drops the link; ten is somewhere a packet reliably gets through. It moves the ring a long way." />
+
                 <!-- Station-wide rather than per-node, so it belongs on the map
                      chrome and not in a marker's menu. -->
                 <Button x:Name="PathLossButton" Content="Path loss…"

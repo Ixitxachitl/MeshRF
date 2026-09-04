@@ -61,6 +61,7 @@ public partial class HorizonWindow : Window
             _settings = settings,
             _centre = new GeoPoint(lat, lon),
             _units = vm.CurrentUnitSystem,
+            _radiusM = settings.HorizonRadiusM,
         };
         window.Prepare();
         await window.ShowDialog(owner);
@@ -232,6 +233,7 @@ public partial class HorizonWindow : Window
 
         _settings.LinkProfileMyAntennaM = HeightM(MyHeightBox, _settings.LinkProfileMyAntennaM);
         _settings.LinkProfilePeerAntennaM = HeightM(PeerHeightBox, _settings.LinkProfilePeerAntennaM);
+        _settings.HorizonRadiusM = _radiusM;
 
         MyHeightBox.Text = FormatHeight(_settings.LinkProfileMyAntennaM);
         PeerHeightBox.Text = FormatHeight(_settings.LinkProfilePeerAntennaM);

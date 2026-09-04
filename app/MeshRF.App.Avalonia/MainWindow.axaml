@@ -844,6 +844,7 @@
                                 <MenuItem Header="Show on map" Click="OnShowOnMap" />
                                 <MenuItem Header="Telemetry history…" Click="OnOpenNodeTelemetryHistory" />
                                 <MenuItem Header="Location history…" Click="OnOpenNodeLocationHistory" />
+                                <MenuItem Header="Link profile…" Click="OnOpenNodeLinkProfile" />
                                 <Separator />
                                 <MenuItem Header="Request node info"
                                           Command="{Binding #RootWindow.DataContext.RequestNodeInfoCommand}"
