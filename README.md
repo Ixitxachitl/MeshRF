@@ -688,6 +688,13 @@ Upstream references influencing licensing and implementation include:
 - [Nominatim](https://nominatim.org/) and
   [OpenTopoMap](https://opentopomap.org/) (CC-BY-SA), for place search and the
   topographic basemap
+- [OpenFreeMap](https://openfreemap.org/) and
+  [OpenMapTiles](https://openmaptiles.org/), for the vector dark basemap
+- [Esri ArcGIS Online](https://www.arcgis.com/), for the Street and Satellite
+  basemaps. Unlike everything else here these tiles are not open data: they are
+  reachable without a key but are not offered under a licence that grants this
+  use, so treat those two basemaps as convenience rather than as something the
+  project is entitled to. Every other source is free and openly licensed.
 
 ## Disclaimer
 

@@ -155,7 +155,7 @@ public sealed class OverpassBuildings : IDisposable
         // is normal rather than a fault.
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
         if (!_http.DefaultRequestHeaders.Contains("User-Agent"))
-            _http.DefaultRequestHeaders.UserAgent.ParseAdd("MeshRF/1.0 (+https://github.com/meshrf)");
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd(HttpIdentity.UserAgent);
     }
 
     /// <summary>

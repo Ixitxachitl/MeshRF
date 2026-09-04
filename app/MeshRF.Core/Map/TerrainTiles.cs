@@ -81,7 +81,7 @@ public sealed class TerrainTiles : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeshRF", "terrain");
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         if (!_http.DefaultRequestHeaders.Contains("User-Agent"))
-            _http.DefaultRequestHeaders.UserAgent.ParseAdd("MeshRF/1.0 (+https://github.com/meshrf)");
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd(HttpIdentity.UserAgent);
     }
 
     /// <summary>Samples the ground between two points, fetching whatever tiles

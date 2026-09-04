@@ -204,7 +204,7 @@ public sealed class MapCanvas : Control
         };
         var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         // OSM's tile policy requires an identifying UA.
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("MeshRF/1.0 (+https://github.com/meshrf)");
+        http.DefaultRequestHeaders.UserAgent.ParseAdd(HttpIdentity.UserAgent);
         return http;
     }
 
