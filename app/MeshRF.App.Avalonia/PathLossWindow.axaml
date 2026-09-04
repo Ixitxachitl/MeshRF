@@ -19,11 +19,27 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,0,8,0" />
         </Style>
+
+        <!-- The app-wide row height is 20px, set for tables that hold nothing
+             but text. A checkbox is taller than a line of text and was being
+             clipped; this is the only grid in the app with one. -->
+        <Style Selector="DataGridRow">
+            <Setter Property="Height" Value="26" />
+        </Style>
+        <Style Selector="DataGridCell CheckBox">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
     </Window.Styles>
 
     <Grid Margin="8" ColumnDefinitions="*,8,250">
 
-        <Grid Grid.Column="0" RowDefinitions="Auto,*,6,220">
+        <!-- Chart and table share the height rather than the table taking a
+             fixed slice, so a station with a long neighbour list gets more of
+             the window by resizing it. -->
+        <Grid Grid.Column="0" RowDefinitions="Auto,3*,6,2*">
 
             <TextBlock Grid.Row="0" x:Name="StatusText" Margin="0,0,0,6"
                        TextTrimming="CharacterEllipsis" />
