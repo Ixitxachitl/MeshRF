@@ -249,6 +249,11 @@ one RF-switch line, not two.
   bearing is walked outward to where contiguous coverage ends, judged against
   the range the same radio gets over open ground, and the fitted path loss is
   used in place of free space wherever a calibration has been applied.
+- Horizon panorama: the 360° skyline from this antenna, shaded by how far away
+  the ground defining it is, with every positioned node plotted where it would
+  appear against it — green where the terrain leaves a clear sight of it, red
+  where a ridge is in the way. Geometry only, and the answer to how much mast
+  a hidden neighbour would take.
 
 ### UI and Workflow
 

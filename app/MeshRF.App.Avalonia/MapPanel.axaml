@@ -104,6 +104,12 @@
                               HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                               IsCheckedChanged="OnCoverageToggle"
                               ToolTip.Tip="Sweep the compass for how far this station reaches. Green is the range open ground would give, amber is terrain cutting it back, red is a direction stopped close in. Uses the fitted path loss when one has been applied." />
+
+                <Button x:Name="HorizonButton" Content="Horizon…"
+                        Height="24" FontSize="11" Margin="0,4,0,0"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                        Click="OnOpenHorizon"
+                        ToolTip.Tip="The 360° skyline from this antenna, with every positioned node plotted against it" />
             </StackPanel>
         </Border>
 

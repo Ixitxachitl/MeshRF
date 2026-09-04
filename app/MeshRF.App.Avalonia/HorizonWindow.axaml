@@ -1,0 +1,114 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.HorizonWindow"
+        Title="Horizon"
+        Width="1080" Height="640" MinWidth="860" MinHeight="520"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Window.Styles>
+        <Style Selector="TextBlock.caption">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+        </Style>
+        <Style Selector="TextBlock.figure">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+        </Style>
+        <Style Selector="StackPanel.tile">
+            <Setter Property="Margin" Value="0,0,18,4" />
+        </Style>
+        <Style Selector="TextBlock.field">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+    </Window.Styles>
+
+    <Grid Margin="8" ColumnDefinitions="*,8,236">
+
+        <Grid Grid.Column="0" RowDefinitions="Auto,*,Auto,Auto">
+
+            <TextBlock Grid.Row="0" x:Name="HeaderText" FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis" Margin="0,0,0,6" />
+
+            <Border Grid.Row="1" BorderThickness="1"
+                    Background="{DynamicResource BrushPanelBackground}"
+                    BorderBrush="{DynamicResource BrushPanelBorder}">
+                <Panel>
+                    <local:HorizonChart x:Name="Chart" />
+                    <Border x:Name="BusyOverlay" IsVisible="True"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Background="#CC202020" CornerRadius="3" Padding="14,8">
+                        <TextBlock x:Name="BusyText" Text="Reading terrain…" />
+                    </Border>
+                </Panel>
+            </Border>
+
+            <Grid Grid.Row="2" Margin="2,8,0,0" ColumnDefinitions="*,*,*,*">
+                <StackPanel Grid.Column="0" Classes="tile">
+                    <TextBlock Classes="caption" Text="Highest obstruction" />
+                    <TextBlock Classes="figure" x:Name="HighestText" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Classes="tile">
+                    <TextBlock Classes="caption" Text="Where it stands" />
+                    <TextBlock Classes="figure" x:Name="HighestWhereText" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Classes="tile">
+                    <TextBlock Classes="caption" Text="Horizon obstructed" />
+                    <TextBlock Classes="figure" x:Name="ObstructedText" />
+                </StackPanel>
+                <StackPanel Grid.Column="3" Classes="tile">
+                    <TextBlock Classes="caption" Text="Nodes in sight" />
+                    <TextBlock Classes="figure" x:Name="NodesText" />
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Grid.Row="3" x:Name="SourceText" FontSize="10" TextWrapping="Wrap"
+                       Foreground="{DynamicResource BrushSubtle}" Margin="2,2,0,0" />
+        </Grid>
+
+        <Border Grid.Column="2" BorderThickness="1" Padding="8"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto"
+                  ColumnDefinitions="Auto,*">
+
+                <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Viewpoint"
+                           FontWeight="SemiBold" Margin="0,0,0,6" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Classes="field" x:Name="MyHeightLabel"
+                           Text="My antenna (m)" />
+                <TextBox   Grid.Row="1" Grid.Column="1" x:Name="MyHeightBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Height of your antenna above its own ground. Raising it is what lowers the skyline." />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Classes="field" x:Name="PeerHeightLabel"
+                           Text="Peer antenna (m)" />
+                <TextBox   Grid.Row="2" Grid.Column="1" x:Name="PeerHeightBox" Margin="0,0,0,4"
+                           ToolTip.Tip="Height assumed for each node, above its own ground. A node on a taller pole clears a ridge its ground does not." />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Classes="field" Text="Look out to" />
+                <ComboBox  Grid.Row="3" Grid.Column="1" x:Name="RadiusCombo" Margin="0,0,0,4"
+                           HorizontalAlignment="Stretch"
+                           SelectionChanged="OnRadiusChanged"
+                           ToolTip.Tip="A near radius resolves the ridge at the end of the street; a far one shows the hills behind it. Both are real skylines, at different scales." />
+
+                <Button Grid.Row="4" Grid.ColumnSpan="2" x:Name="ResweepButton"
+                        Content="Re-sweep" HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" Margin="0,6,0,0"
+                        Click="OnResweep" />
+
+                <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="Reading it"
+                           FontWeight="SemiBold" Margin="0,14,0,6" />
+
+                <TextBlock Grid.Row="6" Grid.ColumnSpan="2" FontSize="10" TextWrapping="Wrap"
+                           VerticalAlignment="Top"
+                           Foreground="{DynamicResource BrushSubtle}"
+                           Text="The silhouette is the ground standing around you, shaded light where it is close and dark where it is distant — a pale ridge is one a taller mast can beat. The dashed line is horizontal. Dots are nodes: green where the ground leaves a clear sight of them, red where a ridge is in the way.&#10;&#10;Geometry only. A node in plain sight can still be out of radio range, and one just under the skyline may still be heard by diffraction." />
+
+                <TextBlock Grid.Row="7" Grid.ColumnSpan="2" x:Name="AttributionText"
+                           FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Foreground="{DynamicResource BrushSubtle}" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

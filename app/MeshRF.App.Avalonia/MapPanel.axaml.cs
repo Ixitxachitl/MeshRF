@@ -106,6 +106,21 @@ public partial class MapPanel : UserControl
         await PathLossWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
     }
 
+    /// <summary>"Horizon…" on the map chrome: what this antenna can see, which
+    /// is a question about the station rather than about any one link.</summary>
+    private async void OnOpenHorizon(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || _settings is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon))
+        {
+            _viewModel.StatusText = "Set your own location before sweeping the horizon.";
+            return;
+        }
+
+        await HorizonWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
+    }
+
     /// <summary>Supersedes an earlier sweep: the toggle can be flipped again
     /// while tiles are still being fetched for the last one.</summary>
     private CancellationTokenSource? _coverageRun;
