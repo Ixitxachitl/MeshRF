@@ -1520,7 +1520,12 @@ public sealed class MapCanvas : Control
             // Markers aren't visuals, so there is nothing for the framework to
             // attach a ContextMenu to — resolve the marker ourselves and build
             // the menu for whatever is under the pointer.
-            if (BuildMarkerMenu(HitTest(p)?.Marker) is not { } menu) return;
+            var (menuLat, menuLon) = ScreenToGeo(p);
+            var menu = HitTest(p)?.Marker is { } hitMarker
+                ? BuildMarkerMenu(hitMarker)
+                : BuildGroundMenu(menuLat, menuLon);
+            if (menu is null) return;
+
             menu.PlacementTarget = this;
             menu.Placement = PlacementMode.Pointer;
             menu.Open(this);
@@ -1689,6 +1694,14 @@ public sealed class MapCanvas : Control
     /// </summary>
     public event Action<NodeRecord>? RequestLinkProfile;
 
+    /// <summary>A place on bare map was chosen as the viewpoint for a sweep.
+    /// Every other tool here is anchored to this station; these two answer the
+    /// other question, which is where a node ought to go.</summary>
+    public event Action<double, double>? RequestCoverageFrom;
+
+    /// <summary>The same, for the skyline.</summary>
+    public event Action<double, double>? RequestHorizonFrom;
+
     // -- Marker context menu ------------------------------------------------
 
     /// <summary>
@@ -1698,6 +1711,27 @@ public sealed class MapCanvas : Control
     /// picked first. Mirrors the node and waypoint grids' menus, minus the
     /// entries that are inherently grid-bound (Copy, Show on map).
     /// </summary>
+    /// <summary>
+    /// The menu for bare ground: sweep from here rather than from home.
+    ///
+    /// The RF tools all answer a question about a viewpoint, and until now the
+    /// viewpoint was always this station. Letting it be dropped anywhere turns
+    /// them from "what do I reach" into "what would a node here reach", which
+    /// is the question behind putting one up.
+    /// </summary>
+    private ContextMenu? BuildGroundMenu(double lat, double lon)
+    {
+        if (_vm is null) return null;
+
+        var coverage = new MenuItem { Header = "Coverage from here" };
+        coverage.Click += (_, _) => RequestCoverageFrom?.Invoke(lat, lon);
+
+        var horizon = new MenuItem { Header = "Horizon from here…" };
+        horizon.Click += (_, _) => RequestHorizonFrom?.Invoke(lat, lon);
+
+        return Menu(coverage, horizon);
+    }
+
     private ContextMenu? BuildMarkerMenu(RadioViewModel.MapMarker? marker)
     {
         if (_vm is null || marker is not { } mk || mk.IsHome) return null;

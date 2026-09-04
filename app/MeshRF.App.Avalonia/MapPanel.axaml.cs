@@ -43,6 +43,8 @@ public partial class MapPanel : UserControl
         Canvas.RequestDeleteWaypoint += OnRequestDeleteWaypoint;
         Canvas.RequestDeleteNode += OnRequestDeleteNode;
         Canvas.RequestLinkProfile += OnRequestLinkProfile;
+        Canvas.RequestCoverageFrom += OnRequestCoverageFrom;
+        Canvas.RequestHorizonFrom += OnRequestHorizonFrom;
     }
 
     /// <summary>"Edit…" on a waypoint marker's context menu, and a double-click
@@ -172,6 +174,35 @@ public partial class MapPanel : UserControl
     /// while tiles are still being fetched for the last one.</summary>
     private CancellationTokenSource? _coverageRun;
 
+    /// <summary>Where the next sweep runs from, when it is somewhere other than
+    /// this station. Cleared when the toggle is used on its own, so the button
+    /// always means "from here" and the menu entry always means "from
+    /// there".</summary>
+    private GeoPoint? _coverageOrigin;
+
+    /// <summary>"Coverage from here" on bare map: sweep as though a node stood
+    /// at that point, with this station's antenna and radio.</summary>
+    private void OnRequestCoverageFrom(double lat, double lon)
+    {
+        _coverageOrigin = new GeoPoint(lat, lon);
+
+        // Re-enter through the toggle so there is one path that runs a sweep.
+        // Already on, and it has to be nudged: the origin changed, which the
+        // checked state cannot express.
+        if (CoverageButton.IsChecked == true) OnCoverageToggle(this, new RoutedEventArgs());
+        else CoverageButton.IsChecked = true;
+    }
+
+    /// <summary>"Horizon from here…" on bare map: the skyline a node put there
+    /// would see.</summary>
+    private async void OnRequestHorizonFrom(double lat, double lon)
+    {
+        if (_viewModel is null || _settings is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        await HorizonWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
+    }
+
     /// <summary>
     /// The "Coverage" toggle: sweeps the compass from this station and draws
     /// how far it reaches in each direction.
@@ -187,12 +218,19 @@ public partial class MapPanel : UserControl
 
         if (CoverageButton.IsChecked != true)
         {
+            _coverageOrigin = null;
             Canvas.ShowCoverage(null);
             return;
         }
 
         if (_viewModel is null || _settings is null) return;
-        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon))
+
+        double lat, lon;
+        if (_coverageOrigin is { } dropped)
+        {
+            (lat, lon) = (dropped.Lat, dropped.Lon);
+        }
+        else if (!_viewModel.TryGetHomeLocation(out lat, out lon))
         {
             _viewModel.StatusText = "Set your own location before sweeping coverage.";
             CoverageButton.IsChecked = false;
@@ -207,7 +245,11 @@ public partial class MapPanel : UserControl
         // The one measured distance available, and the bound on how far any of
         // this may be carried. Read before the sweep so it can shape it rather
         // than merely annotate it afterwards.
-        double measuredM = FurthestHeardDirectM(_viewModel, new GeoPoint(lat, lon));
+        // Only meaningful about this station: what a dropped point has "heard
+        // directly" is nothing, since every reading was taken from here.
+        double measuredM = _coverageOrigin is null
+            ? FurthestHeardDirectM(_viewModel, new GeoPoint(lat, lon))
+            : 0;
         var calibration = FittedPathLoss(_settings);
         var applied = UsableForCoverage(calibration) ? calibration : null;
 
@@ -260,6 +302,7 @@ public partial class MapPanel : UserControl
             var units = _viewModel.CurrentUnitSystem;
 
             string note =
+                (_coverageOrigin is null ? string.Empty : "from a dropped point · ") +
                 $"to {DisplayUnits.FormatShortDistance(ring.UnobstructedRangeM, units)} open" +
                 (options.Calibration is null ? " · free space" : " · calibrated") +
                 $" · terrain {TerrainGrid.MetresPerPixel(area.Zoom, options.Centre.Lat):0} m/px";
@@ -267,7 +310,8 @@ public partial class MapPanel : UserControl
             Canvas.ShowCoverage(ring, note, measuredM, units);
 
             _viewModel.StatusText =
-                CoverageSummary(ring, area, measuredM, applied, calibration, units);
+                CoverageSummary(ring, area, measuredM, applied, calibration, units,
+                                fromDroppedPoint: _coverageOrigin is not null);
         }
         catch (OperationCanceledException)
         {
@@ -315,7 +359,8 @@ public partial class MapPanel : UserControl
     /// </summary>
     private static string CoverageSummary(
         CoverageRing ring, TerrainArea area, double measuredM,
-        PathLossFit? applied, PathLossFit? onFile, UnitSystem units)
+        PathLossFit? applied, PathLossFit? onFile, UnitSystem units,
+        bool fromDroppedPoint)
     {
         var parts = new List<string>
         {
@@ -333,7 +378,9 @@ public partial class MapPanel : UserControl
         }
         else
         {
-            parts.Add("nothing heard directly yet to check it against");
+            parts.Add(fromDroppedPoint
+                ? "nothing measured from a point nobody is standing at, so there is no check on this"
+                : "nothing heard directly yet to check it against");
         }
 
         if (ring.RangeWasCapped)
