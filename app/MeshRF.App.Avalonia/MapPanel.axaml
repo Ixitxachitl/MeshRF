@@ -84,7 +84,7 @@
             <StackPanel Orientation="Vertical" Width="160">
                 <TextBlock Text="Find a place" FontSize="11" Margin="0,0,0,3" Foreground="#DDDDDD" />
                 <TextBox x:Name="PlaceSearchBox" Height="24" FontSize="11" Margin="0,0,0,6"
-                         Watermark="Town, address…"
+                         PlaceholderText="Town, address…"
                          KeyDown="OnPlaceSearchKey"
                          ToolTip.Tip="Press Enter to look the name up and send the map there. Uses OpenStreetMap Nominatim." />
 
@@ -119,6 +119,12 @@
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                         Click="OnOpenPathLoss"
                         ToolTip.Tip="Fit a path-loss model to every direct neighbour, and apply it to link predictions" />
+
+                <ToggleButton x:Name="BuildingsButton" Content="Buildings"
+                              Height="24" FontSize="11" Margin="0,4,0,0"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              IsCheckedChanged="OnBuildingsToggle"
+                              ToolTip.Tip="Charge link predictions for the buildings a path crosses, using footprints from OpenStreetMap. Defaults to 10.8 dB per building plus 0.3 dB per 100 m inside — figures measured somewhere else, so treat them as a starting point and let the path-loss fit correct them." />
 
                 <ToggleButton x:Name="SurveyButton" Content="Record survey"
                               Height="24" FontSize="11" Margin="0,4,0,0"

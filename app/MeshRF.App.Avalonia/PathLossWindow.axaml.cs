@@ -28,8 +28,11 @@ public sealed partial class PathLossRow : ObservableObject
         Name = observation.Name;
         Range = DisplayUnits.FormatShortDistance(observation.DistanceM, units);
         Snr = $"{observation.MeasuredSnrDb:0.0} dB";
-        TerrainLoss = observation.DiffractionLossDb > 0
-            ? $"{observation.DiffractionLossDb:0.0} dB"
+        double inTheWay = observation.DiffractionLossDb + observation.BuildingLossDb;
+        TerrainLoss = inTheWay > 0
+            ? (observation.BuildingLossDb > 0
+                ? $"{inTheWay:0.0} dB  (bldg)"
+                : $"{inTheWay:0.0} dB")
             : "—";
 
         ExcessDb = observation.PropagationLossDb
@@ -151,6 +154,25 @@ public partial class PathLossWindow : Window
         _running = cts;
 
         PersistInputs();
+
+        // Fetched around this station, wide enough to cover the neighbours the
+        // fit will reach for. Buildings the fit can name are taken out of it,
+        // the same as terrain — otherwise the exponent absorbs them and then
+        // charges for them a second time wherever it is applied.
+        if (_settings.BuildingLossEnabled && _buildings.Count == 0)
+        {
+            BusyText.Text = "Reading buildings…";
+            BusyOverlay.IsVisible = true;
+            _buildings = await SharedTerrain
+                .BuildingsAroundAsync(_settings, _home, OverpassBuildings.MaxRadiusM, cts.Token)
+                .ConfigureAwait(true);
+            if (cts.IsCancellationRequested) return;
+        }
+        else if (!_settings.BuildingLossEnabled)
+        {
+            _buildings = BuildingIndex.Empty;
+        }
+
         var options = Options();
 
         if (UsingSurvey)
@@ -372,6 +394,8 @@ public partial class PathLossWindow : Window
         StatusText.Text = "Calibration cleared. Link predictions are back to terrain only.";
     }
 
+    private BuildingIndex _buildings = BuildingIndex.Empty;
+
     private PathLossSurveyOptions Options()
     {
         var settings = _settings!;
@@ -383,7 +407,9 @@ public partial class PathLossWindow : Window
             PeerGainDbi: settings.LinkProfilePeerGainDbi,
             AssumedPeerTxPowerDbm: settings.PathLossAssumedPeerTxPowerDbm,
             FrequencyMhz: _frequencyMhz,
-            BandwidthKhz: _bandwidthKhz);
+            BandwidthKhz: _bandwidthKhz,
+            Buildings: _buildings,
+            BuildingLoss: SharedTerrain.LossModel(settings));
     }
 
     // -- Inputs -------------------------------------------------------------

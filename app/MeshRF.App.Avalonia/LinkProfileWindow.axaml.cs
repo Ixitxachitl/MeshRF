@@ -34,6 +34,7 @@ public partial class LinkProfileWindow : Window
     private GeoPoint _to;
     private UnitSystem _units;
     private CancellationTokenSource? _running;
+    private BuildingIndex _buildings = BuildingIndex.Empty;
 
     public LinkProfileWindow()
     {
@@ -122,6 +123,24 @@ public partial class LinkProfileWindow : Window
             var terrain = await SharedTerrain.Tiles.SampleAsync(_from, _to, cts.Token).ConfigureAwait(true);
             if (cts.IsCancellationRequested) return;
 
+            // Fetched around the midpoint, with room for the whole path: one
+            // extract covers the line rather than one per end.
+            if (_settings.BuildingLossEnabled)
+            {
+                BusyText.Text = "Reading buildings…";
+                var middle = Geodesy.Interpolate(_from, _to, 0.5);
+                double reach = Geodesy.DistanceM(_from, _to) / 2 + 200;
+                _buildings = await SharedTerrain
+                    .BuildingsAroundAsync(_settings, middle, reach, cts.Token)
+                    .ConfigureAwait(true);
+            }
+            else
+            {
+                _buildings = BuildingIndex.Empty;
+            }
+
+            if (cts.IsCancellationRequested) return;
+
             if (terrain is null)
             {
                 BusyText.Text = "No elevation data for this path.";
@@ -184,12 +203,22 @@ public partial class LinkProfileWindow : Window
 
         double fspl = LinkBudget.FreeSpacePathLossDb(profile.DistanceM, frequency);
         PathLossText.Text = $"{fspl:0.0} dB";
-        DiffractionText.Text = $"{profile.DiffractionLossDb:0.0} dB";
-        DiffractionText.Foreground = profile.DiffractionLossDb > 0 ? Marginal : Clear;
+
+        var crossed = _buildings.AlongPath(_from, _to);
+        double buildingLoss = SharedTerrain.LossModel(_settings).LossDb(crossed);
+
+        // Terrain and buildings share a tile: they are the two things in the
+        // way, and a path with both has one number for what the ground costs.
+        DiffractionText.Text = crossed.Count > 0
+            ? $"{profile.DiffractionLossDb + buildingLoss:0.0} dB  ({crossed.Count} bldg)"
+            : $"{profile.DiffractionLossDb:0.0} dB";
+        DiffractionText.Foreground =
+            profile.DiffractionLossDb + buildingLoss > 0 ? Marginal : Clear;
 
         double rxPower = LinkBudget.ReceivedPowerDbm(
             TxPowerDbm(), GainDbi(MyGainBox, _settings.LinkProfileMyGainDbi),
-            GainDbi(PeerGainBox, _settings.LinkProfilePeerGainDbi), fspl, profile.DiffractionLossDb);
+            GainDbi(PeerGainBox, _settings.LinkProfilePeerGainDbi),
+            fspl, profile.DiffractionLossDb + buildingLoss);
         double predictedSnr = LinkBudget.SnrDb(rxPower, bwKhz);
         double margin = LinkBudget.MarginDb(rxPower, sf, bwKhz);
 
@@ -204,7 +233,8 @@ public partial class LinkProfileWindow : Window
             $"Terrain zoom {terrain.Zoom} ({TerrainGrid.MetresPerPixel(terrain.Zoom, _from.Lat):0} m/px), " +
             $"{terrain.TileCount} tiles",
             terrain.Complete ? TerrainTiles.Attribution
-                             : "Part of this path had no elevation data and was bridged. " + TerrainTiles.Attribution);
+                             : "Part of this path had no elevation data and was bridged. " + TerrainTiles.Attribution,
+            _buildings.Count > 0 ? OverpassBuildings.Attribution : string.Empty);
     }
 
     /// <summary>

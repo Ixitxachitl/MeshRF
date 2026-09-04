@@ -401,6 +401,23 @@ public sealed class AppSettings
     /// deliberate act, and it writes a row per packet.</summary>
     public bool SurveyRecording { get; set; }
 
+    // -- Building loss ------------------------------------------------------
+
+    /// <summary>Whether link predictions charge for the buildings a path
+    /// crosses, using footprints fetched from OpenStreetMap. Off by default: it
+    /// puts the app on a shared public service, and terrain alone is the
+    /// honest answer until someone asks for more.</summary>
+    public bool BuildingLossEnabled { get; set; }
+
+    /// <summary>Flat charge for each footprint a path enters — the two walls.
+    /// The default is MeshLab RF's, from a paired field survey of its own
+    /// region rather than a law of nature.</summary>
+    public double BuildingLossPerCrossingDb { get; set; } = 10.8;
+
+    /// <summary>What the contents cost, per hundred metres of path inside a
+    /// footprint.</summary>
+    public double BuildingLossPerHundredMetresDb { get; set; } = 0.3;
+
     /// <summary>How far the horizon sweep looks. Remembered because it is a
     /// question about a place — the ridge at the end of the street or the hills
     /// behind it — and the answer does not change between sittings.</summary>

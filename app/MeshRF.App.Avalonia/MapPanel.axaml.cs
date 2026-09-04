@@ -171,6 +171,26 @@ public partial class MapPanel : UserControl
         if (CoverageButton.IsChecked == true) OnCoverageToggle(sender, e);
     }
 
+    /// <summary>Buildings are fetched from a shared public service, so the
+    /// toggle is a deliberate act rather than something on by default. A sweep
+    /// already showing is redone, since the answer changes.</summary>
+    private void OnBuildingsToggle(object? sender, RoutedEventArgs e)
+    {
+        if (_settings is null || _viewModel is null) return;
+
+        bool wanted = BuildingsButton.IsChecked == true;
+        if (wanted == _settings.BuildingLossEnabled) return;
+
+        _settings.BuildingLossEnabled = wanted;
+        _settings.Save();
+
+        _viewModel.StatusText = wanted
+            ? "Link predictions will charge for the buildings a path crosses."
+            : "Buildings are no longer charged for.";
+
+        if (CoverageButton.IsChecked == true) OnCoverageToggle(sender, e);
+    }
+
     /// <summary>Nominatim asks for no more than a request a second, so one
     /// instance holds the gap for the whole app rather than each keystroke
     /// starting fresh.</summary>
@@ -321,6 +341,7 @@ public partial class MapPanel : UserControl
             Calibration: applied,
             MaxCredibleRangeM: CredibleRangeM(applied));
 
+        var settings = _settings;
         _viewModel.StatusText = "Sweeping coverage…";
         try
         {
@@ -338,10 +359,17 @@ public partial class MapPanel : UserControl
                 double radius = CoverageMap.OpenGroundRangeM(options) * 1.05;
                 if (options.MaxCredibleRangeM > 0)
                     radius = Math.Min(radius, options.MaxCredibleRangeM);
+
+                var footprints = await SharedTerrain
+                    .BuildingsAroundAsync(settings, options.Centre, radius, cts.Token)
+                    .ConfigureAwait(false);
+                var sweepOptions = footprints.Count > 0
+                    ? options with { Buildings = footprints, BuildingLoss = SharedTerrain.LossModel(settings) }
+                    : options;
                 var area = await SharedTerrain.Tiles
                     .LoadAreaAsync(options.Centre, radius, cts.Token)
                     .ConfigureAwait(false);
-                return area is null ? null : (area, CoverageMap.Build(area.Grid, options));
+                return area is null ? null : (area, CoverageMap.Build(area.Grid, sweepOptions));
             }, cts.Token).ConfigureAwait(true);
 
             if (cts.IsCancellationRequested) return;
@@ -499,6 +527,7 @@ public partial class MapPanel : UserControl
         Canvas.Attach(viewModel);
         Canvas.LoadFromSettings(settings);
 
+        BuildingsButton.IsChecked = settings.BuildingLossEnabled;
         CoverageMarginCombo.ItemsSource = CoverageMargins.Select(m => m.Label).ToList();
         CoverageMarginCombo.SelectedIndex = Math.Max(0, Array.FindIndex(
             CoverageMargins, m => Math.Abs(m.Db - settings.CoverageRequiredMarginDb) < 0.001));

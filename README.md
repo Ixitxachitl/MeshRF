@@ -249,6 +249,12 @@ one RF-switch line, not two.
   bearing is walked outward to where contiguous coverage ends, judged against
   the range the same radio gets over open ground, and the fitted path loss is
   used in place of free space wherever a calibration has been applied.
+- Building attenuation: OpenStreetMap footprints fetched through Overpass and
+  charged against every path that crosses them, in the link profile, the
+  coverage sweep and the calibration alike. Off by default, since it puts the
+  app on a shared public service. The defaults are MeshLab RF's field-survey
+  figures for its own region, so they are a starting point the path-loss fit is
+  meant to correct rather than constants to trust.
 - Place search on the map, and a topographic basemap alongside the street,
   satellite and dark ones — plus "None", for working offline or reading an
   overlay without a map competing with it.
@@ -660,6 +666,8 @@ Upstream references influencing licensing and implementation include:
 - [meshtastic/firmware](https://github.com/meshtastic/firmware)
 - [MeshLab RF](https://github.com/HarukiToreda/MeshLab-RF) (MIT), whose
   propagation model the link profile follows
+- [Overpass](https://overpass-api.de/), for the OpenStreetMap building
+  footprints the obstruction model uses
 - [Nominatim](https://nominatim.org/) and
   [OpenTopoMap](https://opentopomap.org/) (CC-BY-SA), for place search and the
   topographic basemap

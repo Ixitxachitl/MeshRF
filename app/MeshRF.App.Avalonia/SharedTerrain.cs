@@ -15,6 +15,25 @@ namespace MeshRF.AvaloniaApp;
 public static class SharedTerrain
 {
     private static readonly Lazy<TerrainTiles> s_tiles = new(() => new TerrainTiles());
+    private static readonly Lazy<OverpassBuildings> s_buildings = new(() => new OverpassBuildings());
 
     public static TerrainTiles Tiles => s_tiles.Value;
+
+    /// <summary>Building footprints, on the same terms and for the same
+    /// reasons: one disk cache, one backoff, and a public service that should
+    /// see one client rather than one per window.</summary>
+    public static OverpassBuildings Buildings => s_buildings.Value;
+
+    /// <summary>The footprints around a point, or an empty index when
+    /// buildings are switched off. Keeps every caller from repeating the
+    /// settings check.</summary>
+    public static Task<BuildingIndex> BuildingsAroundAsync(
+        AppSettings settings, GeoPoint centre, double radiusM, CancellationToken ct = default) =>
+        settings.BuildingLossEnabled
+            ? Buildings.AroundAsync(centre, radiusM, ct)
+            : Task.FromResult(BuildingIndex.Empty);
+
+    /// <summary>The loss model the user has configured.</summary>
+    public static BuildingLossModel LossModel(AppSettings settings) =>
+        new(settings.BuildingLossPerCrossingDb, settings.BuildingLossPerHundredMetresDb);
 }

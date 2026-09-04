@@ -21,12 +21,18 @@ public sealed record PathLossSurveyOptions(
     double BandwidthKhz,
     double NoiseFigureDb = LinkBudget.DefaultNoiseFigureDb,
     double MinDistanceM = 100,
-    double MaxDistanceM = 100_000);
+    double MaxDistanceM = 100_000,
+    BuildingIndex? Buildings = null,
+    BuildingLossModel? BuildingLoss = null);
 
 /// <summary>What one neighbour contributes. <paramref name="TerrainKnown"/> is
 /// false when no elevation could be read for the path, which leaves the terrain
 /// loss unaccounted for and would push it into the fit as if it were clutter.
 /// </summary>
+/// <param name="BuildingLossDb">What the footprints along the path cost, when
+/// buildings are in use. Subtracted like the terrain: whatever the model can
+/// name is taken out before the fit, so the exponent describes what is left
+/// rather than re-absorbing something already accounted for.</param>
 public sealed record PathLossObservation(
     uint NodeNum,
     string Name,
@@ -34,7 +40,8 @@ public sealed record PathLossObservation(
     double MeasuredSnrDb,
     double DiffractionLossDb,
     double PropagationLossDb,
-    bool TerrainKnown)
+    bool TerrainKnown,
+    double BuildingLossDb = 0)
 {
     public PathLossSample ToSample() => new(NodeNum, DistanceM, PropagationLossDb);
 }
@@ -129,6 +136,8 @@ public sealed class PathLossSurvey
             // Back out the loss from the reading: a received power is an SNR
             // above the floor, and everything between the two antenna ports had
             // to account for the difference.
+            double buildings = BuildingLossAlong(options, options.Home, peer);
+
             double receivedPower = snr + noiseFloor;
             double totalLoss = options.AssumedPeerTxPowerDbm + options.PeerGainDbi + options.MyGainDbi
                              - receivedPower;
@@ -139,8 +148,9 @@ public sealed class PathLossSurvey
                 DistanceM: Geodesy.DistanceM(options.Home, peer),
                 MeasuredSnrDb: snr,
                 DiffractionLossDb: diffraction,
-                PropagationLossDb: totalLoss - diffraction,
-                TerrainKnown: terrainKnown));
+                PropagationLossDb: totalLoss - diffraction - buildings,
+                TerrainKnown: terrainKnown,
+                BuildingLossDb: buildings));
 
             completed?.Report(i + 1);
         }
@@ -191,6 +201,8 @@ public sealed class PathLossSurvey
                 diffractionByPeer[bin.NodeNum] = terrainLoss;
             }
 
+            double buildings = BuildingLossAlong(options, options.Home, peer.At);
+
             double receivedPower = bin.MeanSnrDb + noiseFloor;
             double totalLoss = options.AssumedPeerTxPowerDbm + options.PeerGainDbi + options.MyGainDbi
                              - receivedPower;
@@ -201,14 +213,22 @@ public sealed class PathLossSurvey
                 DistanceM: bin.DistanceM,
                 MeasuredSnrDb: bin.MeanSnrDb,
                 DiffractionLossDb: terrainLoss.LossDb,
-                PropagationLossDb: totalLoss - terrainLoss.LossDb,
-                TerrainKnown: terrainLoss.Known));
+                PropagationLossDb: totalLoss - terrainLoss.LossDb - buildings,
+                TerrainKnown: terrainLoss.Known,
+                BuildingLossDb: buildings));
 
             completed?.Report(i + 1);
         }
 
         return observations;
     }
+
+    /// <summary>What the buildings between two points cost, or nothing when
+    /// they are not in use.</summary>
+    public static double BuildingLossAlong(PathLossSurveyOptions options, GeoPoint from, GeoPoint to) =>
+        options is { Buildings: { Count: > 0 } index, BuildingLoss: { } model }
+            ? model.LossDb(index.AlongPath(from, to))
+            : 0;
 
     private static string DisplayName(NodeRecord node) =>
         !string.IsNullOrWhiteSpace(node.LongName) ? node.LongName

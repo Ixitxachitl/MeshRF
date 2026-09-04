@@ -264,6 +264,98 @@ public class CoverageMapTests
         Assert.Equal(0, unknown.CredibleRangeM);
     }
 
+    // -- Buildings ----------------------------------------------------------
+
+    /// <summary>A wall of footprints across the east, at a range.</summary>
+    private static BuildingIndex Terrace(double atRangeM, double fromBearing, double toBearing)
+    {
+        var blocks = new List<Footprint>();
+        for (double bearing = fromBearing; bearing <= toBearing; bearing += 2)
+        {
+            var centre = CoverageMap.Along(Centre, bearing, atRangeM);
+            const double half = 0.0004; // roughly 40 m
+
+            blocks.Add(new Footprint([
+                new GeoPoint(centre.Lat + half, centre.Lon - half),
+                new GeoPoint(centre.Lat + half, centre.Lon + half),
+                new GeoPoint(centre.Lat - half, centre.Lon + half),
+                new GeoPoint(centre.Lat - half, centre.Lon - half),
+            ]));
+        }
+        return new BuildingIndex(blocks);
+    }
+
+    [Fact]
+    public void BuildingsShortenTheDirectionsBehindThem()
+    {
+        var buildings = Terrace(1200, 70, 110);
+
+        var open = CoverageMap.Build(new FlatGround(200), Options(Clutter))!;
+        var built = CoverageMap.Build(
+            new FlatGround(200),
+            Options(Clutter) with { Buildings = buildings, BuildingLoss = new BuildingLossModel() })!;
+
+        double Behind(CoverageRing ring) =>
+            ring.Spokes.First(s => s.BearingDegrees is >= 85 and <= 95).ReachM;
+        double Elsewhere(CoverageRing ring) =>
+            ring.Spokes.First(s => s.BearingDegrees is >= 265 and <= 275).ReachM;
+
+        Assert.True(Behind(built) < Behind(open),
+            $"behind the terrace {Behind(built):F0} m should be under {Behind(open):F0} m");
+        Assert.Equal(Elsewhere(open), Elsewhere(built), 1);
+    }
+
+    [Fact]
+    public void ATallerChargePerBuildingShortensThingsFurther()
+    {
+        var buildings = Terrace(1200, 70, 110);
+
+        double ReachWith(double perCrossingDb)
+        {
+            var ring = CoverageMap.Build(
+                new FlatGround(200),
+                Options(Clutter) with
+                {
+                    Buildings = buildings,
+                    BuildingLoss = new BuildingLossModel(perCrossingDb, 0),
+                })!;
+            return ring.Spokes.First(s => s.BearingDegrees is >= 85 and <= 95).ReachM;
+        }
+
+        Assert.True(ReachWith(25) < ReachWith(5),
+            $"25 dB a building left {ReachWith(25):F0} m, 5 dB left {ReachWith(5):F0} m");
+    }
+
+    [Fact]
+    public void TheOpenGroundReferenceIgnoresBuildings()
+    {
+        // It is the yardstick every direction is measured against. Charging it
+        // for buildings would move it along with the thing being measured, and
+        // a town would come out looking as clear as a field.
+        var open = CoverageMap.Build(new FlatGround(200), Options(Clutter))!;
+        var built = CoverageMap.Build(
+            new FlatGround(200),
+            Options(Clutter) with
+            {
+                Buildings = Terrace(1200, 0, 358),
+                BuildingLoss = new BuildingLossModel(),
+            })!;
+
+        Assert.Equal(open.UnobstructedRangeM, built.UnobstructedRangeM, 1);
+        Assert.True(built.CountOf(CoverageQuality.Clear) < open.CountOf(CoverageQuality.Clear));
+    }
+
+    [Fact]
+    public void NoBuildingsMeansNoChange()
+    {
+        var without = CoverageMap.Build(new FlatGround(200), Options(Clutter))!;
+        var empty = CoverageMap.Build(
+            new FlatGround(200),
+            Options(Clutter) with { Buildings = BuildingIndex.Empty, BuildingLoss = new BuildingLossModel() })!;
+
+        Assert.Equal(without.FurthestReachM, empty.FurthestReachM, 1);
+    }
+
     // -- The margin field ---------------------------------------------------
 
     [Fact]

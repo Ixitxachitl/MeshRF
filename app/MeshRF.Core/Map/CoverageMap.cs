@@ -117,6 +117,8 @@ public sealed record CoverageOptions(
     double RequiredMarginDb = 6.0,
     PathLossFit? Calibration = null,
     double MaxCredibleRangeM = 0,
+    BuildingIndex? Buildings = null,
+    BuildingLossModel? BuildingLoss = null,
     int Bearings = 180,
     double EarthRadiusFactor = 4.0 / 3.0);
 
@@ -296,7 +298,13 @@ public static class CoverageMap
         CoverageOptions options, double centreGround, double txM, double allowedLoss,
         double wavelength, double effectiveRadius, double maxRange, int samples) =>
         Sweep(
-            new LevelGround(centreGround), options, bearingDegrees: 0,
+            new LevelGround(centreGround),
+            // Open ground means open: the reference is what this radio does
+            // with nothing in the way, which is what the spokes are compared
+            // against. Charging it for buildings would move the yardstick
+            // along with the thing being measured.
+            options with { Buildings = null },
+            bearingDegrees: 0,
             centreGround, txM, allowedLoss, wavelength, effectiveRadius,
             spacing: maxRange / samples, maxRange: maxRange, samples: samples);
 
@@ -327,6 +335,14 @@ public static class CoverageMap
         double reached = 0;
         bool failed = false;
 
+        // Buildings accumulate as the walk goes out rather than being counted
+        // afresh at every range. A footprint entered once stays entered, so the
+        // running total is exactly what a path to this sample has crossed —
+        // and the whole bearing costs one pass instead of one per sample.
+        bool countBuildings = options.Buildings is { Count: > 0 } && options.BuildingLoss is not null;
+        var crossedSoFar = BuildingCrossing.None;
+        var previousPoint = options.Centre;
+
         for (int k = 1; k <= samples; k++)
         {
             double distance = k * spacing;
@@ -335,6 +351,12 @@ public static class CoverageMap
             var at = Along(options.Centre, bearingDegrees, distance);
             if (terrain.ElevationAt(at.Lat, at.Lon) is not double elevation) break;
             ground[k] = elevation;
+
+            if (countBuildings)
+            {
+                crossedSoFar = crossedSoFar.Plus(options.Buildings!.Along(previousPoint, at));
+                previousPoint = at;
+            }
 
             double rxM = elevation + options.PeerAntennaM;
 
@@ -353,7 +375,8 @@ public static class CoverageMap
                 if (v > worstV) worstV = v;
             }
 
-            double loss = PathLossDb(distance, options) + LinkProfile.KnifeEdgeLossDb(worstV);
+            double loss = PathLossDb(distance, options) + LinkProfile.KnifeEdgeLossDb(worstV)
+                        + (countBuildings ? options.BuildingLoss!.LossDb(crossedSoFar) : 0);
             if (field is not null) field[fieldOffset + k - 1] = (float)(headroom - loss);
 
             // The reach is the first failure, but the walk carries on so the
