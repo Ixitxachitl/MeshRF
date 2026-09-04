@@ -34,9 +34,9 @@ public sealed record SurveyBin(
 /// single packet at a single distance, and a station whose neighbours all sit
 /// on one mast can never measure a falloff at all.
 ///
-/// Kept as CSV rather than in the database. It is append-only, it is the sort
-/// of thing worth opening in a spreadsheet or handing to someone else, and the
-/// format is close enough to MeshLab's own measurements.csv to be read by it.
+/// Kept as CSV rather than in the database: it is append-only, it is worth
+/// opening in a spreadsheet, and a survey driven on one machine has to reach
+/// the station it was collected for — see <see cref="Import"/>.
 /// </summary>
 public sealed class SurveyLog
 {
@@ -79,15 +79,8 @@ public sealed class SurveyLog
         double distance = Geodesy.DistanceM(mine, peer);
         if (distance <= 0 || double.IsNaN(distance)) return false;
 
-        var line = string.Join(',',
-            heardUtc.ToString("O", CultureInfo.InvariantCulture),
-            nodeNum.ToString(CultureInfo.InvariantCulture),
-            mine.Lat.ToString("F6", CultureInfo.InvariantCulture),
-            mine.Lon.ToString("F6", CultureInfo.InvariantCulture),
-            peer.Lat.ToString("F6", CultureInfo.InvariantCulture),
-            peer.Lon.ToString("F6", CultureInfo.InvariantCulture),
-            snr.ToString("F2", CultureInfo.InvariantCulture),
-            distance.ToString("F1", CultureInfo.InvariantCulture));
+        var line = Line(new SurveySample(
+            heardUtc, nodeNum, mine.Lat, mine.Lon, peer.Lat, peer.Lon, snr, distance));
 
         lock (_gate)
         {
@@ -138,6 +131,92 @@ public sealed class SurveyLog
         }
 
         return samples;
+    }
+
+    /// <summary>What an import did. Duplicates are counted rather than
+    /// silently dropped: importing the same drive twice should say so, not
+    /// double the weight of every reading in it.</summary>
+    public readonly record struct SurveyImport(int Added, int Duplicates, int Unreadable);
+
+    /// <summary>
+    /// Merges another log into this one.
+    ///
+    /// Merges rather than replaces, because the case this exists for is a
+    /// survey driven on a laptop being brought back to the station it was
+    /// collected for, which already has readings of its own. A reading is the
+    /// same reading when it is the same node at the same instant, so importing
+    /// a file twice adds nothing the second time.
+    /// </summary>
+    public SurveyImport Import(string path)
+    {
+        var incoming = new SurveyLog(path).Read();
+
+        // Lines the reader could not parse never became samples, so what is
+        // missing from the count is what could not be read. Worked out before
+        // the empty case returns, or importing something that is not a survey
+        // at all reports "nothing happened" rather than "that was not one".
+        int unreadable = Math.Max(0, CountLines(path) - incoming.Count);
+        if (incoming.Count == 0) return new SurveyImport(0, 0, unreadable);
+
+        var have = Read()
+            .Select(s => (s.HeardUtc, s.NodeNum))
+            .ToHashSet();
+
+        var fresh = new List<SurveySample>();
+        int duplicates = 0;
+
+        foreach (var sample in incoming)
+        {
+            if (!have.Add((sample.HeardUtc, sample.NodeNum))) { duplicates++; continue; }
+            fresh.Add(sample);
+        }
+
+        Append(fresh);
+        return new SurveyImport(fresh.Count, duplicates, unreadable);
+    }
+
+    /// <summary>Writes the whole log somewhere else, for keeping or for
+    /// carrying to another machine.</summary>
+    public bool Export(string path)
+    {
+        try
+        {
+            if (!File.Exists(_path)) return false;
+            lock (_gate) File.Copy(_path, path, overwrite: true);
+            return true;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    private void Append(IReadOnlyCollection<SurveySample> samples)
+    {
+        if (samples.Count == 0) return;
+
+        lock (_gate)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+                bool fresh = !File.Exists(_path);
+                using var writer = new StreamWriter(_path, append: true);
+                if (fresh) writer.WriteLine(Header);
+                foreach (var sample in samples) writer.WriteLine(Line(sample));
+            }
+            catch (IOException) { /* nothing written is the honest outcome */ }
+            catch (UnauthorizedAccessException) { /* same */ }
+        }
+    }
+
+    private static int CountLines(string path)
+    {
+        try
+        {
+            // The header is not a reading, and neither is a trailing blank.
+            return File.ReadAllLines(path).Count(l => !string.IsNullOrWhiteSpace(l)) - 1;
+        }
+        catch (IOException) { return 0; }
+        catch (UnauthorizedAccessException) { return 0; }
     }
 
     public void Clear()
@@ -194,6 +273,16 @@ public sealed class SurveyLog
             .OrderBy(b => b.DistanceM)
             .ToList();
     }
+
+    private static string Line(SurveySample s) => string.Join(',',
+        s.HeardUtc.ToString("O", CultureInfo.InvariantCulture),
+        s.NodeNum.ToString(CultureInfo.InvariantCulture),
+        s.MyLat.ToString("F6", CultureInfo.InvariantCulture),
+        s.MyLon.ToString("F6", CultureInfo.InvariantCulture),
+        s.PeerLat.ToString("F6", CultureInfo.InvariantCulture),
+        s.PeerLon.ToString("F6", CultureInfo.InvariantCulture),
+        s.SnrDb.ToString("F2", CultureInfo.InvariantCulture),
+        s.DistanceM.ToString("F1", CultureInfo.InvariantCulture));
 
     private static bool Number(string text, out double value) =>
         double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);

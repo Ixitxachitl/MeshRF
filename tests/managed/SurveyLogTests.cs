@@ -117,6 +117,108 @@ public sealed class SurveyLogTests : IDisposable
         Assert.Empty(new SurveyLog(Path.Combine(_dir, "never.csv")).Read());
     }
 
+    // -- Carrying a survey between machines ----------------------------------
+
+    private SurveyLog Elsewhere(string name) => new(Path.Combine(_dir, name));
+
+    [Fact]
+    public void AnExportedLogReadsBackTheSame()
+    {
+        for (int i = 0; i < 3; i++) Record(node: (uint)i);
+
+        var carried = Path.Combine(_dir, "carried.csv");
+        Assert.True(_log.Export(carried));
+        Assert.Equal(3, new SurveyLog(carried).Read().Count);
+    }
+
+    [Fact]
+    public void ExportingALogThatWasNeverWrittenSaysSo()
+    {
+        Assert.False(_log.Export(Path.Combine(_dir, "nothing.csv")));
+    }
+
+    [Fact]
+    public void ImportingMergesRatherThanReplaces()
+    {
+        // The case this exists for: a survey driven on a laptop coming back to
+        // the station, which has readings of its own already.
+        var laptop = Elsewhere("laptop.csv");
+        for (int i = 0; i < 4; i++)
+            laptop.Record(100u + (uint)i, 0, false, -7, Home, CoverageMap.Along(Home, 45, 3000), DateTime.UtcNow.AddMinutes(i));
+
+        Record(node: 1);
+        var result = _log.Import(laptop.FilePath);
+
+        Assert.Equal(4, result.Added);
+        Assert.Equal(0, result.Duplicates);
+        Assert.Equal(5, _log.Read().Count);
+    }
+
+    [Fact]
+    public void ImportingTheSameDriveTwiceAddsNothingTheSecondTime()
+    {
+        // Otherwise every reading in it counts double, and a bin's average is
+        // quietly weighted toward whichever file was imported most often.
+        var laptop = Elsewhere("laptop.csv");
+        for (int i = 0; i < 3; i++)
+            laptop.Record((uint)i, 0, false, -7, Home, CoverageMap.Along(Home, 45, 3000), DateTime.UtcNow.AddMinutes(i));
+
+        Assert.Equal(3, _log.Import(laptop.FilePath).Added);
+
+        var again = _log.Import(laptop.FilePath);
+        Assert.Equal(0, again.Added);
+        Assert.Equal(3, again.Duplicates);
+        Assert.Equal(3, _log.Read().Count);
+    }
+
+    [Fact]
+    public void ImportingIntoAnEmptyLogJustWorks()
+    {
+        var laptop = Elsewhere("laptop.csv");
+        laptop.Record(1, 0, false, -7, Home, CoverageMap.Along(Home, 45, 3000), DateTime.UtcNow);
+
+        Assert.Equal(1, _log.Import(laptop.FilePath).Added);
+        Assert.Single(_log.Read());
+    }
+
+    [Fact]
+    public void ImportingSomethingThatIsNotASurveyAddsNothing()
+    {
+        var junk = Path.Combine(_dir, "junk.csv");
+        File.WriteAllLines(junk, ["name,value", "alpha,1", "beta,2"]);
+
+        var result = _log.Import(junk);
+
+        Assert.Equal(0, result.Added);
+        Assert.True(result.Unreadable > 0, "unreadable lines should be counted, not silently dropped");
+        Assert.Empty(_log.Read());
+    }
+
+    [Fact]
+    public void ImportingAFileThatIsNotThereIsHarmless()
+    {
+        var result = _log.Import(Path.Combine(_dir, "missing.csv"));
+        Assert.Equal(0, result.Added);
+    }
+
+    [Fact]
+    public void ImportedReadingsFitAlongsideTheirOwn()
+    {
+        // What the whole exercise is for: readings from a drive joining the
+        // station's own so one peer spans several ranges instead of one.
+        var laptop = Elsewhere("laptop.csv");
+        foreach (double range in new[] { 4000.0, 9000, 15000 })
+            for (int i = 0; i < 4; i++)
+                laptop.Record(7, 0, false, -9, Home, CoverageMap.Along(Home, 90, range),
+                              DateTime.UtcNow.AddSeconds(range + i));
+
+        for (int i = 0; i < 4; i++) Record(node: 7);
+        _log.Import(laptop.FilePath);
+
+        var bins = SurveyLog.Bin(_log.Read());
+        Assert.True(bins.Count >= 4, $"expected several ranges for one peer, got {bins.Count}");
+    }
+
     // -- Binning ------------------------------------------------------------
 
     private static SurveySample At(uint node, double distanceM, double snr) =>

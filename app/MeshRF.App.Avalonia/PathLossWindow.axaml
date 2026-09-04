@@ -99,7 +99,7 @@
         <Border Grid.Column="2" BorderThickness="1" Padding="8"
                 Background="{DynamicResource BrushPanelBackground}"
                 BorderBrush="{DynamicResource BrushPanelBorder}">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto"
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto"
                   ColumnDefinitions="Auto,*">
 
                 <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Fitted model"
@@ -135,46 +135,65 @@
                            SelectionChanged="OnSourceChanged"
                            ToolTip.Tip="Where the readings come from. The node list gives one packet per neighbour at whatever range it sits; a survey gives many packets per neighbour across every range you carried the radio through." />
 
-                <TextBlock Grid.Row="6" Grid.Column="0" Classes="field" Text="Peer TX (dBm)" />
-                <TextBox   Grid.Row="6" Grid.Column="1" x:Name="PeerTxPowerBox" Margin="0,0,0,4"
+                <!-- A survey is recorded wherever the radio was driven, which
+                     is rarely the machine the fit is read on. The log is a
+                     plain CSV, so moving it is a file copy; these do it without
+                     asking the user to find the app's data directory. -->
+                <UniformGrid Grid.Row="6" Grid.ColumnSpan="2" Columns="3" Margin="0,0,0,4">
+                    <Button x:Name="ImportSurveyButton" Content="Import…"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            FontSize="11" Margin="0,0,3,0" Click="OnImportSurvey"
+                            ToolTip.Tip="Merge a survey CSV into this one. Readings already held are skipped, so importing the same file twice changes nothing." />
+                    <Button x:Name="ExportSurveyButton" Content="Export…"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            FontSize="11" Margin="3,0" Click="OnExportSurvey"
+                            ToolTip.Tip="Write this survey out as a CSV" />
+                    <Button x:Name="ClearSurveyButton" Content="Clear"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            FontSize="11" Margin="3,0,0,0" Click="OnClearSurvey"
+                            ToolTip.Tip="Discard every recorded reading. Export first if you want to keep them." />
+                </UniformGrid>
+
+                <TextBlock Grid.Row="7" Grid.Column="0" Classes="field" Text="Peer TX (dBm)" />
+                <TextBox   Grid.Row="7" Grid.Column="1" x:Name="PeerTxPowerBox" Margin="0,0,0,4"
                            ToolTip.Tip="What the other nodes are assumed to transmit at. The mesh does not report this, so an error here moves the offset, not the exponent." />
 
-                <TextBlock Grid.Row="7" Grid.Column="0" Classes="field" x:Name="MyHeightLabel" Text="My antenna (m)" />
-                <TextBox   Grid.Row="7" Grid.Column="1" x:Name="MyHeightBox" Margin="0,0,0,4" />
+                <TextBlock Grid.Row="8" Grid.Column="0" Classes="field" x:Name="MyHeightLabel" Text="My antenna (m)" />
+                <TextBox   Grid.Row="8" Grid.Column="1" x:Name="MyHeightBox" Margin="0,0,0,4" />
 
-                <TextBlock Grid.Row="8" Grid.Column="0" Classes="field" x:Name="PeerHeightLabel" Text="Peer antenna (m)" />
-                <TextBox   Grid.Row="8" Grid.Column="1" x:Name="PeerHeightBox" Margin="0,0,0,4" />
+                <TextBlock Grid.Row="9" Grid.Column="0" Classes="field" x:Name="PeerHeightLabel" Text="Peer antenna (m)" />
+                <TextBox   Grid.Row="9" Grid.Column="1" x:Name="PeerHeightBox" Margin="0,0,0,4" />
 
                 <!-- Gains land in the offset decibel for decibel, so a fit made
                      with the wrong ones is wrong by exactly that much. They
                      belong beside the other assumptions rather than only in the
                      link-profile window. -->
-                <TextBlock Grid.Row="9" Grid.Column="0" Classes="field" Text="My gain (dBi)" />
-                <TextBox   Grid.Row="9" Grid.Column="1" x:Name="MyGainBox" Margin="0,0,0,4"
+                <TextBlock Grid.Row="10" Grid.Column="0" Classes="field" Text="My gain (dBi)" />
+                <TextBox   Grid.Row="10" Grid.Column="1" x:Name="MyGainBox" Margin="0,0,0,4"
                            ToolTip.Tip="Your antenna gain net of feedline loss. A stock whip is about 2 dBi." />
 
-                <TextBlock Grid.Row="10" Grid.Column="0" Classes="field" Text="Peer gain (dBi)" />
-                <TextBox   Grid.Row="10" Grid.Column="1" x:Name="PeerGainBox" Margin="0,0,0,4"
+                <TextBlock Grid.Row="11" Grid.Column="0" Classes="field" Text="Peer gain (dBi)" />
+                <TextBox   Grid.Row="11" Grid.Column="1" x:Name="PeerGainBox" Margin="0,0,0,4"
                            ToolTip.Tip="Gain assumed for the other nodes. Like their transmit power, the mesh does not report it, so an error here moves the offset rather than the exponent." />
 
-                <Button Grid.Row="11" Grid.ColumnSpan="2" x:Name="RemeasureButton"
+                <Button Grid.Row="12" Grid.ColumnSpan="2" x:Name="RemeasureButton"
                         Content="Re-measure" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center" Margin="0,6,0,0"
                         Click="OnRemeasure"
                         ToolTip.Tip="Read the terrain again with these assumptions" />
 
-                <TextBlock Grid.Row="12" Grid.ColumnSpan="2" x:Name="CaveatText"
+                <TextBlock Grid.Row="13" Grid.ColumnSpan="2" x:Name="CaveatText"
                            FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"
                            VerticalAlignment="Top"
                            Foreground="{DynamicResource BrushSubtle}"
                            Text="Each reading is one packet's SNR, not an average, and peer transmit power is assumed rather than reported. Read the exponent as the finding and the offset as bookkeeping." />
 
-                <Button Grid.Row="13" Grid.ColumnSpan="2" x:Name="ApplyButton"
+                <Button Grid.Row="14" Grid.ColumnSpan="2" x:Name="ApplyButton"
                         Content="Apply to link predictions" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center" Margin="0,8,0,0"
                         IsEnabled="False" Click="OnApply" />
 
-                <Button Grid.Row="14" Grid.ColumnSpan="2" x:Name="ClearButton"
+                <Button Grid.Row="15" Grid.ColumnSpan="2" x:Name="ClearButton"
                         Content="Clear calibration" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center" Margin="0,4,0,0"
                         Click="OnClear" />

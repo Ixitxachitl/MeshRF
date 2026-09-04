@@ -5,6 +5,7 @@ using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using MeshRF.Map;
 using MeshRF.Mesh;
@@ -123,16 +124,43 @@ public partial class PathLossWindow : Window
 
         ClearButton.IsEnabled = _settings.PathLossExponent is not null;
 
-        int surveyed = _vm.Survey.Read().Count;
-        SourceCombo.ItemsSource = new[]
-        {
-            "Node list",
-            surveyed > 0 ? $"Survey ({surveyed:N0})" : "Survey (empty)",
-        };
-        SourceCombo.SelectedIndex = surveyed > 0 ? 1 : 0;
+        ShowSurveyCount(prefer: 1);
 
         _ = MeasureAsync();
     }
+
+    /// <summary>Relabels the source picker with what the survey now holds, and
+    /// enables the actions that need readings to act on.</summary>
+    /// <param name="prefer">Which source to select if the survey has readings.
+    /// Defaults to whatever is already selected, so relabelling after an import
+    /// does not move the user off the source they were looking at.</param>
+    private void ShowSurveyCount(int? prefer = null)
+    {
+        int surveyed = _vm!.Survey.Read().Count;
+        int wanted = prefer ?? Math.Max(SourceCombo.SelectedIndex, 0);
+
+        // Replacing the items resets the selection, which would refit twice
+        // over: once on the reset and once on the restore.
+        _relabelling = true;
+        try
+        {
+            SourceCombo.ItemsSource = new[]
+            {
+                "Node list",
+                surveyed > 0 ? $"Survey ({surveyed:N0})" : "Survey (empty)",
+            };
+            SourceCombo.SelectedIndex = surveyed > 0 ? wanted : 0;
+        }
+        finally
+        {
+            _relabelling = false;
+        }
+
+        ExportSurveyButton.IsEnabled = surveyed > 0;
+        ClearSurveyButton.IsEnabled = surveyed > 0;
+    }
+
+    private bool _relabelling;
 
     private void OnRemeasure(object? sender, RoutedEventArgs e) => _ = MeasureAsync();
 
@@ -140,7 +168,7 @@ public partial class PathLossWindow : Window
     /// the two sources produce entirely different observations.</summary>
     private void OnSourceChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (_vm is not null && IsLoaded) _ = MeasureAsync();
+        if (_vm is not null && IsLoaded && !_relabelling) _ = MeasureAsync();
     }
 
     private bool UsingSurvey => SourceCombo.SelectedIndex == 1;
@@ -393,6 +421,126 @@ public partial class PathLossWindow : Window
 
         ClearButton.IsEnabled = false;
         StatusText.Text = "Calibration cleared. Link predictions are back to terrain only.";
+    }
+
+    // -- The survey file ----------------------------------------------------
+
+    private static FilePickerFileType[] SurveyFileTypes =>
+    [
+        new FilePickerFileType("Survey CSV") { Patterns = ["*.csv"] },
+        new FilePickerFileType("All files") { Patterns = ["*"] },
+    ];
+
+    /// <summary>
+    /// Merges a survey recorded elsewhere into this one.
+    ///
+    /// The workflow this exists for: recording happens in a vehicle, on
+    /// whatever machine has a GPS attached, and the fit is read back at the
+    /// station the survey was collected for. Merging rather than replacing
+    /// means several drives accumulate, which is exactly what the fit wants —
+    /// each one adds range spread the last did not have.
+    /// </summary>
+    private async void OnImportSurvey(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+
+        var storage = GetTopLevel(this)?.StorageProvider;
+        if (storage is null) return;
+
+        var picked = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import survey",
+            AllowMultiple = false,
+            FileTypeFilter = SurveyFileTypes,
+        });
+        if (picked.Count == 0) return;
+
+        if (picked[0].TryGetLocalPath() is not { } path)
+        {
+            StatusText.Text = "That file is not one this machine can read directly.";
+            return;
+        }
+
+        SurveyLog.SurveyImport result;
+        try
+        {
+            result = _vm.Survey.Import(path);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Import failed: {ex.Message}";
+            return;
+        }
+
+        ShowSurveyCount(prefer: 1);
+        StatusText.Text = Describe(result);
+
+        if (result.Added > 0) _ = MeasureAsync();
+
+        static string Describe(SurveyLog.SurveyImport r)
+        {
+            if (r.Added == 0 && r.Duplicates == 0)
+                return r.Unreadable > 0
+                    ? $"Nothing imported — none of the {r.Unreadable:N0} lines in that file were survey readings."
+                    : "That file held no readings.";
+
+            string added = $"Imported {r.Added:N0} reading{(r.Added == 1 ? "" : "s")}";
+            if (r.Duplicates > 0) added += $", skipping {r.Duplicates:N0} already held";
+            if (r.Unreadable > 0) added += $", and {r.Unreadable:N0} line{(r.Unreadable == 1 ? "" : "s")} that could not be read";
+            return added + ".";
+        }
+    }
+
+    private async void OnExportSurvey(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+
+        int count = _vm.Survey.Read().Count;
+        if (count == 0)
+        {
+            StatusText.Text = "Nothing recorded to export.";
+            return;
+        }
+
+        var storage = GetTopLevel(this)?.StorageProvider;
+        if (storage is null) return;
+
+        var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export survey",
+            SuggestedFileName = $"meshrf-survey-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
+            DefaultExtension = "csv",
+            FileTypeChoices = SurveyFileTypes,
+        });
+        if (file is null) return;
+
+        if (file.TryGetLocalPath() is not { } path)
+        {
+            StatusText.Text = "That location is not one this machine can write to directly.";
+            return;
+        }
+
+        StatusText.Text = _vm.Survey.Export(path)
+            ? $"Exported {count:N0} reading{(count == 1 ? "" : "s")} to {file.Name}."
+            : "Export failed — the file could not be written.";
+    }
+
+    private async void OnClearSurvey(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+
+        int count = _vm.Survey.Read().Count;
+        if (count == 0) return;
+
+        if (!await ConfirmDialog.ConfirmAsync(this, "Clear survey",
+                $"Discard all {count:N0} recorded readings? Export them first if you want to keep them.",
+                "Clear"))
+            return;
+
+        _vm.Survey.Clear();
+        ShowSurveyCount(prefer: 0);
+        StatusText.Text = "Survey cleared.";
+        _ = MeasureAsync();
     }
 
     private BuildingIndex _buildings = BuildingIndex.Empty;
