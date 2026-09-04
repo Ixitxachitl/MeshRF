@@ -162,6 +162,7 @@ public partial class MapPanel : UserControl
         // than merely annotate it afterwards.
         double measuredM = FurthestHeardDirectM(_viewModel, new GeoPoint(lat, lon));
         var calibration = FittedPathLoss(_settings);
+        var applied = UsableForCoverage(calibration) ? calibration : null;
 
         var options = new CoverageOptions(
             Centre: new GeoPoint(lat, lon),
@@ -173,8 +174,8 @@ public partial class MapPanel : UserControl
             FrequencyMhz: _viewModel.CenterFreqMHz,
             BandwidthKhz: bwKhz,
             SpreadingFactor: sf,
-            Calibration: calibration,
-            MaxCredibleRangeM: CredibleRangeM(calibration));
+            Calibration: applied,
+            MaxCredibleRangeM: CredibleRangeM(applied));
 
         _viewModel.StatusText = "Sweeping coverage…";
         try
@@ -217,7 +218,8 @@ public partial class MapPanel : UserControl
 
             Canvas.ShowCoverage(ring, note, measuredM, units);
 
-            _viewModel.StatusText = CoverageSummary(ring, area, measuredM, options, units);
+            _viewModel.StatusText =
+                CoverageSummary(ring, area, measuredM, applied, calibration, units);
         }
         catch (OperationCanceledException)
         {
@@ -242,6 +244,21 @@ public partial class MapPanel : UserControl
     }
 
     /// <summary>
+    /// Whether a fitted model can answer the question coverage asks, which is
+    /// entirely about range.
+    ///
+    /// A fit that held its exponent at free space measured how strong signals
+    /// were at about one distance and nothing at all about how they fall off.
+    /// Handed to a sweep it does not merely predict badly — it predicts
+    /// uselessly: with the exponent at 2 and a large negative offset the link
+    /// keeps tens of decibels of headroom right out to the edge of what the fit
+    /// has evidence for, so nothing anywhere obstructs it and the ring comes out
+    /// a circle. Better to sweep on plain physics and say why.
+    /// </summary>
+    private static bool UsableForCoverage(PathLossFit? fit) =>
+        fit is { ExponentFitted: true, IsPlausible: true };
+
+    /// <summary>
     /// What the sweep found, and how much of it to believe. A ring drawn on
     /// free-space loss over anywhere with trees or buildings promises range the
     /// station does not have, and at these ranges the terrain is read too
@@ -250,7 +267,7 @@ public partial class MapPanel : UserControl
     /// </summary>
     private static string CoverageSummary(
         CoverageRing ring, TerrainArea area, double measuredM,
-        CoverageOptions options, UnitSystem units)
+        PathLossFit? applied, PathLossFit? onFile, UnitSystem units)
     {
         var parts = new List<string>
         {
@@ -270,15 +287,23 @@ public partial class MapPanel : UserControl
         }
 
         if (ring.RangeWasCapped)
-            parts.Add("stopped where the model runs out of evidence, not where the signal does");
-
-        parts.Add(options.Calibration switch
         {
-            null => "free-space loss — calibrate path loss to draw the range this site actually has",
-            { ExponentFitted: false } => "the calibration never measured a falloff, so it says nothing " +
-                                         "about longer ranges — it needs neighbours spread across range",
-            { IsPlausible: false } => "the fitted exponent is outside what real environments produce",
-            _ => $"calibrated, n = {options.Calibration.Exponent:0.00}",
+            parts.Add(ring.CountOf(CoverageQuality.Clear) == ring.Spokes.Count
+                ? "nothing here limited the ring — it stops at the edge of the fit's evidence, " +
+                  "not at the edge of coverage"
+                : "stopped where the model runs out of evidence, not where the signal does");
+        }
+
+        parts.Add((applied, onFile) switch
+        {
+            ({ } fit, _) => $"calibrated, n = {fit.Exponent:0.00}",
+            (null, { ExponentFitted: false }) =>
+                "your calibration never measured a falloff, so it cannot answer a question about " +
+                "range — swept on free space instead. It needs neighbours spread across range",
+            (null, { IsPlausible: false } bad) =>
+                $"your calibration fitted n = {bad.Exponent:0.00}, outside what real environments " +
+                "produce — swept on free space instead",
+            _ => "free-space loss — calibrate path loss to draw the range this site actually has",
         });
 
         if (!area.Complete) parts.Add("some terrain missing");
