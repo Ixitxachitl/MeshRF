@@ -249,6 +249,9 @@ one RF-switch line, not two.
   bearing is walked outward to where contiguous coverage ends, judged against
   the range the same radio gets over open ground, and the fitted path loss is
   used in place of free space wherever a calibration has been applied.
+- Place search on the map, and a topographic basemap alongside the street,
+  satellite and dark ones — plus "None", for working offline or reading an
+  overlay without a map competing with it.
 - Survey recording: every directly-heard packet written to a CSV along with
   where this station was standing, which turns a client with a GPS into the
   survey instrument the path-loss fit needs. Readings are binned by peer and by
@@ -657,6 +660,9 @@ Upstream references influencing licensing and implementation include:
 - [meshtastic/firmware](https://github.com/meshtastic/firmware)
 - [MeshLab RF](https://github.com/HarukiToreda/MeshLab-RF) (MIT), whose
   propagation model the link profile follows
+- [Nominatim](https://nominatim.org/) and
+  [OpenTopoMap](https://opentopomap.org/) (CC-BY-SA), for place search and the
+  topographic basemap
 
 ## Disclaimer
 

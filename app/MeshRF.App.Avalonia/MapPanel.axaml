@@ -82,6 +82,12 @@
                 Background="#CC202020" CornerRadius="3"
                 BorderBrush="#553A3A3A" BorderThickness="1">
             <StackPanel Orientation="Vertical" Width="160">
+                <TextBlock Text="Find a place" FontSize="11" Margin="0,0,0,3" Foreground="#DDDDDD" />
+                <TextBox x:Name="PlaceSearchBox" Height="24" FontSize="11" Margin="0,0,0,6"
+                         Watermark="Town, address…"
+                         KeyDown="OnPlaceSearchKey"
+                         ToolTip.Tip="Press Enter to look the name up and send the map there. Uses OpenStreetMap Nominatim." />
+
                 <TextBlock Text="Map label" FontSize="11" Margin="0,0,0,3" Foreground="#DDDDDD" />
                 <ComboBox x:Name="LabelModeCombo" Height="24" FontSize="11"
                           HorizontalAlignment="Stretch"

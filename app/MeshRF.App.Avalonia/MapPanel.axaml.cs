@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using MeshRF.Map;
 using MeshRF.Mesh;
@@ -168,6 +169,59 @@ public partial class MapPanel : UserControl
         _settings.Save();
 
         if (CoverageButton.IsChecked == true) OnCoverageToggle(sender, e);
+    }
+
+    /// <summary>Nominatim asks for no more than a request a second, so one
+    /// instance holds the gap for the whole app rather than each keystroke
+    /// starting fresh.</summary>
+    private static readonly PlaceSearch s_places = new();
+
+    private CancellationTokenSource? _placeLookup;
+
+    /// <summary>
+    /// Enter in the search box sends the map to the best match.
+    ///
+    /// Only on Enter, never as you type. Nominatim's usage policy is written
+    /// for people typing into a box, and a lookup per keystroke is exactly what
+    /// it asks callers not to do.
+    /// </summary>
+    private async void OnPlaceSearchKey(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || _viewModel is null) return;
+        e.Handled = true;
+
+        var query = PlaceSearchBox.Text;
+        if (string.IsNullOrWhiteSpace(query)) return;
+
+        _placeLookup?.Cancel();
+        var cts = new CancellationTokenSource();
+        _placeLookup = cts;
+
+        _viewModel.StatusText = $"Looking up “{query.Trim()}”…";
+        try
+        {
+            var found = await s_places.FindAsync(query, limit: 1, cts.Token).ConfigureAwait(true);
+            if (cts.IsCancellationRequested) return;
+
+            if (found.Count == 0)
+            {
+                _viewModel.StatusText = $"Nothing found for “{query.Trim()}”.";
+                return;
+            }
+
+            var place = found[0];
+            Canvas.CenterOn(place.At.Lat, place.At.Lon);
+            _viewModel.StatusText = place.Name;
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a later search, or the panel went away.
+        }
+        finally
+        {
+            if (ReferenceEquals(_placeLookup, cts)) _placeLookup = null;
+            cts.Dispose();
+        }
     }
 
     /// <summary>Supersedes an earlier sweep: the toggle can be flipped again
