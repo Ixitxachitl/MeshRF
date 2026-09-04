@@ -30,7 +30,7 @@ public class HttpIdentityTests
 
         // A bare product name with no version leaves an operator unable to say
         // which release started misbehaving.
-        Assert.Matches(@"^MeshRF/\d+\.\d+\.\d+ \(\+https://\S+\)$", agent);
+        Assert.Matches(@"^MeshRF/\d+\.\d+\.\d+\S* \(\+https://\S+\)$", agent);
     }
 
     [Fact]
@@ -38,5 +38,19 @@ public class HttpIdentityTests
     {
         // Hardcoded "MeshRF/1.0" outlived four releases before anyone noticed.
         Assert.DoesNotContain("MeshRF/1.0 ", HttpIdentity.UserAgent + " ", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThePatchReleaseIsNamedNotTheMinorItCameFrom()
+    {
+        // AssemblyVersion is pinned to major.minor.0.0 for binding stability,
+        // so reading it would make every patch release introduce itself as the
+        // minor release. The source revision is trimmed off the other end: a
+        // service wants to know which release misbehaved, not which commit.
+        string agent = HttpIdentity.UserAgent;
+
+        Assert.DoesNotContain("+", agent[..agent.IndexOf('(', StringComparison.Ordinal)],
+            StringComparison.Ordinal);
+        Assert.Matches(@"MeshRF/\d+\.\d+\.\d+ ", agent);
     }
 }
