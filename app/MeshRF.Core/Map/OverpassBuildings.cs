@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Globalization;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 
@@ -11,13 +12,94 @@ namespace MeshRF.Map;
 /// any buildings here, or the service could not be reached — and a prediction
 /// that quietly drops the buildings it was asked for should say which.
 /// </summary>
-public sealed record BuildingExtract(BuildingIndex Index, bool LookupFailed)
+public sealed record BuildingExtract(
+    BuildingIndex Index,
+    bool LookupFailed,
+    BuildingLookupFailure Failure = BuildingLookupFailure.None,
+    TimeSpan? RetryAfter = null)
 {
     public static readonly BuildingExtract None = new(BuildingIndex.Empty, false);
 
-    public static readonly BuildingExtract Unavailable = new(BuildingIndex.Empty, true);
+    public static readonly BuildingExtract Unavailable =
+        new(BuildingIndex.Empty, true, BuildingLookupFailure.Unknown);
+
+    public static BuildingExtract Failed(BuildingLookupFailure why, TimeSpan? retryAfter = null) =>
+        new(BuildingIndex.Empty, true, why, retryAfter);
 
     public int Count => Index.Count;
+
+    /// <summary>Why the lookup did not happen, in words, or null when it did.
+    /// </summary>
+    /// <remarks>"Could not be reached" covers a service that is rate-limiting
+    /// us, one that is overloaded, and a machine with no network at all. Those
+    /// call for waiting, retrying later and checking the connection
+    /// respectively, so collapsing them into one message tells the user to do
+    /// nothing in particular.</remarks>
+    public string? Explanation => Failure switch
+    {
+        BuildingLookupFailure.None => null,
+
+        BuildingLookupFailure.RateLimited =>
+            "OpenStreetMap is rate-limiting this machine" +
+            Wait(" — try again in ", string.Empty) +
+            ". Overpass is a shared free service that allows each user a few queries at a time",
+
+        BuildingLookupFailure.ServerBusy =>
+            "the OpenStreetMap building service is busy and shed the query" +
+            Wait(" — try again in ", "; a smaller radius asks less of it"),
+
+        BuildingLookupFailure.TimedOut =>
+            "the OpenStreetMap building query timed out — a smaller radius asks for less",
+
+        BuildingLookupFailure.Offline =>
+            "OpenStreetMap could not be reached — check this machine's network connection",
+
+        BuildingLookupFailure.Refused =>
+            "OpenStreetMap refused the building query",
+
+        BuildingLookupFailure.CoolingOff =>
+            "not retried yet after an earlier OpenStreetMap failure" +
+            Wait(" — retrying in ", string.Empty),
+
+        _ => "OpenStreetMap could not be reached",
+    };
+
+    /// <summary>The wait in words, when the service said how long.</summary>
+    private string Wait(string prefix, string otherwise) =>
+        RetryAfter is { } wait && wait > TimeSpan.Zero
+            ? prefix + (wait.TotalMinutes >= 1.5
+                ? $"{wait.TotalMinutes:0} minutes"
+                : $"{Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds))} seconds")
+            : otherwise;
+}
+
+/// <summary>Why a building lookup produced nothing.</summary>
+public enum BuildingLookupFailure
+{
+    /// <summary>It succeeded, whether or not it found anything.</summary>
+    None,
+
+    /// <summary>Overpass is enforcing its per-user limit.</summary>
+    RateLimited,
+
+    /// <summary>Overpass is up but shed the query.</summary>
+    ServerBusy,
+
+    /// <summary>The query ran past the client's own patience.</summary>
+    TimedOut,
+
+    /// <summary>Nothing answered: no route, no DNS, no network.</summary>
+    Offline,
+
+    /// <summary>Answered, but refused the query itself.</summary>
+    Refused,
+
+    /// <summary>Not attempted — an earlier failure is still in its cool-off.
+    /// </summary>
+    CoolingOff,
+
+    /// <summary>Failed in a way not worth its own message.</summary>
+    Unknown,
 }
 
 /// <summary>
@@ -84,7 +166,9 @@ public sealed class OverpassBuildings : IDisposable
         // Still inside a backoff from an earlier refusal, which is a failure
         // that has not stopped being one just because it is not being retried.
         var key = file;
-        if (!_backoff.ShouldTry(key, DateTimeOffset.UtcNow)) return BuildingExtract.Unavailable;
+        var now = DateTimeOffset.UtcNow;
+        if (!_backoff.ShouldTry(key, now))
+            return BuildingExtract.Failed(BuildingLookupFailure.CoolingOff, _backoff.RetryIn(key, now));
 
         string json;
         try
@@ -98,19 +182,29 @@ public sealed class OverpassBuildings : IDisposable
 
             using var body = new StringContent(query);
             using var response = await _http.PostAsync(Endpoint, body, ct).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
+
+            // Inspected rather than thrown on: the status and any Retry-After
+            // are the whole diagnosis, and EnsureSuccessStatusCode drops the
+            // header on its way out.
+            if (!response.IsSuccessStatusCode)
+            {
+                _backoff.Failed(key, DateTimeOffset.UtcNow);
+                return BuildingExtract.Failed(Classify(response.StatusCode), RetryAfter(response));
+            }
+
             json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             _backoff.Succeeded(key);
         }
         catch (HttpRequestException)
         {
+            // Nothing answered at all: no route, no DNS, connection refused.
             _backoff.Failed(key, DateTimeOffset.UtcNow);
-            return BuildingExtract.Unavailable;
+            return BuildingExtract.Failed(BuildingLookupFailure.Offline);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
             _backoff.Failed(key, DateTimeOffset.UtcNow);
-            return BuildingExtract.Unavailable;
+            return BuildingExtract.Failed(BuildingLookupFailure.TimedOut);
         }
 
         try
@@ -210,6 +304,34 @@ public sealed class OverpassBuildings : IDisposable
         string.Format(
             CultureInfo.InvariantCulture,
             "osm_{0:F3}_{1:F3}_{2:F3}_{3:F3}.json", south, west, north, east);
+
+    /// <summary>What an unsuccessful status says about why.</summary>
+    /// <remarks>Overpass answers 429 when a user is over their slot allowance
+    /// and 504 when the query was too heavy for it at that moment; 509 is the
+    /// older bandwidth-limit answer some mirrors still send.</remarks>
+    public static BuildingLookupFailure Classify(HttpStatusCode status) => status switch
+    {
+        HttpStatusCode.TooManyRequests => BuildingLookupFailure.RateLimited,
+        (HttpStatusCode)509 => BuildingLookupFailure.RateLimited,
+        HttpStatusCode.GatewayTimeout => BuildingLookupFailure.ServerBusy,
+        HttpStatusCode.ServiceUnavailable => BuildingLookupFailure.ServerBusy,
+        HttpStatusCode.RequestTimeout => BuildingLookupFailure.TimedOut,
+        _ => BuildingLookupFailure.Refused,
+    };
+
+    /// <summary>How long the service asked us to wait, if it said.</summary>
+    private static TimeSpan? RetryAfter(HttpResponseMessage response)
+    {
+        var header = response.Headers.RetryAfter;
+        if (header is null) return null;
+        if (header.Delta is { } delta) return delta;
+        if (header.Date is { } date)
+        {
+            var wait = date - DateTimeOffset.UtcNow;
+            if (wait > TimeSpan.Zero) return wait;
+        }
+        return null;
+    }
 
     public void Dispose() => _http.Dispose();
 }

@@ -278,12 +278,16 @@ and building-attenuation figures are all its work.
   several drives accumulate.
 - **Building attenuation** charges a path for the footprints it crosses, in the
   profile, the sweep and the calibration alike. Off by default, since it puts
-  the app on a shared public service.
+  the app on a shared public service. A lookup that does not happen says which
+  of rate limiting, an overloaded server, a timeout, no network, or an
+  unexpired backoff was responsible, rather than collapsing all five into
+  "could not be reached".
 - A **chosen point** on the map runs any of it from somewhere other than this
   station, which turns "what do I reach" into "what would a node here reach".
   Set it by right-clicking bare ground, or pick an existing node — on the map or
   in the Nodes table — to ask about where one already is. A node can be either
-  end of a link profile, drawn to it or from it. There is one point
+  end of a link profile, drawn to it or from it, and so can a bare place, which
+  covers siting two nodes at once when neither exists yet. There is one point
   however it was set, so either replaces the other. A sweep from elsewhere uses
   your own antenna and modem settings, since the mesh does not report a peer's.
 

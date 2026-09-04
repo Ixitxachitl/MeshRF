@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Net;
 using MeshRF.Map;
 using Xunit;
 
@@ -143,5 +144,69 @@ public class OverpassBuildingsTests
 
         Assert.Equal(0, BuildingExtract.Unavailable.Count);
         Assert.True(BuildingExtract.Unavailable.LookupFailed);
+    }
+
+    // -- Why a lookup failed ------------------------------------------------
+
+    [Theory]
+    [InlineData(429, BuildingLookupFailure.RateLimited)]
+    [InlineData(509, BuildingLookupFailure.RateLimited)]
+    [InlineData(504, BuildingLookupFailure.ServerBusy)]
+    [InlineData(503, BuildingLookupFailure.ServerBusy)]
+    [InlineData(408, BuildingLookupFailure.TimedOut)]
+    [InlineData(400, BuildingLookupFailure.Refused)]
+    public void AnUnsuccessfulStatusSaysWhichKindOfFailureItWas(int status, BuildingLookupFailure expected) =>
+        Assert.Equal(expected, OverpassBuildings.Classify((HttpStatusCode)status));
+
+    [Fact]
+    public void BeingRateLimitedReadsDifferentlyFromHavingNoNetwork()
+    {
+        // The distinction the whole enum exists for: one is "wait", the other
+        // is "check your connection", and one message for both says neither.
+        string limited = BuildingExtract.Failed(BuildingLookupFailure.RateLimited).Explanation!;
+        string offline = BuildingExtract.Failed(BuildingLookupFailure.Offline).Explanation!;
+
+        Assert.Contains("rate-limiting", limited, StringComparison.Ordinal);
+        Assert.Contains("network connection", offline, StringComparison.Ordinal);
+        Assert.NotEqual(limited, offline);
+    }
+
+    [Fact]
+    public void AServiceThatSaidHowLongToWaitIsQuoted()
+    {
+        string soon = BuildingExtract
+            .Failed(BuildingLookupFailure.RateLimited, TimeSpan.FromSeconds(45)).Explanation!;
+        string later = BuildingExtract
+            .Failed(BuildingLookupFailure.RateLimited, TimeSpan.FromMinutes(10)).Explanation!;
+
+        Assert.Contains("45 seconds", soon, StringComparison.Ordinal);
+        Assert.Contains("10 minutes", later, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AServiceThatSaidNothingAboutWaitingDoesNotInventATime()
+    {
+        string explanation = BuildingExtract.Failed(BuildingLookupFailure.RateLimited).Explanation!;
+
+        Assert.DoesNotContain("try again in", explanation, StringComparison.Ordinal);
+        Assert.Contains("rate-limiting", explanation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASuccessfulLookupHasNothingToExplain()
+    {
+        Assert.Null(BuildingExtract.None.Explanation);
+        Assert.False(BuildingExtract.None.LookupFailed);
+    }
+
+    [Fact]
+    public void NotHavingRetriedYetIsItsOwnAnswer()
+    {
+        // Distinct from a fresh failure: nothing was asked this time, so
+        // "could not be reached" would be describing a request never made.
+        var waiting = BuildingExtract.Failed(BuildingLookupFailure.CoolingOff, TimeSpan.FromSeconds(30));
+
+        Assert.True(waiting.LookupFailed);
+        Assert.Contains("retrying in 30 seconds", waiting.Explanation!, StringComparison.Ordinal);
     }
 }
