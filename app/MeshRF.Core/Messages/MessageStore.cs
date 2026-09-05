@@ -162,6 +162,31 @@ public sealed class MessageStore : IDisposable
         }
     }
 
+    /// <summary>Moves every message to or from <paramref name="retired"/> onto
+    /// <paramref name="survivor"/>, for a node that changed its number.</summary>
+    /// <remarks>
+    /// The node database decides that two numbers are one radio (see
+    /// <c>NodeStore.Merge</c>); this is the half of it that lives here, because
+    /// a conversation keyed on a number the node list no longer has would show
+    /// as a bare id and take no further messages from the radio it belongs to.
+    /// </remarks>
+    public void RepointNode(uint retired, uint survivor)
+    {
+        ThrowIfDisposed();
+        if (retired == survivor) return;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE messages SET from_node = $to WHERE from_node = $from;
+                UPDATE messages SET to_node   = $to WHERE to_node   = $from;
+                """;
+            cmd.Parameters.AddWithValue("$from", retired);
+            cmd.Parameters.AddWithValue("$to", survivor);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
     /// <summary>Most recent messages, newest first.</summary>
     public IReadOnlyList<MessageRecord> Recent(int limit = 500)
     {

@@ -41,6 +41,10 @@ public sealed record NodeTelemetryHistoryRecord(
     double? Ch3CurrentMa,
     string Signature);
 
+/// <summary>One node number folded into another as a single radio that
+/// renumbered itself, and the evidence that said so.</summary>
+public sealed record NodeMerge(uint Survivor, uint Retired, NodeIdentityMatch Match);
+
 /// <summary>
 /// SQLite-backed persistent node database, modeled after the Meshtastic
 /// firmware <c>NodeDB</c>. The schema mirrors the <c>NodeInfo</c> protobuf so
@@ -63,6 +67,13 @@ public sealed class NodeStore : IDisposable
     private readonly SqliteConnection _conn;
     private bool _disposed;
 
+    // Retired node number -> the row it was folded into. Held in memory because
+    // every packet-driven write consults it: a neighbour that has not caught up
+    // goes on relaying a renumbered node under its old number, and without this
+    // each of those would insert the ghost row straight back. Merge keeps every
+    // value pointing at a live row, so a lookup is never a chain.
+    private readonly Dictionary<uint, uint> _aliases = new();
+
     public static string DefaultPath => AppData.PathFor("nodes.db");
 
     public NodeStore() : this(DefaultPath) { }
@@ -79,6 +90,15 @@ public sealed class NodeStore : IDisposable
             wal.ExecuteNonQuery();
         }
         EnsureSchema();
+        LoadAliases();
+    }
+
+    private void LoadAliases()
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT alias_num, node_num FROM node_aliases";
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read()) _aliases[(uint)rd.GetInt64(0)] = (uint)rd.GetInt64(1);
     }
 
     private void EnsureSchema()
@@ -196,6 +216,19 @@ public sealed class NodeStore : IDisposable
             );
             CREATE INDEX IF NOT EXISTS idx_node_telemetry_history_node_time
                 ON node_telemetry_history(node_num, timestamp_epoch ASC, id ASC);
+
+            -- Node numbers this database has retired, and the row each one was
+            -- folded into. See MeshRF.Nodes.NodeIdentity for what makes two
+            -- rows one radio; Merge keeps these pointing at a live node_num,
+            -- so a lookup never has to follow a chain.
+            CREATE TABLE IF NOT EXISTS node_aliases (
+                alias_num    INTEGER PRIMARY KEY,
+                node_num     INTEGER NOT NULL,
+                merged_epoch INTEGER NOT NULL DEFAULT 0,
+                reason       TEXT    NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_node_aliases_node
+                ON node_aliases(node_num);
             """;
         history.ExecuteNonQuery();
 
@@ -312,7 +345,10 @@ public sealed class NodeStore : IDisposable
                     ch3_voltage_v    = COALESCE(excluded.ch3_voltage_v,  ch3_voltage_v),
                     ch3_current_ma   = COALESCE(excluded.ch3_current_ma, ch3_current_ma);
                 """;
-            cmd.Parameters.AddWithValue("$node_num", rec.NodeNum);
+            // A relayed packet can still carry a number this database has
+            // retired; resolving here is what keeps the ghost row from
+            // being inserted all over again.
+            cmd.Parameters.AddWithValue("$node_num", TargetOf(rec));
             cmd.Parameters.AddWithValue("$user_id", rec.UserId ?? string.Empty);
             cmd.Parameters.AddWithValue("$long_name", rec.LongName ?? string.Empty);
             cmd.Parameters.AddWithValue("$short_name", rec.ShortName ?? string.Empty);
@@ -485,6 +521,7 @@ public sealed class NodeStore : IDisposable
         GeoPoint? mine, GeoPoint? theirs, DateTimeOffset? when = null)
     {
         ThrowIfDisposed();
+        nodeNum = Resolve(nodeNum);
         if (mine is not { } myPos || theirs is not { } peerPos) return;
 
         var fresh = new DirectSighting(
@@ -521,17 +558,23 @@ public sealed class NodeStore : IDisposable
         }
     }
 
+    /// <summary>One node, by any number it has answered to: a number retired by
+    /// a merge finds the row it was folded into.</summary>
     public NodeRecord? Get(uint nodeNum)
     {
         ThrowIfDisposed();
-        lock (_gate)
-        {
-            using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "SELECT * FROM nodes WHERE node_num = $n";
-            cmd.Parameters.AddWithValue("$n", nodeNum);
-            using var rd = cmd.ExecuteReader();
-            return rd.Read() ? Read(rd) : null;
-        }
+        lock (_gate) return ReadRow(Resolve(nodeNum));
+    }
+
+    // Caller holds _gate. The row exactly as stored, with no alias applied --
+    // only Merge, which is about to retire one of these numbers, wants this.
+    private NodeRecord? ReadRow(uint nodeNum)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM nodes WHERE node_num = $n";
+        cmd.Parameters.AddWithValue("$n", nodeNum);
+        using var rd = cmd.ExecuteReader();
+        return rd.Read() ? Read(rd) : null;
     }
 
     /// <summary>All nodes, newest-heard first.</summary>
@@ -574,6 +617,240 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$n", nodeNum);
             cmd.ExecuteNonQuery();
         }
+    }
+
+    /// <summary>
+    /// The number a node is known by now. A node number that has been merged
+    /// away resolves to the row it was folded into; anything else comes back
+    /// unchanged. <see cref="Merge"/> repoints existing aliases as it goes, so
+    /// this never has to follow a chain.
+    /// </summary>
+    public uint Resolve(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        lock (_gate) return _aliases.TryGetValue(nodeNum, out var found) ? found : nodeNum;
+    }
+
+    // Caller holds _gate. Which row an upsert should land on: the surviving one
+    // for a retired number, unless what it carries says the number is no longer
+    // the radio it was folded into.
+    private uint TargetOf(NodeRecord rec)
+    {
+        uint target = Resolve(rec.NodeNum);
+        if (target == rec.NodeNum || ReadRow(target) is not { } kept) return target;
+
+        // A merge can be wrong — a MAC is only what a node claims, and two of
+        // them claiming one is all it takes. A number answering with identity
+        // that contradicts the row it was folded into gets released, so a bad
+        // merge costs one wrong attribution rather than being permanent. What
+        // already moved across stays moved; this only governs what comes next.
+        if (!Contradicts(rec.MacAddress, kept.MacAddress)
+            && !Contradicts(rec.PublicKey, kept.PublicKey))
+            return target;
+
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM node_aliases WHERE alias_num = $n";
+        cmd.Parameters.AddWithValue("$n", rec.NodeNum);
+        cmd.ExecuteNonQuery();
+        _aliases.Remove(rec.NodeNum);
+        return rec.NodeNum;
+    }
+
+    /// <summary>Two identity values that disagree. Either being unknown is not
+    /// a disagreement — most writes carry neither.</summary>
+    private static bool Contradicts(string? claimed, string? stored) =>
+        !string.IsNullOrEmpty(claimed) && !string.IsNullOrEmpty(stored)
+        && !string.Equals(claimed, stored, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Numbers this node used to answer to, oldest merge first.</summary>
+    public IReadOnlyList<uint> AliasesOf(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        var list = new List<uint>();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT alias_num FROM node_aliases
+                WHERE node_num = $n
+                ORDER BY merged_epoch ASC, alias_num ASC
+                """;
+            cmd.Parameters.AddWithValue("$n", nodeNum);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) list.Add((uint)rd.GetInt64(0));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Folds <paramref name="retired"/> into <paramref name="survivor"/> as one
+    /// radio that changed its node number, and records the old number as an
+    /// alias so stored history still resolves to the surviving row.
+    /// </summary>
+    /// <remarks>
+    /// What carries over is deliberately narrow: the history rows, when the
+    /// radio was first heard, the choices the user made about it, and any
+    /// identity field the surviving row is missing. Position, telemetry, signal
+    /// and path are left alone — they describe the last packet, and the
+    /// surviving row is the identity currently on air, so a reading from a
+    /// ghost that a neighbour is still relaying must not overwrite it.
+    /// </remarks>
+    /// <returns>False when there was nothing to fold, which is what stops the
+    /// callers that merge until nothing matches from looping forever.</returns>
+    public bool Merge(uint survivor, uint retired, NodeIdentityMatch match)
+    {
+        ThrowIfDisposed();
+        if (survivor == retired) return false;
+        lock (_gate)
+        {
+            // Read straight through, not via Get: the point is the row that is
+            // about to stop existing, and Get would resolve past it.
+            var old = ReadRow(retired);
+            if (old is null || ReadRow(survivor) is null) return false;
+
+            using var tx = _conn.BeginTransaction();
+            using (var cmd = _conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    UPDATE node_location_history  SET node_num = $s WHERE node_num = $r;
+                    UPDATE node_telemetry_history SET node_num = $s WHERE node_num = $r;
+
+                    UPDATE nodes SET
+                        user_id     = CASE WHEN user_id    = '' THEN $uid   ELSE user_id    END,
+                        long_name   = CASE WHEN long_name  = '' THEN $long  ELSE long_name  END,
+                        short_name  = CASE WHEN short_name = '' THEN $short ELSE short_name END,
+                        hw_model    = CASE WHEN hw_model   = '' THEN $hw    ELSE hw_model   END,
+                        role        = CASE WHEN role       = '' THEN $role  ELSE role       END,
+                        public_key  = COALESCE(NULLIF(public_key,  ''), NULLIF($pubkey, '')),
+                        mac_address = COALESCE(NULLIF(mac_address, ''), NULLIF($mac,    '')),
+                        first_heard_epoch = CASE
+                            WHEN $first > 0 AND (first_heard_epoch = 0 OR $first < first_heard_epoch)
+                            THEN $first ELSE first_heard_epoch END,
+                        favorite   = MAX(favorite,   $favorite),
+                        ignored    = MAX(ignored,    $ignored),
+                        mute_rtttl = MAX(mute_rtttl, $mute)
+                    WHERE node_num = $s;
+
+                    DELETE FROM nodes WHERE node_num = $r;
+
+                    -- Anything already pointing at the number being retired
+                    -- follows it, which is what keeps Resolve a single lookup.
+                    UPDATE node_aliases SET node_num = $s WHERE node_num = $r;
+                    -- The survivor is a live number again if it was ever retired.
+                    DELETE FROM node_aliases WHERE alias_num = $s;
+                    INSERT OR REPLACE INTO node_aliases (alias_num, node_num, merged_epoch, reason)
+                    VALUES ($r, $s, $now, $reason);
+                    """;
+                cmd.Parameters.AddWithValue("$s", survivor);
+                cmd.Parameters.AddWithValue("$r", retired);
+                cmd.Parameters.AddWithValue("$uid", old.UserId);
+                cmd.Parameters.AddWithValue("$long", old.LongName);
+                cmd.Parameters.AddWithValue("$short", old.ShortName);
+                cmd.Parameters.AddWithValue("$hw", old.HwModel);
+                cmd.Parameters.AddWithValue("$role", old.Role);
+                cmd.Parameters.AddWithValue("$pubkey", old.PublicKey);
+                cmd.Parameters.AddWithValue("$mac", old.MacAddress);
+                cmd.Parameters.AddWithValue("$first", old.FirstHeardEpoch);
+                cmd.Parameters.AddWithValue("$favorite", old.Favorite ? 1 : 0);
+                cmd.Parameters.AddWithValue("$ignored", old.Ignored ? 1 : 0);
+                cmd.Parameters.AddWithValue("$mute", old.MuteRtttl ? 1 : 0);
+                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                cmd.Parameters.AddWithValue("$reason", match.ToString());
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+
+            // Same three moves the SQL above made, kept in step in memory.
+            foreach (var alias in _aliases.Where(a => a.Value == retired).Select(a => a.Key).ToList())
+                _aliases[alias] = survivor;
+            _aliases.Remove(survivor);
+            _aliases[retired] = survivor;
+
+            // Two nodes' worth of history landed on one row, so the cap has to
+            // be reapplied — otherwise the survivor keeps up to twice its share.
+            TrimLocationHistory(survivor, HistoryRowsKeptPerNode);
+            TrimTelemetryHistory(survivor, HistoryRowsKeptPerNode);
+            return true;
+        }
+    }
+
+    /// <summary>Every pair of rows the identity rules call one radio. Reports
+    /// without changing anything.</summary>
+    public IReadOnlyList<NodeMerge> FindDuplicates()
+    {
+        var all = All();
+        var found = new List<NodeMerge>();
+        // Every pair, which for a node database of this size is a few hundred
+        // thousand string compares — cheap enough for the one startup pass, and
+        // the live path uses MergeDuplicatesOf instead.
+        for (int i = 0; i < all.Count; i++)
+        {
+            for (int j = i + 1; j < all.Count; j++)
+            {
+                var match = NodeIdentity.Compare(all[i], all[j]);
+                if (match == NodeIdentityMatch.None) continue;
+                var keep = NodeIdentity.Survivor(all[i], all[j]);
+                var drop = ReferenceEquals(keep, all[i]) ? all[j] : all[i];
+                found.Add(new NodeMerge(keep.NodeNum, drop.NodeNum, match));
+            }
+        }
+        return found;
+    }
+
+    /// <summary>Applies every duplicate <see cref="FindDuplicates"/> can see.
+    /// The one-shot pass over a database written before the MAC was stored.
+    /// </summary>
+    public IReadOnlyList<NodeMerge> MergeDuplicates()
+    {
+        ThrowIfDisposed();
+        var applied = new List<NodeMerge>();
+        lock (_gate)
+        {
+            // Re-found after each merge rather than applied as a batch: folding
+            // one pair can fill a blank that makes another pair match, and a
+            // stale list would name rows that no longer exist.
+            while (FindDuplicates().FirstOrDefault() is { } merge
+                   && Merge(merge.Survivor, merge.Retired, merge.Match))
+                applied.Add(merge);
+        }
+        return applied;
+    }
+
+    /// <summary>Retires any duplicate of one node. Called when a NodeInfo
+    /// arrives, which is where the MAC and key that can identify a renumbered
+    /// radio come from.</summary>
+    public IReadOnlyList<NodeMerge> MergeDuplicatesOf(uint nodeNum)
+    {
+        ThrowIfDisposed();
+        var applied = new List<NodeMerge>();
+        lock (_gate)
+        {
+            // Merging can expose another duplicate — three rows for one radio
+            // that upgraded twice — so follow the survivor until nothing matches.
+            while (Get(nodeNum) is { } node && FirstDuplicateOf(node) is { } merge
+                   && Merge(merge.Survivor, merge.Retired, merge.Match))
+            {
+                applied.Add(merge);
+                nodeNum = merge.Survivor;
+            }
+        }
+        return applied;
+    }
+
+    // Caller holds _gate (Monitor is reentrant on the same thread).
+    private NodeMerge? FirstDuplicateOf(NodeRecord node)
+    {
+        foreach (var other in All())
+        {
+            var match = NodeIdentity.Compare(node, other);
+            if (match == NodeIdentityMatch.None) continue;
+            var keep = NodeIdentity.Survivor(node, other);
+            return ReferenceEquals(keep, node)
+                ? new NodeMerge(node.NodeNum, other.NodeNum, match)
+                : new NodeMerge(other.NodeNum, node.NodeNum, match);
+        }
+        return null;
     }
 
     public IReadOnlyList<NodeLocationHistoryRecord> LocationHistory(uint nodeNum, int limit = 500)
@@ -639,6 +916,7 @@ public sealed class NodeStore : IDisposable
                                    double latitude, double longitude, int? altitudeM)
     {
         ThrowIfDisposed();
+        nodeNum = Resolve(nodeNum);
         lock (_gate)
         {
             using var cmd = _conn.CreateCommand();
@@ -815,6 +1093,7 @@ public sealed class NodeStore : IDisposable
     public long AddTelemetryHistory(NodeTelemetryHistoryRecord rec)
     {
         ThrowIfDisposed();
+        rec = rec with { NodeNum = Resolve(rec.NodeNum) };
         lock (_gate)
         {
             using var cmd = _conn.CreateCommand();
@@ -1028,9 +1307,12 @@ public sealed class NodeStore : IDisposable
                 DELETE FROM nodes;
                 DELETE FROM node_location_history;
                 DELETE FROM node_telemetry_history;
+                DELETE FROM node_aliases;
                 """;
             cmd.ExecuteNonQuery();
+            _aliases.Clear();
         }
+
     }
 
     private static NodeRecord Read(SqliteDataReader r)

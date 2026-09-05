@@ -91,9 +91,17 @@ public sealed class NodeRecord : INotifyPropertyChanged
     public string Role      { get; set; } = string.Empty;
 
     /// <summary>MAC the peer advertised in NodeInfo (field 4), as
-    /// <c>aa:bb:cc:dd:ee:ff</c>; empty when it has never sent a real one.
-    /// The field is deprecated, and firmware zero-fills it for any node whose
-    /// record came back from flash, so most peers never populate it.</summary>
+    /// <c>aa:bb:cc:dd:ee:ff</c>; empty until it sends us one.</summary>
+    /// <remarks>
+    /// Deprecated on the wire, and a phone client almost never sees a usable
+    /// one: <c>TypeConversions::ConvertToUser</c> zero-fills it for anything a
+    /// node serves out of its NodeDB, which is everything a phone reads. We
+    /// take NodeInfo off the air instead, where it is the sender's own
+    /// <c>owner</c> record with the real MAC in it, so every NodeInfo we have
+    /// accepted has carried one. That makes it a durable per-radio identity —
+    /// see <see cref="NodeIdentity"/>, which uses it to recognise a node that
+    /// changed its number.
+    /// </remarks>
     public string MacAddress { get; set; } = string.Empty;
 
     /// <summary>Convenience flag for UI visibility bindings.</summary>

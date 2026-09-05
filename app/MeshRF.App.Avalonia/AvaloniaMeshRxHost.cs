@@ -336,6 +336,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         };
 
         LoadChannels();
+
+        // Firmware 2.8 moved the node number from the MAC to the public key, so
+        // every node that upgrades leaves a ghost row behind on the old number.
+        // The pass runs before the list is filled: rows retired here should
+        // never reach it, and a database written before we stored the MAC can
+        // be carrying ghosts from upgrades we had no way to see at the time.
+        foreach (var merge in _nodeStore.MergeDuplicates())
+        {
+            _messageStore.RepointNode(merge.Retired, merge.Survivor);
+            Log(MergeDescription(merge));
+        }
+
         foreach (var wp in _waypointStore.All()) Waypoints.Add(wp);
         // Our own node lives in the database so chats can show our name, but we
         // don't list ourselves among the discovered peers. Excluded here rather
@@ -794,6 +806,44 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         _nodeStore.SetFavorite(nodeNum, favorite);
         MarkNodeDirty(nodeNum);
     }
+
+    /// <summary>Retires any duplicate identity of a node we have just heard a
+    /// NodeInfo from, and returns the number its row is listed under after.
+    /// </summary>
+    private uint MergeNodeDuplicates(uint nodeNum)
+    {
+        if (nodeNum == 0 || nodeNum == MyNodeNum) return nodeNum;
+
+        foreach (var merge in _nodeStore.MergeDuplicatesOf(nodeNum))
+        {
+            _messageStore.RepointNode(merge.Retired, merge.Survivor);
+
+            for (int i = Nodes.Count - 1; i >= 0; i--)
+                if (Nodes[i].NodeNum == merge.Retired) Nodes.RemoveAt(i);
+
+            // A tab on either number is reopened on the surviving one, which is
+            // also what reloads it with the history just moved across.
+            bool wasOpen = _conversationsByNode.TryGetValue(merge.Retired, out var ghost);
+            if (wasOpen) CloseConversation(ghost!);
+            if (_conversationsByNode.TryGetValue(merge.Survivor, out var kept))
+            {
+                CloseConversation(kept);
+                wasOpen = true;
+            }
+            if (wasOpen) OpenConversation(merge.Survivor);
+
+            Log("  " + MergeDescription(merge));
+            nodeNum = merge.Survivor;
+        }
+        return nodeNum;
+    }
+
+    private static string MergeDescription(NodeMerge merge) =>
+        $"!{merge.Retired:x8} is the same radio as !{merge.Survivor:x8} " +
+        (merge.Match == NodeIdentityMatch.MacAddress
+            ? "(same MAC)"
+            : "(same key, renumbered by 2.8)") +
+        " — folded into it.";
 
     public void ForgetNode(uint nodeNum)
     {
@@ -1281,7 +1331,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     Log($"  {header.FromId}: KEY MISMATCH — the public key changed; keeping the one on file. " +
                         "Right-click the node → Request new keys to accept the new one.");
                 if (keyAccepted) StoredPublicKeyChanged?.Invoke(header.From);
-                MarkNodeDirty(header.From);
+                // A NodeInfo is the only packet that carries a MAC and a key, so
+                // it is the moment a radio that renumbered itself can be matched
+                // to the row we already hold for it. The merge can move the row,
+                // so refresh whichever number it ends up under.
+                MarkNodeDirty(MergeNodeDuplicates(header.From));
                 // Raised after the upsert, so a greeting script sees the name
                 // and key this packet carried rather than a bare node id.
                 if (firstNodeInfo) RaiseNewNode(header.From, snrDb, packetRssiDbm, hopsAway);
