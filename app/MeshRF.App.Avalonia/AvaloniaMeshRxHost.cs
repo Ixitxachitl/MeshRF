@@ -1139,6 +1139,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// model's business and not the receiver's.</summary>
     public event Action<uint, byte, bool, float?>? SurveySighting;
 
+    /// <summary>Reports one heard packet to whatever is keeping track of what
+    /// this station hears directly. Every path that receives a frame has to
+    /// call it, including the NodeInfo path that does its own upsert.</summary>
+    private void RaiseSighting(MeshHeader header, byte hopsAway, float? snrDb) =>
+        SurveySighting?.Invoke(header.From, hopsAway, header.ViaMqtt, snrDb);
+
     /// <summary>True when this node number has no record yet, so the packet
     /// being handled is the first time it has ever been heard. Must be called
     /// before the upsert that creates the row.</summary>
@@ -1221,6 +1227,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 // node whose very first packet is a NodeInfo can be noticed as
                 // new — and it is a common way to first hear one.
                 bool firstNodeInfo = IsFirstSighting(header.From);
+
+                // The router skips RecordSighting for a NodeInfo record, so
+                // this is also the only place its sighting can be reported. It
+                // is a packet that crossed the air like any other, and leaving
+                // it out let the hop count this upsert writes run ahead of the
+                // path memory that never saw it — a node could read "4 (6)",
+                // claiming a longer path it had simply not been told about.
+                RaiseSighting(header, hopsAway, snrDb);
                 string newKeyHex = result.User.PublicKey.Length == 32
                     ? Convert.ToHexString(result.User.PublicKey)
                     : string.Empty;

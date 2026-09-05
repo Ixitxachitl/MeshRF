@@ -115,6 +115,32 @@ public class NodeDirectnessStoreTests : IDisposable
     }
 
     [Fact]
+    public void ARememberedPathLongerThanTheLastPacketIsNotShown()
+    {
+        // The bracket reveals a shorter path the protocol's figure is hiding.
+        // A longer remembered one reveals nothing — the protocol's figure is
+        // already the better of the two, and is what every RF tool uses — so
+        // "4 (6)" claimed knowledge of six hops when all it meant was that the
+        // shorter path had not been recorded yet.
+        _store.RecordDirectness(7, 6, -27f, null, Home, Peer);
+        _store.RecordSighting(7, hopsAway: 4);
+
+        var node = _store.Get(7)!;
+
+        Assert.Equal("4", node.HopsDisplay);
+        Assert.DoesNotContain("(", node.HopsTip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnEqualRememberedPathIsNotShownEither()
+    {
+        _store.RecordDirectness(7, 3, -19f, null, Home, Peer);
+        _store.RecordSighting(7, hopsAway: 3);
+
+        Assert.Equal("3", _store.Get(7)!.HopsDisplay);
+    }
+
+    [Fact]
     public void TheProtocolFigureIsNeverOverwritten()
     {
         // MeshRF must keep agreeing with the radio's own node list.

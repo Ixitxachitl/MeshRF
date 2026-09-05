@@ -173,21 +173,33 @@ public sealed class NodeRecord : INotifyPropertyChanged
             ? best.HopsAway
             : null;
 
+    /// <summary>A remembered path worth showing: one strictly better than the
+    /// hop count the last packet reported.</summary>
+    /// <remarks>Strictly better, not merely different. The bracket exists to
+    /// reveal a short path the protocol's figure is hiding; a remembered path
+    /// that is longer reveals nothing, because the protocol's own figure is
+    /// already the better one and is what every RF tool uses. Showing it
+    /// implied knowledge this app does not have — "4 (6)" reads as a claim
+    /// about six hops when all it meant was that the shorter path had not been
+    /// recorded yet.</remarks>
+    private byte? BetterPath =>
+        HopsAway is { } hops && BestHopsNow is { } best && best < hops ? best : null;
+
     /// <summary>The hops cell: what the last packet did, and in brackets the
-    /// best this node has actually been heard over when the two disagree.
+    /// shorter path this node has actually been heard over when there is one.
     /// </summary>
     /// <remarks>Both, never one. The bare protocol figure hides a direct
     /// neighbour whose path faded once; replacing it would put this app at odds
     /// with the radio's own node list and every other client.</remarks>
     public string HopsDisplay =>
         HopsAway is not { } hops ? string.Empty
-        : BestHopsNow is { } best && best != hops ? $"{hops} ({best})"
+        : BetterPath is { } best ? $"{hops} ({best})"
         : hops.ToString();
 
     /// <summary>Why the hops cell reads as it does.</summary>
     public string HopsTip =>
         HopsAway is not { } hops ? "Never heard from"
-        : BestHopsNow is { } best && best != hops
+        : BetterPath is { } best
             ? $"Last packet arrived over {hops} hop{(hops == 1 ? "" : "s")}, " +
               $"but this node has been heard at {best} from where both ends are now" +
               (BestPath is { } b ? $" ({Age(DateTimeOffset.UtcNow - b.When)} ago)" : string.Empty)
