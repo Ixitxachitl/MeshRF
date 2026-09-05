@@ -77,4 +77,18 @@ public class BroadcastIntervalsTests
     [Fact]
     public void ZeroOrNegativeIntervalPassesThroughUntouched() =>
         Assert.Equal(0, BroadcastIntervals.ScaledSeconds(0, "Client", onlineNodes: 500, LoraPreset.LongFast));
+
+    // Firmware's config has no way to say "no gap": zero is an unset field, and
+    // Default::getConfiguredOrDefault reads it as the five-minute default. The
+    // rule is unconditional, so a private channel gets it too.
+    [Fact]
+    public void UnsetSmartGapBecomesFirmwaresFiveMinutes()
+    {
+        Assert.Equal(300, BroadcastIntervals.SmartPositionGapSeconds(0));
+        Assert.Equal(300, BroadcastIntervals.DefaultSmartPositionSeconds);
+    }
+
+    [Fact]
+    public void AskingForEveryFixIsOneSecond() =>
+        Assert.Equal(1, BroadcastIntervals.SmartPositionGapSeconds(1));
 }

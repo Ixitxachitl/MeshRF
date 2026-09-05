@@ -60,6 +60,17 @@ public class DefaultChannelMinimumsTests
         Assert.False(DefaultChannelMinimums.IsDefaultChannel(
             Default(ChannelPlan.PresetName(LoraPreset.LongFast)), Preset));
 
+    // Firmware calls both the channel and the preset "Custom" once the modem is
+    // hand-tuned, so the unnamed channel still matches and a preset-named one
+    // stops matching — the preset name means nothing on a modem not running it.
+    [Fact]
+    public void CustomModemLeavesOnlyTheUnnamedChannelDefault()
+    {
+        Assert.True(DefaultChannelMinimums.IsDefaultChannel(Default(name: ""), Preset, usesPreset: false));
+        Assert.False(DefaultChannelMinimums.IsDefaultChannel(Default(), Preset, usesPreset: false));
+        Assert.True(DefaultChannelMinimums.IsDefaultChannel(Default("Custom"), Preset, usesPreset: false));
+    }
+
     [Fact]
     public void DisabledChannelIsNotDefault()
     {
@@ -92,33 +103,33 @@ public class DefaultChannelMinimumsTests
 
     // ---- Position gate ----
 
-    // Firmware picks the channel the way sendOurPosition does — the first with
-    // a precision set — and tests only that one.
+    // Only the channel the report is addressed to decides it. A default channel
+    // sitting elsewhere in the list is not where this position is going.
     [Fact]
-    public void PositionFollowsTheChannelItWouldActuallyGoOut()
-    {
-        var shared = Default();
-        shared.PositionPrecision = 0;                       // sharing off here
-        Assert.False(DefaultChannelMinimums.PositionUsesDefaultChannel(
-            new[] { shared, Private() }, Preset));          // so the private one carries it
-    }
+    public void PositionSentPrivatelyIsNotFloored() =>
+        Assert.False(DefaultChannelMinimums.PositionUsesDefaultChannel(Private(), Preset));
 
     [Fact]
     public void PositionOnADefaultChannelIsFloored()
     {
         var shared = Default();
         shared.PositionPrecision = 13;
-        Assert.True(DefaultChannelMinimums.PositionUsesDefaultChannel(
-            new[] { shared, Private() }, Preset));
+        Assert.True(DefaultChannelMinimums.PositionUsesDefaultChannel(shared, Preset));
     }
 
+    // Sharing switched off on that channel means no position goes out at all,
+    // so there is nothing to hold down.
     [Fact]
-    public void NoChannelSharesPositionAtAll()
+    public void ChannelThatSharesNoPositionIsNotFloored()
     {
         var shared = Default();
         shared.PositionPrecision = 0;
-        Assert.False(DefaultChannelMinimums.PositionUsesDefaultChannel(new[] { shared }, Preset));
+        Assert.False(DefaultChannelMinimums.PositionUsesDefaultChannel(shared, Preset));
     }
+
+    [Fact]
+    public void NoChannelAtAllIsNotFloored() =>
+        Assert.False(DefaultChannelMinimums.PositionUsesDefaultChannel(null, Preset));
 
     // ---- The minimums themselves ----
 

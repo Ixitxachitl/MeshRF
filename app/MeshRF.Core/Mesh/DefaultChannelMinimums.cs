@@ -44,19 +44,42 @@ public static class DefaultChannelMinimums
         configured == 0 ? 0 : Math.Max(configured, minimum);
 
     /// <summary>
+    /// Firmware <c>DisplayFormatters::getModemPresetDisplayName</c> with
+    /// <c>use_preset</c> false. Firmware relies on it being this exact literal,
+    /// because it is what both a channel name and a preset name collapse to
+    /// once the modem is hand-tuned.
+    /// </summary>
+    private const string CustomPresetName = "Custom";
+
+    /// <summary>
     /// Firmware <c>Channels::isDefaultChannel</c>: the well-known key, under the
     /// name the current preset would have given it.
     /// </summary>
+    /// <param name="usesPreset">Firmware <c>config.lora.use_preset</c>. False
+    /// renames both sides to "Custom", so an unnamed channel still matches while
+    /// one named after a preset no longer does — the preset name means nothing
+    /// on a modem that isn't running that preset.</param>
     /// <remarks>
     /// An unnamed channel counts, because firmware displays such a channel under
     /// the preset name and hashes it that way — that is precisely the
     /// out-of-the-box channel this rule exists for.
+    ///
+    /// Firmware tests the stored key as the single byte 1, which is the only
+    /// form it ever writes. MeshRF also stores the key that byte stands for, so
+    /// the test is what the key resolves to; the two agree about every channel
+    /// firmware could have configured, and ours additionally recognises the
+    /// same channel written out in full.
+    ///
+    /// A disabled channel is excluded, where firmware's own loop counts it. It
+    /// carries nothing, so a floor held for its sake would be one with no
+    /// channel behind it.
     /// </remarks>
-    public static bool IsDefaultChannel(ChannelConfig channel, LoraPreset preset)
+    public static bool IsDefaultChannel(ChannelConfig channel, LoraPreset preset, bool usesPreset = true)
     {
         if (channel.IsDisabled || !channel.UsesDefaultKey) return false;
-        string name = string.IsNullOrEmpty(channel.Name) ? ChannelPlan.PresetName(preset) : channel.Name;
-        return string.Equals(name, ChannelPlan.PresetName(preset), StringComparison.Ordinal);
+        string presetName = usesPreset ? ChannelPlan.PresetName(preset) : CustomPresetName;
+        string name = string.IsNullOrEmpty(channel.Name) ? presetName : channel.Name;
+        return string.Equals(name, presetName, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -70,24 +93,29 @@ public static class DefaultChannelMinimums
     {
         if (!usesPreset || !onDefaultFrequencySlot) return false;
         foreach (var channel in channels)
-            if (IsDefaultChannel(channel, preset)) return true;
+            if (IsDefaultChannel(channel, preset, usesPreset)) return true;
         return false;
     }
 
     /// <summary>
     /// Whether our positions would go out over a default channel, which gates
-    /// the position floor. Firmware picks the channel the same way
-    /// <c>PositionModule::sendOurPosition</c> does — the first one with a
-    /// position precision set — and tests only that one, so a default channel
-    /// elsewhere in the list does not constrain a position sent privately.
+    /// the position floor. One channel decides it — the one the report is
+    /// addressed to — so a default channel elsewhere in the list does not hold
+    /// down a position sent privately.
     /// </summary>
-    public static bool PositionUsesDefaultChannel(IEnumerable<ChannelConfig> channels, LoraPreset preset)
-    {
-        foreach (var channel in channels)
-            if (channel.EffectivePositionPrecision != 0)
-                return IsDefaultChannel(channel, preset);
-        return false;
-    }
+    /// <remarks>
+    /// Firmware has no say in where a position goes: <c>sendOurPosition</c>
+    /// takes the first channel with a precision set, and
+    /// <c>NodeDB::NodeDB</c> tests that one. MeshRF gives each auto report a
+    /// channel of its own, so the channel to test is the one chosen rather
+    /// than the first one found — otherwise a report addressed to a private
+    /// channel is held to the shared channel's cadence.
+    /// </remarks>
+    public static bool PositionUsesDefaultChannel(ChannelConfig? positionChannel, LoraPreset preset,
+                                                  bool usesPreset = true) =>
+        positionChannel is not null
+        && positionChannel.EffectivePositionPrecision != 0
+        && IsDefaultChannel(positionChannel, preset, usesPreset);
 
     private static bool IsRouter(string? role) =>
         (role ?? string.Empty).Trim().Replace("_", string.Empty).ToUpperInvariant()

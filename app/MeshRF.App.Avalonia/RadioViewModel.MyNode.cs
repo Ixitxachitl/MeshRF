@@ -634,28 +634,53 @@ public partial class RadioViewModel
         }
     }
 
-    /// <summary>Firmware's telemetry floor, in force only while we are actually
-    /// on a default channel.</summary>
-    private int TelemetryFloorSeconds =>
-        DefaultChannelMinimums.HasDefaultChannel(
-            AllChannelConfigs(), SelectedPreset, !IsCustomLoraParams, OnDefaultFrequencySlot)
-            ? DefaultChannelMinimums.TelemetrySeconds(MyRole)
-            : 0;
+    /// <summary>
+    /// Whether a report addressed to <paramref name="channelName"/> would land
+    /// on the channel the neighbourhood shares. Every default-channel floor
+    /// turns on this one question.
+    /// </summary>
+    /// <remarks>
+    /// Firmware asks it two ways, neither of which fits us. Its telemetry gate
+    /// (<c>hasDefaultChannel</c>) is about the node: a default channel anywhere
+    /// in the list quiets every report, wherever it goes. Its position gate
+    /// tests one channel, but firmware picks that channel itself. MeshRF gives
+    /// each auto report a picker, so the report says where it is going and we
+    /// ask about that channel — a report on a private channel is nobody else's
+    /// airtime, whatever else the list holds.
+    ///
+    /// The frequency slot is part of it, as it is in firmware's telemetry gate
+    /// but not its position one: on a hand-tuned frequency no other radio is
+    /// listening, so there is no shared channel to be quiet on.
+    /// </remarks>
+    private bool ReportsToDefaultChannel(string channelName) =>
+        OnDefaultFrequencySlot
+        && AutoReportChannel(channelName) is { } channel
+        && DefaultChannelMinimums.IsDefaultChannel(channel, SelectedPreset, !IsCustomLoraParams);
+
+    /// <summary>Firmware's telemetry floor, in force only for a report actually
+    /// addressed to a default channel.</summary>
+    private int TelemetryFloorSeconds(string channelName) =>
+        ReportsToDefaultChannel(channelName) ? DefaultChannelMinimums.TelemetrySeconds(MyRole) : 0;
+
+    /// <summary>Whether the auto position report is addressed to a default
+    /// channel — the one thing both position floors turn on. Sharing switched
+    /// off on that channel means no position leaves at all, so there is nothing
+    /// to hold down.</summary>
+    private bool PositionGoesOutOnDefaultChannel =>
+        OnDefaultFrequencySlot
+        && DefaultChannelMinimums.PositionUsesDefaultChannel(
+               AutoReportChannel(AutoReportPositionChannel), SelectedPreset, !IsCustomLoraParams);
 
     /// <summary>Firmware's position floor, which follows the channel our
     /// positions would actually go out on rather than the channel list.</summary>
     private int PositionFloorSeconds =>
-        DefaultChannelMinimums.PositionUsesDefaultChannel(AllChannelConfigs(), SelectedPreset)
-            ? DefaultChannelMinimums.PositionSeconds(MyRole)
-            : 0;
+        PositionGoesOutOnDefaultChannel ? DefaultChannelMinimums.PositionSeconds(MyRole) : 0;
 
     /// <summary>The five-minute smart-broadcast gap a default channel imposes.
     /// This is what holds a TAK_TRACKER's 15-second role default in check when
     /// it is beaconing on the channel everyone shares.</summary>
     private int SmartPositionFloorSeconds =>
-        DefaultChannelMinimums.PositionUsesDefaultChannel(AllChannelConfigs(), SelectedPreset)
-            ? DefaultChannelMinimums.SmartPositionSeconds
-            : 0;
+        PositionGoesOutOnDefaultChannel ? DefaultChannelMinimums.SmartPositionSeconds : 0;
 
     /// <summary>Nodes heard inside firmware's two-hour online window, which is
     /// what its congestion coefficient counts.</summary>
@@ -712,9 +737,9 @@ public partial class RadioViewModel
     // channel allows decides whether a position is sent at all, and how
     // precise it may be.
     partial void OnAutoReportPositionChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
-    partial void OnAutoReportDeviceMetricsChannelChanged(string value) => SaveSettings();
-    partial void OnAutoReportEnvironmentMetricsChannelChanged(string value) => SaveSettings();
-    partial void OnAutoReportAirQualityMetricsChannelChanged(string value) => SaveSettings();
+    partial void OnAutoReportDeviceMetricsChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportEnvironmentMetricsChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportAirQualityMetricsChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
     partial void OnAutoReportNodeStatusChannelChanged(string value) => SaveSettings();
 
     /// <summary>
@@ -830,7 +855,10 @@ public partial class RadioViewModel
         if (!EffectivePositionSmartEnabled || !_positionBroadcast.HasReference) return false;
         if (!TryGetHomeLocation(out double lat, out double lon)) return false;
 
-        var channel = PrimaryChannel();
+        // The channel the report is addressed to, not the primary: precision is
+        // per channel, and measuring the move at another channel's precision
+        // would answer for a report we are not about to send.
+        var channel = AutoReportChannel(AutoReportPositionChannel);
         if (channel is null || channel.EffectivePositionPrecision == 0) return false;
 
         var (sendLat, sendLon) = MeshEncoder.ApplyPositionPrecision(lat, lon, channel.EffectivePositionPrecision);

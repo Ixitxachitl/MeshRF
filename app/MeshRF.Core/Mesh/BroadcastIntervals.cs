@@ -31,6 +31,21 @@ public static class BroadcastIntervals
     public const int MinNodeInfoSeconds = 60 * 60;
 
     /// <summary>
+    /// Firmware <c>default_broadcast_smart_minimum_interval_secs</c>: the gap a
+    /// smart position keeps when the setting is left unset. Nothing to do with
+    /// the default channel — zero in firmware's config means "unset", so a
+    /// private channel gets these five minutes too.
+    /// </summary>
+    public const int DefaultSmartPositionSeconds = 5 * 60;
+
+    /// <summary>
+    /// Firmware <c>Default::getConfiguredOrDefault</c> for that gap. Someone who
+    /// wants every fix sent as it arrives types one second, not zero.
+    /// </summary>
+    public static int SmartPositionGapSeconds(int configuredSeconds) =>
+        configuredSeconds > 0 ? configuredSeconds : DefaultSmartPositionSeconds;
+
+    /// <summary>
     /// Roles firmware exempts from scaling: the routers because their intervals
     /// are already long, and the tracker/sensor family because their whole
     /// purpose is a timely position or reading.

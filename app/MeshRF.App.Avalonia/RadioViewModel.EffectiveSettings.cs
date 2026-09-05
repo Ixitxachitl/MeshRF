@@ -38,6 +38,10 @@ public partial class RadioViewModel
     private const string NodeInfoFloorReason = "min 1 h";
     private const string DefaultChannelReason = "default channel";
 
+    /// <summary>Zero is firmware's "unset", not "no gap at all"; one second is
+    /// how you ask for every fix.</summary>
+    private const string UnsetReason = "0 means unset";
+
     // ---- Resolved settings -------------------------------------------------
 
     private ResolvedSetting<bool> NodeInfoEnabled => ResolveFlag(AutoReportNodeInfoEnabled, RoleCoercions.NodeInfoEnabled);
@@ -52,11 +56,22 @@ public partial class RadioViewModel
     private ResolvedSetting<bool> PositionSmartEnabled =>
         ResolveFlag(AutoReportPositionSmartEnabled, RoleCoercions.PositionSmartEnabled);
 
-    // Not ClampInterval'd: the smart gap is a threshold, and zero is a legal
-    // "no minimum gap" the auto-report floor must not raise to five seconds.
-    private ResolvedSetting<int> PositionSmartMinSeconds => SettingOverlay.Interval(
-        Math.Max(0, AutoReportPositionSmartMinSeconds), RoleCoercions.PositionSmartMinSeconds,
-        MyRole, SmartPositionFloorSeconds, DefaultChannelReason);
+    // Not ClampInterval'd: the smart gap is a threshold rather than a schedule,
+    // so the auto-report floor must not raise it to five seconds.
+    private ResolvedSetting<int> PositionSmartMinSeconds
+    {
+        get
+        {
+            var resolved = SettingOverlay.Interval(
+                Math.Max(0, AutoReportPositionSmartMinSeconds), RoleCoercions.PositionSmartMinSeconds,
+                MyRole, SmartPositionFloorSeconds, DefaultChannelReason);
+
+            // Firmware reads zero as "unset" and falls back to its five-minute
+            // default on any channel — this one is not a default-channel rule.
+            int gap = BroadcastIntervals.SmartPositionGapSeconds(resolved.Value);
+            return gap == resolved.Value ? resolved : new ResolvedSetting<int>(gap, UnsetReason);
+        }
+    }
 
     private ResolvedSetting<uint> PositionSmartMinMoveMeters => SettingOverlay.Distance(
         AutoReportPositionSmartMinMoveMeters, RoleCoercions.PositionSmartMinMoveMeters, MyRole);
@@ -68,18 +83,19 @@ public partial class RadioViewModel
         ResolveFlag(AutoReportDeviceMetricsEnabled, RoleCoercions.DeviceMetricsEnabled);
     private ResolvedSetting<int> DeviceMetricsSeconds => ResolveInterval(
         AutoReportDeviceMetricsSeconds, RoleCoercions.DeviceMetricsSeconds,
-        TelemetryFloorSeconds, DefaultChannelReason);
+        TelemetryFloorSeconds(AutoReportDeviceMetricsChannel), DefaultChannelReason);
 
     private ResolvedSetting<bool> EnvironmentMetricsEnabled =>
         ResolveFlag(AutoReportEnvironmentMetricsEnabled, RoleCoercions.EnvironmentMetricsEnabled);
     private ResolvedSetting<int> EnvironmentMetricsSeconds => ResolveInterval(
         AutoReportEnvironmentMetricsSeconds, RoleCoercions.EnvironmentMetricsSeconds,
-        TelemetryFloorSeconds, DefaultChannelReason);
+        TelemetryFloorSeconds(AutoReportEnvironmentMetricsChannel), DefaultChannelReason);
 
     private ResolvedSetting<bool> AirQualityMetricsEnabled =>
         ResolveFlag(AutoReportAirQualityMetricsEnabled, RoleCoercions.AirQualityMetricsEnabled);
     private ResolvedSetting<int> AirQualityMetricsSeconds => ResolveInterval(
-        AutoReportAirQualityMetricsSeconds, null, TelemetryFloorSeconds, DefaultChannelReason);
+        AutoReportAirQualityMetricsSeconds, null,
+        TelemetryFloorSeconds(AutoReportAirQualityMetricsChannel), DefaultChannelReason);
 
     private ResolvedSetting<bool> NodeStatusEnabled =>
         ResolveFlag(AutoReportNodeStatusEnabled, RoleCoercions.NodeStatusEnabled);
@@ -168,7 +184,7 @@ public partial class RadioViewModel
     {
         get
         {
-            var channel = _rxHost.FindChannelByName(AutoReportPositionChannel) ?? PrimaryChannel();
+            var channel = AutoReportChannel(AutoReportPositionChannel);
             if (channel is null) return string.Empty;
 
             byte effective = channel.EffectivePositionPrecision;

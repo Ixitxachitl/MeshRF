@@ -546,12 +546,12 @@ public partial class RadioViewModel
             lonI += 1 << (31 - precisionBits);
         }
 
-        // "Auto-named" must match the primary-channel naming rule exactly:
-        // empty, or still equal to a bare LoraPreset enum name.
-        var primary = Tabs.OfType<ChannelTabViewModel>()
-            .FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)?.Config;
-        bool hasDefaultChannel = primary is not null && primary.UsesDefaultKey &&
-            (string.IsNullOrEmpty(primary.Name) || Enum.GetNames<LoraPreset>().Contains(primary.Name));
+        // Firmware answers this field with Channels::hasDefaultChannel, which
+        // asks about the whole list rather than the primary alone: the map is
+        // being told whether this node is reachable on the shared channel at
+        // all, not which channel it prefers.
+        bool hasDefaultChannel = DefaultChannelMinimums.HasDefaultChannel(
+            AllChannelConfigs(), SelectedPreset, !IsCustomLoraParams, OnDefaultFrequencySlot);
 
         // Firmware's NodeDB::getNumOnlineMeshNodes(localOnly: true): heard in the
         // last 2 hours, most recent sighting not via MQTT. Our own node is skipped
