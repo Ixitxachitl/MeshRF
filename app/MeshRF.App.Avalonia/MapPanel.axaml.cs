@@ -50,6 +50,13 @@ public partial class MapPanel : UserControl
         Canvas.ChosenPointCleared += OnChosenPointCleared;
     }
 
+    /// <summary>Raised by the pop-out button in the map's overlay. The map does
+    /// not own the window it would move into — the main window does the moving
+    /// — so the button only reports the click.</summary>
+    public event EventHandler? PopOutRequested;
+
+    private void OnPopOut(object? sender, RoutedEventArgs e) => PopOutRequested?.Invoke(this, EventArgs.Empty);
+
     /// <summary>"Edit…" on a waypoint marker's context menu, and a double-click
     /// on the marker itself. Same dialog and same update call as the waypoints
     /// grid's own Edit entry.</summary>

@@ -97,7 +97,11 @@ public partial class MainWindow : Window
                               or nameof(RadioViewModel.LogAutoScroll))
                 TailLog();
         };
-        Opened += (_, _) => TailLog();
+        Opened += (_, _) =>
+        {
+            TailLog();
+            ShowRestoredPanelWindows();
+        };
 
         // Capture layout while the visual tree is still alive; Closed fires
         // after teardown, when the grids' measured sizes are gone.
@@ -105,6 +109,11 @@ public partial class MainWindow : Window
         {
             StopLayoutAutoSave();
             SaveLayout();
+
+            // After the save, so each pop-out window's geometry is recorded
+            // while it is still up. They cancel their own close to dock back,
+            // and the app does not end until its last window has gone.
+            ClosePanelWindows();
         };
         Closed += (_, _) =>
         {

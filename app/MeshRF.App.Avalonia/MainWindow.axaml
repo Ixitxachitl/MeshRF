@@ -12,161 +12,7 @@
         Width="1280" Height="900">
 
     <Window.Styles>
-        <!-- Unseen-activity pulse on a tab header. Alternating playback fades
-             out and back rather than snapping, and it runs until the tab is
-             selected and the view model clears TabNeedsAttention. -->
-        <!-- Reaction chips are buttons but should read as inline tags, so the
-             stock button chrome is stripped back to a hover cue. They sit on a
-             bubble rather than a panel, so the fill is the list background:
-             darker than either bubble tint, which is what makes a chip read as
-             set into the bubble instead of floating on it. -->
-        <Style Selector="Button.reactionChip">
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="Button.reactionChip /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-            <Setter Property="CornerRadius" Value="9" />
-        </Style>
-        <Style Selector="Button.reactionChip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
-        </Style>
-
-        <!-- Chat bubbles. Tint and border are set here rather than on the
-             template's Border so the .outgoing class can swap both, and hover
-             lifts the whole bubble as one target — it is what carries the
-             reply / react context menu. -->
-        <Style Selector="Border.bubble">
-            <Setter Property="Background" Value="{DynamicResource BrushBubbleIncoming}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushBubbleIncomingBorder}" />
-        </Style>
-        <Style Selector="Border.bubble.outgoing">
-            <Setter Property="Background" Value="{DynamicResource BrushBubbleOutgoing}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushBubbleOutgoingBorder}" />
-        </Style>
-        <Style Selector="Border.bubble:pointerover">
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
-        </Style>
-
-        <!-- The message list is a transcript, not a picker: nothing acts on the
-             selected row, so the selection and hover fills are cleared and the
-             row padding goes to the bubble instead. Selection still works, it
-             just leaves no mark behind the bubble it would fight with. -->
-        <Style Selector="ListBox.chat">
-            <Setter Property="Padding" Value="4,2" />
-        </Style>
-        <Style Selector="ListBox.chat ListBoxItem">
-            <Setter Property="Padding" Value="0" />
-        </Style>
-        <Style Selector="ListBox.chat ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-
-        <!-- Channel / DM tab headers. Fluent's default is an underline cue with
-             no box, which at this app's 12px type reads as a row of loose words
-             rather than tabs. Padding is set on TabItem (it template-binds to
-             the header presenter) while the chrome is set on the template's
-             root Border: the theme's own :selected / :pointerover styles target
-             that part, so setting Background/BorderBrush on TabItem itself
-             would be overridden the moment a tab is selected or hovered. -->
-        <!-- MinHeight is deliberately NOT forced to 0 here. Squeezing the header
-             is what pulled the title down into Fluent's selection pipe, which is
-             pinned to the bottom edge of the header and drew straight through
-             the text. The visible box now comes from a Border inside the item
-             template (see TabControl.ItemTemplate), which does not depend on
-             the theme's internal part names. -->
-        <!-- Horizontal Padding is 0, not the 6px this used to carry: the item
-             template's Border (see TabControl.ItemTemplate) already insets its
-             own content by 8px via its own Padding, so TabItem's Padding was
-             adding a second, outer margin around that border rather than
-             padding the text. Since the border doesn't stretch to fill it,
-             each tab's outer padding stacked with its neighbour's, showing up
-             as a visible gap between adjacent tab boxes rather than breathing
-             room inside them. Vertical Padding stays for header height. -->
-        <!-- One TabItem style, not two. A second block matching the same
-             selector wins on the setters it repeats regardless of which looks
-             more specific, and an earlier Margin binding was silently beaten
-             by the Margin="0" here — leaving no gap, so the divider landed on
-             the previous tab instead of between them.
-
-             Margin is what opens that gap, because the tab's chrome (the
-             LayoutRoot border styled below) is sized to the whole TabItem: a
-             rule placed inside the header would be enclosed by the tab box
-             rather than separating it from the one before. The rule is drawn
-             back out into the gap with a negative margin, and ClipToBounds
-             goes off for that one tab so the tab does not clip it away —
-             there is no horizontal Padding here for it to sit inside. -->
-        <Style Selector="TabItem" x:DataType="mesh:ITabItem">
-            <Setter Property="Padding" Value="0,2" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Margin"
-                    Value="{Binding StartsTabGroup,
-                                    Converter={x:Static local:TabGroupMarginConverter.Instance}}" />
-            <Setter Property="ClipToBounds" Value="{Binding !StartsTabGroup}" />
-        </Style>
-        <!-- Fluent marks the selected tab with a coloured pipe pinned to the
-             bottom edge of the header. With the shorter header this app uses it
-             lands across the title instead of under it, and the box below makes
-             it redundant anyway — selection now reads from the fill. -->
-        <!-- Part names verified against Avalonia.Themes.Fluent 12.1.1 rather
-             than assumed: the header root is "LayoutRoot" with no PART_ prefix,
-             while the selection bar is "PART_SelectedPipe" with one. Both are
-             matched by name only, without a type, so a template that swaps the
-             element type still gets styled. -->
-        <!-- A /template/ selector needs an element type or the setters have
-             nothing to resolve against (AVLN2200), so the type cannot be left
-             off even though only the name is load-bearing. The pipe is listed
-             as both Border and Rectangle because the theme's choice is not
-             visible from the compiled assembly; the one that does not match is
-             simply inert. -->
-        <Style Selector="TabItem /template/ Border#PART_SelectedPipe">
-            <Setter Property="IsVisible" Value="False" />
-        </Style>
-        <Style Selector="TabItem /template/ Rectangle#PART_SelectedPipe">
-            <Setter Property="IsVisible" Value="False" />
-        </Style>
-        <Style Selector="TabItem /template/ Border#LayoutRoot">
-            <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="4,4,0,0" />
-        </Style>
-        <Style Selector="TabItem:pointerover /template/ Border#LayoutRoot">
-            <Setter Property="Background" Value="{DynamicResource BrushHover}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
-        </Style>
-        <Style Selector="TabItem:selected /template/ Border#LayoutRoot">
-            <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
-        </Style>
-
-        <!-- Compose byte counter: quiet until the message no longer fits,
-             then the same red the app uses for an overridden value. -->
-        <Style Selector="TextBlock.byteCount">
-            <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
-        </Style>
-        <Style Selector="TextBlock.byteCount.over">
-            <Setter Property="Foreground" Value="{DynamicResource BrushOverridden}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
-
-        <Style Selector="TextBlock.attention">
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Style.Animations>
-                <Animation Duration="0:0:0.45" IterationCount="Infinite" PlaybackDirection="Alternate">
-                    <KeyFrame Cue="0%">
-                        <Setter Property="Opacity" Value="1.0" />
-                    </KeyFrame>
-                    <KeyFrame Cue="100%">
-                        <Setter Property="Opacity" Value="0.35" />
-                    </KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
+        <StyleInclude Source="avares://MeshRF/PanelStyles.axaml" />
     </Window.Styles>
 
     <Window.Resources>
@@ -560,6 +406,83 @@
             </WrapPanel>
         </Border>
 
+        <!-- Toolbar row 4: My Node — opens the identity settings dialog
+             and the windows that belong to this station. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                BorderThickness="0,0,0,1"
+                Padding="4,2">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="My Node" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <!-- Capped so a long name trims rather than pushing the buttons
+                     along: they line up with the quick-send row below, and
+                     should stay put whichever node this is. -->
+                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource BrushSubtle}"
+                           MaxWidth="220" TextTrimming="CharacterEllipsis" Margin="0,0,4,0"
+                           Text="{Binding MyLongName}" />
+                <Button Content="Telemetry" Padding="8,2"
+                        Click="OnOpenSelfTelemetryHistory" ToolTip.Tip="My recorded telemetry history" />
+                <!-- Our own recorded history, the counterpart of the
+                     per-node entries in the node grid's menu. -->
+                <Button Content="Location" Padding="8,2"
+                        Click="OnOpenSelfLocationHistory" ToolTip.Tip="My recorded location history" />
+                <Button Content="Notifications" Padding="8,2"
+                        Click="OnOpenRingtoneSettings"
+                        ToolTip.Tip="Alert tones and volume: the message, geofence and alert bell tunes, and how long each plays" />
+                <Button Content="Scripts" Padding="8,2"
+                        Click="OnOpenScripts"
+                        ToolTip.Tip="Automation scripts: reply to messages and send on a schedule" />
+                <Button Content="MQTT" Padding="8,2"
+                        Click="OnOpenMqttSettings"
+                        ToolTip.Tip="Open the MQTT bridge settings (uplink/downlink to a broker)" />
+                <Button Content="Configure" Padding="8,2"
+                        Click="OnOpenNodeIdentity" ToolTip.Tip="Open My Node identity and settings" />
+            </StackPanel>
+        </Border>
+
+        <!-- Toolbar row 5: quick send. Each button prompts for the
+             destination channel (or an open DM peer) first, as MeshRF.App
+             does. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BrushPanelBackground}"
+                BorderBrush="{DynamicResource BrushPanelBorder}"
+                BorderThickness="0,0,0,1"
+                Padding="4,2">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="Quick send" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <Button Content="Node info" Padding="10,3" Click="OnSendNodeInfoPrompted"
+                        ToolTip.Tip="Broadcast your NODEINFO payload on the primary channel" />
+                <Button Content="Position" Padding="10,3" Click="OnSendPositionPrompted"
+                        ToolTip.Tip="Broadcast your POSITION payload on the primary channel" />
+                <Button Content="Device metrics" Padding="10,3" Click="OnSendDeviceMetricsPrompted"
+                        ToolTip.Tip="Broadcast your device-metrics telemetry on the primary channel" />
+                <Button Content="Env telemetry" Padding="10,3" Click="OnSendEnvironmentMetricsPrompted"
+                        ToolTip.Tip="Fetch weather for your home location, then broadcast TELEMETRY environment metrics" />
+                <Button Content="AQ telemetry" Padding="10,3" Click="OnSendAirQualityMetricsPrompted"
+                        ToolTip.Tip="Fetch PM2.5/PM10 from the Open-Meteo air quality API, then broadcast TELEMETRY air quality metrics" />
+                <Button Content="Status" Padding="10,3" Click="OnSendNodeStatusPrompted"
+                        ToolTip.Tip="Broadcast your NODE_STATUS_APP text on the primary channel" />
+                <!-- Buttons the scripts asked for, after the built-in
+                     ones. Empty unless a script has a quick_send
+                     trigger, so the bar looks unchanged without one. -->
+                <ItemsControl ItemsSource="{Binding ScriptQuickSends}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="4" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="scripting:QuickSendButton">
+                            <Button Content="{Binding Label}" Padding="10,3"
+                                    Click="OnRunScriptQuickSend"
+                                    ToolTip.Tip="{Binding FileName}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
         <!-- Status bar. -->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource BrushPanelBackground}"
@@ -591,94 +514,31 @@
                     <RowDefinition Height="1*" MinHeight="120" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0" Margin="0,0,0,3"
+                <Border x:Name="MapPanelHost" Grid.Row="0" Margin="0,0,0,3"
                         Background="{DynamicResource BrushSpectrumBackground}"
                         BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
                     <local:MapPanel x:Name="Map" />
                 </Border>
 
-                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                <GridSplitter x:Name="LeftSplitter" Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                               Background="{DynamicResource BrushSplitter}" />
 
                 <Grid x:Name="NodesWaypointsGrid" Grid.Row="2" Margin="0,3,0,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="2*" MinHeight="80" />
                         <RowDefinition Height="5" />
                         <RowDefinition Height="1*" MinHeight="80" />
                     </Grid.RowDefinitions>
-                    <!-- Compact My Node bar — opens the identity settings dialog. -->
-                    <Border Grid.Row="0" Margin="0,0,0,4" Padding="6,4"
-                            Background="{DynamicResource BrushPanelBackground}"
-                            BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-                        <DockPanel LastChildFill="True">
-                            <Button DockPanel.Dock="Right" Content="Configure" Padding="8,2"
-                                    Click="OnOpenNodeIdentity" ToolTip.Tip="Open My Node identity and settings" />
-                            <Button DockPanel.Dock="Right" Content="MQTT" Padding="8,2" Margin="0,0,4,0"
-                                    Click="OnOpenMqttSettings"
-                                    ToolTip.Tip="Open the MQTT bridge settings (uplink/downlink to a broker)" />
-                            <Button DockPanel.Dock="Right" Content="Scripts" Padding="8,2" Margin="0,0,4,0"
-                                    Click="OnOpenScripts"
-                                    ToolTip.Tip="Automation scripts: reply to messages and send on a schedule" />
-                            <Button DockPanel.Dock="Right" Content="Notifications" Padding="8,2" Margin="0,0,4,0"
-                                    Click="OnOpenRingtoneSettings"
-                                    ToolTip.Tip="Alert tones and volume: the message, geofence and alert bell tunes, and how long each plays" />
-                            <!-- Our own recorded history, the counterpart of the
-                                 per-node entries in the node grid's menu. -->
-                            <Button DockPanel.Dock="Right" Content="Location" Padding="8,2" Margin="0,0,4,0"
-                                    Click="OnOpenSelfLocationHistory" ToolTip.Tip="My recorded location history" />
-                            <Button DockPanel.Dock="Right" Content="Telemetry" Padding="8,2" Margin="0,0,4,0"
-                                    Click="OnOpenSelfTelemetryHistory" ToolTip.Tip="My recorded telemetry history" />
-                            <TextBlock Text="My Node" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
-                            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource BrushSubtle}"
-                                       Text="{Binding MyLongName}" TextTrimming="CharacterEllipsis" />
+                    <StackPanel x:Name="NodesHeaderPanel" Grid.Row="0">
+                        <DockPanel Margin="0,0,0,4">
+                            <Button DockPanel.Dock="Right" Classes="popout" Tag="Nodes"
+                                    Click="OnPopOutPanel"
+                                    ToolTip.Tip="Move the node list into its own window. Closing that window brings it back." />
+                            <TextBlock Margin="4,0,0,0" FontWeight="Bold" VerticalAlignment="Center"
+                                       Text="{Binding NodesHeader}"
+                                       ToolTip.Tip="Online = heard in the last 2 hours, counted across every known node rather than just the filtered ones" />
                         </DockPanel>
-                    </Border>
-
-                    <!-- Quick send bar. Each button prompts for the destination
-                         channel (or an open DM peer) first, as MeshRF.App does. -->
-                    <Border Grid.Row="1" Margin="0,0,0,4" Padding="6,4"
-                            Background="{DynamicResource BrushPanelBackground}"
-                            BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <TextBlock Text="Quick send" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <Button Content="Node info" Padding="10,3" Click="OnSendNodeInfoPrompted"
-                                    ToolTip.Tip="Broadcast your NODEINFO payload on the primary channel" />
-                            <Button Content="Position" Padding="10,3" Click="OnSendPositionPrompted"
-                                    ToolTip.Tip="Broadcast your POSITION payload on the primary channel" />
-                            <Button Content="Device metrics" Padding="10,3" Click="OnSendDeviceMetricsPrompted"
-                                    ToolTip.Tip="Broadcast your device-metrics telemetry on the primary channel" />
-                            <Button Content="Env telemetry" Padding="10,3" Click="OnSendEnvironmentMetricsPrompted"
-                                    ToolTip.Tip="Fetch weather for your home location, then broadcast TELEMETRY environment metrics" />
-                            <Button Content="AQ telemetry" Padding="10,3" Click="OnSendAirQualityMetricsPrompted"
-                                    ToolTip.Tip="Fetch PM2.5/PM10 from the Open-Meteo air quality API, then broadcast TELEMETRY air quality metrics" />
-                            <Button Content="Status" Padding="10,3" Click="OnSendNodeStatusPrompted"
-                                    ToolTip.Tip="Broadcast your NODE_STATUS_APP text on the primary channel" />
-                            <!-- Buttons the scripts asked for, after the built-in
-                                 ones. Empty unless a script has a quick_send
-                                 trigger, so the bar looks unchanged without one. -->
-                            <ItemsControl ItemsSource="{Binding ScriptQuickSends}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal" Spacing="4" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="scripting:QuickSendButton">
-                                        <Button Content="{Binding Label}" Padding="10,3"
-                                                Click="OnRunScriptQuickSend"
-                                                ToolTip.Tip="{Binding FileName}" />
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </Border>
-
-                    <StackPanel Grid.Row="2">
-                        <TextBlock Margin="4,0,0,4" FontWeight="Bold" Text="{Binding NodesHeader}"
-                                   ToolTip.Tip="Online = heard in the last 2 hours, counted across every known node rather than just the filtered ones" />
 
                         <!-- Node list filter bar. -->
                         <Border Margin="0,0,0,3" Padding="4,3"
@@ -829,7 +689,7 @@
                         </Border>
                     </StackPanel>
 
-                    <DataGrid Grid.Row="3" x:Name="NodesGridProxy" ItemsSource="{Binding NodesView}"
+                    <DataGrid Grid.Row="1" x:Name="NodesGridProxy" ItemsSource="{Binding NodesView}"
                               AutoGenerateColumns="False" IsReadOnly="True"
                               GridLinesVisibility="Horizontal"
                               CanUserSortColumns="True" CanUserResizeColumns="True"
@@ -1074,16 +934,21 @@
                         </DataGrid.Columns>
                     </DataGrid>
 
-                    <GridSplitter Grid.Row="4" Height="5" HorizontalAlignment="Stretch"
+                    <GridSplitter x:Name="NodesWaypointsSplitter" Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
                                   Background="{DynamicResource BrushSplitter}" />
 
                     <!-- The count label rides inside the waypoint row rather than
                          in an Auto row of its own: a GridSplitter resizes the two
                          definitions either side of it, so a separate label row is
                          what the drag would fight against instead of the table. -->
-                    <DockPanel Grid.Row="5">
-                        <TextBlock DockPanel.Dock="Top" Margin="4,3,0,4" FontWeight="Bold"
-                                   Text="{Binding Waypoints.Count, StringFormat='Waypoints ({0})'}" />
+                    <DockPanel x:Name="WaypointsPanelHost" Grid.Row="3">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,3,0,4">
+                            <Button DockPanel.Dock="Right" Classes="popout" Tag="Waypoints"
+                                    Click="OnPopOutPanel"
+                                    ToolTip.Tip="Move the waypoint list into its own window. Closing that window brings it back." />
+                            <TextBlock Margin="4,0,0,0" FontWeight="Bold" VerticalAlignment="Center"
+                                       Text="{Binding Waypoints.Count, StringFormat='Waypoints ({0})'}" />
+                        </DockPanel>
                         <DataGrid x:Name="WaypointsGridProxy" ItemsSource="{Binding Waypoints}"
                                   AutoGenerateColumns="False" IsReadOnly="True"
                                   GridLinesVisibility="Horizontal"
@@ -1146,7 +1011,7 @@
                 </Grid>
             </Grid>
 
-            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+            <GridSplitter x:Name="MainSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
                           Background="{DynamicResource BrushSplitter}" />
 
             <!-- Right: spectrum/waterfall (top) over chat tabs + log (bottom). -->
@@ -1157,7 +1022,7 @@
                     <RowDefinition Height="1*" MinHeight="120" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0" Margin="3,0,0,3"
+                <Border x:Name="SpectrumPanelHost" Grid.Row="0" Margin="3,0,0,3"
                         Background="{DynamicResource BrushSpectrumBackground}"
                         BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
                     <Grid>
@@ -1226,17 +1091,27 @@
                             </Border>
                         </Grid>
                     </Grid>
+                    <!-- No title row over the spectrum stack to hang this off,
+                         so it floats in the corner the axis labels leave free. -->
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="0,4,4,0" Background="#CC202020" CornerRadius="3">
+                        <Button Classes="popout" Tag="Spectrum" Click="OnPopOutPanel"
+                                ToolTip.Tip="Move the spectrum and waterfall into their own window. Closing that window brings them back." />
+                    </Border>
                     </Grid>
                 </Border>
 
-                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                <GridSplitter x:Name="RightSplitter" Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                               Background="{DynamicResource BrushSplitter}" />
 
                 <Grid x:Name="MessagesLayoutGrid" Grid.Row="2" Margin="3,3,0,0" RowDefinitions="Auto,2*,5,1*">
                     <!-- Header layout is kept identical to the Log header below:
                          title on the left, Auto-scroll rightmost, other actions
                          immediately to its left. -->
-                    <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,3" MinHeight="26">
+                    <DockPanel x:Name="ChatHeaderPanel" Grid.Row="0" LastChildFill="True" Margin="0,0,0,3" MinHeight="26">
+                        <Button DockPanel.Dock="Right" Classes="popout" Tag="Chat" Margin="4,0,0,0"
+                                VerticalAlignment="Center" Click="OnPopOutPanel"
+                                ToolTip.Tip="Move the channels and messages into their own window. Closing that window brings them back." />
                         <ToggleButton DockPanel.Dock="Right" Content="Auto-scroll" FontSize="11" Padding="6,1"
                                       Margin="4,0,0,0" VerticalAlignment="Center"
                                       IsChecked="{Binding AutoScroll}"
@@ -1260,7 +1135,7 @@
                     <!-- Tabs, reply banner and composer live in one outer row so
                          the splitter below resizes the chat area against the log
                          instead of squeezing the composer. -->
-                    <Grid Grid.Row="1" RowDefinitions="*,Auto,Auto">
+                    <Grid x:Name="ChatBodyGrid" Grid.Row="1" RowDefinitions="*,Auto,Auto">
                     <!-- Drag-to-reorder: secondary channels among themselves and
                          DM tabs among themselves, matching MeshRF.App. Handled
                          on the TabControl rather than each TabItem because the
@@ -1444,11 +1319,14 @@
                     </DockPanel>
                     </Grid>
 
-                    <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch" Margin="0,6,0,0"
+                    <GridSplitter x:Name="MessagesSplitter" Grid.Row="2" Height="5" HorizontalAlignment="Stretch" Margin="0,6,0,0"
                                   Background="{DynamicResource BrushSplitter}" />
 
-                    <DockPanel Grid.Row="3" Margin="0,3,0,0">
+                    <DockPanel x:Name="LogPanelHost" Grid.Row="3" Margin="0,3,0,0">
                         <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,3" MinHeight="26">
+                            <Button DockPanel.Dock="Right" Classes="popout" Tag="Log" Margin="4,0,0,0"
+                                    VerticalAlignment="Center" Click="OnPopOutPanel"
+                                    ToolTip.Tip="Move the log into its own window. Closing that window brings it back." />
                             <ToggleButton DockPanel.Dock="Right" Content="Auto-scroll" FontSize="11" Padding="6,1"
                                           Margin="4,0,0,0" VerticalAlignment="Center"
                                           IsChecked="{Binding LogAutoScroll}"

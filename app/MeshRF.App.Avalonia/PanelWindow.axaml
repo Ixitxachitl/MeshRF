@@ -1,0 +1,24 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.PanelWindow"
+        x:Name="RootWindow"
+        x:DataType="local:RadioViewModel"
+        Width="760" Height="560"
+        MinWidth="240" MinHeight="160">
+
+    <!-- Named RootWindow because the main window is: the message bubbles and
+         the node grid's context menu reach the view model through that name,
+         and a panel realized in here has to find it under the same name or
+         those menus come up with no command behind them. -->
+
+    <Window.Styles>
+        <StyleInclude Source="avares://MeshRF/PanelStyles.axaml" />
+    </Window.Styles>
+
+    <!-- The panel's own parts are moved in here, in the order they had in the
+         main window: everything but the last docked to the top, so a panel
+         that carried a title row above a table still reads that way. -->
+    <DockPanel x:Name="PanelHost" Margin="6" LastChildFill="True" />
+
+</Window>

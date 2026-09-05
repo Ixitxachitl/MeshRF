@@ -112,6 +112,11 @@
                               VerticalContentAlignment="Center"
                               IsChecked="{Binding SurveyRecording, Mode=TwoWay}"
                               ToolTip.Tip="Write down every packet heard directly, with where this station was standing. Drive with it on and the same neighbour is measured at fifty ranges instead of one, which is what the path-loss fit needs and cannot get from the node list." />
+                <!-- The map has no title row to hang this off, so it joins the
+                     other buttons here that open a window of their own. -->
+                <Button x:Name="MapPopOutButton" Classes="popout" Height="24"
+                        Click="OnPopOut"
+                        ToolTip.Tip="Move the map into its own window. Closing that window brings it back." />
             </StackPanel>
         </Border>
 

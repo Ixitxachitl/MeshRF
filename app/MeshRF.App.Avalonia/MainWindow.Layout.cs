@@ -31,21 +31,14 @@ public partial class MainWindow
     {
         ApplyWindowBounds(settings);
 
-        ApplyStarPair(MainLayoutGrid.ColumnDefinitions[0], MainLayoutGrid.ColumnDefinitions[2],
-                      settings.MainLeftPaneStar, settings.MainRightPaneStar);
-        ApplyStarPair(LeftPaneGrid.RowDefinitions[0], LeftPaneGrid.RowDefinitions[2],
-                      settings.MainLeftTopPaneStar, settings.MainLeftBottomPaneStar);
-        ApplyStarPair(RightPaneGrid.RowDefinitions[0], RightPaneGrid.RowDefinitions[2],
-                      settings.MainRightTopPaneStar, settings.MainRightBottomPaneStar);
-        // Nodes/waypoints grid: row 3 = nodes, row 5 = waypoints, row 4 the splitter.
-        ApplyStarPair(NodesWaypointsGrid.RowDefinitions[3], NodesWaypointsGrid.RowDefinitions[5],
-                      settings.NodesPaneStar, settings.WaypointsPaneStar);
+        // The splits between the six panels, and which of them are in windows
+        // of their own, are restored together: a popped-out panel collapses
+        // the pane it left, so the two cannot be applied independently.
+        BuildPanels();
+        RestorePanels(settings);
+
         ApplyStarPair(SpectrumLayoutGrid.RowDefinitions[0], SpectrumLayoutGrid.RowDefinitions[2],
                       settings.SpectrumTopPaneStar, settings.SpectrumBottomPaneStar);
-        // Messages grid: row 1 = chat area (tabs + reply banner + composer),
-        // row 3 = log; rows 0 and 2 are the header and the splitter.
-        ApplyStarPair(MessagesLayoutGrid.RowDefinitions[1], MessagesLayoutGrid.RowDefinitions[3],
-                      settings.MessagesTopPaneStar, settings.MessagesBottomPaneStar);
 
         ApplyLastPacketExpandedState(settings.LastPacketExpanded, persist: false);
         Map.Attach(_viewModel, settings);
@@ -231,35 +224,12 @@ public partial class MainWindow
             ? nameof(WindowState.Maximized)
             : nameof(WindowState.Normal);
 
-        SaveStarPair(MainLayoutGrid.ColumnDefinitions[0], MainLayoutGrid.ColumnDefinitions[2],
-                     out var mainLeft, out var mainRight);
-        settings.MainLeftPaneStar = mainLeft;
-        settings.MainRightPaneStar = mainRight;
-
-        SaveStarPair(LeftPaneGrid.RowDefinitions[0], LeftPaneGrid.RowDefinitions[2],
-                     out var leftTop, out var leftBottom);
-        settings.MainLeftTopPaneStar = leftTop;
-        settings.MainLeftBottomPaneStar = leftBottom;
-
-        SaveStarPair(RightPaneGrid.RowDefinitions[0], RightPaneGrid.RowDefinitions[2],
-                     out var rightTop, out var rightBottom);
-        settings.MainRightTopPaneStar = rightTop;
-        settings.MainRightBottomPaneStar = rightBottom;
-
-        SaveStarPair(NodesWaypointsGrid.RowDefinitions[3], NodesWaypointsGrid.RowDefinitions[5],
-                     out var nodesStar, out var waypointsStar);
-        settings.NodesPaneStar = nodesStar;
-        settings.WaypointsPaneStar = waypointsStar;
+        CapturePanels(settings);
 
         SaveStarPair(SpectrumLayoutGrid.RowDefinitions[0], SpectrumLayoutGrid.RowDefinitions[2],
                      out var specTop, out var specBottom);
         settings.SpectrumTopPaneStar = specTop;
         settings.SpectrumBottomPaneStar = specBottom;
-
-        SaveStarPair(MessagesLayoutGrid.RowDefinitions[1], MessagesLayoutGrid.RowDefinitions[3],
-                     out var msgTop, out var msgBottom);
-        settings.MessagesTopPaneStar = msgTop;
-        settings.MessagesBottomPaneStar = msgBottom;
 
         settings.LastPacketExpanded = _lastPacketExpanded;
         Map.SaveToSettings(settings);
@@ -294,6 +264,27 @@ public partial class MainWindow
         {
             case ColumnDefinition c: c.Width = new GridLength(star, GridUnitType.Star); break;
             case RowDefinition r: r.Height = new GridLength(star, GridUnitType.Star); break;
+        }
+    }
+
+    /// <summary>Fixed size, in pixels. Zero is how a pane whose panel has been
+    /// popped out is collapsed, along with the splitter beside it.</summary>
+    private static void SetPixels(DefinitionBase def, double px)
+    {
+        switch (def)
+        {
+            case ColumnDefinition c: c.Width = new GridLength(px, GridUnitType.Pixel); break;
+            case RowDefinition r: r.Height = new GridLength(px, GridUnitType.Pixel); break;
+        }
+    }
+
+    /// <summary>MinWidth on a column, MinHeight on a row.</summary>
+    private static void SetMinimum(DefinitionBase def, double min)
+    {
+        switch (def)
+        {
+            case ColumnDefinition c: c.MinWidth = min; break;
+            case RowDefinition r: r.MinHeight = min; break;
         }
     }
 

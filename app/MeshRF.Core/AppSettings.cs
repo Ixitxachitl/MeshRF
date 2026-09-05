@@ -318,6 +318,12 @@ public sealed class AppSettings
     public bool LastPacketExpanded { get; set; } = true;
     public double? MessagesTopPaneStar { get; set; }
     public double? MessagesBottomPaneStar { get; set; }
+
+    /// <summary>Which of the main window's six panels are currently in windows
+    /// of their own, and where each of those windows sits. Keyed by the panel
+    /// name (see MainWindow.Panels.cs); a panel with no entry is docked.
+    /// </summary>
+    public Dictionary<string, PanelWindowSettings> PanelWindows { get; set; } = new();
     public double? ConversationMessagesPaneStar { get; set; }
     public double? ConversationRightPaneStar { get; set; }
     public double? ConversationTelemetryPaneStar { get; set; }
@@ -730,6 +736,21 @@ public sealed class AppSettings
 /// mistake here that under-reports — the UI would show 22 dBm while the
 /// antenna saw 30 — which is why MeshRF ships no guesses for these boards.
 /// </summary>
+/// <summary>
+/// One popped-out panel: whether it is out, and the geometry of the window it
+/// is out in. Geometry is kept even while the panel is docked, so popping it
+/// out again puts the window back where it was last left.
+/// </summary>
+public sealed class PanelWindowSettings
+{
+    public bool PoppedOut { get; set; }
+    public double? Left { get; set; }
+    public double? Top { get; set; }
+    public double? Width { get; set; }
+    public double? Height { get; set; }
+    public string WindowState { get; set; } = "Normal";
+}
+
 public sealed class CustomSpiBoardSettings
 {
     /// <summary>SPI device node under /dev, e.g. "spidev0.0".</summary>

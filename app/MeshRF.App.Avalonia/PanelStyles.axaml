@@ -1,0 +1,187 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        xmlns:mesh="clr-namespace:MeshRF;assembly=MeshRF.Core">
+
+    <!-- Shared by the main window and by PanelWindow, the host a popped-out
+         panel moves into. A control picks up styles only from the window it is
+         currently in, so a panel that left the main window would otherwise
+         arrive unstyled: chat bubbles as bare borders, reaction chips as stock
+         buttons, tab headers without their boxes. Both windows include this
+         file, so a panel looks the same either side of the move. -->
+    <!-- Unseen-activity pulse on a tab header. Alternating playback fades
+         out and back rather than snapping, and it runs until the tab is
+         selected and the view model clears TabNeedsAttention. -->
+    <!-- Reaction chips are buttons but should read as inline tags, so the
+         stock button chrome is stripped back to a hover cue. They sit on a
+         bubble rather than a panel, so the fill is the list background:
+         darker than either bubble tint, which is what makes a chip read as
+         set into the bubble instead of floating on it. -->
+    <Style Selector="Button.reactionChip">
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.reactionChip /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+        <Setter Property="CornerRadius" Value="9" />
+    </Style>
+    <Style Selector="Button.reactionChip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushPanelBorder}" />
+    </Style>
+
+    <!-- Chat bubbles. Tint and border are set here rather than on the
+         template's Border so the .outgoing class can swap both, and hover
+         lifts the whole bubble as one target — it is what carries the
+         reply / react context menu. -->
+    <Style Selector="Border.bubble">
+        <Setter Property="Background" Value="{DynamicResource BrushBubbleIncoming}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushBubbleIncomingBorder}" />
+    </Style>
+    <Style Selector="Border.bubble.outgoing">
+        <Setter Property="Background" Value="{DynamicResource BrushBubbleOutgoing}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushBubbleOutgoingBorder}" />
+    </Style>
+    <Style Selector="Border.bubble:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+    </Style>
+
+    <!-- The message list is a transcript, not a picker: nothing acts on the
+         selected row, so the selection and hover fills are cleared and the
+         row padding goes to the bubble instead. Selection still works, it
+         just leaves no mark behind the bubble it would fight with. -->
+    <Style Selector="ListBox.chat">
+        <Setter Property="Padding" Value="4,2" />
+    </Style>
+    <Style Selector="ListBox.chat ListBoxItem">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.chat ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- Channel / DM tab headers. Fluent's default is an underline cue with
+         no box, which at this app's 12px type reads as a row of loose words
+         rather than tabs. Padding is set on TabItem (it template-binds to
+         the header presenter) while the chrome is set on the template's
+         root Border: the theme's own :selected / :pointerover styles target
+         that part, so setting Background/BorderBrush on TabItem itself
+         would be overridden the moment a tab is selected or hovered. -->
+    <!-- MinHeight is deliberately NOT forced to 0 here. Squeezing the header
+         is what pulled the title down into Fluent's selection pipe, which is
+         pinned to the bottom edge of the header and drew straight through
+         the text. The visible box now comes from a Border inside the item
+         template (see TabControl.ItemTemplate), which does not depend on
+         the theme's internal part names. -->
+    <!-- Horizontal Padding is 0, not the 6px this used to carry: the item
+         template's Border (see TabControl.ItemTemplate) already insets its
+         own content by 8px via its own Padding, so TabItem's Padding was
+         adding a second, outer margin around that border rather than
+         padding the text. Since the border doesn't stretch to fill it,
+         each tab's outer padding stacked with its neighbour's, showing up
+         as a visible gap between adjacent tab boxes rather than breathing
+         room inside them. Vertical Padding stays for header height. -->
+    <!-- One TabItem style, not two. A second block matching the same
+         selector wins on the setters it repeats regardless of which looks
+         more specific, and an earlier Margin binding was silently beaten
+         by the Margin="0" here — leaving no gap, so the divider landed on
+         the previous tab instead of between them.
+
+         Margin is what opens that gap, because the tab's chrome (the
+         LayoutRoot border styled below) is sized to the whole TabItem: a
+         rule placed inside the header would be enclosed by the tab box
+         rather than separating it from the one before. The rule is drawn
+         back out into the gap with a negative margin, and ClipToBounds
+         goes off for that one tab so the tab does not clip it away —
+         there is no horizontal Padding here for it to sit inside. -->
+    <Style Selector="TabItem" x:DataType="mesh:ITabItem">
+        <Setter Property="Padding" Value="0,2" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Margin"
+                Value="{Binding StartsTabGroup,
+                                Converter={x:Static local:TabGroupMarginConverter.Instance}}" />
+        <Setter Property="ClipToBounds" Value="{Binding !StartsTabGroup}" />
+    </Style>
+    <!-- Fluent marks the selected tab with a coloured pipe pinned to the
+         bottom edge of the header. With the shorter header this app uses it
+         lands across the title instead of under it, and the box below makes
+         it redundant anyway — selection now reads from the fill. -->
+    <!-- Part names verified against Avalonia.Themes.Fluent 12.1.1 rather
+         than assumed: the header root is "LayoutRoot" with no PART_ prefix,
+         while the selection bar is "PART_SelectedPipe" with one. Both are
+         matched by name only, without a type, so a template that swaps the
+         element type still gets styled. -->
+    <!-- A /template/ selector needs an element type or the setters have
+         nothing to resolve against (AVLN2200), so the type cannot be left
+         off even though only the name is load-bearing. The pipe is listed
+         as both Border and Rectangle because the theme's choice is not
+         visible from the compiled assembly; the one that does not match is
+         simply inert. -->
+    <Style Selector="TabItem /template/ Border#PART_SelectedPipe">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="TabItem /template/ Rectangle#PART_SelectedPipe">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="TabItem /template/ Border#LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4,4,0,0" />
+    </Style>
+    <Style Selector="TabItem:pointerover /template/ Border#LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+    </Style>
+    <Style Selector="TabItem:selected /template/ Border#LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+    </Style>
+
+    <!-- Compose byte counter: quiet until the message no longer fits,
+         then the same red the app uses for an overridden value. -->
+    <Style Selector="TextBlock.byteCount">
+        <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+    </Style>
+    <Style Selector="TextBlock.byteCount.over">
+        <Setter Property="Foreground" Value="{DynamicResource BrushOverridden}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.attention">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Style.Animations>
+            <Animation Duration="0:0:0.45" IterationCount="Infinite" PlaybackDirection="Alternate">
+                <KeyFrame Cue="0%">
+                    <Setter Property="Opacity" Value="1.0" />
+                </KeyFrame>
+                <KeyFrame Cue="100%">
+                    <Setter Property="Opacity" Value="0.35" />
+                </KeyFrame>
+            </Animation>
+        </Style.Animations>
+    </Style>
+
+    <!-- Pop-out affordance, one per panel. Deliberately quiet: it rides in a
+         panel's title row, or over the map and spectrum canvases where there
+         is no title row, and should read as chrome rather than as an action
+         competing with the panel's own buttons. -->
+    <Style Selector="Button.popout">
+        <Setter Property="Width" Value="22" />
+        <Setter Property="Height" Value="22" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Content" Value="&#x29C9;" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.popout /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource BrushSubtle}" />
+    </Style>
+    <Style Selector="Button.popout:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource BrushAppForeground}" />
+    </Style>
+</Styles>
