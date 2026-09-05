@@ -27,4 +27,9 @@
     <ProjectReference Include="..\..\app\MeshRF.App.Avalonia\MeshRF.App.Avalonia.csproj" />
   </ItemGroup>
 
+  <!-- These tests construct the real MainWindow, whose view model talks to the
+       native bridge on the way up, so the library has to be beside the test
+       assembly as well as beside the app. -->
+  <Import Project="..\..\NativeBridge.targets" />
+
 </Project>
