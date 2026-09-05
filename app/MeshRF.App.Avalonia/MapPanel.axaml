@@ -234,7 +234,7 @@
                                 IsEnabled="{Binding UseWaypointGeofence}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Text="{Binding WaypointGeofenceRadiusLabel}" VerticalAlignment="Center" />
-                            <TextBox Width="80" Text="{Binding WaypointGeofenceRadiusInput, Mode=TwoWay}"
+                            <TextBox local:RejectInvalidBehavior.Accepts="Number" Width="80" Text="{Binding WaypointGeofenceRadiusInput, Mode=TwoWay}"
                                      ToolTip.Tip="Circular geofence radius, in your selected display units. Sent as metres, which is what Waypoint.geofence_radius carries." />
                         </StackPanel>
                     </StackPanel>

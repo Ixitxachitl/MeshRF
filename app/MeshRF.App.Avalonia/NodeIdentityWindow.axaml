@@ -128,7 +128,7 @@
                 <Grid Margin="0,6,0,0" ColumnDefinitions="*,110" IsEnabled="{Binding IsUsbSerialLocationSource}">
                     <TextBox Grid.Column="0" Margin="0,0,4,0" FontFamily="Consolas" PlaceholderText="COM5"
                              Text="{Binding GpsSerialPort}" ToolTip.Tip="Optional COM port override; blank = auto-detect" />
-                    <TextBox Grid.Column="1" Margin="4,0,0,0" FontFamily="Consolas" PlaceholderText="9600"
+                    <TextBox local:RejectInvalidBehavior.Accepts="Number" Grid.Column="1" Margin="4,0,0,0" FontFamily="Consolas" PlaceholderText="9600"
                              Text="{Binding GpsBaudRateText}" ToolTip.Tip="Optional baud override; blank = auto-detect" />
                 </Grid>
                 <!-- Fixed to the two lines the status is written as. Letting
@@ -148,7 +148,7 @@
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding GpsSmartPosition}"
                           ToolTip.Tip="Only take a fix that is both far enough from the last one taken and long enough after it. A receiver reports every second and wanders while standing still; without this the marker twitches in place and the settings file is rewritten all day." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="{Binding GpsSmartPositionMinMoveLabel}" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinMoveInput}"
+                <TextBox local:RejectInvalidBehavior.Accepts="Number" Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinMoveInput}"
                          ToolTip.Tip="How far the receiver must have moved since the last fix taken. Distance accumulates, so a slow walk still gets there." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Min gap" />
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinSeconds}"
@@ -159,11 +159,11 @@
             <TextBlock Grid.Row="16" Grid.Column="0" Text="{Binding HomePositionLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
             <Grid Grid.Row="16" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
                   IsEnabled="{Binding IsManualLocationSource}">
-                <TextBox Grid.Column="0" Margin="0,0,2,0" FontFamily="Consolas"
+                <TextBox local:RejectInvalidBehavior.Accepts="Signed" Grid.Column="0" Margin="0,0,2,0" FontFamily="Consolas"
                          ToolTip.Tip="Latitude in degrees (-90..90)" Text="{Binding HomeLatitudeText}" />
-                <TextBox Grid.Column="1" Margin="2,0,2,0" FontFamily="Consolas"
+                <TextBox local:RejectInvalidBehavior.Accepts="Signed" Grid.Column="1" Margin="2,0,2,0" FontFamily="Consolas"
                          ToolTip.Tip="Longitude in degrees (-180..180)" Text="{Binding HomeLongitudeText}" />
-                <TextBox Grid.Column="2" Margin="2,0,0,0" FontFamily="Consolas"
+                <TextBox local:RejectInvalidBehavior.Accepts="Signed" Grid.Column="2" Margin="2,0,0,0" FontFamily="Consolas"
                          ToolTip.Tip="Altitude (optional)" Text="{Binding HomeAltitudeText}" />
             </Grid>
 
@@ -261,7 +261,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionSmartEnabledNote}"
                            IsVisible="{Binding HasPositionSmartEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="{Binding AutoReportPositionSmartMinMoveLabel}" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinMoveInput}"
+                <TextBox local:RejectInvalidBehavior.Accepts="Number" Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinMoveInput}"
                          ToolTip.Tip="How far to have moved since the last position sent, measured at the precision the channel actually transmits — firmware's broadcast_smart_minimum_distance. Default 100 m." />
                 <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"

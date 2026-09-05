@@ -6,6 +6,22 @@ using Avalonia.Threading;
 
 namespace MeshRF.AvaloniaApp;
 
+/// <summary>What a string-bound box will take, for the boxes whose view model
+/// parses the text itself and so has no binding to refuse it.</summary>
+public enum NumberShape
+{
+    /// <summary>No shape of its own — whatever the binding accepts.</summary>
+    Any,
+
+    /// <summary>Digits and one decimal point: a distance, an interval, a
+    /// radius. None of them mean anything below zero.</summary>
+    Number,
+
+    /// <summary>The same, and a leading minus — a latitude, a longitude, an
+    /// altitude in Death Valley.</summary>
+    Signed,
+}
+
 /// <summary>
 /// Attached behaviour for a box whose binding is typed — an interval in
 /// seconds, a frequency in MHz. What the binding refuses never lands: the box
@@ -24,6 +40,10 @@ namespace MeshRF.AvaloniaApp;
 /// runs at Send priority — ahead of the frame that would have drawn the error —
 /// so the rejected keystroke is never seen, and it runs after the binding has
 /// finished, so it does not depend on which of the two goes first.
+///
+/// A box bound to a string has no judge of its own — a view model that parses
+/// the text itself takes "poop" quietly and reads it as nothing — so those say
+/// what shape they hold with <see cref="AcceptsProperty"/> instead.
 /// </remarks>
 public static class RejectInvalidBehavior
 {
@@ -32,6 +52,47 @@ public static class RejectInvalidBehavior
 
     public static void SetIsEnabled(TextBox target, bool value) => target.SetValue(IsEnabledProperty, value);
     public static bool GetIsEnabled(TextBox target) => target.GetValue(IsEnabledProperty);
+
+    /// <summary>The shape a string-bound box holds. <see cref="NumberShape.Any"/>
+    /// leaves the binding as the only judge.</summary>
+    public static readonly AttachedProperty<NumberShape> AcceptsProperty =
+        AvaloniaProperty.RegisterAttached<TextBox, NumberShape>("Accepts", typeof(RejectInvalidBehavior));
+
+    public static void SetAccepts(TextBox target, NumberShape value) => target.SetValue(AcceptsProperty, value);
+    public static NumberShape GetAccepts(TextBox target) => target.GetValue(AcceptsProperty);
+
+    /// <summary>Whether the box is under this behaviour at all.</summary>
+    private static bool Watched(TextBox box) => GetIsEnabled(box) || GetAccepts(box) != NumberShape.Any;
+
+    /// <summary>
+    /// Whether the text could still become a number, which is not the same as
+    /// being one. Half-typed states have to stand — "12." on the way to "12.5",
+    /// "-" on the way to "-1", and empty, which every box here reads as unset —
+    /// or the box would fight the person filling it in. What cannot stand is
+    /// text no further typing could rescue.
+    /// </summary>
+    private static bool ShapeAllows(TextBox box, string text)
+    {
+        var shape = GetAccepts(box);
+        if (shape == NumberShape.Any || text.Length == 0) return true;
+
+        int i = shape == NumberShape.Signed && text[0] == '-' ? 1 : 0;
+        bool seenPoint = false;
+        for (; i < text.Length; i++)
+        {
+            if (text[i] == '.')
+            {
+                if (seenPoint) return false;
+                seenPoint = true;
+                continue;
+            }
+            // The view models behind these boxes parse invariant, so the
+            // separator they accept is the one accepted here.
+            if (!char.IsAsciiDigit(text[i])) return false;
+        }
+
+        return true;
+    }
 
     /// <summary>What the binding last accepted. The caret travels with it so a
     /// refused keystroke puts the cursor back where it was rather than one
@@ -58,6 +119,7 @@ public static class RejectInvalidBehavior
     static RejectInvalidBehavior()
     {
         IsEnabledProperty.Changed.AddClassHandler<TextBox>((box, _) => Attach(box));
+        AcceptsProperty.Changed.AddClassHandler<TextBox>((box, _) => Attach(box));
 
         // Class handlers rather than per-box subscriptions: there is nothing to
         // unsubscribe when a dialog closes, and a box without the behaviour
@@ -68,7 +130,7 @@ public static class RejectInvalidBehavior
 
     private static void Attach(TextBox box)
     {
-        if (!GetIsEnabled(box)) return;
+        if (!Watched(box)) return;
 
         var state = States.GetOrCreateValue(box);
         state.Text = box.Text ?? string.Empty;
@@ -88,7 +150,7 @@ public static class RejectInvalidBehavior
     /// </remarks>
     private static void Settle(TextBox box)
     {
-        if (!GetIsEnabled(box)) return;
+        if (!Watched(box)) return;
         if (!States.TryGetValue(box, out var state)) return;
         if (state.Restoring || state.Posted) return;
 
@@ -97,9 +159,10 @@ public static class RejectInvalidBehavior
         {
             state.Posted = false;
 
-            if (!DataValidationErrors.GetHasErrors(box))
+            string text = box.Text ?? string.Empty;
+            if (!DataValidationErrors.GetHasErrors(box) && ShapeAllows(box, text))
             {
-                state.Text = box.Text ?? string.Empty;
+                state.Text = text;
                 state.Caret = box.CaretIndex;
                 return;
             }

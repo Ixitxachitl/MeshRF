@@ -27,11 +27,21 @@ public class RejectInvalidInputTests(HeadlessAvalonia ui)
     {
         private int _seconds = 3600;
         private byte _spreadingFactor = 11;
+        private string _typed = "100";
 
         public int Seconds
         {
             get => _seconds;
             set { _seconds = value; Raise(); }
+        }
+
+        /// <summary>A box that parses its own text, the way the distance and
+        /// coordinate boxes do — the binding takes anything, so it is no
+        /// judge.</summary>
+        public string Typed
+        {
+            get => _typed;
+            set { _typed = value; Raise(); }
         }
 
         /// <summary>A byte, so a number the box can hold and the setting cannot
@@ -155,5 +165,79 @@ public class RejectInvalidInputTests(HeadlessAvalonia ui)
 
         Assert.Equal("3600t", box.Text);
         Assert.True(DataValidationErrors.GetHasErrors(box));
+    });
+
+    // ---- Boxes whose view model does its own parsing ----
+
+    /// <summary>A string-bound box, which no binding will ever refuse — the
+    /// shape it holds has to be declared.</summary>
+    private void Shaped(NumberShape shape, Action<TextBox, Settings> body) => ui.Run(() =>
+    {
+        var vm = new Settings();
+        var box = new TextBox { DataContext = vm };
+        RejectInvalidBehavior.SetAccepts(box, shape);
+        box.Bind(TextBox.TextProperty, new Binding(nameof(Settings.Typed)) { Mode = BindingMode.TwoWay });
+        Settle();
+        body(box, vm);
+    });
+
+    [Fact]
+    public void AWordInADistanceBoxIsTurnedAway() => Shaped(NumberShape.Number, (box, vm) =>
+    {
+        box.Text = "poop";
+        Settle();
+
+        Assert.Equal("100", box.Text);
+        Assert.Equal("100", vm.Typed);
+    });
+
+    // Half-typed states have to stand, or the box fights the person filling it
+    // in: "12." is on the way to "12.5", and empty is how these boxes are unset.
+    [Theory]
+    [InlineData("12.")]
+    [InlineData("12.5")]
+    [InlineData("")]
+    [InlineData("0")]
+    public void WhatCouldStillBecomeANumberStands(string typed) =>
+        Shaped(NumberShape.Number, (box, vm) =>
+        {
+            box.Text = typed;
+            Settle();
+
+            Assert.Equal(typed, box.Text);
+        });
+
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1e5")]
+    [InlineData("12,5")]
+    [InlineData("-5")]
+    public void WhatCouldNot(string typed) => Shaped(NumberShape.Number, (box, vm) =>
+    {
+        box.Text = typed;
+        Settle();
+
+        Assert.Equal("100", box.Text);
+    });
+
+    // A latitude goes south and an altitude goes below sea level.
+    [Theory]
+    [InlineData("-")]
+    [InlineData("-39.19")]
+    public void ASignedBoxTakesAMinus(string typed) => Shaped(NumberShape.Signed, (box, vm) =>
+    {
+        box.Text = typed;
+        Settle();
+
+        Assert.Equal(typed, box.Text);
+    });
+
+    [Fact]
+    public void AMinusInTheMiddleIsStillNotANumber() => Shaped(NumberShape.Signed, (box, vm) =>
+    {
+        box.Text = "39-19";
+        Settle();
+
+        Assert.Equal("100", box.Text);
     });
 }
