@@ -48,6 +48,7 @@ public partial class MapPanel : UserControl
         Canvas.RequestHorizonFrom += OnRequestHorizonFrom;
         Canvas.RequestLinkProfileTo += OnRequestLinkProfileTo;
         Canvas.ChosenPointCleared += OnChosenPointCleared;
+        Canvas.ChosenPointMoved += OnChosenPointMoved;
     }
 
     /// <summary>Raised by the pop-out button in the map's overlay. The map does
@@ -327,8 +328,10 @@ public partial class MapPanel : UserControl
     private void OnRequestCoverageFrom(double lat, double lon)
     {
         // Re-enter through the toggle so there is one path that runs a sweep.
-        // Already on, and it has to be nudged: the point changed, which the
-        // checked state cannot express.
+        // Moving the point has already switched coverage off, so this is
+        // normally the branch that turns it back on; the nudge is for asking
+        // again from the point it is already on, where nothing moved and the
+        // checked state cannot express that anything changed.
         if (CoverageButton.IsChecked == true) OnCoverageToggle(this, new RoutedEventArgs());
         else CoverageButton.IsChecked = true;
     }
@@ -338,6 +341,19 @@ public partial class MapPanel : UserControl
     private void OnChosenPointCleared()
     {
         if (CoverageButton.IsChecked == true) OnCoverageToggle(this, new RoutedEventArgs());
+    }
+
+    /// <summary>The origin moved, so a swept field drawn from where it stood
+    /// is about somewhere else now and comes off the map.
+    ///
+    /// Off rather than re-swept: the point is usually moved by one of the
+    /// other tools — a horizon, the near end of a link profile — and none of
+    /// those is a request to spend a sweep. "Coverage from here" moves the
+    /// point too, and re-arms the toggle straight after, so the one case that
+    /// does want a sweep still gets one.</summary>
+    private void OnChosenPointMoved()
+    {
+        if (CoverageButton.IsChecked == true) CoverageButton.IsChecked = false;
     }
 
     /// <summary>"Link profile to here…" on bare map: a profile whose far end is

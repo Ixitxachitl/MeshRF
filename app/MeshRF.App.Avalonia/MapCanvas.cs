@@ -1781,6 +1781,12 @@ public sealed class MapCanvas : Control
     /// redoing from this station.</summary>
     public event Action? ChosenPointCleared;
 
+    /// <summary>The chosen point moved, so anything drawn from where it stood
+    /// is now about somewhere else. Raised however the point was set — a tool
+    /// that wants its layer back after moving the point re-arms it itself.
+    /// </summary>
+    public event Action? ChosenPointMoved;
+
     /// <summary>
     /// A place on the map the RF tools work from instead of this station.
     ///
@@ -1793,8 +1799,11 @@ public sealed class MapCanvas : Control
 
     public void SetChosenPoint(double lat, double lon)
     {
-        ChosenPoint = new GeoPoint(lat, lon);
+        var point = new GeoPoint(lat, lon);
+        bool moved = ChosenPoint != point;
+        ChosenPoint = point;
         InvalidateVisual();
+        if (moved) ChosenPointMoved?.Invoke();
     }
 
     private const string NoPositionTip = "This node has not reported a position";
