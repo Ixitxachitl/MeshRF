@@ -76,9 +76,6 @@ public partial class RadioViewModel
     private ResolvedSetting<uint> PositionSmartMinMoveMeters => SettingOverlay.Distance(
         AutoReportPositionSmartMinMoveMeters, RoleCoercions.PositionSmartMinMoveMeters, MyRole);
 
-    private ResolvedSetting<bool> PositionAltitudeMsl =>
-        ResolveFlag(AutoReportPositionAltitudeMsl, RoleCoercions.PositionAltitudeMsl);
-
     private ResolvedSetting<bool> DeviceMetricsEnabled =>
         ResolveFlag(AutoReportDeviceMetricsEnabled, RoleCoercions.DeviceMetricsEnabled);
     private ResolvedSetting<int> DeviceMetricsSeconds => ResolveInterval(
@@ -134,7 +131,6 @@ public partial class RadioViewModel
     public bool EffectivePositionSmartEnabled => PositionSmartEnabled.Value;
     public int EffectivePositionSmartMinSeconds => PositionSmartMinSeconds.Value;
     public uint EffectivePositionSmartMinMoveMeters => PositionSmartMinMoveMeters.Value;
-    public bool EffectivePositionAltitudeMsl => PositionAltitudeMsl.Value;
     public bool EffectiveDeviceMetricsEnabled => DeviceMetricsEnabled.Value;
     public int EffectiveDeviceMetricsSeconds => DeviceMetricsSeconds.Value;
     public bool EffectiveEnvironmentMetricsEnabled => EnvironmentMetricsEnabled.Value;
@@ -165,8 +161,6 @@ public partial class RadioViewModel
     public string PositionSmartMinSecondsNote => Note(PositionSmartMinSeconds, SettingOverlay.Duration);
     public string PositionSmartMinMoveNote =>
         Note(PositionSmartMinMoveMeters, m => DisplayUnits.FormatShortDistance(m, CurrentUnitSystem));
-    public string PositionAltitudeMslNote =>
-        Note(PositionAltitudeMsl, msl => msl ? "above sea level" : "above ellipsoid (HAE)");
     public string DeviceMetricsEnabledNote => Note(DeviceMetricsEnabled, OnOff);
     public string DeviceMetricsSecondsNote => Note(DeviceMetricsSeconds, SettingOverlay.Duration);
     public string EnvironmentMetricsEnabledNote => Note(EnvironmentMetricsEnabled, OnOff);
@@ -228,7 +222,6 @@ public partial class RadioViewModel
     public bool HasPositionSmartEnabledNote => PositionSmartEnabledNote.Length > 0;
     public bool HasPositionSmartMinSecondsNote => PositionSmartMinSecondsNote.Length > 0;
     public bool HasPositionSmartMinMoveNote => PositionSmartMinMoveNote.Length > 0;
-    public bool HasPositionAltitudeMslNote => PositionAltitudeMslNote.Length > 0;
     public bool HasDeviceMetricsEnabledNote => DeviceMetricsEnabledNote.Length > 0;
     public bool HasDeviceMetricsSecondsNote => DeviceMetricsSecondsNote.Length > 0;
     public bool HasEnvironmentMetricsEnabledNote => EnvironmentMetricsEnabledNote.Length > 0;
@@ -245,7 +238,7 @@ public partial class RadioViewModel
         nameof(EffectiveNodeInfoEnabled), nameof(EffectiveNodeInfoSeconds),
         nameof(EffectivePositionEnabled), nameof(EffectivePositionSeconds),
         nameof(EffectivePositionSmartEnabled), nameof(EffectivePositionSmartMinSeconds),
-        nameof(EffectivePositionSmartMinMoveMeters), nameof(EffectivePositionAltitudeMsl),
+        nameof(EffectivePositionSmartMinMoveMeters), nameof(AltitudeDatumSummary),
         nameof(EffectiveDeviceMetricsEnabled), nameof(EffectiveDeviceMetricsSeconds),
         nameof(EffectiveEnvironmentMetricsEnabled), nameof(EffectiveEnvironmentMetricsSeconds),
         nameof(EffectiveAirQualityMetricsEnabled), nameof(EffectiveAirQualityMetricsSeconds),
@@ -254,7 +247,7 @@ public partial class RadioViewModel
         nameof(NodeInfoEnabledNote), nameof(NodeInfoSecondsNote),
         nameof(PositionEnabledNote), nameof(PositionSecondsNote),
         nameof(PositionSmartEnabledNote), nameof(PositionSmartMinSecondsNote),
-        nameof(PositionSmartMinMoveNote), nameof(PositionAltitudeMslNote),
+        nameof(PositionSmartMinMoveNote),
         nameof(DeviceMetricsEnabledNote), nameof(DeviceMetricsSecondsNote),
         nameof(EnvironmentMetricsEnabledNote), nameof(EnvironmentMetricsSecondsNote),
         nameof(AirQualityMetricsEnabledNote), nameof(AirQualityMetricsSecondsNote),
@@ -267,7 +260,6 @@ public partial class RadioViewModel
         nameof(HasPositionSmartEnabledNote),
         nameof(HasPositionSmartMinSecondsNote),
         nameof(HasPositionSmartMinMoveNote),
-        nameof(HasPositionAltitudeMslNote),
         nameof(HasDeviceMetricsEnabledNote),
         nameof(HasDeviceMetricsSecondsNote),
         nameof(HasEnvironmentMetricsEnabledNote),

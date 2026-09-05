@@ -7,10 +7,17 @@ namespace MeshRF.Location;
 
 public sealed record GpsSerialOptions(string? PortName, int? BaudRate);
 
+/// <param name="AltitudeM">Height above mean sea level, which is what NMEA
+/// reports and what a map gives you.</param>
+/// <param name="GeoidSeparationM">How far the geoid sits above the WGS-84
+/// ellipsoid here, straight out of the same sentence. Adding it to
+/// <paramref name="AltitudeM"/> gives height above the ellipsoid, which is the
+/// datum a CoT wants; without it that conversion cannot be made honestly.</param>
 public sealed record GpsFix(
     double Latitude,
     double Longitude,
     int? AltitudeM,
+    int? GeoidSeparationM,
     string PortName,
     int BaudRate,
     DateTimeOffset TimestampUtc);
@@ -217,7 +224,8 @@ public sealed class UsbSerialGpsService : IDisposable
                         announcedNmea = true;
                     }
 
-                    if (!TryParseNmeaFix(line, out var latitude, out var longitude, out var altitudeM))
+                    if (!TryParseNmeaFix(line, out var latitude, out var longitude, out var altitudeM,
+                                         out var geoidSeparationM))
                         continue;
 
                     sawFix = true;
@@ -227,6 +235,7 @@ public sealed class UsbSerialGpsService : IDisposable
                         latitude,
                         longitude,
                         altitudeM,
+                        geoidSeparationM,
                         portName,
                         baudRate,
                         DateTimeOffset.UtcNow));
@@ -263,11 +272,19 @@ public sealed class UsbSerialGpsService : IDisposable
     private static bool LooksLikeNmeaSentence(string line) =>
         !string.IsNullOrWhiteSpace(line) && line[0] == '$' && line.Length >= 6;
 
-    private static bool TryParseNmeaFix(string line, out double latitude, out double longitude, out int? altitudeM)
+    /// <summary>
+    /// Reads one NMEA sentence. Public because the field positions are the part
+    /// worth testing: an altitude and the separation that goes with it sit two
+    /// fields apart in GGA, and reading the wrong one is a mistake nothing
+    /// downstream could notice.
+    /// </summary>
+    public static bool TryParseNmeaFix(string line, out double latitude, out double longitude,
+                                       out int? altitudeM, out int? geoidSeparationM)
     {
         latitude = 0;
         longitude = 0;
         altitudeM = null;
+        geoidSeparationM = null;
 
         if (!LooksLikeNmeaSentence(line))
             return false;
@@ -304,6 +321,17 @@ public sealed class UsbSerialGpsService : IDisposable
                                 CultureInfo.InvariantCulture, out var altMeters))
             {
                 altitudeM = (int)Math.Round(altMeters);
+            }
+
+            // Field 11 = geoid separation, field 12 = its unit. The receiver
+            // has already worked out what the ellipsoid is doing under us, and
+            // it is the only way we can name a height above it.
+            if (fields.Length >= 12 &&
+                !string.IsNullOrWhiteSpace(fields[11]) &&
+                double.TryParse(fields[11], NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out var separationMeters))
+            {
+                geoidSeparationM = (int)Math.Round(separationMeters);
             }
 
             return true;

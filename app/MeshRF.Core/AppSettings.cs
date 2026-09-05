@@ -222,10 +222,6 @@ public sealed class AppSettings
     // actually moved, on top of the interval above rather than instead of it.
     public bool AutoReportPositionSmartEnabled { get; set; } = true;
 
-    /// <summary>Firmware's ALTITUDE_MSL position flag — see
-    /// <c>RadioViewModel.AutoReportPositionAltitudeMsl</c>.</summary>
-    public bool AutoReportPositionAltitudeMsl { get; set; } = true;
-
     /// <summary>Firmware's <c>lora.override_duty_cycle</c>: transmit past the
     /// region's hourly budget. Off by default, as in firmware.</summary>
     public bool OverrideDutyCycle { get; set; }

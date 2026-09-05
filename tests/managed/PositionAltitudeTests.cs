@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using MeshRF.Channels;
+using MeshRF.Location;
 using MeshRF.Mesh;
 using Xunit;
 
@@ -73,5 +74,50 @@ public class PositionAltitudeTests
         var decoded = MeshDecoder.Decode(frame, new[] { DefaultChannel() });
         Assert.NotNull(decoded?.Position);
         Assert.Null(decoded!.Position!.AltitudeM);
+    }
+
+    // ---- Choosing the datum ----
+
+    // Everything MeshRF holds is orthometric, so HAE is a conversion and not a
+    // label. The receiver already worked out the separation for us.
+    [Fact]
+    public void HaeIsTheReadingPlusTheSeparation()
+    {
+        var (altitude, isMsl) = AltitudeDatum.ForTransmit(1500, geoidSeparationM: -27, wantsHae: true);
+        Assert.Equal(1473, altitude);
+        Assert.False(isMsl);
+    }
+
+    // Without a separation the conversion cannot be made, and a number in the
+    // HAE field would be wrong by the height of the geoid. The datum we can
+    // prove goes out instead.
+    [Fact]
+    public void NoSeparationMeansTheReadingStaysMsl()
+    {
+        var (altitude, isMsl) = AltitudeDatum.ForTransmit(1500, geoidSeparationM: null, wantsHae: true);
+        Assert.Equal(1500, altitude);
+        Assert.True(isMsl);
+    }
+
+    [Fact]
+    public void WithoutARoleAskingForHaeTheSeparationIsLeftAlone()
+    {
+        var (altitude, isMsl) = AltitudeDatum.ForTransmit(1500, geoidSeparationM: -27, wantsHae: false);
+        Assert.Equal(1500, altitude);
+        Assert.True(isMsl);
+    }
+
+    [Fact]
+    public void NoAltitudeAtAllSendsNone() =>
+        Assert.Equal((null, true), AltitudeDatum.ForTransmit(null, geoidSeparationM: -27, wantsHae: true));
+
+    // A TAK node is the one that asks for this, and it is exactly the case the
+    // conversion has to be right for.
+    [Fact]
+    public void ATakRoleIsWhatAsksForHae()
+    {
+        Assert.False(RoleDefaults.For("Tak").PositionAltitudeMsl);
+        Assert.False(RoleDefaults.For("TakTracker").PositionAltitudeMsl);
+        Assert.Null(RoleDefaults.For("Client").PositionAltitudeMsl);
     }
 }

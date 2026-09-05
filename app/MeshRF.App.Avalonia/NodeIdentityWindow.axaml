@@ -156,7 +156,7 @@
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
 
-            <TextBlock Grid.Row="16" Grid.Column="0" Text="{Binding HomeAltitudeLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="16" Grid.Column="0" Text="{Binding HomePositionLabel}" Margin="0,4,8,4" VerticalAlignment="Center" />
             <Grid Grid.Row="16" Grid.Column="1" Margin="0,4,0,4" ColumnDefinitions="2*,2*,*"
                   IsEnabled="{Binding IsManualLocationSource}">
                 <TextBox Grid.Column="0" Margin="0,0,2,0" FontFamily="Consolas"
@@ -279,18 +279,14 @@
                            IsVisible="{Binding HasPositionSmartMinSecondsNote}" />
             </StackPanel>
 
-            <!-- Firmware's ALTITUDE_MSL position flag. The TAK roles clear it,
-                 because CoTs carry height above the ellipsoid. -->
+            <!-- Firmware's ALTITUDE_MSL position flag, which is not a
+                 preference: every altitude we hold is above mean sea level, so
+                 the other datum is a conversion we can only make from a
+                 receiver's geoid separation. Shown rather than set. -->
             <TextBlock Grid.Row="25" Grid.Column="0" Text="Altitude datum" Margin="0,4,8,4" VerticalAlignment="Center" />
             <StackPanel Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
-                <CheckBox VerticalAlignment="Center" Content="Above mean sea level"
-                          IsChecked="{Binding AutoReportPositionAltitudeMsl}"
-                          ToolTip.Tip="Send altitude as height above mean sea level (Position.altitude) rather than above the ellipsoid (Position.altitude_hae) — firmware's ALTITUDE_MSL position flag. The TAK roles clear it, since CoTs use HAE." />
-                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
-                           Foreground="{DynamicResource BrushOverridden}"
-                           Text="{Binding PositionAltitudeMslNote}"
-                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionAltitudeMslNote}"
-                           IsVisible="{Binding HasPositionAltitudeMslNote}" />
+                <TextBlock VerticalAlignment="Center" Text="{Binding AltitudeDatumSummary}"
+                           ToolTip.Tip="Which of Position's two altitude fields we transmit — altitude (above mean sea level) or altitude_hae (above the WGS-84 ellipsoid). The TAK roles ask for HAE, since CoTs carry it, and the conversion is made with the geoid separation reported alongside the fix." />
             </StackPanel>
 
             <TextBlock Grid.Row="26" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />

@@ -922,8 +922,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     public bool UseMiles => UseImperial;
 
-    /// <summary>Altitude field label, unit-aware like MeshRF.App's.</summary>
-    public string HomeAltitudeLabel => $"Alt ({DisplayUnits.AltitudeUnitShort(CurrentUnitSystem)})";
+    /// <summary>Label for the home position row, which holds latitude and
+    /// longitude as well as the altitude — naming only the last of the three
+    /// read as a label for the first.</summary>
+    public string HomePositionLabel => $"Lat / lon / alt ({DisplayUnits.AltitudeUnitShort(CurrentUnitSystem)})";
 
     /// <summary>The typed home altitude in metres, which is the unit every
     /// consumer of it wants — the settings file, the position encoder, and the
@@ -2138,7 +2140,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(UseImperial));
         OnPropertyChanged(nameof(UseFahrenheit));
         OnPropertyChanged(nameof(UseMiles));
-        OnPropertyChanged(nameof(HomeAltitudeLabel));
+        OnPropertyChanged(nameof(HomePositionLabel));
         OnPropertyChanged(nameof(NodeDistanceUnitShort));
         OnPropertyChanged(nameof(WaypointGeofenceRadiusLabel));
         OnPropertyChanged(nameof(GpsSmartPositionMinMoveLabel));
@@ -2996,9 +2998,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             StatusText = "Set your home location in My Node → Configure first.";
             return;
         }
-        int? alt = HomeAltitudeMeters;
+        var (alt, altIsMsl) = AltitudeToSend();
         var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
-            altitudeM: alt, altitudeIsMsl: EffectivePositionAltitudeMsl,
+            altitudeM: alt, altitudeIsMsl: altIsMsl,
             precisionBits: channel.EffectivePositionPrecision,
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,

@@ -183,6 +183,10 @@ public partial class RadioViewModel
     /// writes into them, which is also what the map marker reads.</summary>
     private void ApplyLocationSource(bool startOrStop)
     {
+        // The datum turns on where the altitude came from, and this is
+        // where that changes.
+        OnPropertyChanged(nameof(AltitudeDatumSummary));
+
         var options = BuildGpsOptions();
         _gpsService.UpdateOptions(options);
         ResetSmartPosition();
@@ -244,7 +248,40 @@ public partial class RadioViewModel
         HomeLongitudeText = fix.Longitude.ToString("F6", CultureInfo.InvariantCulture);
         if (fix.AltitudeM is int alt)
             HomeAltitudeText = DisplayUnits.FormatAltitudeInput(alt, CurrentUnitSystem);
+
+        // Kept beside the altitude it belongs to. It describes where this fix
+        // was taken, so it travels with the fix rather than being looked up.
+        _geoidSeparationM = fix.GeoidSeparationM;
+        OnPropertyChanged(nameof(AltitudeDatumSummary));
     }
+
+    /// <summary>The geoid separation from the last fix, which is only ours to
+    /// use while the altitude beside it is the one that came with it. Typing a
+    /// height into the box replaces the reading and not the separation, so the
+    /// manual source has none.</summary>
+    private int? _geoidSeparationM;
+
+    private int? GeoidSeparationM => IsUsbSerialLocationSource ? _geoidSeparationM : null;
+
+    /// <summary>Whether the role asks for height above the ellipsoid. Nobody
+    /// sets this by hand: the datum is a property of what a receiver of ours
+    /// expects, which is what choosing a TAK role says.</summary>
+    private bool RoleWantsHae => RoleCoercions.PositionAltitudeMsl == false;
+
+    /// <summary>The altitude to put on the air and the field it belongs in.
+    /// </summary>
+    private (int? AltitudeM, bool IsMsl) AltitudeToSend() =>
+        AltitudeDatum.ForTransmit(HomeAltitudeMeters, GeoidSeparationM, RoleWantsHae);
+
+    /// <summary>What the dialog says beside "Altitude datum", since there is no
+    /// longer a box to set it in. A role that asks for HAE and a receiver that
+    /// will not say where the ellipsoid is are two different states, and the
+    /// second one is worth seeing.</summary>
+    public string AltitudeDatumSummary =>
+        !RoleWantsHae ? "above mean sea level"
+        : GeoidSeparationM is int separation
+            ? $"above the ellipsoid (HAE), {separation:+#;-#;0} m from the fix"
+            : "above mean sea level — no geoid separation to convert with";
 
     // ----- Weather / air quality sources -----
 
@@ -320,9 +357,9 @@ public partial class RadioViewModel
                 case PortNum.Position:
                     if (channel.EffectivePositionPrecision == 0) return;
                     if (!TryGetHomeLocation(out double lat, out double lon)) return;
-                    int? alt = HomeAltitudeMeters;
+                    var (alt, altIsMsl) = AltitudeToSend();
                     var position = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, NextPacketId(), lat, lon,
-                        altitudeM: alt, altitudeIsMsl: EffectivePositionAltitudeMsl,
+                        altitudeM: alt, altitudeIsMsl: altIsMsl,
                         precisionBits: channel.EffectivePositionPrecision,
                         to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt);
                     TransmitBackground(position);
@@ -499,11 +536,6 @@ public partial class RadioViewModel
 
     /// <summary><c>broadcast_smart_minimum_interval_secs</c>.</summary>
     [ObservableProperty] private int _autoReportPositionSmartMinSeconds = 300;
-
-    /// <summary>Firmware's <c>ALTITUDE_MSL</c> position flag: send our altitude
-    /// as height above mean sea level rather than above the ellipsoid. The TAK
-    /// roles clear it, because CoTs carry HAE.</summary>
-    [ObservableProperty] private bool _autoReportPositionAltitudeMsl = true;
 
     public string AutoReportPositionSmartMinMoveLabel =>
         $"Min move ({DisplayUnits.ShortDistanceUnitShort(CurrentUnitSystem)})";
@@ -723,7 +755,6 @@ public partial class RadioViewModel
     partial void OnAutoReportPositionSecondsChanged(int value) { _nextPositionUtc = Next(EffectivePositionEnabled, EffectivePositionSeconds); SaveSettings(); RefreshEffectiveSettings(); }
 
     partial void OnAutoReportPositionSmartEnabledChanged(bool value) { SaveSettings(); RefreshEffectiveSettings(); }
-    partial void OnAutoReportPositionAltitudeMslChanged(bool value) { SaveSettings(); RefreshEffectiveSettings(); }
     partial void OnAutoReportPositionSmartMinMoveInputChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
     partial void OnAutoReportPositionSmartMinSecondsChanged(int value) { SaveSettings(); RefreshEffectiveSettings(); }
     partial void OnAutoReportDeviceMetricsSecondsChanged(int value) { _nextDeviceMetricsUtc = Next(EffectiveDeviceMetricsEnabled, EffectiveDeviceMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
@@ -774,7 +805,6 @@ public partial class RadioViewModel
         AutoReportPositionSmartMinMoveInput = DisplayUnits.FormatShortDistanceInput(
             _settings.AutoReportPositionSmartMinMoveMeters, CurrentUnitSystem);
         AutoReportPositionSmartMinSeconds = Math.Max(0, _settings.AutoReportPositionSmartMinSeconds);
-        AutoReportPositionAltitudeMsl = _settings.AutoReportPositionAltitudeMsl;
         AutoReportDeviceMetricsEnabled = _settings.AutoReportDeviceMetricsEnabled;
         AutoReportDeviceMetricsSeconds = Clamp(_settings.AutoReportDeviceMetricsSeconds);
         AutoReportEnvironmentMetricsEnabled = _settings.AutoReportEnvironmentMetricsEnabled;
@@ -808,7 +838,6 @@ public partial class RadioViewModel
         s.AutoReportPositionSmartEnabled = AutoReportPositionSmartEnabled;
         s.AutoReportPositionSmartMinMoveMeters = AutoReportPositionSmartMinMoveMeters;
         s.AutoReportPositionSmartMinSeconds = Math.Max(0, AutoReportPositionSmartMinSeconds);
-        s.AutoReportPositionAltitudeMsl = AutoReportPositionAltitudeMsl;
         s.AutoReportDeviceMetricsEnabled = AutoReportDeviceMetricsEnabled;
         s.AutoReportDeviceMetricsSeconds = Clamp(AutoReportDeviceMetricsSeconds);
         s.AutoReportEnvironmentMetricsEnabled = AutoReportEnvironmentMetricsEnabled;
