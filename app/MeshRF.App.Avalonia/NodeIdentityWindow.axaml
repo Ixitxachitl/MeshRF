@@ -10,7 +10,7 @@
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Margin="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Node ID" Margin="0,4,8,4" VerticalAlignment="Center" />
             <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" IsReadOnly="True"
@@ -203,6 +203,11 @@
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeInfoSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
+                <ComboBox x:Name="AutoNodeInfoChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                          ItemsSource="{Binding AutoReportChannelOptions}"
+                          SelectedItem="{Binding AutoReportNodeInfoChannel}"
+                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding NodeInfoSecondsNote}"
@@ -221,6 +226,11 @@
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
+                <ComboBox x:Name="AutoPositionChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                          ItemsSource="{Binding AutoReportChannelOptions}"
+                          SelectedItem="{Binding AutoReportPositionChannel}"
+                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding PositionSecondsNote}"
@@ -231,8 +241,17 @@
             <!-- Firmware's position_broadcast_smart_enabled, and only meaningful
                  alongside the interval above: it adds early sends, it does not
                  replace the schedule. -->
-            <TextBlock Grid.Row="23" Grid.Column="0" Text="Smart broadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="23" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
+            <!-- Its own row rather than beside the picker: the row above is
+                 full, and a channel that shares no location at all is worth
+                 more than the few characters left over there. -->
+            <TextBlock Grid.Row="23" Grid.Column="1" Margin="0,0,0,4" FontSize="11"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource BrushOverridden}"
+                       Text="{Binding PositionChannelNote}"
+                       IsVisible="{Binding HasPositionChannelNote}" />
+
+            <TextBlock Grid.Row="24" Grid.Column="0" Text="Smart broadcast" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4"
                         IsEnabled="{Binding AutoReportPositionEnabled}">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportPositionSmartEnabled}"
                           ToolTip.Tip="Send a position ahead of the schedule once you have actually moved — firmware's position_broadcast_smart_enabled. It adds sends, it never delays the scheduled one." />
@@ -262,8 +281,8 @@
 
             <!-- Firmware's ALTITUDE_MSL position flag. The TAK roles clear it,
                  because CoTs carry height above the ellipsoid. -->
-            <TextBlock Grid.Row="24" Grid.Column="0" Text="Altitude datum" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="24" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="25" Grid.Column="0" Text="Altitude datum" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox VerticalAlignment="Center" Content="Above mean sea level"
                           IsChecked="{Binding AutoReportPositionAltitudeMsl}"
                           ToolTip.Tip="Send altitude as height above mean sea level (Position.altitude) rather than above the ellipsoid (Position.altitude_hae) — firmware's ALTITUDE_MSL position flag. The TAK roles clear it, since CoTs use HAE." />
@@ -274,8 +293,8 @@
                            IsVisible="{Binding HasPositionAltitudeMslNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="25" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="25" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="26" Grid.Column="0" Text="Auto device metrics" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="26" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportDeviceMetricsEnabled}" />
                 <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
@@ -285,6 +304,11 @@
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
+                <ComboBox x:Name="AutoDeviceMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                          ItemsSource="{Binding AutoReportChannelOptions}"
+                          SelectedItem="{Binding AutoReportDeviceMetricsChannel}"
+                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding DeviceMetricsSecondsNote}"
@@ -292,8 +316,8 @@
                            IsVisible="{Binding HasDeviceMetricsSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="26" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="26" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="27" Grid.Column="0" Text="Auto env telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="27" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportEnvironmentMetricsEnabled}" />
                 <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
@@ -303,6 +327,11 @@
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
+                <ComboBox x:Name="AutoEnvironmentMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                          ItemsSource="{Binding AutoReportChannelOptions}"
+                          SelectedItem="{Binding AutoReportEnvironmentMetricsChannel}"
+                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding EnvironmentMetricsSecondsNote}"
@@ -310,8 +339,8 @@
                            IsVisible="{Binding HasEnvironmentMetricsSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="27" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="27" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="28" Grid.Column="0" Text="Auto AQ telemetry" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="28" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportAirQualityMetricsEnabled}" />
                 <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
@@ -321,6 +350,11 @@
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
+                <ComboBox x:Name="AutoAirQualityMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                          ItemsSource="{Binding AutoReportChannelOptions}"
+                          SelectedItem="{Binding AutoReportAirQualityMetricsChannel}"
+                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding AirQualityMetricsSecondsNote}"
@@ -328,8 +362,8 @@
                            IsVisible="{Binding HasAirQualityMetricsSecondsNote}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="28" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <StackPanel Grid.Row="28" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
+            <TextBlock Grid.Row="29" Grid.Column="0" Text="Auto status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="29" Grid.Column="1" Margin="0,4,0,4" Orientation="Horizontal" Spacing="4">
                 <CheckBox Content="Enabled" VerticalAlignment="Center" IsChecked="{Binding AutoReportNodeStatusEnabled}" />
                 <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
@@ -339,26 +373,31 @@
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
+                <ComboBox x:Name="AutoNodeStatusChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                          ItemsSource="{Binding AutoReportChannelOptions}"
+                          SelectedItem="{Binding AutoReportNodeStatusChannel}"
+                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
             </StackPanel>
 
-            <TextBlock Grid.Row="29" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="30" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AutoReportLastSentSummary}"
                        ToolTip.Tip="Last successful auto-send times for NodeInfo, Position, Device Metrics, Environment Metrics, Air Quality, and Status." />
 
-            <TextBlock Grid.Row="30" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="30" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="31" Grid.Column="0" Text="Weather status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="31" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding WeatherTelemetryStatus}"
                        ToolTip.Tip="Live status of weather fetches used for environment telemetry (Open-Meteo)." />
 
-            <TextBlock Grid.Row="31" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="31" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
+            <TextBlock Grid.Row="32" Grid.Column="0" Text="AQ status" Margin="0,4,8,4" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="32" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas" FontSize="11"
                        TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}"
                        Text="{Binding AirQualityTelemetryStatus}"
                        ToolTip.Tip="Live status of air quality fetches used for air quality telemetry (Open-Meteo AQ API)." />
 
-            <TextBlock Grid.Row="32" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+            <TextBlock Grid.Row="33" Grid.Column="1" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource BrushSubtle}"
                        Text="Relay routing rebroadcasts other nodes' traffic after a contention delay, following the role and rebroadcast mode above. It needs a TX-capable device, and stays off entirely while the Routing box is unchecked." />
         </Grid>

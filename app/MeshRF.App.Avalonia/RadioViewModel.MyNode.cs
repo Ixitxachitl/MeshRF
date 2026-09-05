@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Collections.ObjectModel;
 using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -518,6 +519,64 @@ public partial class RadioViewModel
     [ObservableProperty] private bool _autoReportNodeStatusEnabled;
     [ObservableProperty] private int _autoReportNodeStatusSeconds = 3600;
 
+    /// <summary>The channel each report is broadcast on, by name.</summary>
+    /// <remarks>
+    /// One channel per report rather than one for all of them: which mesh a
+    /// report belongs on differs by what it says. A name that matches no
+    /// channel - one renamed or deleted since - falls back to the primary at
+    /// send time rather than the report going quiet, and
+    /// <see cref="RefreshAutoReportChannelOptions"/> puts the picker back on
+    /// something real.
+    /// </remarks>
+    [ObservableProperty] private string _autoReportNodeInfoChannel = string.Empty;
+    [ObservableProperty] private string _autoReportPositionChannel = string.Empty;
+    [ObservableProperty] private string _autoReportDeviceMetricsChannel = string.Empty;
+    [ObservableProperty] private string _autoReportEnvironmentMetricsChannel = string.Empty;
+    [ObservableProperty] private string _autoReportAirQualityMetricsChannel = string.Empty;
+    [ObservableProperty] private string _autoReportNodeStatusChannel = string.Empty;
+
+    /// <summary>Names the pickers offer: every channel that can carry a
+    /// broadcast, in tab order.</summary>
+    public ObservableCollection<string> AutoReportChannelOptions { get; } = new();
+
+    /// <summary>Rebuilds the offered names and moves any picker whose channel
+    /// has gone onto the primary, so what the dialog shows is where a report
+    /// would actually go.</summary>
+    public void RefreshAutoReportChannelOptions()
+    {
+        var names = Tabs.OfType<ChannelTabViewModel>()
+                                .Where(t => !t.Config.IsDisabled)
+                                .Select(t => t.Config.Name)
+                                .ToList();
+
+        // No channels yet (this can be asked before they are loaded) means
+        // nothing to offer and nothing to coerce against — leaving the saved
+        // names alone rather than resolving every one of them to "".
+        if (names.Count == 0) return;
+
+        if (!names.SequenceEqual(AutoReportChannelOptions))
+        {
+            AutoReportChannelOptions.Clear();
+            foreach (var name in names) AutoReportChannelOptions.Add(name);
+        }
+
+        string fallback = PrimaryChannel()?.Name ?? names.FirstOrDefault() ?? string.Empty;
+        string Offered(string chosen) => names.Contains(chosen) ? chosen : fallback;
+
+        AutoReportNodeInfoChannel = Offered(AutoReportNodeInfoChannel);
+        AutoReportPositionChannel = Offered(AutoReportPositionChannel);
+        AutoReportDeviceMetricsChannel = Offered(AutoReportDeviceMetricsChannel);
+        AutoReportEnvironmentMetricsChannel = Offered(AutoReportEnvironmentMetricsChannel);
+        AutoReportAirQualityMetricsChannel = Offered(AutoReportAirQualityMetricsChannel);
+        AutoReportNodeStatusChannel = Offered(AutoReportNodeStatusChannel);
+    }
+
+    /// <summary>The channel a report goes out on. An unknown name resolves to
+    /// the primary, which is where every report went before they could be
+    /// sent separately.</summary>
+    private ChannelConfig? AutoReportChannel(string name) =>
+        _rxHost.FindChannelByName(name) ?? PrimaryChannel();
+
     [ObservableProperty]
     private string _autoReportLastSentSummary =
         "Auto last: NI never | POS never | MET never | ENV never | AQ never | ST never";
@@ -647,6 +706,17 @@ public partial class RadioViewModel
     partial void OnAutoReportAirQualityMetricsSecondsChanged(int value) { _nextAirQualityMetricsUtc = Next(EffectiveAirQualityMetricsEnabled, EffectiveAirQualityMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
     partial void OnAutoReportNodeStatusSecondsChanged(int value) { _nextNodeStatusUtc = Next(EffectiveNodeStatusEnabled, AutoReportNodeStatusSeconds); SaveSettings(); RefreshEffectiveSettings(); }
 
+    // Where the next report goes, not when, so these are only written down.
+    partial void OnAutoReportNodeInfoChannelChanged(string value) => SaveSettings();
+    // The one whose channel changes more than where it goes: what the
+    // channel allows decides whether a position is sent at all, and how
+    // precise it may be.
+    partial void OnAutoReportPositionChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
+    partial void OnAutoReportDeviceMetricsChannelChanged(string value) => SaveSettings();
+    partial void OnAutoReportEnvironmentMetricsChannelChanged(string value) => SaveSettings();
+    partial void OnAutoReportAirQualityMetricsChannelChanged(string value) => SaveSettings();
+    partial void OnAutoReportNodeStatusChannelChanged(string value) => SaveSettings();
+
     /// <summary>
     /// Re-arms every schedule against the intervals now in force. Called when
     /// the role changes: a pending timer armed for the old interval would
@@ -688,6 +758,13 @@ public partial class RadioViewModel
         AutoReportAirQualityMetricsSeconds = Clamp(_settings.AutoReportAirQualityMetricsSeconds);
         AutoReportNodeStatusEnabled = _settings.AutoReportNodeStatusEnabled;
         AutoReportNodeStatusSeconds = Clamp(_settings.AutoReportNodeStatusSeconds);
+
+        AutoReportNodeInfoChannel = _settings.AutoReportNodeInfoChannel;
+        AutoReportPositionChannel = _settings.AutoReportPositionChannel;
+        AutoReportDeviceMetricsChannel = _settings.AutoReportDeviceMetricsChannel;
+        AutoReportEnvironmentMetricsChannel = _settings.AutoReportEnvironmentMetricsChannel;
+        AutoReportAirQualityMetricsChannel = _settings.AutoReportAirQualityMetricsChannel;
+        AutoReportNodeStatusChannel = _settings.AutoReportNodeStatusChannel;
     }
 
     /// <summary>
@@ -715,6 +792,13 @@ public partial class RadioViewModel
         s.AutoReportAirQualityMetricsSeconds = Clamp(AutoReportAirQualityMetricsSeconds);
         s.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
         s.AutoReportNodeStatusSeconds = Clamp(AutoReportNodeStatusSeconds);
+
+        s.AutoReportNodeInfoChannel = AutoReportNodeInfoChannel;
+        s.AutoReportPositionChannel = AutoReportPositionChannel;
+        s.AutoReportDeviceMetricsChannel = AutoReportDeviceMetricsChannel;
+        s.AutoReportEnvironmentMetricsChannel = AutoReportEnvironmentMetricsChannel;
+        s.AutoReportAirQualityMetricsChannel = AutoReportAirQualityMetricsChannel;
+        s.AutoReportNodeStatusChannel = AutoReportNodeStatusChannel;
     }
 
     /// <summary>Tracks the position we last put on the air, so movement can be
@@ -790,7 +874,7 @@ public partial class RadioViewModel
             if (EffectiveNodeInfoEnabled && DateTime.UtcNow >= _nextNodeInfoUtc)
             {
                 _nextNodeInfoUtc = NextScheduled(EffectiveNodeInfoSeconds, "nodeinfo");
-                await SendSelfNodeInfoCommand.ExecuteAsync(null);
+                await SendNodeInfoOnChannelAsync(AutoReportChannel(AutoReportNodeInfoChannel), null);
                 if (StatusText.StartsWith("Sent NodeInfo", StringComparison.OrdinalIgnoreCase))
                 { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
@@ -804,7 +888,7 @@ public partial class RadioViewModel
                 (DateTime.UtcNow >= _nextPositionUtc || SmartPositionBroadcastDue()))
             {
                 _nextPositionUtc = NextScheduled(EffectivePositionSeconds, "position");
-                await SendSelfPositionCommand.ExecuteAsync(null);
+                await SendPositionOnChannelAsync(AutoReportChannel(AutoReportPositionChannel), null);
                 if (StatusText.StartsWith("Sent position", StringComparison.OrdinalIgnoreCase))
                 { _lastPositionUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
@@ -812,7 +896,7 @@ public partial class RadioViewModel
             if (EffectiveDeviceMetricsEnabled && DateTime.UtcNow >= _nextDeviceMetricsUtc)
             {
                 _nextDeviceMetricsUtc = NextScheduled(EffectiveDeviceMetricsSeconds, "device metrics");
-                await SendSelfDeviceMetricsCommand.ExecuteAsync(null);
+                await SendDeviceMetricsOnChannelAsync(AutoReportChannel(AutoReportDeviceMetricsChannel), null);
                 if (StatusText.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
                 { _lastDeviceMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
@@ -820,7 +904,7 @@ public partial class RadioViewModel
             if (EffectiveEnvironmentMetricsEnabled && DateTime.UtcNow >= _nextEnvironmentMetricsUtc)
             {
                 _nextEnvironmentMetricsUtc = NextScheduled(EffectiveEnvironmentMetricsSeconds, "environment metrics");
-                await SendSelfEnvironmentMetricsCommand.ExecuteAsync(null);
+                await SendEnvironmentMetricsOnChannelAsync(AutoReportChannel(AutoReportEnvironmentMetricsChannel), null);
                 if (StatusText.StartsWith("Sent environment metrics", StringComparison.OrdinalIgnoreCase))
                 { _lastEnvironmentMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
@@ -828,7 +912,7 @@ public partial class RadioViewModel
             if (EffectiveAirQualityMetricsEnabled && DateTime.UtcNow >= _nextAirQualityMetricsUtc)
             {
                 _nextAirQualityMetricsUtc = NextScheduled(EffectiveAirQualityMetricsSeconds, "air quality metrics");
-                await SendSelfAirQualityMetricsCommand.ExecuteAsync(null);
+                await SendAirQualityMetricsOnChannelAsync(AutoReportChannel(AutoReportAirQualityMetricsChannel), null);
                 if (StatusText.StartsWith("Sent air quality metrics", StringComparison.OrdinalIgnoreCase))
                 { _lastAirQualityMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }
@@ -836,7 +920,7 @@ public partial class RadioViewModel
             if (EffectiveNodeStatusEnabled && DateTime.UtcNow >= _nextNodeStatusUtc)
             {
                 _nextNodeStatusUtc = NextScheduled(AutoReportNodeStatusSeconds, "node status");
-                await SendSelfNodeStatusCommand.ExecuteAsync(null);
+                await SendNodeStatusOnChannelAsync(AutoReportChannel(AutoReportNodeStatusChannel), null);
                 if (StatusText.StartsWith("Sent node status", StringComparison.OrdinalIgnoreCase))
                 { _lastNodeStatusUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
             }

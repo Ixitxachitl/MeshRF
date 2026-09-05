@@ -244,6 +244,19 @@ public sealed class AppSettings
     public bool AutoReportAirQualityMetricsEnabled { get; set; } = false;
     public int AutoReportAirQualityMetricsSeconds { get; set; } = 3600;
 
+    /// <summary>Channel each auto report goes out on, by name. Empty means the
+    /// primary, which is where every one of them used to go: a report is a
+    /// broadcast to whoever is listening, and which mesh that is differs per
+    /// report — telemetry to the neighbours, a status to the club channel.
+    /// A name no channel answers to falls back to the primary rather than
+    /// going silent.</summary>
+    public string AutoReportNodeInfoChannel { get; set; } = string.Empty;
+    public string AutoReportPositionChannel { get; set; } = string.Empty;
+    public string AutoReportDeviceMetricsChannel { get; set; } = string.Empty;
+    public string AutoReportEnvironmentMetricsChannel { get; set; } = string.Empty;
+    public string AutoReportAirQualityMetricsChannel { get; set; } = string.Empty;
+    public string AutoReportNodeStatusChannel { get; set; } = string.Empty;
+
     // -- Automation scripts -------------------------------------------------
 
     /// <summary>Master switch for the script engine. Off by default: turning it

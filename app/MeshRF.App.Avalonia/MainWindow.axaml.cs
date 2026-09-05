@@ -1009,6 +1009,10 @@ public partial class MainWindow : Window
 
     private void OnOpenNodeIdentity(object? sender, RoutedEventArgs e)
     {
+        // The channel pickers offer whatever channels exist right now, and one
+        // renamed or deleted since the last save is put back on the primary.
+        _viewModel.RefreshAutoReportChannelOptions();
+
         if (_identityWindow is not null) { _identityWindow.Activate(); return; }
         _identityWindow = new NodeIdentityWindow { DataContext = _viewModel };
         _identityWindow.Closed += (_, _) => _identityWindow = null;

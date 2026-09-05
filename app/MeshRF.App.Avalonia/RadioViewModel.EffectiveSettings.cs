@@ -158,6 +158,36 @@ public partial class RadioViewModel
     public string AirQualityMetricsEnabledNote => Note(AirQualityMetricsEnabled, OnOff);
     public string AirQualityMetricsSecondsNote => Note(AirQualityMetricsSeconds, SettingOverlay.Duration);
     public string NodeStatusEnabledNote => Note(NodeStatusEnabled, OnOff);
+
+    /// <summary>What the channel chosen for the position report will do
+    /// with it, when that is not what choosing a channel implies: sharing
+    /// turned off there means nothing goes out at all, and a channel anyone
+    /// can decrypt caps how precise a position may be however the channel is
+    /// configured. Silent when the position goes out as asked.</summary>
+    public string PositionChannelNote
+    {
+        get
+        {
+            var channel = _rxHost.FindChannelByName(AutoReportPositionChannel) ?? PrimaryChannel();
+            if (channel is null) return string.Empty;
+
+            byte effective = channel.EffectivePositionPrecision;
+            if (effective == 0)
+                return $"actually nothing sent (location sharing is off on {channel.Name})";
+
+            return effective < channel.PositionPrecision
+                ? $"actually {PrecisionLabel(effective)} ({channel.Name} uses a public key)"
+                : string.Empty;
+        }
+    }
+
+    /// <summary>How a precision reads in the picker the channel dialog
+    /// offers, so the note names it the way the setting does. Bits with no
+    /// row of their own are spelled out rather than guessed at.</summary>
+    private string PrecisionLabel(byte bits) =>
+        DisplayUnits.BuildPositionPrecisionOptions(CurrentUnitSystem)
+                    .FirstOrDefault(o => o.Bits == bits)?.Label.ToLowerInvariant()
+            ?? $"{bits}-bit precision";
     public string UnmessagableNote => Note(Unmessagable, OnOff);
     /// <summary>Spelled as the picker beside it does — showing
     /// CORE_PORTNUMS_ONLY next to a box reading "All" reads as a different
@@ -190,6 +220,7 @@ public partial class RadioViewModel
     public bool HasAirQualityMetricsEnabledNote => AirQualityMetricsEnabledNote.Length > 0;
     public bool HasAirQualityMetricsSecondsNote => AirQualityMetricsSecondsNote.Length > 0;
     public bool HasNodeStatusEnabledNote => NodeStatusEnabledNote.Length > 0;
+    public bool HasPositionChannelNote => PositionChannelNote.Length > 0;
     public bool HasUnmessagableNote => UnmessagableNote.Length > 0;
     public bool HasRebroadcastModeNote => RebroadcastModeNote.Length > 0;
 
@@ -212,6 +243,7 @@ public partial class RadioViewModel
         nameof(EnvironmentMetricsEnabledNote), nameof(EnvironmentMetricsSecondsNote),
         nameof(AirQualityMetricsEnabledNote), nameof(AirQualityMetricsSecondsNote),
         nameof(NodeStatusEnabledNote), nameof(UnmessagableNote), nameof(RebroadcastModeNote),
+        nameof(PositionChannelNote), nameof(HasPositionChannelNote),
         nameof(HasNodeInfoEnabledNote),
         nameof(HasNodeInfoSecondsNote),
         nameof(HasPositionEnabledNote),
