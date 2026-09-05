@@ -41,16 +41,7 @@ public sealed class FeedSyncStore
 
     public FeedSyncStore(string? path = null) => _path = path ?? DefaultPath;
 
-    public static string DefaultPath
-    {
-        get
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeshRF");
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "feed-sync.json");
-        }
-    }
+    public static string DefaultPath => AppData.PathFor("feed-sync.json");
 
     /// <summary>Reads the file. A missing or unreadable one leaves the memory
     /// empty, which costs one round of re-sends rather than failing to start.</summary>

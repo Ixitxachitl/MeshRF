@@ -58,10 +58,7 @@ public sealed class ScriptLibrary
         Directory.CreateDirectory(_directory);
     }
 
-    public static string DefaultDirectory =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "MeshRF", "scripts");
+    public static string DefaultDirectory => AppData.SubdirectoryFor("scripts");
 
     public string DirectoryPath => _directory;
 

@@ -507,22 +507,21 @@ public sealed class AppSettings
         WriteIndented = true,
     };
 
-    /// <summary>Redirects the settings file, so the persistence can be
-    /// exercised against a temp directory instead of the real profile. The app
-    /// never sets it; left null, everything lands where it always did.</summary>
+    /// <summary>Redirects the settings file alone, so the persistence can be
+    /// exercised against a temp file instead of the real profile. To move the
+    /// whole set of stores together, set <see cref="AppData.DirectoryOverride"/>
+    /// instead. The app never sets either; left null, everything lands where it
+    /// always did.</summary>
     public static string? PathOverride { get; set; }
 
     public static string SettingsPath
     {
         get
         {
-            string dir = PathOverride is { Length: > 0 } custom
-                ? Path.GetDirectoryName(custom)!
-                : Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "MeshRF");
-            Directory.CreateDirectory(dir);
-            return PathOverride is { Length: > 0 } path ? path : Path.Combine(dir, "settings.json");
+            if (PathOverride is not { Length: > 0 } custom) return AppData.PathFor("settings.json");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(custom)!);
+            return custom;
         }
     }
 

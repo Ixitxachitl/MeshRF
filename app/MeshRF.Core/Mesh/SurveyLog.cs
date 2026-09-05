@@ -47,9 +47,7 @@ public sealed class SurveyLog
     private readonly object _gate = new();
 
     public SurveyLog(string? path = null) =>
-        _path = path ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "MeshRF", "survey.csv");
+        _path = path ?? AppData.PathFor("survey.csv");
 
     /// <summary>Where the log lives. Named FilePath rather than Path: a
     /// member called Path on a type that also uses System.IO.Path shadows

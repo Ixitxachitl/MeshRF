@@ -21,17 +21,7 @@ public sealed class ChannelStore : IDisposable
     private readonly SqliteConnection _conn;
     private bool _disposed;
 
-    public static string DefaultPath
-    {
-        get
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "MeshRF");
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "channels.db");
-        }
-    }
+    public static string DefaultPath => AppData.PathFor("channels.db");
 
     public ChannelStore() : this(DefaultPath) { }
 

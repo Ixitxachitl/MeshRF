@@ -63,17 +63,7 @@ public sealed class NodeStore : IDisposable
     private readonly SqliteConnection _conn;
     private bool _disposed;
 
-    public static string DefaultPath
-    {
-        get
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "MeshRF");
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "nodes.db");
-        }
-    }
+    public static string DefaultPath => AppData.PathFor("nodes.db");
 
     public NodeStore() : this(DefaultPath) { }
 
