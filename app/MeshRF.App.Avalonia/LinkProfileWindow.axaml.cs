@@ -45,12 +45,17 @@ public partial class LinkProfileWindow : Window
 
     /// <summary>Opens the profile from this station to a node. The caller has
     /// already established that both ends have a position.</summary>
-    /// <param name="fromName">What to call the near end in the header. The
-    /// origin is not always this station, and a header that says it is when the
-    /// profile was drawn from a chosen point is simply wrong.</param>
+    /// <param name="fromName">What to call the near end, on the chart and in
+    /// the header. The origin is not always this station — it is a dropped
+    /// point, or the node that point stands on — and a profile that says it is
+    /// is simply wrong.</param>
+    /// <param name="fromIsThisStation">Whether that near end is this station,
+    /// which is what decides whether the antenna and gain boxes may call it
+    /// "mine".</param>
     public static async Task ShowForAsync(
         Window owner, RadioViewModel vm, AppSettings settings, NodeRecord node,
-        double fromLat, double fromLon, string fromName = "This station")
+        double fromLat, double fromLon, string fromName = "This station",
+        bool fromIsThisStation = true)
     {
         if (node.Latitude is not double toLat || node.Longitude is not double toLon) return;
 
@@ -63,6 +68,7 @@ public partial class LinkProfileWindow : Window
             _to = new GeoPoint(toLat, toLon),
             _units = vm.CurrentUnitSystem,
             _fromName = fromName,
+            _fromIsThisStation = fromIsThisStation,
         };
         window.Prepare();
         await window.ShowDialog(owner);
@@ -79,7 +85,8 @@ public partial class LinkProfileWindow : Window
     /// </summary>
     public static async Task ShowBetweenAsync(
         Window owner, RadioViewModel vm, AppSettings settings,
-        GeoPoint from, GeoPoint to, string fromName, string toName)
+        GeoPoint from, GeoPoint to, string fromName, string toName,
+        bool fromIsThisStation = true)
     {
         var window = new LinkProfileWindow
         {
@@ -90,12 +97,14 @@ public partial class LinkProfileWindow : Window
             _units = vm.CurrentUnitSystem,
             _fromName = fromName,
             _toName = toName,
+            _fromIsThisStation = fromIsThisStation,
         };
         window.Prepare();
         await window.ShowDialog(owner);
     }
 
     private string _fromName = "This station";
+    private bool _fromIsThisStation = true;
     private string? _toName;
 
     private string PeerName =>
@@ -111,9 +120,22 @@ public partial class LinkProfileWindow : Window
         Title = $"Link Profile — {PeerName}";
         HeaderText.Text = $"{_fromName}  →  {PeerName}";
 
+        // The near end is only "mine" when it is this station. Drawn from a
+        // dropped point, or from the node that point stands on, these boxes
+        // describe a mast somewhere else, and the header above says whose.
+        // Named for the end rather than after it, since a long name would take
+        // the panel's width away from the box it labels.
+        string near = _fromIsThisStation ? "My" : "Start";
         string heightUnit = DisplayUnits.AltitudeUnitShort(_units);
-        MyHeightLabel.Text = $"My antenna ({heightUnit})";
+        MyHeightLabel.Text = $"{near} antenna ({heightUnit})";
+        MyGainLabel.Text = $"{near} gain (dBi)";
         PeerHeightLabel.Text = $"Peer antenna ({heightUnit})";
+        ToolTip.SetTip(MyHeightBox, _fromIsThisStation
+            ? "Height of your antenna above the ground it stands on, not above sea level"
+            : $"Height of the antenna at {_fromName} above the ground it stands on, not above sea level");
+        ToolTip.SetTip(MyGainBox, _fromIsThisStation
+            ? "Antenna gain net of feedline loss. A stock whip is about 2 dBi."
+            : $"Gain of the antenna at {_fromName}, net of feedline loss. A stock whip is about 2 dBi.");
         MyHeightBox.Text = FormatHeight(_settings.LinkProfileMyAntennaM);
         PeerHeightBox.Text = FormatHeight(_settings.LinkProfilePeerAntennaM);
         MyGainBox.Text = _settings.LinkProfileMyGainDbi.ToString("0.##", CultureInfo.InvariantCulture);
@@ -217,7 +239,7 @@ public partial class LinkProfileWindow : Window
             _settings.LinkProfilePeerAntennaM,
             frequency);
 
-        Chart.Show(profile, _units, "This station", PeerName);
+        Chart.Show(profile, _units, _fromName, PeerName);
 
         DistanceText.Text = DisplayUnits.FormatShortDistance(profile.DistanceM, _units);
 

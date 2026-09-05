@@ -103,16 +103,17 @@
                            FontWeight="SemiBold" Margin="0,0,0,6" />
 
                 <TextBlock Grid.Row="1" Grid.Column="0" Classes="field" x:Name="MyHeightLabel" Text="My antenna (m)" />
-                <TextBox   Grid.Row="1" Grid.Column="1" x:Name="MyHeightBox" Margin="0,0,0,4"
-                           ToolTip.Tip="Height of your antenna above the ground it stands on, not above sea level" />
+                <!-- Both near-end labels and their tips are written in
+                     Prepare: what the near end is called depends on where the
+                     profile was drawn from. -->
+                <TextBox   Grid.Row="1" Grid.Column="1" x:Name="MyHeightBox" Margin="0,0,0,4" />
 
                 <TextBlock Grid.Row="2" Grid.Column="0" Classes="field" x:Name="PeerHeightLabel" Text="Peer antenna (m)" />
                 <TextBox   Grid.Row="2" Grid.Column="1" x:Name="PeerHeightBox" Margin="0,0,0,4"
                            ToolTip.Tip="Height of the far antenna above its own ground" />
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Classes="field" Text="My gain (dBi)" />
-                <TextBox   Grid.Row="3" Grid.Column="1" x:Name="MyGainBox" Margin="0,0,0,4"
-                           ToolTip.Tip="Antenna gain net of feedline loss. A stock whip is about 2 dBi." />
+                <TextBlock Grid.Row="3" Grid.Column="0" Classes="field" x:Name="MyGainLabel" Text="My gain (dBi)" />
+                <TextBox   Grid.Row="3" Grid.Column="1" x:Name="MyGainBox" Margin="0,0,0,4" />
 
                 <TextBlock Grid.Row="4" Grid.Column="0" Classes="field" Text="Peer gain (dBi)" />
                 <TextBox   Grid.Row="4" Grid.Column="1" x:Name="PeerGainBox" Margin="0,0,0,4" />

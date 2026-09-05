@@ -141,10 +141,10 @@ public partial class MapPanel : UserControl
 
         // Kept, not spent: a candidate site is usually profiled to several
         // nodes in turn.
-        if (!Origin(out var from, out string fromName)) return;
+        if (!Origin(out var from, out string fromName, out bool fromIsThisStation)) return;
 
         await LinkProfileWindow.ShowForAsync(
-            owner, _viewModel, _settings, node, from.Lat, from.Lon, fromName);
+            owner, _viewModel, _settings, node, from.Lat, from.Lon, fromName, fromIsThisStation);
     }
 
     /// <summary>"Path loss…" on the map chrome: fits a model to every direct
@@ -172,7 +172,7 @@ public partial class MapPanel : UserControl
     {
         if (_viewModel is null || _settings is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
-        if (!Origin(out var from, out _, "sweeping the horizon")) return;
+        if (!Origin(out var from, out _, out _, "sweeping the horizon")) return;
 
         await HorizonWindow.ShowForAsync(owner, _viewModel, _settings, from.Lat, from.Lon);
     }
@@ -391,33 +391,36 @@ public partial class MapPanel : UserControl
         if (_viewModel is null || _settings is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        if (!Origin(out var from, out string fromName)) return;
+        if (!Origin(out var from, out string fromName, out bool fromIsThisStation)) return;
 
         await LinkProfileWindow.ShowBetweenAsync(
-            owner, _viewModel, _settings, from, new GeoPoint(lat, lon), fromName, "Map point");
+            owner, _viewModel, _settings, from, new GeoPoint(lat, lon),
+            fromName, "Map point", fromIsThisStation);
     }
 
     /// <summary>Where the RF tools are working from, and what to call it. The
-    /// chosen point wins over this station when there is one. <paramref
+    /// chosen point wins over this station when there is one, and is named
+    /// after the node it stands on when it was set from one. <paramref
     /// name="action"/> finishes the sentence the caller shows when there is
     /// neither, so the prompt names the tool that asked.</summary>
-    private bool Origin(out GeoPoint from, out string name,
+    private bool Origin(out GeoPoint from, out string name, out bool isThisStation,
                         string action = "drawing a link profile")
     {
         if (Canvas.ChosenPoint is { } chosen)
         {
-            (from, name) = (chosen, "Chosen point");
+            (from, name, isThisStation) = (chosen, Canvas.ChosenPointName, false);
             return true;
         }
 
         if (_viewModel is not null && _viewModel.TryGetHomeLocation(out double lat, out double lon))
         {
-            (from, name) = (new GeoPoint(lat, lon), "This station");
+            (from, name, isThisStation) = (new GeoPoint(lat, lon), "This station", true);
             return true;
         }
 
         from = default;
         name = string.Empty;
+        isThisStation = false;
         if (_viewModel is not null)
             _viewModel.StatusText =
                 $"Set your own location, or choose a start point, before {action}.";

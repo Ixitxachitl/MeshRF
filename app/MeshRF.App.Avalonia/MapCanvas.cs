@@ -1822,6 +1822,34 @@ public sealed class MapCanvas : Control
     /// </summary>
     public GeoPoint? ChosenPoint { get; private set; }
 
+    /// <summary>
+    /// What to call the chosen point. "Link profile from this node…",
+    /// "Coverage from this node" and "Horizon from this node" all leave it
+    /// standing exactly on a marker, and a tool that then calls that end
+    /// "Chosen point" hides the one thing the user picked.
+    ///
+    /// Resolved from where the point is rather than remembered from how it was
+    /// set, so dragging it off a marker stops it borrowing that node's name.
+    /// Every node is searched, not only the ones drawn: filtering a node out of
+    /// the grid does not move the point off it.
+    /// </summary>
+    public string ChosenPointName
+    {
+        get
+        {
+            if (ChosenPoint is not { } chosen || _vm is null) return "Chosen point";
+
+            foreach (var node in _vm.Nodes)
+            {
+                if (node.Latitude is not { } lat || node.Longitude is not { } lon) continue;
+                if (Geodesy.DistanceM(chosen, new GeoPoint(lat, lon)) < 1)
+                    return DisplayName(node);
+            }
+
+            return "Chosen point";
+        }
+    }
+
     public void SetChosenPoint(double lat, double lon)
     {
         var point = new GeoPoint(lat, lon);
