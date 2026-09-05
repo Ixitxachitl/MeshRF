@@ -254,10 +254,16 @@ public sealed class MapCanvas : Control
     /// framework.</summary>
     /// <param name="Marker">The marker drawn here, so a right-click can act on
     /// it. Null for a cluster badge, which stands for several at once.</param>
+    /// <param name="Place">Where a target stands for a point the map already
+    /// holds, rather than for whatever pixel was clicked. A menu opened on one
+    /// acts on that point exactly — which is the only way to name the point
+    /// that is already chosen, since no two clicks by hand land on the same
+    /// coordinates.</param>
     private readonly record struct HitTarget(
         double X, double Y, double Radius, string Tooltip,
         List<(RadioViewModel.MapMarker mk, double px, double py)>? Cluster,
-        RadioViewModel.MapMarker? Marker = null);
+        RadioViewModel.MapMarker? Marker = null,
+        GeoPoint? Place = null);
 
     private readonly List<HitTarget> _hitTargets = new();
 
@@ -1484,6 +1490,13 @@ public sealed class MapCanvas : Control
         context.DrawLine(ChosenPointPen, new Point(px, py - 12), new Point(px, py + 12));
 
         DrawLabel(context, label, px + 14, py - 7);
+
+        // Hoverable like a node marker, and carrying the point itself so a
+        // menu opened on the crosshair works from where the point is rather
+        // than from where the pointer was. Registered before the markers, so a
+        // node standing on the point keeps its own menu.
+        _hitTargets.Add(new HitTarget(px, py, 12, "Chosen point — the map tools work from here",
+                                      null, null, at));
     }
 
     private void DrawPendingLinkProfile(DrawingContext context, double originX, double originY)
@@ -1591,8 +1604,11 @@ public sealed class MapCanvas : Control
             // Markers aren't visuals, so there is nothing for the framework to
             // attach a ContextMenu to — resolve the marker ourselves and build
             // the menu for whatever is under the pointer.
-            var (menuLat, menuLon) = ScreenToGeo(p);
-            var menu = HitTest(p)?.Marker is { } hitMarker
+            var underPointer = HitTest(p);
+            var (menuLat, menuLon) = underPointer?.Place is { } place
+                ? (place.Lat, place.Lon)
+                : ScreenToGeo(p);
+            var menu = underPointer?.Marker is { } hitMarker
                 ? BuildMarkerMenu(hitMarker)
                 : BuildGroundMenu(menuLat, menuLon);
             if (menu is null) return;

@@ -43,7 +43,7 @@ public class PanelPopOutTests
     public void PoppingAPanelOutCollapsesThePaneItLeaves(
         string key, string gridName, int index, string splitterName)
     {
-        WithTempDataDirectory(() => _avalonia.Run(() =>
+        TempDataDirectory.With(() => _avalonia.Run(() =>
         {
             using var app = new MainWindowUnderTest();
 
@@ -87,7 +87,7 @@ public class PanelPopOutTests
     [Fact]
     public void ChatInItsOwnWindowStillTracksTheViewModel()
     {
-        WithTempDataDirectory(() => _avalonia.Run(() =>
+        TempDataDirectory.With(() => _avalonia.Run(() =>
         {
             using var app = new MainWindowUnderTest();
 
@@ -127,7 +127,7 @@ public class PanelPopOutTests
     [InlineData("Toggle favorite")]
     public void NodeMenuInItsOwnWindowStillHasItsCommands(string header)
     {
-        WithTempDataDirectory(() => _avalonia.Run(() =>
+        TempDataDirectory.With(() => _avalonia.Run(() =>
         {
             using var app = new MainWindowUnderTest();
 
@@ -151,7 +151,7 @@ public class PanelPopOutTests
     [Fact]
     public void WithEveryPanelOutTheMainWindowIsJustItsToolbars()
     {
-        WithTempDataDirectory(() => _avalonia.Run(() =>
+        TempDataDirectory.With(() => _avalonia.Run(() =>
         {
             using var app = new MainWindowUnderTest();
 
@@ -182,7 +182,7 @@ public class PanelPopOutTests
     [Fact]
     public void PoppingOutAndBackLeavesTheSplittersWhereTheyWere()
     {
-        WithTempDataDirectory(() => _avalonia.Run(() =>
+        TempDataDirectory.With(() => _avalonia.Run(() =>
         {
             double mapShare, listsShare;
 
@@ -227,7 +227,7 @@ public class PanelPopOutTests
     [Fact]
     public void APoppedOutPanelComesBackOutOnTheNextRun()
     {
-        WithTempDataDirectory(() => _avalonia.Run(() =>
+        TempDataDirectory.With(() => _avalonia.Run(() =>
         {
             using (var first = new MainWindowUnderTest())
             {
@@ -333,28 +333,4 @@ public class PanelPopOutTests
 
     private static void Click(Button button) =>
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-
-    /// <summary>Runs the body against a data directory of its own. The window
-    /// writes its layout on close and on a timer, and it opens the node,
-    /// message and channel databases on construction — so without this, these
-    /// tests would rewrite the layout of the app the developer is running and
-    /// leave a freshly minted identity in their node database on every run.
-    /// </summary>
-    private static void WithTempDataDirectory(Action body)
-    {
-        string dir = Path.Combine(Path.GetTempPath(), "MeshRF-panel-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-
-        string? previous = AppData.DirectoryOverride;
-        AppData.DirectoryOverride = dir;
-        try
-        {
-            body();
-        }
-        finally
-        {
-            AppData.DirectoryOverride = previous;
-            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
-        }
-    }
 }
