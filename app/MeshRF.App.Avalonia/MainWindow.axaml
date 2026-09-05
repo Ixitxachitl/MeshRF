@@ -715,12 +715,8 @@
                                 <MenuItem Header="Exchange node info"
                                           Command="{Binding #RootWindow.DataContext.ExchangeNodeInfoCommand}"
                                           CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
-                                <MenuItem Header="Request location"
-                                          Command="{Binding #RootWindow.DataContext.RequestLocationCommand}"
-                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
-                                <MenuItem Header="Exchange location"
-                                          Command="{Binding #RootWindow.DataContext.ExchangeLocationCommand}"
-                                          CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />
+                                <MenuItem Header="Request location…" Click="OnRequestNodeLocation" />
+                                <MenuItem Header="Exchange location…" Click="OnExchangeNodeLocation" />
                                 <MenuItem Header="Request telemetry"
                                           Command="{Binding #RootWindow.DataContext.RequestTelemetryCommand}"
                                           CommandParameter="{Binding #NodesGridProxy.SelectedItem}" />

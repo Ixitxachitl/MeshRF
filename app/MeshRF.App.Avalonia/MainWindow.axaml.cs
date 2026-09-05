@@ -680,6 +680,31 @@ public partial class MainWindow : Window
         await SendPromptedAsync("Send node info on which channel?",
             (ch, to) => _viewModel.SendNodeInfoOnChannelAsync(ch, to));
 
+    /// <summary>"Request location…" on a node row. The channel is asked for
+    /// rather than assumed: the request has to be sealed with a key the node
+    /// reads, and only the operator knows which channel that is.</summary>
+    private async void OnRequestNodeLocation(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        if (!_viewModel.CanRequestLocation(node)) return;
+
+        var channel = await ChannelPickerWindow.PickChannelAsync(
+            this, _viewModel, "Request location on which channel?");
+        if (channel is null) return;
+        await _viewModel.RequestLocationOnChannelAsync(node, channel);
+    }
+
+    private async void OnExchangeNodeLocation(object? sender, RoutedEventArgs e)
+    {
+        if (NodesGridProxy.SelectedItem is not NodeRecord node) return;
+        if (!_viewModel.CanRequestLocation(node)) return;
+
+        var channel = await ChannelPickerWindow.PickChannelAsync(
+            this, _viewModel, "Exchange location on which channel?");
+        if (channel is null) return;
+        await _viewModel.ExchangeLocationOnChannelAsync(node, channel);
+    }
+
     private async void OnSendPositionPrompted(object? sender, RoutedEventArgs e) =>
         await SendPromptedAsync("Send position on which channel?", _viewModel.SendPositionOnChannelAsync);
 

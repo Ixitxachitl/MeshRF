@@ -1781,6 +1781,15 @@ public sealed class MapCanvas : Control
     /// </summary>
     public event Action<NodeRecord>? RequestLinkProfile;
 
+    /// <summary>"Request location" or "Exchange location" was chosen on a node
+    /// marker. Raised rather than run here: the channel is asked for first, and
+    /// the picker needs a parent window, which the host owns.</summary>
+    public event Action<NodeRecord>? RequestNodeLocation;
+
+    /// <summary>As <see cref="RequestNodeLocation"/>, and sends our own
+    /// position back on the channel chosen.</summary>
+    public event Action<NodeRecord>? ExchangeNodeLocation;
+
     /// <summary>A place on bare map was chosen as the viewpoint for a sweep.
     /// Every other tool here is anchored to this station; these two answer the
     /// other question, which is where a node ought to go.</summary>
@@ -2032,6 +2041,15 @@ public sealed class MapCanvas : Control
             ToolTip.SetTip(horizonHere, NoPositionTip);
         }
 
+        // Both ask which channel before anything goes out, so they open a
+        // dialog rather than running off the menu — hence the ellipsis, and
+        // hence being raised to the host rather than bound to a command.
+        var requestLocation = new MenuItem { Header = "Request location…" };
+        requestLocation.Click += (_, _) => RequestNodeLocation?.Invoke(node);
+
+        var exchangeLocation = new MenuItem { Header = "Exchange location…" };
+        exchangeLocation.Click += (_, _) => ExchangeNodeLocation?.Invoke(node);
+
         return Menu(
             Item("Message", _vm.MessageNodeCommand, node),
             new Separator(),
@@ -2042,8 +2060,8 @@ public sealed class MapCanvas : Control
             new Separator(),
             Item("Request node info", _vm.RequestNodeInfoCommand, node),
             Item("Exchange node info", _vm.ExchangeNodeInfoCommand, node),
-            Item("Request location", _vm.RequestLocationCommand, node),
-            Item("Exchange location", _vm.ExchangeLocationCommand, node),
+            requestLocation,
+            exchangeLocation,
             Item("Request telemetry", _vm.RequestTelemetryCommand, node),
             Item("Traceroute", _vm.TracerouteCommand, node),
             Item("Request new keys", _vm.RequestNewKeysCommand, node),

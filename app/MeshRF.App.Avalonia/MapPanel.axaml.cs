@@ -2,6 +2,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using MeshRF.Channels;
 using MeshRF.Map;
 using MeshRF.Mesh;
 using MeshRF.Nodes;
@@ -44,6 +45,8 @@ public partial class MapPanel : UserControl
         Canvas.RequestDeleteWaypoint += OnRequestDeleteWaypoint;
         Canvas.RequestDeleteNode += OnRequestDeleteNode;
         Canvas.RequestLinkProfile += OnRequestLinkProfile;
+        Canvas.RequestNodeLocation += OnRequestNodeLocation;
+        Canvas.ExchangeNodeLocation += OnExchangeNodeLocation;
         Canvas.RequestCoverageFrom += OnRequestCoverageFrom;
         Canvas.RequestHorizonFrom += OnRequestHorizonFrom;
         Canvas.RequestLinkProfileTo += OnRequestLinkProfileTo;
@@ -95,6 +98,31 @@ public partial class MapPanel : UserControl
     /// <summary>"Link profile…" on a node marker's context menu: the terrain
     /// cross-section from this station to that node.</summary>
     private async void OnRequestLinkProfile(NodeRecord node) => await ShowLinkProfileAsync(node);
+
+    /// <summary>"Request location…" on a node marker.</summary>
+    private async void OnRequestNodeLocation(NodeRecord node) =>
+        await AskThenAsync(node, "Request location on which channel?",
+                           (n, ch) => _viewModel!.RequestLocationOnChannelAsync(n, ch));
+
+    /// <summary>"Exchange location…" on a node marker.</summary>
+    private async void OnExchangeNodeLocation(NodeRecord node) =>
+        await AskThenAsync(node, "Exchange location on which channel?",
+                           (n, ch) => _viewModel!.ExchangeLocationOnChannelAsync(n, ch));
+
+    /// <summary>Asks which channel the request goes out on, then sends it.
+    /// Parented to the map's own window, which is the popped-out one when the
+    /// map is living in it.</summary>
+    private async Task AskThenAsync(
+        NodeRecord node, string prompt, Func<NodeRecord, ChannelConfig, Task> send)
+    {
+        if (_viewModel is null) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (!_viewModel.CanRequestLocation(node)) return;
+
+        var channel = await ChannelPickerWindow.PickChannelAsync(owner, _viewModel, prompt);
+        if (channel is null) return;
+        await send(node, channel);
+    }
 
     /// <summary>The same profile, reachable from the node grid as well as from
     /// the marker. Says why rather than doing nothing when an end is missing,

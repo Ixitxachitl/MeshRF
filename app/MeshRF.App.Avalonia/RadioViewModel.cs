@@ -2851,30 +2851,50 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "nodeinfo", $"Exchanged NodeInfo with {name}…");
     }
 
-    [RelayCommand]
-    private async Task RequestLocation(NodeRecord? node)
+    /// <summary>Whether a position request to this node could go out now.
+    /// Checked before the channel picker opens, so nobody answers a question
+    /// about a request that was never going to be sent; the cooldown says so
+    /// on the status line as it does anywhere else.</summary>
+    public bool CanRequestLocation(NodeRecord? node)
     {
-        if (node is null || IsSelf(node) || !CanTransmit) return;
+        if (node is null || IsSelf(node) || !CanTransmit) return false;
         var remaining = PositionRequestCooldown - (DateTime.UtcNow - _lastPositionRequestUtc);
-        if (remaining > TimeSpan.Zero) { StatusText = $"Position request on cooldown — wait {Math.Ceiling(remaining.TotalSeconds):F0}s."; return; }
-        var channel = PrimaryChannel();
-        if (channel is null) return;
+        if (remaining > TimeSpan.Zero)
+        {
+            StatusText = $"Position request on cooldown — wait {Math.Ceiling(remaining.TotalSeconds):F0}s.";
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Asks a node for its position on a named channel.</summary>
+    /// <remarks>
+    /// The channel is the caller's to choose rather than this station's
+    /// primary: a node heard on one channel cannot read a request sealed with
+    /// another's key, and the request would go out, be discarded, and leave a
+    /// note saying it had been asked.
+    /// </remarks>
+    public async Task RequestLocationOnChannelAsync(NodeRecord? node, ChannelConfig? channel)
+    {
+        if (!CanRequestLocation(node) || node is null || channel is null) return;
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodePositionRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
             hopLimit: (byte)HopLimit);
         if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
         _lastPositionRequestUtc = DateTime.UtcNow;
         var name = _rxHost.NodeDisplayName(node.NodeNum);
-        _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "position", $"Position requested from {name}…");
+        _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "position",
+            $"Position requested from {name} on {channel.Name}…");
     }
 
-    [RelayCommand]
-    private async Task ExchangeLocation(NodeRecord? node)
+    /// <summary>The same request, with our own position sent back on the same
+    /// channel — which is the one the answer will come in on, so it is the one
+    /// to answer with.</summary>
+    public async Task ExchangeLocationOnChannelAsync(NodeRecord? node, ChannelConfig? channel)
     {
-        if (node is null || IsSelf(node) || !CanTransmit) return;
-        await RequestLocation(node);
-        var channel = PrimaryChannel();
-        if (channel is null || channel.EffectivePositionPrecision == 0) return;
+        if (node is null || channel is null) return;
+        await RequestLocationOnChannelAsync(node, channel);
+        if (channel.EffectivePositionPrecision == 0) return;
         if (_settings.HomeLatitude is not double lat || _settings.HomeLongitude is not double lon) return;
         try
         {

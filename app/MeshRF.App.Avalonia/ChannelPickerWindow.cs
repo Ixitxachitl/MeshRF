@@ -80,13 +80,28 @@ public sealed class ChannelPickerWindow : Window
 
     /// <summary>Shows the picker. Returns null when cancelled or when there is
     /// nowhere to send.</summary>
-    public static async Task<(ChannelConfig? Channel, uint? DmNodeNum)?> PickAsync(
-        Window owner, RadioViewModel vm, string prompt = "Send waypoint on which channel?")
+    public static Task<(ChannelConfig? Channel, uint? DmNodeNum)?> PickAsync(
+        Window owner, RadioViewModel vm, string prompt = "Send waypoint on which channel?") =>
+        PickAsync(owner, vm, prompt, includeOpenDms: true);
+
+    /// <summary>Shows the picker offering channels alone, and returns the one
+    /// chosen or null when cancelled.</summary>
+    /// <remarks>For a payload whose destination is already settled and where
+    /// only the channel to reach it on is in question: an open DM names a node,
+    /// which is not an answer to that.</remarks>
+    public static async Task<ChannelConfig?> PickChannelAsync(
+        Window owner, RadioViewModel vm, string prompt) =>
+        (await PickAsync(owner, vm, prompt, includeOpenDms: false))?.Channel;
+
+    private static async Task<(ChannelConfig? Channel, uint? DmNodeNum)?> PickAsync(
+        Window owner, RadioViewModel vm, string prompt, bool includeOpenDms)
     {
         // A disabled channel has no key and no hash on the air, so it isn't a
         // place anything can be sent.
         var channels = vm.Tabs.OfType<ChannelTabViewModel>().Where(c => !c.Config.IsDisabled).ToList();
-        var openDms = vm.Tabs.OfType<ConversationTabViewModel>().ToList();
+        var openDms = includeOpenDms
+            ? vm.Tabs.OfType<ConversationTabViewModel>().ToList()
+            : [];
         if (channels.Count == 0 && openDms.Count == 0)
         {
             vm.StatusText = "No channel to send on.";
