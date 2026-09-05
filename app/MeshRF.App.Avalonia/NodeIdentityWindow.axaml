@@ -151,7 +151,7 @@
                 <TextBox Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinMoveInput}"
                          ToolTip.Tip="How far the receiver must have moved since the last fix taken. Distance accumulates, so a slow walk still gets there." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Min gap" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinSeconds}"
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding GpsSmartPositionMinSeconds}"
                          ToolTip.Tip="Shortest time between two fixes being taken, measured from the last one taken." />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
             </StackPanel>
@@ -201,7 +201,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding NodeInfoEnabledNote}"
                            IsVisible="{Binding HasNodeInfoEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeInfoSeconds}" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeInfoSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
                 <ComboBox x:Name="AutoNodeInfoChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
@@ -224,7 +224,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionEnabledNote}"
                            IsVisible="{Binding HasPositionEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSeconds}" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
                 <ComboBox x:Name="AutoPositionChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
@@ -269,7 +269,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PositionSmartMinMoveNote}"
                            IsVisible="{Binding HasPositionSmartMinMoveNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Min gap" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinSeconds}"
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSmartMinSeconds}"
                          ToolTip.Tip="Shortest time between sends, so a fast mover cannot flood the channel — firmware's broadcast_smart_minimum_interval_secs. Default 300 sec; 0 means unset and firmware reads it back as 300, so type 1 to send every fix." />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="4,0,0,0" VerticalAlignment="Center" FontSize="11"
@@ -302,7 +302,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding DeviceMetricsEnabledNote}"
                            IsVisible="{Binding HasDeviceMetricsEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
                 <ComboBox x:Name="AutoDeviceMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
@@ -325,7 +325,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding EnvironmentMetricsEnabledNote}"
                            IsVisible="{Binding HasEnvironmentMetricsEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
                 <ComboBox x:Name="AutoEnvironmentMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
@@ -348,7 +348,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AirQualityMetricsEnabledNote}"
                            IsVisible="{Binding HasAirQualityMetricsEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
                 <ComboBox x:Name="AutoAirQualityMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
@@ -371,7 +371,7 @@
                            TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding NodeStatusEnabledNote}"
                            IsVisible="{Binding HasNodeStatusEnabledNote}" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Interval" />
-                <TextBox Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
                 <ComboBox x:Name="AutoNodeStatusChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"

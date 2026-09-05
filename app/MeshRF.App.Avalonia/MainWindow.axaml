@@ -207,13 +207,13 @@
                           FontSize="11" Width="130" Height="26" Margin="0,0,8,2" />
                 <TextBlock Text="SF" FontSize="11" VerticalAlignment="Center" Margin="0,0,2,2"
                            ToolTip.Tip="Spreading factor — auto-filled from preset; edit to override" />
-                <TextBox Text="{Binding OverrideSf}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="28" Height="26" Margin="0,0,6,2" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Text="{Binding OverrideSf}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="28" Height="26" Margin="0,0,6,2" />
                 <TextBlock Text="BW" FontSize="11" VerticalAlignment="Center" Margin="0,0,2,2"
                            ToolTip.Tip="Bandwidth in kHz — auto-filled from preset; edit to override" />
-                <TextBox Text="{Binding OverrideBwKhz}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="52" Height="26" Margin="0,0,6,2" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Text="{Binding OverrideBwKhz}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="52" Height="26" Margin="0,0,6,2" />
                 <TextBlock Text="CR" FontSize="11" VerticalAlignment="Center" Margin="0,0,2,2"
                            ToolTip.Tip="Coding rate denominator (4/N) — auto-filled from preset; edit to override" />
-                <TextBox Text="{Binding OverrideCr}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="24" Height="26" Margin="0,0,8,2" />
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Text="{Binding OverrideCr}" IsEnabled="{Binding !IsRunning}" FontSize="11" Width="24" Height="26" Margin="0,0,8,2" />
                 <TextBlock Text="Slot" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <ComboBox ItemsSource="{Binding Slots}"
                           SelectedItem="{Binding SelectedSlot}"
@@ -234,7 +234,7 @@
                     </ComboBox.ItemTemplate>
                 </ComboBox>
                 <TextBlock Text="Freq (MHz)" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
-                <TextBox Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
+                <TextBox local:RejectInvalidBehavior.IsEnabled="True" Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
                          FontSize="11" Width="100" Height="26" Margin="0,0,8,2" />
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
                 <!-- Drawn, not typed: see ToggleButtonGeometry for why a ▶
