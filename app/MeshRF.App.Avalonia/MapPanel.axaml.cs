@@ -134,19 +134,18 @@ public partial class MapPanel : UserControl
         await PathLossWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
     }
 
-    /// <summary>"Horizon…" on the map chrome: what this antenna can see, which
-    /// is a question about the station rather than about any one link.</summary>
+    /// <summary>"Horizon…" on the map chrome: what an antenna standing at the
+    /// origin can see, which is a question about a place rather than about any
+    /// one link. A chosen point wins over this station, the way it does for
+    /// coverage and the link profile — dropping a point is how you ask about
+    /// somewhere you are considering putting a node.</summary>
     private async void OnOpenHorizon(object? sender, RoutedEventArgs e)
     {
         if (_viewModel is null || _settings is null) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
-        if (!_viewModel.TryGetHomeLocation(out double lat, out double lon))
-        {
-            _viewModel.StatusText = "Set your own location before sweeping the horizon.";
-            return;
-        }
+        if (!Origin(out var from, out _, "sweeping the horizon")) return;
 
-        await HorizonWindow.ShowForAsync(owner, _viewModel, _settings, lat, lon);
+        await HorizonWindow.ShowForAsync(owner, _viewModel, _settings, from.Lat, from.Lon);
     }
 
     /// <summary>Margins the coverage sweep offers. Named rather than typed:
@@ -355,8 +354,11 @@ public partial class MapPanel : UserControl
     }
 
     /// <summary>Where the RF tools are working from, and what to call it. The
-    /// chosen point wins over this station when there is one.</summary>
-    private bool Origin(out GeoPoint from, out string name)
+    /// chosen point wins over this station when there is one. <paramref
+    /// name="action"/> finishes the sentence the caller shows when there is
+    /// neither, so the prompt names the tool that asked.</summary>
+    private bool Origin(out GeoPoint from, out string name,
+                        string action = "drawing a link profile")
     {
         if (Canvas.ChosenPoint is { } chosen)
         {
@@ -374,7 +376,7 @@ public partial class MapPanel : UserControl
         name = string.Empty;
         if (_viewModel is not null)
             _viewModel.StatusText =
-                "Set your own location, or choose a start point, before drawing a link profile.";
+                $"Set your own location, or choose a start point, before {action}.";
         return false;
     }
 

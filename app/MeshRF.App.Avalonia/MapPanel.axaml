@@ -106,7 +106,7 @@
                         Height="24" FontSize="11" Padding="10,0"
                         VerticalContentAlignment="Center"
                         Click="OnOpenHorizon"
-                        ToolTip.Tip="The 360° skyline from this antenna, with every positioned node plotted against it" />
+                        ToolTip.Tip="The 360° skyline from this antenna, with every positioned node plotted against it. Drop a point on the map first to sweep from there instead." />
                 <ToggleButton x:Name="SurveyButton" Content="Record survey"
                               Height="24" FontSize="11" Padding="10,0"
                               VerticalContentAlignment="Center"
