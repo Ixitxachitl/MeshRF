@@ -1834,7 +1834,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (_suppressSampleRateUpdate || value is null) return;
         _core?.SetDeviceOption("rx_sample_rate_hz", checked((int)value.Hz));
-        StoreSavedRxSampleRateHz(SelectedDevice, value.Hz);
         SpectrumSpanHz = value.Hz;
         SaveSettings();
         // A wider capture reaches more presets, so the set changes with it.
@@ -1909,14 +1908,20 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _ => _settings.RxSampleRateHz,
     };
 
-    private void StoreSavedRxSampleRateHz(RadioDeviceKind kind, uint hz)
+    /// <summary>Records the rate for the device it was chosen on, and as the
+    /// device-independent fallback. Takes the target explicitly, like every
+    /// other helper reached from <see cref="ApplyOwnedSettings"/>: writing the
+    /// field instead would land in memory and never on disk, which is exactly
+    /// how the chosen rate went unsaved and every launch came up at 2.4 MS/s.
+    /// </summary>
+    private static void StoreSavedRxSampleRateHz(AppSettings settings, RadioDeviceKind kind, uint hz)
     {
         switch (kind)
         {
-            case RadioDeviceKind.HackRf: _settings.HackRfRxSampleRateHz = hz; break;
-            case RadioDeviceKind.RtlSdr: _settings.RtlSdrRxSampleRateHz = hz; break;
+            case RadioDeviceKind.HackRf: settings.HackRfRxSampleRateHz = hz; break;
+            case RadioDeviceKind.RtlSdr: settings.RtlSdrRxSampleRateHz = hz; break;
         }
-        _settings.RxSampleRateHz = hz;
+        settings.RxSampleRateHz = hz;
     }
 
     partial void OnSelectedPresetChanged(LoraPreset value)
@@ -2333,6 +2338,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var _settings = settings;
         _settings.RxDeviceKind = SelectedDevice.ToString();
         _settings.TxDeviceKind = SelectedTxDevice.ToString();
+        // Only the selected device's own rate, so the other kind keeps the
+        // one on disk. Nothing is written while no rate is selected, which is
+        // what "None" leaves behind.
+        if (SelectedRxSampleRate is { } rxRate)
+            StoreSavedRxSampleRateHz(_settings, SelectedDevice, rxRate.Hz);
         _settings.Preset = SelectedPreset.ToString();
         _settings.CenterFreqMHz = CenterFreqMHz;
         _settings.Region = SelectedRegion.ToString();
