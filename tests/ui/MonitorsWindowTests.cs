@@ -79,6 +79,7 @@ public class MonitorsWindowTests(HeadlessAvalonia ui) : RenderTest(ui)
         {
             vm.MultiPresetEnabled = true;
             var longFast = vm.MonitorPresets.Single(r => r.Name == nameof(LoraPreset.LongFast));
+            Assert.True(vm.CanEditMonitors, "a stopped receiver on an SDR can be told what to listen for");
             Assert.True(longFast.CanChoose);
             Assert.True(longFast.Included);
 
@@ -134,5 +135,8 @@ public class MonitorsWindowTests(HeadlessAvalonia ui) : RenderTest(ui)
         Assert.True(vm.HasMonitorsNote);
         Assert.Contains("one channel at a time", vm.MonitorsUnavailableNote);
         Assert.Single(vm.ChannelBands);
+        // The rows obey the same gate the rest of the window does: the set is
+        // fixed while the receiver is on it, so none of them is choosable.
+        Assert.All(vm.MonitorPresets, r => Assert.False(r.CanChoose));
     }));
 }

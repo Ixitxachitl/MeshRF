@@ -17,8 +17,14 @@ public sealed partial class MonitorPresetRow : ObservableObject
     public required string FreqText { get; init; }
     public required string StatusText { get; init; }
 
-    /// <summary>False for a preset the region cannot hold, or the primary's
-    /// own channel: neither is the user's to choose.</summary>
+    /// <summary>
+    /// False for a preset the region cannot hold, or the primary's own
+    /// channel — neither is the user's to choose — and for every preset while
+    /// the receiver is running, since the set it is demodulating is fixed
+    /// when it starts. Ticking one then would have shown a mesh nothing was
+    /// listening to, and unticking one would have hidden a mesh still
+    /// arriving.
+    /// </summary>
     public required bool CanChoose { get; init; }
 
     /// <summary>Raised when the tick changes, so the view model can rewrite
@@ -169,7 +175,7 @@ public partial class RadioViewModel
                 SlotText = SlotTextFor(l.Preset, l.FreqMHz),
                 FreqText = $"{l.FreqMHz:0.000} MHz",
                 StatusText = l.IsPrimary ? "primary" : "listening",
-                CanChoose = !l.IsPrimary,
+                CanChoose = !l.IsPrimary && CanEditMonitors,
                 Included = true,
                 Toggled = OnMonitorRowToggled,
             }));
@@ -194,7 +200,8 @@ public partial class RadioViewModel
                 SlotText = unsupported ? string.Empty : SlotTextFor(x.Preset, x.FreqMHz),
                 FreqText = unsupported ? string.Empty : $"{x.FreqMHz:0.000} MHz",
                 StatusText = status,
-                CanChoose = x.Reason is MonitorPlan.LeftOutReason.Excluded or MonitorPlan.LeftOutReason.OutOfRange,
+                CanChoose = CanEditMonitors
+                            && x.Reason is MonitorPlan.LeftOutReason.Excluded or MonitorPlan.LeftOutReason.OutOfRange,
                 Included = x.Reason != MonitorPlan.LeftOutReason.Excluded,
                 Toggled = OnMonitorRowToggled,
             }));
