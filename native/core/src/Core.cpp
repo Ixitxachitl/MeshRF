@@ -26,7 +26,10 @@ namespace mrf {
 
 namespace {
 constexpr std::size_t kSpectrumFftSize = 1024;
-constexpr std::size_t kMaxQueuedEvents = 256;
+constexpr std::size_t kMaxQueuedEvents = 1024;
+// Fill level past which the queue keeps only the lines the app acts on; see
+// Impl::is_diagnostic_line.
+constexpr std::size_t kShedDiagnosticsAbove = kMaxQueuedEvents / 2;
 constexpr std::uint32_t kDefaultDeviceRateHz = 2'400'000u;
 constexpr std::uint32_t kWaterfallTargetFps = 60u;
 constexpr std::uint32_t kWaterfallMaxFramesToPull = 64u;
@@ -184,12 +187,28 @@ struct Core::Impl {
     std::mutex events_mu;
     std::deque<std::string> events; // produced by modem callback
     std::uint64_t events_dropped{0};
+    std::uint64_t diagnostics_shed{0};
 
-    // Adds a line, discarding the oldest once the queue is full. The count of
-    // discards travels to the reader rather than being reported from here: a
-    // full queue has no slot to put the notice in, which is the one line that
+    // A line that only explains a decode — sync internals, raw symbol and
+    // byte dumps, SFD-search candidates — as opposed to the preamble, header
+    // and payload lines the app parses. A frame emits several of them, so
+    // under load they are what fills the queue, and they are what the reader
+    // can do without. The modem indents them deeper than the lines it
+    // reports on, which is what tells them apart here.
+    static bool is_diagnostic_line(const std::string& msg) {
+        return msg.rfind("    ", 0) == 0 || msg.rfind("  sfd?", 0) == 0;
+    }
+
+    // Adds a line. Past half full, diagnostics are shed so the payload lines
+    // behind them still fit; once full, the oldest line goes. Both counts
+    // travel to the reader rather than being reported from here: a full
+    // queue has no slot to put the notice in, which is the one line that
     // must not be lost. Caller holds events_mu.
     void queue_event_locked(std::string msg) {
+        if (events.size() >= kShedDiagnosticsAbove && is_diagnostic_line(msg)) {
+            ++diagnostics_shed;
+            return;
+        }
         if (events.size() >= kMaxQueuedEvents) {
             events.pop_front();
             ++events_dropped;
@@ -1335,9 +1354,22 @@ std::size_t Core::pull_event(std::span<char> out) noexcept {
     // notice, where the sample counter above reports a running total.
     if (impl_->events_dropped != 0) {
         int n = std::snprintf(out.data(), out.size(),
-                              "WARNING: dropped %llu log events (UI overrun)",
-                              static_cast<unsigned long long>(impl_->events_dropped));
+                              "WARNING: dropped %llu log events and shed %llu diagnostic lines (UI overrun)",
+                              static_cast<unsigned long long>(impl_->events_dropped),
+                              static_cast<unsigned long long>(impl_->diagnostics_shed));
         impl_->events_dropped = 0;
+        impl_->diagnostics_shed = 0;
+        if (n < 0) return 0;
+        return std::min(static_cast<std::size_t>(n), out.size() - 1);
+    }
+    // Shedding alone is not an overrun: nothing the app acts on was lost.
+    // Still worth one line, since the decode diagnostics for that stretch
+    // are missing from the log and a reader looking for them should know why.
+    if (impl_->diagnostics_shed != 0) {
+        int n = std::snprintf(out.data(), out.size(),
+                              "note: shed %llu diagnostic lines while the log queue was over half full",
+                              static_cast<unsigned long long>(impl_->diagnostics_shed));
+        impl_->diagnostics_shed = 0;
         if (n < 0) return 0;
         return std::min(static_cast<std::size_t>(n), out.size() - 1);
     }

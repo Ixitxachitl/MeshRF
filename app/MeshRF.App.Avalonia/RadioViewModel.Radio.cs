@@ -318,7 +318,11 @@ public partial class RadioViewModel
 
     // -- Demodulator event drain -------------------------------------------
 
-    private const int MaxRxEventsPerTick = 8;
+    /// <summary>Time budget for one drain, so a burst cannot hold the UI
+    /// thread. There is no count cap to go with it: the native queue is
+    /// bounded and drops its oldest line once full, so a drain that stops
+    /// short of empty while lines are still arriving is what loses payloads.
+    /// </summary>
     private const double MaxRxDrainMsPerTick = 4.0;
 
     private static readonly Regex PreamblePeakRegex = new(
@@ -360,14 +364,14 @@ public partial class RadioViewModel
         return m.Success && m.Groups["status"].Success && m.Groups["status"].Value == "OK";
     }
 
-    /// <summary>Drains queued demodulator events, capped per tick so a burst
-    /// can't lock up the UI thread.</summary>
+    /// <summary>Drains queued demodulator events until the queue is empty or
+    /// the time budget is spent.</summary>
     private void DrainDemodEvents()
     {
         if (_core is null) return;
 
         long start = Stopwatch.GetTimestamp();
-        for (int i = 0; i < MaxRxEventsPerTick; i++)
+        while (true)
         {
             double elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
             if (elapsedMs >= MaxRxDrainMsPerTick) break;
@@ -376,26 +380,31 @@ public partial class RadioViewModel
             if (ev is null) break;
             var nowUtc = DateTime.UtcNow;
 
-            if (!IsHighRateDemodEvent(ev)) _rxHost.Log(CompactDemodEventForUi(ev));
+            // The modem indents the lines of a frame under its preamble, so
+            // what kind of line this is has to be read past that indent. The
+            // log keeps the indent.
+            var kind = ev.TrimStart();
 
-            if (ev.StartsWith("preamble", StringComparison.Ordinal))
+            if (!IsHighRateDemodEvent(kind)) _rxHost.Log(ev);
+
+            if (kind.StartsWith("preamble", StringComparison.Ordinal))
             {
                 // A preamble marks the start of a frame: hold off transmitting,
                 // and keep its peak-above-noise as the SNR for the payload.
                 MarkRxBusy(nowUtc, RxBusyDefaultHold);
-                var pm = PreamblePeakRegex.Match(ev);
+                var pm = PreamblePeakRegex.Match(kind);
                 if (pm.Success && float.TryParse(pm.Groups["peak"].Value,
                         NumberStyles.Float, CultureInfo.InvariantCulture, out var peak))
                     _lastPreamblePeakDb = peak;
             }
-            else if (ev.StartsWith("payload", StringComparison.Ordinal))
+            else if (kind.StartsWith("payload", StringComparison.Ordinal))
             {
                 MarkRxFrameComplete(nowUtc);
             }
 
-            DecodePayloadIfPossible(ev);
+            DecodePayloadIfPossible(kind);
 
-            if (IsCrcOkPayload(ev)) PacketDecoded?.Invoke();
+            if (IsCrcOkPayload(kind)) PacketDecoded?.Invoke();
         }
     }
 }
