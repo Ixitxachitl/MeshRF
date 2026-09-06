@@ -35,7 +35,12 @@ public sealed class Rendered
 
     /// <summary>Draws a control at a given size and reads back its pixels.
     /// </summary>
-    public static Rendered Draw(Control content, int width, int height)
+    /// <param name="beforeCapture">Run once the control is laid out and before
+    /// the frame is taken. A test that has to say where in the picture to look
+    /// can only find out by asking the arranged control, which does not exist
+    /// until this point and is gone once the window closes.</param>
+    public static Rendered Draw(Control content, int width, int height,
+                                Action<Window>? beforeCapture = null)
     {
         var window = new Window
         {
@@ -52,6 +57,9 @@ public sealed class Rendered
         // measure can invalidate an arrange, and a control that sizes itself
         // from its content only knows its bounds once arranged.
         for (int i = 0; i < 8; i++) Dispatcher.UIThread.RunJobs();
+
+        beforeCapture?.Invoke(window);
+        for (int i = 0; i < 4; i++) Dispatcher.UIThread.RunJobs();
 
         var frame = window.CaptureRenderedFrame()
             ?? throw new InvalidOperationException("the headless platform captured no frame");

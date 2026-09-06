@@ -66,26 +66,62 @@
                               IsCheckedChanged="OnClusterToggle" ToolTip.Tip="Cluster overlapping nodes" />
                 <!-- Layers over the basemap, like the two toggles above them,
                      rather than windows like the buttons on the toolbar. The
-                     glyphs are deliberately unlike each other and unlike the
-                     rings above: waves spreading, a dithered field, a divided
-                     block. Two patterned squares were indistinguishable at
-                     28px, which is why the last one is a bold line rather than
-                     more texture. -->
+                     marks are deliberately unlike each other and unlike the
+                     rings above: waves spreading, a field hot in the middle, a
+                     pair of buildings.
+
+                     The last two are drawn rather than typed. They were a
+                     block-element glyph and a Geometric Shapes one, and both
+                     let the app down: U+2592 is a checkerboard at this size,
+                     which came out as a grey smudge, and U+25EB is missing
+                     from enough interface fonts that it fell back to another
+                     one and landed at the wrong size. A shape the app draws is
+                     the same shape on every machine, and it takes the button's
+                     own Foreground, so it still reads once the toggle is
+                     checked and the fill goes to the accent. -->
                 <ToggleButton x:Name="CoverageButton" Width="28" Height="28" FontSize="14" Padding="0"
                               Content="≋"
                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                               IsCheckedChanged="OnCoverageToggle"
                               ToolTip.Tip="Coverage — sweep the compass for how far this station reaches" />
-                <ToggleButton x:Name="HeatmapButton" Width="28" Height="28" FontSize="13" Padding="0"
-                              Content="▒"
+                <ToggleButton x:Name="HeatmapButton" Width="28" Height="28" Padding="0"
                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                               IsCheckedChanged="OnHeatmapToggle"
-                              ToolTip.Tip="Shade the swept field by the odds of a packet decoding, instead of showing each bearing's verdict on its own. Needs a coverage sweep to shade." />
-                <ToggleButton x:Name="BuildingsButton" Width="28" Height="28" FontSize="14" Padding="0"
-                              Content="◫"
+                              ToolTip.Tip="Shade the swept field by the odds of a packet decoding, instead of showing each bearing's verdict on its own. Needs a coverage sweep to shade.">
+                    <!-- An area shaded from the middle out. The fill is a flat
+                         brush faded by an opacity mask rather than a gradient of
+                         its own, because a gradient's colours are fixed where it
+                         is written and this one has to follow whatever the
+                         button is painting with. The outline is a second border
+                         so the mask does not fade it away too. -->
+                    <Panel Width="15" Height="15">
+                        <Border CornerRadius="2"
+                                Background="{Binding $parent[ToggleButton].Foreground}">
+                            <Border.OpacityMask>
+                                <RadialGradientBrush Center="50%,50%" GradientOrigin="50%,50%">
+                                    <GradientStop Offset="0" Color="#FFFFFFFF" />
+                                    <GradientStop Offset="0.3" Color="#FFFFFFFF" />
+                                    <GradientStop Offset="1" Color="#12FFFFFF" />
+                                </RadialGradientBrush>
+                            </Border.OpacityMask>
+                        </Border>
+                        <Border CornerRadius="2" BorderThickness="1.1"
+                                BorderBrush="{Binding $parent[ToggleButton].Foreground}" />
+                    </Panel>
+                </ToggleButton>
+                <ToggleButton x:Name="BuildingsButton" Width="28" Height="28" Padding="0"
                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                               IsCheckedChanged="OnBuildingsToggle"
-                              ToolTip.Tip="Charge link predictions for the buildings a path crosses, using footprints from OpenStreetMap. Defaults to 10.8 dB per building plus 0.3 dB per 100 m inside — figures measured somewhere else, so treat them as a starting point and let the path-loss fit correct them." />
+                              ToolTip.Tip="Charge link predictions for the buildings a path crosses, using footprints from OpenStreetMap. Defaults to 10.8 dB per building plus 0.3 dB per 100 m inside — figures measured somewhere else, so treat them as a starting point and let the path-loss fit correct them.">
+                    <!-- Two blocks with their windows punched out, which is what
+                         says buildings rather than a bar chart: the even-odd fill
+                         rule makes the inner rectangles holes. -->
+                    <Path Fill="{Binding $parent[ToggleButton].Foreground}"
+                          Data="F0 M1.5,15 V4 H9 V15 Z M9,15 V7.5 H14.5 V15 Z
+                                   M3,6 h2 v2 h-2 z M6,6 h2 v2 h-2 z
+                                   M3,9.5 h2 v2 h-2 z M6,9.5 h2 v2 h-2 z
+                                   M10.5,9.5 h2 v2 h-2 z" />
+                </ToggleButton>
             </StackPanel>
         </Border>
 
