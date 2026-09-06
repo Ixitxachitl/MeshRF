@@ -298,8 +298,11 @@ public partial class RadioViewModel
     /// The gates are firmware's, in its order. The router roles stay quiet
     /// because a backbone node hears everything and would answer every stranger
     /// on the mesh; the channel-utilisation gate keeps a busy channel from
-    /// filling with introductions; and a node more than two hops beyond our own
-    /// limit is one whose reply could never reach us anyway.
+    /// filling with introductions; a node more than two hops beyond our own
+    /// limit is one whose reply could never reach us anyway; and the send window
+    /// is what stops this from being every packet, since a node that never
+    /// answers stays nameless and keeps qualifying. The window is not logged
+    /// when it refuses — that would only move the repetition into the log.
     /// </remarks>
     private void HandleUnknownNodeHeard(uint from, string? channelName, byte hopsAway, RxSource source)
     {
@@ -314,6 +317,9 @@ public partial class RadioViewModel
         var channel = _rxHost.ChannelFor(source, channelName);
         if (channel is null) return;
 
+        var target = TargetForSource(source);
+        if (!_nodeInfoThrottle.AllowsSend(target.MeshTag, NodeInfoSendWindowSeconds(target), out _)) return;
+
         // Built and queued here rather than through SendNodeInfoOnChannelAsync,
         // which reports through StatusText: this runs on the decode thread, and
         // an unprompted introduction is not what the status line is for.
@@ -325,8 +331,61 @@ public partial class RadioViewModel
             wantResponse: RoleDefaults.AllowsRequestingReplies(MyRole), okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey,
             isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
-        TransmitBackground(frame, TargetForSource(source));
+        TransmitBackground(frame, target);
+        _nodeInfoThrottle.MarkSent(target.MeshTag);
         LogFromAnyThread($"  heard new node {_rxHost.NodeDisplayName(from)}, sending our NodeInfo");
+    }
+
+    /// <summary>
+    /// Firmware's brakes on our NodeInfo, shared by every path that sends one:
+    /// see <see cref="NodeInfoThrottle"/>.
+    /// </summary>
+    private readonly NodeInfoThrottle _nodeInfoThrottle = new();
+
+    /// <summary>
+    /// Firmware's <c>allocReply</c> window for one mesh, congestion-scaled the
+    /// way its periodic intervals are. Not the auto-report floor: this is a gap
+    /// between transmits, not a schedule, so it keeps its own ten minutes.
+    /// </summary>
+    /// <remarks>
+    /// Scaled with the preset the send goes out on, since the symbol time is
+    /// what decides how hard a busy mesh backs off. The node count is every node
+    /// we hold rather than that mesh's own — an overestimate for a secondary
+    /// listener, which errs towards the quieter interval.
+    /// </remarks>
+    private int NodeInfoSendWindowSeconds(TxTarget target) =>
+        BroadcastIntervals.ScaledSeconds(
+            NodeInfoThrottle.SendWindowSeconds, MyRole, OnlineNodeCount,
+            target.IsCustom ? SelectedPreset : target.Preset,
+            ChannelPlan.IsWideLora(SelectedRegion));
+
+    /// <summary>
+    /// A peer asked us for our NodeInfo off the air. Firmware's two refusals sit
+    /// here rather than in <see cref="HandleAutoReplyRequest"/> because a script
+    /// that sends a NodeInfo is answering nobody — only a request from the mesh
+    /// is throttled.
+    /// </summary>
+    private void HandleSolicitedReply(PortNum port, uint to, string? channelName, byte hopLimit, RxSource source)
+    {
+        if (port == PortNum.NodeInfo)
+        {
+            // Every request stamps the asker, refused or not, as firmware's does:
+            // the window is on being asked, not on having answered.
+            if (_nodeInfoThrottle.SuppressReplyTo(to, _nodeStore.Count()))
+            {
+                LogFromAnyThread($"  {_rxHost.NodeDisplayName(to)} asked for our NodeInfo — " +
+                                 "answered them within the last 12 h, staying quiet");
+                return;
+            }
+            var target = TargetForSource(source);
+            if (!_nodeInfoThrottle.AllowsSend(target.MeshTag, NodeInfoSendWindowSeconds(target), out var sinceLast))
+            {
+                LogFromAnyThread($"  {_rxHost.NodeDisplayName(to)} asked for our NodeInfo — " +
+                                 $"one went out on {target.MeshTag} {sinceLast.TotalSeconds:F0} s ago, staying quiet");
+                return;
+            }
+        }
+        HandleAutoReplyRequest(port, to, channelName, hopLimit, source);
     }
 
     /// <summary>Answers a directed request from a peer. Without this our
@@ -355,7 +414,9 @@ public partial class RadioViewModel
                         publicKey: TryParseKeyBase64(MyPublicKey),
                         to: to, hopLimit: hopLimit, wantResponse: false, okToMqtt: OkToMqtt,
                         isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
-                    TransmitBackground(nodeInfo, TargetForSource(source));
+                    var nodeInfoTarget = TargetForSource(source);
+                    TransmitBackground(nodeInfo, nodeInfoTarget);
+                    _nodeInfoThrottle.MarkSent(nodeInfoTarget.MeshTag);
                     break;
 
                 case PortNum.Position:
@@ -938,9 +999,24 @@ public partial class RadioViewModel
             if (EffectiveNodeInfoEnabled && DateTime.UtcNow >= _nextNodeInfoUtc)
             {
                 _nextNodeInfoUtc = NextScheduled(EffectiveNodeInfoSeconds, "nodeinfo");
-                await SendNodeInfoOnChannelAsync(AutoReportChannel(AutoReportNodeInfoChannel), null);
-                if (StatusText.StartsWith("Sent NodeInfo", StringComparison.OrdinalIgnoreCase))
-                { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                // On its own mesh the schedule shares one budget with the
+                // introductions and the replies, as firmware's transmit history
+                // does, so a beacon that lands right behind one of those waits
+                // for the next slot.
+                var nodeInfoChannel = AutoReportChannel(AutoReportNodeInfoChannel);
+                var nodeInfoTarget = TargetForChannel(nodeInfoChannel, 0xFFFFFFFFu);
+                if (_nodeInfoThrottle.AllowsSend(nodeInfoTarget.MeshTag,
+                                                 NodeInfoSendWindowSeconds(nodeInfoTarget), out var sinceNodeInfo))
+                {
+                    await SendNodeInfoOnChannelAsync(nodeInfoChannel, null);
+                    if (StatusText.StartsWith("Sent NodeInfo", StringComparison.OrdinalIgnoreCase))
+                    { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                }
+                else
+                {
+                    LogFromAnyThread($"  nodeinfo report skipped: one went out on {nodeInfoTarget.MeshTag} " +
+                                     $"{sinceNodeInfo.TotalSeconds:F0} s ago");
+                }
             }
 
             // Two ways a position goes out: the interval is up, or smart

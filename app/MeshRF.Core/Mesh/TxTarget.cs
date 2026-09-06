@@ -19,6 +19,13 @@ public readonly record struct TxTarget(LoraPreset Preset, byte Sf, uint BwHz, by
     public bool IsCustom => Sf != 0;
     public double FreqMHz => FreqHz / 1e6;
 
+    /// <summary>
+    /// Which mesh this goes out on, named the way a listener's settings are.
+    /// Two listeners on one preset at different frequencies are two meshes, so
+    /// the frequency is part of it; hand-set parameters name no preset.
+    /// </summary>
+    public string MeshTag => HeardOn.Tag(IsCustom ? HeardOn.Custom : HeardOn.Name(Preset), FreqMHz);
+
     /// <summary>The preset's own bandwidth, or the explicit one.</summary>
     public uint EffectiveBwHz => IsCustom
         ? BwHz

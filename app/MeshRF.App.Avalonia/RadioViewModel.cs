@@ -1140,7 +1140,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
         _rxHost.IncomingChannelMessage += PlayIncomingRingtone;
         _rxHost.GeofenceCrossed += PlayGeofenceTone;
-        _rxHost.AutoReplyRequested += HandleAutoReplyRequest;
+        _rxHost.AutoReplyRequested += HandleSolicitedReply;
         _rxHost.UnknownNodeHeard += HandleUnknownNodeHeard;
         _rxHost.TelemetryReplyRequested += HandleTelemetryReplyRequest;
         _rxHost.AckRequested += SendAck;
@@ -3037,7 +3037,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             hwModel: (uint)Math.Max(0, HardwareModels.Id(_settings.UserHwModel)), role: RoleEnumValue(_settings.UserRole),
             publicKey: TryParseKeyBase64(_settings.UserPublicKey),
             to: node.NodeNum, hopLimit: (byte)HopLimit, wantResponse: true);
-        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, node.NodeNum)))
+        var target = TargetForChannel(channel, node.NodeNum);
+        _nodeInfoThrottle.MarkSent(target.MeshTag);
+        if (!await TransmitFrameAsync(frame, target))
         { StatusText = "Transmit failed."; return; }
         var name = _rxHost.NodeDisplayName(node.NodeNum);
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "nodeinfo", $"Exchanged NodeInfo with {name}…");
@@ -3176,7 +3178,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             hopLimit: (byte)HopLimit, wantResponse: wantResponse, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey,
             isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
-        StatusText = await TransmitFrameAsync(frame, TargetForChannel(channel, to ?? 0xFFFFFFFFu))
+        // Stamped on the attempt, not on the acknowledgement, as firmware stamps
+        // its transmit history when it decides to send. A send the user asked
+        // for is never refused by the window; it only pushes that mesh's window
+        // out.
+        var target = TargetForChannel(channel, to ?? 0xFFFFFFFFu);
+        _nodeInfoThrottle.MarkSent(target.MeshTag);
+        StatusText = await TransmitFrameAsync(frame, target)
             ? "Sent NodeInfo." : "Transmit failed.";
     }
 
