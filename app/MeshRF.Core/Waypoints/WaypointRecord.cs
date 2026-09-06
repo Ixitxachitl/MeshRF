@@ -136,8 +136,28 @@ public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChange
     /// on the row would explain. A default-preset primary has no name of its
     /// own, which is why an empty one is a label rather than a blank.
     /// </remarks>
-    public string ChannelText =>
-        string.IsNullOrWhiteSpace(Channel) ? "(primary)" : Channel;
+    public string ChannelText
+    {
+        get
+        {
+            var name = string.IsNullOrWhiteSpace(Channel) ? "(primary)" : Channel;
+            // Two meshes can each have a channel of that name, so the preset
+            // is what says which one this marker is on — and which one a
+            // resend or an edit would go out on.
+            return Preset.Length == 0 ? name : $"{name} · {Preset}";
+        }
+    }
+
+    /// <summary>
+    /// Which channel list this marker belongs to, and so which listener's
+    /// settings it was heard on or sent with: empty for the primary's,
+    /// otherwise a preset name.
+    /// </summary>
+    /// <remarks>
+    /// Empty on every row written before there was more than one list, which
+    /// is correct for them: there was only the primary to have heard them.
+    /// </remarks>
+    public string Preset { get; set; } = string.Empty;
 
     public long RxEpoch { get; set; }
 

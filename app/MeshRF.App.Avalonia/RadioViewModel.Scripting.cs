@@ -615,7 +615,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        if (!await TransmitFrameAsync(frame, PrimaryTarget()))
+        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, to)))
         {
             _rxHost.Log($"sync: transmit failed for \"{action.Name}\"");
             return;
@@ -627,6 +627,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             WaypointId = action.WaypointId,
             PacketId = packetId,
             Channel = channel.Name,
+            Preset = channel.Preset,
             ToNode = to,
             Name = action.Name,
             Description = action.Description,
@@ -859,8 +860,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 if (to != 0xFFFFFFFFu) messages = _rxHost.OpenConversation(to).Messages;
 
                 await SendTextAsync(channel, to, text, action.ReplyId,
-                                    ReplyContextFor(run, action.ReplyId), messages, action.Hops,
-                                    target: PrimaryTarget());
+                                    ReplyContextFor(run, action.ReplyId), messages, action.Hops);
                 break;
             }
 
@@ -877,7 +877,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text,
                     to: to, hopLimit: (byte)HopLimit, replyId: action.ReplyId, emoji: 1,
                     xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-                if (await TransmitFrameAsync(frame, PrimaryTarget()))
+                if (await TransmitFrameAsync(frame, TargetForChannel(channel, to)))
                 {
                     EchoReaction(messages, action.ReplyId, text);
                     _rxHost.PersistOutgoingReaction(to, packetId, action.ReplyId, text, channel.Name);
@@ -889,7 +889,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             // position: is a send it decided on, and the request whose distance
             // would size it is not necessarily the thing that triggered the run.
             case ScriptActionKind.NodeInfo:
-                HandleAutoReplyRequest(PortNum.NodeInfo, action.ToNode, action.ChannelName, (byte)HopLimit, PrimarySource());
+                HandleAutoReplyRequest(PortNum.NodeInfo, action.ToNode, action.ChannelName, (byte)HopLimit,
+                                       SourceForNode(action.ToNode));
                 break;
 
             case ScriptActionKind.RequestNodeInfo:
@@ -898,7 +899,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 break;
 
             case ScriptActionKind.Position:
-                HandleAutoReplyRequest(PortNum.Position, action.ToNode, action.ChannelName, (byte)HopLimit, PrimarySource());
+                HandleAutoReplyRequest(PortNum.Position, action.ToNode, action.ChannelName, (byte)HopLimit,
+                                       SourceForNode(action.ToNode));
                 break;
 
             case ScriptActionKind.Waypoint:
@@ -999,7 +1001,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        if (!await TransmitFrameAsync(frame, PrimaryTarget()))
+        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, action.ToNode)))
         {
             _rxHost.Log("scripts: waypoint transmit failed");
             return;
@@ -1011,6 +1013,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             WaypointId = packetId,
             PacketId = packetId,
             Channel = channel.Name,
+            Preset = channel.Preset,
             ToNode = action.ToNode,
             Name = name,
             Description = description,

@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using MeshRF.Channels;
 using MeshRF.Mesh;
 
 namespace MeshRF.AvaloniaApp;
@@ -399,6 +400,30 @@ public partial class RadioViewModel
         foreach (var s in _rxSources)
             if (!s.IsPrimary && s.PresetName == heardOn) return TargetForSource(s);
         return PrimaryTarget();
+    }
+
+    /// <summary>
+    /// What a send addressed this way goes out on. A packet to a node follows
+    /// that node, wherever it was heard; a broadcast follows the channel it is
+    /// sealed with, since a channel only exists on one mesh. Sealing with one
+    /// preset's key and transmitting on another's settings would put a frame
+    /// on the air that nobody there can read.
+    /// </summary>
+    private TxTarget TargetForChannel(ChannelConfig? channel, uint to)
+    {
+        if (to != 0 && to != 0xFFFFFFFFu) return TargetForNode(to);
+        return TargetForList(channel?.Preset);
+    }
+
+    /// <summary>The listener a node was last heard on, for a reply built the
+    /// way an answer to a received packet is.</summary>
+    private RxSource SourceForNode(uint nodeNum)
+    {
+        var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
+        if (string.IsNullOrEmpty(heardOn)) return PrimarySource();
+        foreach (var s in _rxSources)
+            if (!s.IsPrimary && s.PresetName == heardOn) return s;
+        return PrimarySource();
     }
 
     /// <summary>The target of a list of channels: the listener whose preset

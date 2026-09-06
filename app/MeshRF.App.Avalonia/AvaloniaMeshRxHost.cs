@@ -1536,7 +1536,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
 
             case PortNum.Waypoint when result.Waypoint is not null:
-                HandleWaypoint(header, result);
+                HandleWaypoint(header, result, source);
                 break;
 
             case PortNum.Telemetry when result.Telemetry is not null:
@@ -2106,7 +2106,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         Waypoints.Add(record);
     }
 
-    private void HandleWaypoint(MeshHeader header, MeshDecodeResult result)
+    private void HandleWaypoint(MeshHeader header, MeshDecodeResult result, RxSource source)
     {
         var wp = result.Waypoint!;
         // Some senders omit waypoint id (0); fall back to packet id, which is
@@ -2118,6 +2118,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             WaypointId = waypointId,
             PacketId = header.PacketId,
             Channel = result.ChannelName,
+            Preset = ListNameFor(source),
             // Broadcast is the absence of an address, not an address of its own.
             ToNode = header.IsBroadcast ? 0 : header.To,
             Name = wp.Name,

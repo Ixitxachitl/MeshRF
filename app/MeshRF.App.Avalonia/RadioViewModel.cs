@@ -2626,8 +2626,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         uint replyId,
         string replyContext,
         ObservableCollection<ChannelMessage>? messages,
-        byte? hopLimit = null,
-        TxTarget? target = null)
+        byte? hopLimit = null)
     {
         if (_core is null || text.Length == 0) return false;
 
@@ -2659,7 +2658,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 replyId: replyId, okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        bool ok = await (target is { } named ? TransmitFrameAsync(frame, named) : TransmitFrameAsync(frame));
+        bool ok = await TransmitFrameAsync(frame, TargetForChannel(channel, to));
         if (!ok)
         {
             StatusText = "Failed to transmit (no TX-capable device selected?).";
@@ -2824,7 +2823,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             to: to, hopLimit: (byte)HopLimit, replyId: target.PacketId, emoji: 1,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        if (await TransmitFrameAsync(frame))
+        if (await TransmitFrameAsync(frame, TargetForChannel(channel, to)))
         {
             target.AddReaction(emoji, _rxHost.NodeDisplayName(_rxHost.MyNodeNum));
             _rxHost.PersistOutgoingReaction(to, packetId, target.PacketId, emoji, channel.Name);
@@ -3265,7 +3264,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task ResendWaypoint(WaypointRecord? wp)
     {
         if (wp is null || !CanTransmit) return;
-        var channel = _rxHost.FindChannelByName(wp.Channel);
+        var channel = _rxHost.ChannelIn(wp.Preset, wp.Channel);
         if (channel is null) { StatusText = "No enabled channel to resend waypoint on."; return; }
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeWaypoint(channel, _rxHost.MyNodeNum, packetId, wp.WaypointId,
@@ -3276,7 +3275,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             notifyOnEnter: wp.NotifyOnEnter, notifyOnExit: wp.NotifyOnExit, notifyFavoritesOnly: wp.NotifyFavoritesOnly,
             hopLimit: (byte)HopLimit,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-        StatusText = await TransmitFrameAsync(frame)
+        StatusText = await TransmitFrameAsync(frame, TargetForList(wp.Preset))
             ? $"Resent waypoint \"{wp.Name}\""
             : "Transmit failed (device cannot transmit).";
     }
@@ -3333,7 +3332,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         var ours = waypoints.Where(IsOursToRetire).ToList();
         return CanTransmit
-            ? new SilentDeleteSet([], ours.Where(w => _rxHost.FindChannelByName(w.Channel) is null).ToList())
+            ? new SilentDeleteSet([], ours.Where(w => _rxHost.ChannelIn(w.Preset, w.Channel) is null).ToList())
             : new SilentDeleteSet(ours, []);
     }
 
@@ -3344,7 +3343,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         bool lockedToOther = IsLockedToAnother(wp);
         if (IsOursToRetire(wp) && CanTransmit)
         {
-            var channel = _rxHost.FindChannelByName(wp.Channel);
+            var channel = _rxHost.ChannelIn(wp.Preset, wp.Channel);
             if (channel is not null)
             {
                 try
@@ -3357,7 +3356,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                         expireEpoch: 1, lockedTo: wp.LockedTo, icon: wp.Icon,
                         hopLimit: (byte)HopLimit,
                         xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-                    await TransmitFrameAsync(frame);
+                    await TransmitFrameAsync(frame, TargetForList(wp.Preset));
                 }
                 catch { /* best-effort delete broadcast */ }
             }
@@ -3389,7 +3388,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public async Task<bool> UpdateWaypointAsync(WaypointRecord original, WaypointEditResult edit)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device before editing waypoints."; return false; }
-        var channel = _rxHost.FindChannelByName(original.Channel);
+        var channel = _rxHost.ChannelIn(original.Preset, original.Channel);
         if (channel is null) { StatusText = "No enabled channel to send the edit on."; return false; }
 
         var packetId = NextPacketId();
@@ -3402,7 +3401,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             hopLimit: (byte)HopLimit,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed (device cannot transmit)."; return false; }
+        if (!await TransmitFrameAsync(frame, TargetForList(original.Preset)))
+        {
+            StatusText = "Transmit failed (device cannot transmit).";
+            return false;
+        }
 
         var updated = new WaypointRecord
         {
@@ -3413,6 +3416,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             WaypointId = original.WaypointId,
             PacketId = packetId,
             Channel = original.Channel,
+            Preset = original.Preset,
             Name = edit.Name,
             Description = edit.Description,
             Icon = edit.Icon,

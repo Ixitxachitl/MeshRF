@@ -469,6 +469,7 @@ public partial class RadioViewModel
                 WaypointId = waypointId,
                 PacketId = packetId,
                 Channel = selectedChannel.Name,
+                Preset = selectedChannel.Preset,
                 ToNode = to ?? 0,
                 Name = name,
                 Description = description,
