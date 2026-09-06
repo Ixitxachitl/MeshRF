@@ -38,13 +38,30 @@ private:
     std::uint32_t L_{1};            // interpolation factor
     std::uint32_t M_{1};            // decimation factor
     std::size_t   taps_per_phase_{1};
-    std::vector<float> proto_;      // prototype low-pass, length taps_per_phase_*L_
 
-    std::vector<cf>    hist_;       // ring buffer of recent input samples
-    std::size_t        hist_size_{1};
-    std::size_t        wpos_{0};    // next write slot in hist_
+    // The prototype low-pass, decomposed once into its L phases and stored a
+    // phase at a time, each phase's taps in the order the samples come. An
+    // output is then one walk along two neighbouring runs of memory rather
+    // than a stride of L through the prototype.
+    std::vector<float> branches_;   // L_ phases of taps_per_phase_ taps
+
+    // The tail of the input, kept so an output landing at the start of a block
+    // can still reach back into the one before it. Linear rather than a ring:
+    // the inner loop is the whole cost of this class, and a ring puts an index
+    // wrap in the middle of it.
+    std::vector<cf>    hist_;
+    std::size_t        hist_len_{1};
+
+    std::vector<cf>    edge_;       // hist_ and the head of the block, joined
     std::uint64_t      in_count_{0};// total input samples seen
-    std::uint64_t      next_out_{0};// index of the next output sample
+
+    // Where the next output lands, carried forward rather than divided out of
+    // an output counter: base_ is the newest input sample it taps and branch_
+    // the phase it taps with.
+    std::uint64_t      base_{0};
+    std::uint32_t      branch_{0};
+    std::uint32_t      step_base_{1}; // M_ / L_
+    std::uint32_t      step_branch_{0}; // M_ % L_
 
     std::vector<cf>    out_;        // scratch output for the current process()
 };

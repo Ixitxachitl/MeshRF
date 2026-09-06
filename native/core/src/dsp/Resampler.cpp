@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <numbers>
+#include <algorithm>
 #include <numeric>
 #include <stdexcept>
 
@@ -62,15 +63,27 @@ Resampler::Resampler(std::uint32_t input_rate_hz, std::uint32_t output_rate_hz)
     if (nh < L_) nh = L_;
     taps_per_phase_ = nh / L_;
 
-    proto_ = design_lowpass(nh, cutoff);
+    auto proto = design_lowpass(nh, cutoff);
     // Scale so each polyphase branch has ~unity DC gain (interpolation by L
     // spreads the prototype's unity sum across L branches).
-    for (auto& c : proto_) c *= static_cast<float>(L_);
+    for (auto& c : proto) c *= static_cast<float>(L_);
+
+    // Split the prototype into its phases now, and reverse each phase, so the
+    // inner loop reads both taps and samples forwards: an output is
+    // sum over j of branch[j] * x[base - K + 1 + j].
+    const std::size_t K = taps_per_phase_;
+    branches_.assign(static_cast<std::size_t>(L_) * K, 0.0f);
+    for (std::uint32_t b = 0; b < L_; ++b)
+        for (std::size_t j = 0; j < K; ++j)
+            branches_[b * K + j] = proto[b + (K - 1 - j) * L_];
 
     // History must cover taps_per_phase_ input samples plus the few extra the
     // commutator may reach back for between outputs.
-    hist_size_ = taps_per_phase_ + M_ + 2u;
-    hist_.assign(hist_size_, cf{0.0f, 0.0f});
+    hist_len_ = K - 1u + M_ + 2u;
+    hist_.assign(hist_len_, cf{0.0f, 0.0f});
+
+    step_base_ = M_ / L_;
+    step_branch_ = M_ % L_;
 }
 
 Resampler::~Resampler() = default;
@@ -78,36 +91,61 @@ Resampler::~Resampler() = default;
 std::span<const std::complex<float>>
 Resampler::process(std::span<const std::complex<float>> in) {
     out_.clear();
-    // Upper bound on outputs: one per L/M input samples, +1 slack.
-    out_.reserve(in.size() * L_ / M_ + 1);
+    if (in.empty()) return {};
 
     const std::size_t K = taps_per_phase_;
-    const std::size_t H = hist_size_;
-    const std::uint64_t L = L_;
-    const std::uint64_t M = M_;
+    const std::size_t n = in.size();
+    const std::uint64_t block_start = in_count_;
+    const std::uint64_t newest = block_start + n - 1;
 
-    for (const cf& x : in) {
-        hist_[wpos_] = x;
-        wpos_ = (wpos_ + 1) % H;
-        ++in_count_;
-        const std::uint64_t newest = in_count_ - 1; // absolute index of x
+    // The block's head joined onto the tail of the one before it. Only the
+    // first few outputs of a block straddle that seam; the rest read the
+    // caller's buffer directly, which is why nothing here copies the block.
+    const std::size_t head = std::min(n, hist_len_);
+    edge_.resize(hist_len_ + head);
+    std::copy(hist_.begin(), hist_.end(), edge_.begin());
+    std::copy(in.begin(), in.begin() + static_cast<std::ptrdiff_t>(head),
+              edge_.begin() + static_cast<std::ptrdiff_t>(hist_len_));
+    const std::int64_t edge_base = static_cast<std::int64_t>(block_start)
+                                 - static_cast<std::int64_t>(hist_len_);
 
-        // Emit every output whose base input index is now available.
-        while ((next_out_ * M) / L <= newest) {
-            const std::uint64_t u = next_out_ * M;
-            const std::uint64_t base = u / L;          // newest input it taps
-            const std::size_t branch = static_cast<std::size_t>(u % L);
-            cf acc{0.0f, 0.0f};
-            for (std::size_t k = 0; k < K; ++k) {
-                if (base < k) break;                   // before stream start
-                const std::uint64_t a = base - k;      // absolute input index
-                const cf& xv = hist_[static_cast<std::size_t>(a % H)];
-                acc += proto_[branch + k * L_] * xv;
-            }
-            out_.push_back(acc);
-            ++next_out_;
+    out_.reserve(n * L_ / M_ + 2u);
+
+    while (base_ <= newest) {
+        const cf* x;
+        if (base_ >= block_start + (K - 1)) {
+            x = in.data() + static_cast<std::size_t>(base_ - block_start - (K - 1));
+        } else {
+            x = edge_.data() + static_cast<std::size_t>(
+                    static_cast<std::int64_t>(base_) - static_cast<std::int64_t>(K - 1) - edge_base);
         }
+
+        // Read as interleaved floats: the taps are real, so this is two
+        // independent dot products over one run of memory.
+        const float* h = branches_.data() + static_cast<std::size_t>(branch_) * K;
+        const float* xf = reinterpret_cast<const float*>(x);
+        float ar = 0.0f, ai = 0.0f;
+        for (std::size_t j = 0; j < K; ++j) {
+            ar += h[j] * xf[2 * j];
+            ai += h[j] * xf[2 * j + 1];
+        }
+        out_.emplace_back(ar, ai);
+
+        base_ += step_base_;
+        branch_ += step_branch_;
+        if (branch_ >= L_) { branch_ -= L_; ++base_; }
     }
+
+    // Carry the tail forward for the next block.
+    if (n >= hist_len_) {
+        std::copy(in.end() - static_cast<std::ptrdiff_t>(hist_len_), in.end(), hist_.begin());
+    } else {
+        std::copy(hist_.begin() + static_cast<std::ptrdiff_t>(n), hist_.end(), hist_.begin());
+        std::copy(in.begin(), in.end(),
+                  hist_.end() - static_cast<std::ptrdiff_t>(n));
+    }
+    in_count_ += n;
+
     return std::span<const cf>(out_.data(), out_.size());
 }
 

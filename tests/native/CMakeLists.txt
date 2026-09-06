@@ -19,6 +19,7 @@ add_executable(mrf_core_tests
     test_flooding_router.cpp
     test_preset.cpp
     test_dsp_fir.cpp
+    test_dsp_resampler.cpp
     test_dsp_dc.cpp
     test_dsp_fft.cpp
     test_dsp_spectrum.cpp
@@ -27,6 +28,7 @@ add_executable(mrf_core_tests
     test_meshtastic_rx_frame.cpp
     test_lora_tx.cpp
     test_rx_listener_chain.cpp
+    test_rx_chain_throughput.cpp
     test_sx126x.cpp
 )
 
