@@ -395,7 +395,11 @@ public partial class RadioViewModel
     /// so the answer can be heard; otherwise the primary.</summary>
     private TxTarget TargetForNode(uint nodeNum)
     {
+        // Where they were heard, or failing that the mesh their conversation
+        // is being held over — so what the tab says and what leaves the
+        // antenna are the same thing.
         var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
+        if (string.IsNullOrEmpty(heardOn)) heardOn = _rxHost.MeshForConversation(nodeNum);
         if (string.IsNullOrEmpty(heardOn)) return PrimaryTarget();
         foreach (var s in _rxSources)
             if (!s.IsPrimary && s.PresetName == heardOn) return TargetForSource(s);

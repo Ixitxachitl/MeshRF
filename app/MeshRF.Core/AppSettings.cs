@@ -369,6 +369,15 @@ public sealed class AppSettings
     public int LastSelectedChannelIndex { get; set; } = -1;
     public uint SelectedConversationNode { get; set; }
     public List<uint> OpenConversations { get; set; } = new();
+
+    /// <summary>
+    /// The mesh each open conversation is held over, by node number, for the
+    /// peers whose own record does not say where they were heard. Without it
+    /// a conversation with a node we hold nothing for lands back on the
+    /// primary after a restart, and answering them would go out on the wrong
+    /// mesh.
+    /// </summary>
+    public Dictionary<string, string> ConversationMeshes { get; set; } = new();
     public List<int> MutedRingtoneChannels { get; set; } = new();
     /// <summary>How long the message tone plays. Each tone carries its own,
     /// so a crossing or an alert bell can be silenced without silencing the

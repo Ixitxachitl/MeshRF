@@ -195,18 +195,36 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     private string GroupOf(ITabItem tab) => tab switch
     {
         ChannelTabViewModel channel => channel.Config.Preset,
-        ConversationTabViewModel conversation => GroupForNode(conversation.NodeNum),
+        // Where they were heard if we know it, else where we were reading
+        // them when the conversation was opened, else the primary.
+        ConversationTabViewModel conversation =>
+            GroupForNode(conversation.NodeNum) ?? Available(conversation.MeshHint),
         _ => string.Empty,
     };
 
-    /// <summary>The mesh a conversation sits under: the preset its peer was
-    /// last heard on, when that preset has tabs of its own.</summary>
-    private string GroupForNode(uint nodeNum)
+    /// <summary>
+    /// The mesh a peer is spoken to over: the preset they were last heard on,
+    /// when it is one being listened for. Null when there is no record of
+    /// hearing them at all, which is different from having heard them on the
+    /// primary — a forgotten node has to fall back to something.
+    /// </summary>
+    public string? GroupForNode(uint nodeNum)
     {
         var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
-        if (string.IsNullOrEmpty(heardOn) || heardOn == HeardOn.Custom) return string.Empty;
+        if (string.IsNullOrEmpty(heardOn)) return null;
+        if (heardOn == HeardOn.Custom) return string.Empty;
         return IsPresetShown?.Invoke(heardOn) == true ? heardOn : string.Empty;
     }
+
+    /// <summary>A mesh name, or the primary when that mesh is not one being
+    /// listened for.</summary>
+    private string Available(string group) =>
+        group.Length > 0 && IsPresetShown?.Invoke(group) == true ? group : string.Empty;
+
+    /// <summary>The mesh an open conversation is being held over, or null if
+    /// there is no tab for that peer.</summary>
+    public string? MeshForConversation(uint nodeNum) =>
+        _conversationsByNode.TryGetValue(nodeNum, out var convo) ? convo.TabGroup : null;
 
     public ObservableCollection<NodeRecord> Nodes { get; } = new();
     public ObservableCollection<WaypointRecord> Waypoints { get; } = new();
@@ -528,7 +546,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum && result.WantResponse;
 
     public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore, WaypointStore waypointStore,
-        MessageStore messageStore, uint myNodeNum, IReadOnlyList<uint> openConversationNodeNums)
+        MessageStore messageStore, uint myNodeNum, IReadOnlyList<uint> openConversationNodeNums,
+        IReadOnlyDictionary<uint, string>? conversationMeshes = null)
     {
         _nodeStore = nodeStore;
         _channelStore = channelStore;
@@ -573,14 +592,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         foreach (var n in _nodeStore.All())
             if (MyNodeNum == 0 || n.NodeNum != MyNodeNum)
                 Nodes.Add(n);
-        LoadMessageHistory(openConversationNodeNums);
+        LoadMessageHistory(openConversationNodeNums, conversationMeshes);
     }
 
     /// <summary>Loads channel chat history, then reopens only the DM tabs that
     /// were left open last session (not every peer we have history with):
     /// <c>AppSettings.OpenConversations</c> is persisted, and only those are
     /// replayed.</summary>
-    private void LoadMessageHistory(IReadOnlyList<uint> openConversationNodeNums)
+    private void LoadMessageHistory(IReadOnlyList<uint> openConversationNodeNums,
+                                    IReadOnlyDictionary<uint, string>? conversationMeshes)
     {
         // Reactions are stored as their own rows, so replay in two passes per
         // tab: real messages first, then attach each reaction to its target.
@@ -614,7 +634,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         foreach (var peer in openConversationNodeNums)
         {
             if (peer == 0 || peer == 0xFFFFFFFFu || peer == MyNodeNum) continue;
-            OpenConversation(peer);
+            string? mesh = null;
+            conversationMeshes?.TryGetValue(peer, out mesh);
+            OpenConversation(peer, mesh);
         }
     }
 
@@ -939,9 +961,19 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// <summary>Finds or opens the DM conversation tab for a peer node,
     /// loading its persisted history (including notes and reactions) the
     /// first time it's opened.</summary>
-    public ConversationTabViewModel OpenConversation(uint nodeNum)
+    /// <param name="meshHint">The mesh the conversation is being opened from,
+    /// used when the peer's own record does not say where they were heard.</param>
+    public ConversationTabViewModel OpenConversation(uint nodeNum, string? meshHint = null)
     {
-        if (_conversationsByNode.TryGetValue(nodeNum, out var existing)) return existing;
+        if (_conversationsByNode.TryGetValue(nodeNum, out var existing))
+        {
+            if (existing.MeshHint.Length == 0 && !string.IsNullOrEmpty(meshHint))
+            {
+                existing.MeshHint = meshHint;
+                RefreshTabGroups();
+            }
+            return existing;
+        }
 
         // The store is handed over so the tab can load this peer's recorded
         // location/telemetry history; the formatters keep its display strings
@@ -952,6 +984,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         {
             Node = _nodeStore.Get(nodeNum),
         };
+        convo.MeshHint = meshHint ?? string.Empty;
         _conversationsByNode[nodeNum] = convo;
         Tabs.Add(convo);
 

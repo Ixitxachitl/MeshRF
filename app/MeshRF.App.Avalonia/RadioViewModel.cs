@@ -1039,6 +1039,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedMapNodeLabelMode = _settings.MapNodeLabelMode;
         var savedMapMarkerFilter = _settings.MapMarkerFilter;
         var savedOpenConversations = _settings.OpenConversations?.ToList() ?? new List<uint>();
+        var savedConversationMeshes = ReadConversationMeshes(_settings);
         // Identity fields (My Node dialog) — also snapshotted here, not read
         // directly further down, for the same reason as everything above:
         // the property assignments below trigger OnXxxChanged -> SaveSettings()
@@ -1132,7 +1133,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var myNodeNum = _settings.UserNodeNum != 0
             ? _settings.UserNodeNum
             : (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE);
-        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum, savedOpenConversations);
+        _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum,
+                                         savedOpenConversations, savedConversationMeshes);
         _rxHost.LogLines.CollectionChanged += OnLogLinesChanged;
         _rxHost.OpenConversationsChanged += SaveOpenConversations;
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
@@ -2445,8 +2447,25 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         disk.OpenConversations = Tabs.OfType<ConversationTabViewModel>()
             .Select(t => t.NodeNum)
             .ToList();
+        // Only the ones whose peer record does not already say where they
+        // were heard: anything else would go stale the moment a node moves.
+        disk.ConversationMeshes = Tabs.OfType<ConversationTabViewModel>()
+            .Where(t => t.MeshHint.Length > 0 && _rxHost.GroupForNode(t.NodeNum) is null)
+            .ToDictionary(t => t.NodeNum.ToString(CultureInfo.InvariantCulture), t => t.MeshHint);
         disk.Save();
         _settings.OpenConversations = disk.OpenConversations;
+        _settings.ConversationMeshes = disk.ConversationMeshes;
+    }
+
+    /// <summary>The stored conversation meshes, keyed by node number. Written
+    /// as strings because a JSON object's keys are strings.</summary>
+    private static Dictionary<uint, string> ReadConversationMeshes(AppSettings settings)
+    {
+        var meshes = new Dictionary<uint, string>();
+        foreach (var (key, mesh) in settings.ConversationMeshes)
+            if (uint.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out var node))
+                meshes[node] = mesh;
+        return meshes;
     }
 
     private uint NextPacketId() => (uint)Random.Shared.NextInt64(1, uint.MaxValue);
@@ -2783,7 +2802,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (message is null) return;
         uint peer = message.SenderNodeNum;
         if (peer == 0 || peer == 0xFFFFFFFFu || peer == _rxHost.MyNodeNum) return;
-        SelectedTab = _rxHost.OpenConversation(peer);
+        // Opened from the tab the message is in, so a peer we hold no record
+        // for is still answered on the mesh we read them on.
+        SelectedTab = _rxHost.OpenConversation(peer, SelectedTab?.TabGroup);
     }
 
     [RelayCommand]

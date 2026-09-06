@@ -41,6 +41,19 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     [ObservableProperty]
     private bool _startsTabGroup;
 
+    /// <summary>
+    /// The mesh this conversation was opened over, when the peer's own record
+    /// does not say. Answering somebody whose node we have never had — or have
+    /// since forgotten — still has to reach them, and where their message was
+    /// read is the only evidence of where they are.
+    /// </summary>
+    /// <remarks>
+    /// Only a fallback: a peer we do have a record for is spoken to wherever
+    /// they were last actually heard, so a node that moves mesh takes its
+    /// conversation with it.
+    /// </remarks>
+    public string MeshHint { get; set; } = string.Empty;
+
     [ObservableProperty]
     private string _tabGroup = string.Empty;
 

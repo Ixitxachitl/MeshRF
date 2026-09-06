@@ -174,6 +174,56 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Assert.Contains(vm.Tabs.OfType<ConversationTabViewModel>(), t => t.NodeNum == 0x4444u);
     }));
 
+    /// <summary>
+    /// A peer whose node record we do not hold — never had a NodeInfo, or
+    /// forgot it — still has to be answered on the mesh their message was
+    /// read on. Otherwise the reply goes out on the primary, where they are
+    /// not.
+    /// </summary>
+    [Fact]
+    public void AnsweringAMessageFromAnUnknownNodeStaysOnThatMesh() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+
+        // Reading a message on the LongFast mesh, from somebody we hold no
+        // record for.
+        Show(vm, nameof(LoraPreset.LongFast));
+        vm.SelectedTab = ChannelsOn(vm, nameof(LoraPreset.LongFast));
+        vm.MessageSenderCommand.Execute(new ChannelMessage { SenderNodeNum = 0x3840dd32u, Text = "test" });
+
+        var convo = Assert.IsType<ConversationTabViewModel>(vm.SelectedTab);
+        Assert.Equal(0x3840dd32u, convo.NodeNum);
+        Assert.Equal(nameof(LoraPreset.LongFast), convo.TabGroup);
+        Assert.True(convo.IsTabListed);
+        Assert.Equal(nameof(LoraPreset.LongFast), vm.SelectedTabGroupOption!.Group);
+    }));
+
+    /// <summary>Where a peer is actually heard beats where they were read:
+    /// a node that moves mesh takes its conversation with it.</summary>
+    [Fact]
+    public void APeerWeDoHoldARecordForIsSpokenToWhereTheyWereHeard() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+
+        var store = new NodeStore();
+        store.RecordSighting(0x5555u, heardOnPreset: nameof(LoraPreset.MediumFast), heardOnFreqMHz: 913.125);
+        store.Dispose();
+
+        // Opened while reading LongFast, but they are heard on the primary.
+        Show(vm, nameof(LoraPreset.LongFast));
+        vm.SelectedTab = ChannelsOn(vm, nameof(LoraPreset.LongFast));
+        vm.MessageSenderCommand.Execute(new ChannelMessage { SenderNodeNum = 0x5555u, Text = "test" });
+
+        var convo = vm.Tabs.OfType<ConversationTabViewModel>().Single(t => t.NodeNum == 0x5555u);
+        Assert.Equal(string.Empty, convo.TabGroup);
+    }));
+
     /// <summary>A drag may not carry a tab onto another mesh: which mesh a
     /// channel is on is what its key and its frequency mean.</summary>
     [Fact]
