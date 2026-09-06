@@ -16,6 +16,10 @@ public sealed partial class TabGroupOption : ObservableObject
     /// Hiding a mesh must not hide the fact that it is talking.</summary>
     [ObservableProperty] private bool _needsAttention;
 
+    /// <summary>Whether this is the mesh on show, which is what paints its
+    /// tab as the one the strip below belongs to.</summary>
+    [ObservableProperty] private bool _isSelected;
+
     public override string ToString() => Label;
 }
 
@@ -84,12 +88,15 @@ public partial class RadioViewModel
         RefreshTabGroupAttention();
     }
 
-    /// <summary>Marks the meshes that are not on show and have something
-    /// unread.</summary>
+    /// <summary>Marks the mesh on show, and those that are not but have
+    /// something unread.</summary>
     private void RefreshTabGroupAttention()
     {
         foreach (var option in TabGroupOptions)
-            option.NeedsAttention = option.Group != _rxHost.ShownGroup
+        {
+            option.IsSelected = option.Group == _rxHost.ShownGroup;
+            option.NeedsAttention = !option.IsSelected
                                     && _rxHost.GroupNeedsAttention(option.Group);
+        }
     }
 }

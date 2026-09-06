@@ -59,6 +59,9 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Assert.Equal(string.Empty, vm.TabGroupOptions[0].Group);
         Assert.Equal("Primary", vm.TabGroupOptions[0].Label);
         Assert.Equal(string.Empty, vm.SelectedTabGroupOption!.Group);
+        // Exactly one mesh tab is painted as the one on show.
+        Assert.Single(vm.TabGroupOptions, o => o.IsSelected);
+        Assert.True(vm.TabGroupOptions[0].IsSelected);
         Assert.Contains(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
 
         // Only the primary's tabs are on show.
@@ -80,6 +83,9 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
                    t => Assert.Equal(nameof(LoraPreset.LongFast), t.TabGroup));
         // Selection follows, rather than staying on a tab that is now hidden.
         Assert.True(vm.SelectedTab!.IsTabListed);
+        // And the mesh tab moves with it, so the row shows which set is below.
+        var picked = Assert.Single(vm.TabGroupOptions, o => o.IsSelected);
+        Assert.Equal(nameof(LoraPreset.LongFast), picked.Group);
     }));
 
     [Fact]

@@ -1021,6 +1021,16 @@ public partial class MainWindow : Window
 
     private MqttSettingsWindow? _mqttWindow;
 
+    /// <summary>Picks which mesh the channel strip below is showing. A
+    /// pointer handler rather than a button, so the tab is the app's own
+    /// border and owes nothing to a theme's button chrome.</summary>
+    private void OnMeshTabPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Control { DataContext: TabGroupOption option }) return;
+        _viewModel.SelectedTabGroupOption = option;
+        e.Handled = true;
+    }
+
     private MonitorsWindow? _monitorsWindow;
 
     private void OnOpenMonitors(object? sender, RoutedEventArgs e)

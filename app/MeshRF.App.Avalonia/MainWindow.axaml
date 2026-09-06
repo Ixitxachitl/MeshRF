@@ -1164,27 +1164,46 @@
                                 Content="+" FontSize="13" VerticalAlignment="Center"
                                 Command="{Binding AddChannelCommand}"
                                 ToolTip.Tip="Add a new channel (random PSK)" />
-                        <!-- Which mesh's tabs the strip is showing. Appears
-                             only once there is more than one to choose. A dot
-                             marks a mesh that has something unread, since
-                             hiding one must not hide that it is talking. -->
-                        <ComboBox DockPanel.Dock="Right" Height="22" FontSize="11" MinWidth="120"
-                                  Margin="8,0,0,0" VerticalAlignment="Center"
-                                  IsVisible="{Binding HasSeveralMeshes}"
-                                  ItemsSource="{Binding TabGroupOptions}"
-                                  SelectedItem="{Binding SelectedTabGroupOption}"
-                                  ToolTip.Tip="Which mesh's channels and conversations to show">
-                            <ComboBox.ItemTemplate>
+                        <!-- Which mesh's tabs the strip below is showing, as a
+                             row of tabs of its own: they sit directly above the
+                             channel tabs and pick which set of them is on
+                             show, which a dropdown made look like a filter
+                             rather than the level above. Only appears once
+                             there is more than one mesh to choose. A dot marks
+                             one with something unread, since hiding a mesh
+                             must not hide that it is talking.
+
+                             Drawn as bordered panels rather than as real tab
+                             controls or toggle buttons: the selected fill and
+                             the class that carries it are the app's own, so
+                             none of it depends on a theme's internal part
+                             names. -->
+                        <ItemsControl DockPanel.Dock="Right" Margin="8,0,0,0"
+                                      VerticalAlignment="Bottom"
+                                      IsVisible="{Binding HasSeveralMeshes}"
+                                      ItemsSource="{Binding TabGroupOptions}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="3" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:TabGroupOption">
-                                    <StackPanel Orientation="Horizontal" Spacing="4">
-                                        <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
-                                        <Ellipse Width="6" Height="6" VerticalAlignment="Center"
-                                                 IsVisible="{Binding NeedsAttention}"
-                                                 Fill="{DynamicResource BrushOverridden}" />
-                                    </StackPanel>
+                                    <Border Classes="meshTab" Cursor="Hand"
+                                            Classes.selected="{Binding IsSelected}"
+                                            PointerPressed="OnMeshTabPressed"
+                                            ToolTip.Tip="Show this mesh's channels and conversations">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <TextBlock Text="{Binding Label}" FontSize="11"
+                                                       VerticalAlignment="Center" />
+                                            <Ellipse Width="6" Height="6" VerticalAlignment="Center"
+                                                     IsVisible="{Binding NeedsAttention}"
+                                                     Fill="{DynamicResource BrushOverridden}" />
+                                        </StackPanel>
+                                    </Border>
                                 </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <TextBlock Text="Channels" FontWeight="Bold" Margin="4,0,0,0" VerticalAlignment="Center" />
                     </DockPanel>
 

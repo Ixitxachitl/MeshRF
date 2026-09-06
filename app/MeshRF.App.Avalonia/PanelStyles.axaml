@@ -145,6 +145,25 @@
         <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
     </Style>
 
+    <!-- The mesh tabs above the channel strip. Painted the way the channel
+         tabs are — panel fill unselected, the page's own fill selected, so
+         the chosen one reads as continuous with what is below it — but as
+         plain borders carrying the app's own classes, which keeps them clear
+         of any theme's internal part names. -->
+    <Style Selector="Border.meshTab">
+        <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4,4,0,0" />
+        <Setter Property="Padding" Value="8,2" />
+    </Style>
+    <Style Selector="Border.meshTab:pointerover">
+        <Setter Property="Background" Value="{DynamicResource BrushHover}" />
+    </Style>
+    <Style Selector="Border.meshTab.selected">
+        <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
+    </Style>
+
     <!-- Compose byte counter: quiet until the message no longer fits,
          then the same red the app uses for an overridden value. -->
     <Style Selector="TextBlock.byteCount">
