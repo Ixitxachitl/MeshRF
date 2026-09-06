@@ -166,6 +166,47 @@ public class MonitorPlanTests
         Assert.Equal(MonitorPlan.LeftOutReason.IsPrimary, self.Reason);
     }
 
+    /// <summary>
+    /// Hand-setting the primary's SF, bandwidth and coding rate to what a
+    /// preset already is does not make it a different mesh. Treating it as
+    /// one put a second demodulator on the identical channel, so every packet
+    /// there decoded twice — two sightings, two log lines, two acks.
+    /// </summary>
+    [Fact]
+    public void CustomSettingsThatStillAmountToAPresetAreThatPresetsMesh()
+    {
+        double longFast = MonitorPlan.DefaultSlotFrequencyMHz(Region.US, LoraPreset.LongFast);
+        // LongFast is SF11 at 250 kHz; typed in by hand rather than picked.
+        var primary = new MonitorPlan.Primary(LoraPreset.LongFast, IsCustom: true,
+                                              Sf: 11, BwHz: 250_000, Cr: 5, longFast);
+        var plan = Build(primary, 10_000_000);
+
+        Assert.Single(plan.Listeners, l => Math.Abs(l.FreqMHz - longFast) < 1e-6);
+        var self = Assert.Single(plan.LeftOut, x => x.Preset == LoraPreset.LongFast);
+        Assert.Equal(MonitorPlan.LeftOutReason.IsPrimary, self.Reason);
+    }
+
+    /// <summary>
+    /// Settings that are genuinely different are a different mesh, even on
+    /// the same frequency: nothing on one can hear the other, so the preset
+    /// is still worth listening for.
+    /// </summary>
+    [Fact]
+    public void CustomSettingsThatDifferLeaveThePresetWorthListeningFor()
+    {
+        double longFast = MonitorPlan.DefaultSlotFrequencyMHz(Region.US, LoraPreset.LongFast);
+        // SF12 on LongFast's channel: same air, different modem.
+        var primary = new MonitorPlan.Primary(LoraPreset.LongFast, IsCustom: true,
+                                              Sf: 12, BwHz: 250_000, Cr: 5, longFast);
+        var plan = Build(primary, 10_000_000);
+
+        var here = plan.Listeners.Where(l => Math.Abs(l.FreqMHz - longFast) < 1e-6).ToList();
+        Assert.Equal(2, here.Count);
+        Assert.Contains(here, l => l.IsPrimary && l.Sf == 12);
+        Assert.Contains(here, l => l.Preset == LoraPreset.LongFast && l.Sf == 11);
+        Assert.DoesNotContain(plan.LeftOut, x => x.Reason == MonitorPlan.LeftOutReason.IsPrimary);
+    }
+
     /// <summary>The same preset on another slot is a different mesh, so it
     /// is still listened for.</summary>
     [Fact]

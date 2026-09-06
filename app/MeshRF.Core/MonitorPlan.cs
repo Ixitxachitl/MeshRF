@@ -35,7 +35,8 @@ public static class MonitorPlan
         OutOfRange,
         /// <summary>The region cannot hold the preset's bandwidth.</summary>
         Unsupported,
-        /// <summary>It is the primary's own channel.</summary>
+        /// <summary>The primary is already receiving that channel, on those
+        /// modem settings, so it is the same mesh.</summary>
         IsPrimary,
     }
 
@@ -125,10 +126,15 @@ public static class MonitorPlan
             double f = DefaultSlotFrequencyMHz(region, preset);
             var p = LoraParamsHelper.FromPreset(preset, wide);
             uint bw = (uint)Math.Round(p.BwKhz * 1000.0);
-            // The primary's own channel, on its own preset, is already listened
-            // for. The same preset on another slot is a different mesh and is
-            // still a candidate.
-            if (!primary.IsCustom && preset == primary.Preset && Math.Abs(f - primary.FreqMHz) < 1e-6)
+            // A mesh is a frequency and a way of demodulating it, so the
+            // preset the primary is already receiving is the one whose
+            // channel and modem settings match — not the one whose name it
+            // happens to carry. Hand-set parameters that still amount to
+            // LongFast are still LongFast, and listening for it again would
+            // put a second demodulator on the identical channel and decode
+            // every packet there twice. The same preset on another slot is a
+            // different mesh and is still a candidate.
+            if (Math.Abs(f - primary.FreqMHz) < 1e-6 && p.Sf == primary.Sf && bw == primary.BwHz)
             {
                 leftOut.Add(new LeftOut(preset, f, LeftOutReason.IsPrimary, null));
                 continue;
