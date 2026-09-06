@@ -297,7 +297,8 @@ public partial class RadioViewModel
         // No log line: the router already logs every packet it handles,
         // whatever its origin, and duplicating that here buries real RF
         // activity under MQTT volume.
-        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null);
+        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null,
+                                       PrimarySource() with { FromDownlink = true });
     }
 
     private void HandleMqttJsonMessageReceived(string topic, string json)

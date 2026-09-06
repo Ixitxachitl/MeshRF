@@ -10,13 +10,25 @@ public enum ChannelRole : byte
 }
 
 /// <summary>
-/// Mirrors firmware <c>ChannelSettings</c> + <c>Channel</c>. A device tracks
-/// up to 8 channels; index 0 is the primary, the rest are secondaries.
+/// Mirrors firmware <c>ChannelSettings</c> + <c>Channel</c>. On the air a
+/// channel is its name and key, folded into the one hash byte a packet
+/// carries; the index is only this app's ordering of its list.
 /// </summary>
 public sealed class ChannelConfig
 {
-    /// <summary>0..7. Slot 0 = primary.</summary>
+    /// <summary>Position in the list the channel belongs to. An ordering,
+    /// nothing more: the firmware's own index is arbitrary and never leaves
+    /// the device, so there is no cap.</summary>
     public int Index { get; set; }
+
+    /// <summary>
+    /// Which list this channel is in: empty for the primary's list, the list
+    /// the toolbar configuration transmits and decodes with; otherwise the
+    /// name of the preset whose listener owns it. A packet heard on a
+    /// listener is tried against that listener's list alone, and a message
+    /// sent from a channel goes out on the preset that owns it.
+    /// </summary>
+    public string Preset { get; set; } = string.Empty;
 
     /// <summary>
     /// Display name. Meshtastic clients use this as the "name" field of the

@@ -213,9 +213,66 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private static readonly uint[] RtlSdrSampleRatesHz =
         [960_000, 1_024_000, 1_200_000, 1_440_000, 1_600_000, 1_800_000, 1_920_000,
          2_048_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000];
-    private const uint HackRfMaxSelectableRateHz = 20_000_000;
+    // The native side runs the HackRF no faster than 16 MS/s; offering 20
+    // would silently get 16, and a listener planned against the wider capture
+    // would sit outside the real one.
+    private const uint HackRfMaxSelectableRateHz = 16_000_000;
     private const uint RtlSdrDecodeSafeMaxRateHz = 2_560_000;
     private bool _suppressSampleRateUpdate;
+
+    // -- Listening on several presets at once -------------------------------
+
+    /// <summary>Whether the SDR also listens for every other preset whose
+    /// default-slot channel fits the capture. See <see cref="MonitorPlan"/>.</summary>
+    [ObservableProperty]
+    private bool _multiPresetEnabled;
+
+    /// <summary>Presets unticked in the Monitors window, by name.</summary>
+    public List<string> MonitorExcludedPresets { get; private set; } = new();
+
+    /// <summary>Capture centre relative to the primary, in kHz; null lets the
+    /// plan choose.</summary>
+    [ObservableProperty]
+    private double? _monitorCenterOffsetKHz;
+
+    partial void OnMultiPresetEnabledChanged(bool value)
+    {
+        SaveSettings();
+        RefreshPlannedSpectrumCenter();
+    }
+
+    partial void OnMonitorCenterOffsetKHzChanged(double? value)
+    {
+        SaveSettings();
+        RefreshPlannedSpectrumCenter();
+    }
+
+    /// <summary>The Monitors window edits the exclusion list in place and
+    /// says so here.</summary>
+    public void MonitorExclusionsChanged()
+    {
+        SaveSettings();
+        RefreshPlannedSpectrumCenter();
+    }
+
+    /// <summary>What the receiver would be started with right now.</summary>
+    public MonitorPlan.Result BuildMonitorPlan()
+    {
+        var primary = new MonitorPlan.Primary(SelectedPreset, IsCustomLoraParams, OverrideSf,
+            (uint)Math.Round(OverrideBwKhz * 1000.0), OverrideCr, CenterFreqMHz);
+        uint rate = SelectedRxSampleRate?.Hz ?? 0;
+        var rates = SampleRateOptions.Select(o => o.Hz).ToList();
+        return MonitorPlan.Build(SelectedRegion, primary, SelectedDevice, rate, rates,
+                                 MultiPresetEnabled, MonitorExcludedPresets, MonitorCenterOffsetKHz);
+    }
+
+    /// <summary>While stopped, the axis shows where the capture will be
+    /// centred, which with several listeners need not be the primary.</summary>
+    private void RefreshPlannedSpectrumCenter()
+    {
+        if (_core is null || IsRunning || !_settingsLoaded) return;
+        SpectrumCenterHz = BuildMonitorPlan().DeviceCenterMHz * 1_000_000.0;
+    }
 
     [ObservableProperty]
     private IReadOnlyList<SampleRateOption> _sampleRateOptions = Array.Empty<SampleRateOption>();
@@ -962,6 +1019,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedOverrideCr = _settings.OverrideCr;
         var savedSlot = _settings.Slot;
         var savedCenterFreqMHz = _settings.CenterFreqMHz;
+        var savedMultiPresetEnabled = _settings.MultiPresetEnabled;
+        var savedMonitorExcluded = _settings.MonitorExcludedPresets.ToList();
+        var savedMonitorCenterOffsetKHz = _settings.MonitorCenterOffsetKHz;
         var savedLnaGainDb = _settings.LnaGainDb;
         var savedVgaGainDb = _settings.VgaGainDb;
         var savedAmpEnable = _settings.AmpEnable;
@@ -1094,9 +1154,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Relaying is opt-in via the Routing checkbox; the scheduler is only
         // consulted when RoutingRelayEnabled is on (see RelayContextProvider).
         _rxHost.RelayContextProvider = BuildRelayContext;
+        _rxHost.TargetForSource = TargetForSource;
+        _rxHost.IsPresetListening = name => _rxSources.Any(s => !s.IsPrimary && s.PresetName == name);
         _rxHost.RelayScheduler = new RelayScheduler
         {
-            Transmit = frame => TransmitFrameAsync(frame),
+            Transmit = (frame, target) => TransmitFrameAsync(frame, target),
             // The scheduler logs from a thread-pool continuation once its
             // contention delay elapses, and _rxHost.Log mutates LogLines, which
             // is bound to a ListBox — so it has to be marshalled.
@@ -1166,6 +1228,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (savedSlot > 0) SelectedSlot = savedSlot;
         if (savedCenterFreqMHz > 0)
             CenterFreqMHz = savedCenterFreqMHz;
+        MultiPresetEnabled = savedMultiPresetEnabled;
+        MonitorExcludedPresets = savedMonitorExcluded;
+        MonitorCenterOffsetKHz = savedMonitorCenterOffsetKHz;
 
         LnaGainDb = savedLnaGainDb;
         VgaGainDb = savedVgaGainDb;
@@ -1296,6 +1361,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // generated setter can no-op if CenterFreqMHz never actually
         // changed value during the loads above).
         SpectrumCenterHz = CenterFreqMHz * 1_000_000.0;
+        RefreshPlannedSpectrumCenter();
 
         try
         {
@@ -1336,15 +1402,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             ApplyGains();
             ApplyTxAncillary();
             RefreshSampleRateSelection(SelectedDevice, GetSavedRxSampleRateHz(SelectedDevice));
-            _rxHost.TransmitAutoReply = frame =>
+            _rxHost.TransmitAutoReply = (frame, source) =>
             {
                 // An auto-reply only exists because a frame arrived, so RX is
                 // normally up by construction — but this is a direct call past
                 // TransmitFrameAsync, so it carries the same gate explicitly
                 // rather than relying on that.
                 if (!IsRunning) return;
-                var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-                try { _core.Transmit(SelectedPreset, hz, frame, TxGainDb, TxAmpEnable); }
+                var target = TargetForSource(source);
+                try { _core.Transmit(target.Preset, target.FreqHz, frame, TxGainDb, TxAmpEnable); }
                 catch { /* best-effort auto-reply */ }
             };
         }
@@ -1403,7 +1469,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         DrainDemodEvents();
     }
 
-    private void DecodePayloadIfPossible(string ev)
+    private void DecodePayloadIfPossible(string ev, int listener)
     {
         if (ev.IndexOf("payload", StringComparison.Ordinal) < 0) return;
         var m = PayloadLineRegex.Match(ev);
@@ -1420,7 +1486,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         // Counted before the decode: channel utilisation is about occupied air,
         // so a frame that turns out not to be for us still used the channel.
-        RecordAirtime(m.Groups["hex"].Value.Length / 2, isTx: false);
+        // The primary's channel only: it is what device metrics report on.
+        if (listener == 0) RecordAirtime(m.Groups["hex"].Value.Length / 2, isTx: false);
 
         var frame = HexToBytes(m.Groups["hex"].Value);
         if (frame.Length < MeshHeader.Size)
@@ -1434,11 +1501,17 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             return;
         }
 
-        float? packetRssiDbm = float.IsNegativeInfinity(RssiDbfs) ? null : RssiDbfs;
-        // SNR comes from the preamble that opened this frame, matching
-        // MeshRF.App — it was being dropped entirely before.
-        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: _lastPreamblePeakDb, packetRssiDbm: packetRssiDbm);
-        _lastPreamblePeakDb = null;
+        // With one listener the capture is the channel, and the wideband
+        // figure is the one the app has always shown. With several, a
+        // listener's channel is a sliver of the capture, so its level is
+        // taken after its channel filter.
+        float rssi = _rxSources.Length > 1 && _core is not null
+            ? _core.GetListenerSignalStats(listener).RssiDbfs
+            : RssiDbfs;
+        float? packetRssiDbm = float.IsNegativeInfinity(rssi) ? null : rssi;
+        // SNR comes from the preamble that opened this frame on this listener.
+        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: TakePreamblePeak(listener),
+                                       packetRssiDbm: packetRssiDbm, SourceFor(listener));
     }
 
     /// <summary>Reports a frame the demodulator delivered that never reaches
@@ -1474,18 +1547,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         {
             _core.SetRxDevice(SelectedDevice);
             ApplyGains();
-            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
             try
             {
-                if (IsCustomLoraParams)
-                {
-                    var bwHz = (uint)Math.Round(OverrideBwKhz * 1000.0);
-                    _core.StartRxParams(OverrideSf, bwHz, OverrideCr, hz);
-                }
-                else
-                {
-                    _core.StartRx(SelectedPreset, hz);
-                }
+                StartListeners(BuildMonitorPlan());
                 // Only once the radio actually started: uptime should say how
                 // long we have been listening, not how long ago the button was
                 // pressed on a start that threw.
@@ -1500,6 +1564,57 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     }
 
     private bool CanToggleRx() => _core is not null;
+
+    /// <summary>
+    /// Starts the receiver on the plan's listeners. One listener is the
+    /// single-channel start the receiver has always done; more is one capture
+    /// centred where the plan says, with a chain per channel.
+    /// </summary>
+    private void StartListeners(MonitorPlan.Result plan)
+    {
+        if (_core is null) return;
+        var sources = new List<RxSource>();
+        foreach (var l in plan.Listeners)
+            sources.Add(new RxSource(sources.Count, l.Preset, l.IsCustom, l.FreqMHz));
+
+        if (plan.Listeners.Count == 1)
+        {
+            var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+            if (IsCustomLoraParams)
+            {
+                var bwHz = (uint)Math.Round(OverrideBwKhz * 1000.0);
+                _core.StartRxParams(OverrideSf, bwHz, OverrideCr, hz);
+            }
+            else
+            {
+                _core.StartRx(SelectedPreset, hz);
+            }
+        }
+        else
+        {
+            // Each secondary preset decodes and sends with a list of its own,
+            // seeded with its default channel the first time it is listened
+            // on.
+            foreach (var s in sources.Skip(1)) _rxHost.EnsureChannelList(s.PresetName);
+            var specs = new List<RxListenerSpec>();
+            foreach (var l in plan.Listeners)
+            {
+                var hz = (ulong)Math.Round(l.FreqMHz * 1_000_000.0);
+                specs.Add(l.IsCustom
+                    ? new RxListenerSpec(SelectedPreset, hz, l.Sf, l.BwHz, l.Cr)
+                    : new RxListenerSpec(l.Preset!.Value, hz));
+            }
+            _core.StartRxMulti(specs, (ulong)Math.Round(plan.DeviceCenterMHz * 1_000_000.0));
+            _rxHost.Log($"listening on {sources.Count} presets: " +
+                        string.Join(", ", sources.Select(s => s.Tag)) +
+                        $"; capture centred at {plan.DeviceCenterMHz:0.000} MHz");
+        }
+
+        _rxSources = sources.ToArray();
+        lock (_rxBusyLock) _rxBusyUntilUtc.Clear();
+        _lastPreamblePeakDb.Clear();
+        SpectrumCenterHz = plan.DeviceCenterMHz * 1_000_000.0;
+    }
 
     private void ApplyGains()
     {
@@ -1880,6 +1995,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (!_suppressRetune) SaveSettings();
         SpectrumCenterHz = value * 1_000_000.0;
+        RefreshPlannedSpectrumCenter();
         // Off the default slot there is no shared channel to be held back for.
         RefreshEffectiveSettings();
     }
@@ -2214,6 +2330,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.CenterFreqMHz = CenterFreqMHz;
         _settings.Region = SelectedRegion.ToString();
         _settings.Slot = SelectedSlot;
+        _settings.MultiPresetEnabled = MultiPresetEnabled;
+        _settings.MonitorExcludedPresets = MonitorExcludedPresets.ToList();
+        _settings.MonitorCenterOffsetKHz = MonitorCenterOffsetKHz;
         _settings.OverrideSf = OverrideSf;
         _settings.OverrideBwHz = (uint)Math.Round(OverrideBwKhz * 1000.0);
         _settings.OverrideCr = OverrideCr;
@@ -2321,7 +2440,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// deferred until the channel is idle. Never call Core.Transmit directly —
     /// concurrent sends race on the shared native handle, and keying up during
     /// a reception collides with the traffic being received.</summary>
-    private async Task<bool> TransmitFrameAsync(byte[] frame)
+    private Task<bool> TransmitFrameAsync(byte[] frame) => TransmitFrameAsync(frame, TargetForFrame(frame));
+
+    /// <param name="target">What the frame goes out on. The overload above
+    /// reads it off the frame; callers answering a packet name the listener
+    /// it arrived on.</param>
+    private async Task<bool> TransmitFrameAsync(byte[] frame, TxTarget target)
     {
         if (_core is null) return false;
         // Refused here as well as in the core so the reason is a sentence rather
@@ -2350,10 +2474,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                              "a stick built for another band can be damaged by transmitting here.";
                 return false;
             }
-            if (!ChannelPlan.Contains(SelectedRegion, CenterFreqMHz))
+            if (!ChannelPlan.Contains(SelectedRegion, target.FreqMHz))
             {
                 var r = ChannelPlan.Range(SelectedRegion);
-                StatusText = $"{CenterFreqMHz:0.###} MHz is outside {SelectedRegion} " +
+                StatusText = $"{target.FreqMHz:0.###} MHz is outside {SelectedRegion} " +
                              $"({r.FreqStartMHz:0.###}–{r.FreqEndMHz:0.###} MHz) — " +
                              "pick a slot, or change region if that's really your band.";
                 return false;
@@ -2365,14 +2489,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
-        var preset = SelectedPreset; var gain = TxGainDb; var amp = TxAmpEnable;
+        var hz = target.FreqHz;
+        var preset = target.Preset; var gain = TxGainDb; var amp = TxAmpEnable;
 
         await _txSemaphore.WaitAsync().ConfigureAwait(false);
         bool sent;
         try
         {
-            await WaitForTxOpportunityAsync().ConfigureAwait(false);
+            await WaitForTxOpportunityAsync(target.Listener).ConfigureAwait(false);
             sent = await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
                              .ConfigureAwait(true);
         }
@@ -2415,8 +2539,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             case ConversationTabViewModel convoTab:
                 messages = convoTab.Messages;
                 to = convoTab.NodeNum;
-                // The channel is only needed for the legacy fallback.
-                channel = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault()?.Config;
+                // Only needed for the legacy, channel-sealed fallback: the
+                // Primary-role channel of the list the peer is spoken to on.
+                channel = _rxHost.ChannelForNode(to, null);
                 break;
             default:
                 return;
@@ -2484,7 +2609,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         uint replyId,
         string replyContext,
         ObservableCollection<ChannelMessage>? messages,
-        byte? hopLimit = null)
+        byte? hopLimit = null,
+        TxTarget? target = null)
     {
         if (_core is null || text.Length == 0) return false;
 
@@ -2516,7 +2642,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 replyId: replyId, okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        bool ok = await TransmitFrameAsync(frame);
+        bool ok = await (target is { } named ? TransmitFrameAsync(frame, named) : TransmitFrameAsync(frame));
         if (!ok)
         {
             StatusText = "Failed to transmit (no TX-capable device selected?).";
@@ -2669,10 +2795,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         {
             case ChannelTabViewModel chanTab: channel = chanTab.Config; break;
             case ConversationTabViewModel convoTab:
-                var primary = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
-                if (primary is null) return;
-                channel = primary.Config;
                 to = convoTab.NodeNum;
+                if (_rxHost.ChannelForNode(to, null) is not { } peerChannel) return;
+                channel = peerChannel;
                 break;
             default: return;
         }
@@ -2694,7 +2819,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void AddChannel() => SelectedTab = _rxHost.AddChannel();
+    // Into the list being looked at, so a channel added while on a LongFast
+    // tab joins the LongFast list.
+    private void AddChannel() =>
+        SelectedTab = _rxHost.AddChannel((SelectedTab as ChannelTabViewModel)?.Config.Preset ?? string.Empty);
 
     public bool CanRemoveSelectedChannel => SelectedTab is ChannelTabViewModel { Config.Role: not ChannelRole.Primary };
 
@@ -2826,7 +2954,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task RequestNodeInfo(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
-        var channel = PrimaryChannel();
+        var channel = _rxHost.ChannelForNode(node.NodeNum, null);
         if (channel is null) return;
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeNodeInfoRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
@@ -2840,7 +2968,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task ExchangeNodeInfo(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
-        var channel = PrimaryChannel();
+        var channel = _rxHost.ChannelForNode(node.NodeNum, null);
         if (channel is null) return;
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, packetId,
@@ -2879,6 +3007,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public async Task RequestLocationOnChannelAsync(NodeRecord? node, ChannelConfig? channel)
     {
         if (!CanRequestLocation(node) || node is null || channel is null) return;
+        // The named channel in the list the node is spoken to on, which is
+        // this one when it was heard on the primary.
+        channel = _rxHost.ChannelForNode(node.NodeNum, channel.Name) ?? channel;
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodePositionRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
             hopLimit: (byte)HopLimit);
@@ -2913,7 +3044,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task RequestTelemetry(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
-        var channel = PrimaryChannel();
+        var channel = _rxHost.ChannelForNode(node.NodeNum, null);
         if (channel is null) return;
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeTelemetryRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
@@ -2969,7 +3100,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public async Task SendNodeInfoOnChannelAsync(ChannelConfig? channel, uint? to, bool wantReplies = false)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        channel ??= PrimaryChannel();
+        channel ??= to is { } dest && dest != 0xFFFFFFFFu ? _rxHost.ChannelForNode(dest, null) : PrimaryChannel();
         if (channel is null) return;
         bool wantResponse = wantReplies && RoleDefaults.AllowsRequestingReplies(MyRole);
         var frame = MeshEncoder.EncodeNodeInfo(channel, _rxHost.MyNodeNum, NextPacketId(),
@@ -2989,7 +3120,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public async Task SendPositionOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        channel ??= PrimaryChannel();
+        channel ??= to is { } dest && dest != 0xFFFFFFFFu ? _rxHost.ChannelForNode(dest, null) : PrimaryChannel();
         if (channel is null) return;
         if (channel.EffectivePositionPrecision == 0) { StatusText = "Location sharing is disabled on this channel."; return; }
         if (!double.TryParse(HomeLatitudeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) ||
@@ -3027,7 +3158,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public async Task SendDeviceMetricsOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        channel ??= PrimaryChannel();
+        channel ??= to is { } dest && dest != 0xFFFFFFFFu ? _rxHost.ChannelForNode(dest, null) : PrimaryChannel();
         if (channel is null) return;
         _airtime.Compute(out float channelUtil, out float airUtilTx);
         uint uptime = UptimeSeconds;

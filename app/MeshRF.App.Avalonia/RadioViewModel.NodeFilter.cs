@@ -28,6 +28,10 @@ public partial class RadioViewModel
     public IReadOnlyList<string> NodeFavoriteFilterOptions { get; } = ["Show all", "Only favorites", "Hide favorites"];
     public IReadOnlyList<string> NodeMqttFilterOptions { get; } = ["Any", "Hide via MQTT", "Only via MQTT"];
     public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
+    /// <summary>Which listener's settings a node was last heard on: any, a
+    /// preset, or the custom-parameter primary.</summary>
+    public IReadOnlyList<string> NodeHeardOnFilterOptions { get; } =
+        ["Any", .. Enum.GetNames<LoraPreset>(), MeshRF.Mesh.HeardOn.Custom];
 
     /// <summary>The filtered view bound to the node grid. <see cref="Nodes"/>
     /// stays the unfiltered source of truth that the RX host updates.</summary>
@@ -41,6 +45,7 @@ public partial class RadioViewModel
 
     [ObservableProperty] private string _nodeSearchText = string.Empty;
     [ObservableProperty] private string _nodeHopsFilter = "Any";
+    [ObservableProperty] private string _nodeHeardOnFilter = "Any";
     [ObservableProperty] private string _nodeKeyFilter = "Any";
     [ObservableProperty] private string _nodeSignedFilter = "Show all";
     [ObservableProperty] private string _nodeLocationFilter = "Any";
@@ -139,6 +144,7 @@ public partial class RadioViewModel
 
     partial void OnNodeSearchTextChanged(string value) => OnFilterChanged();
     partial void OnNodeHopsFilterChanged(string value) => OnFilterChanged();
+    partial void OnNodeHeardOnFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeKeyFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeSignedFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeLocationFilterChanged(string value) => OnFilterChanged();
@@ -176,6 +182,7 @@ public partial class RadioViewModel
     {
         NodeSearchText = string.Empty;
         NodeHopsFilter = "Any";
+        NodeHeardOnFilter = "Any";
         NodeKeyFilter = "Any";
         NodeSignedFilter = "Show all";
         NodeLocationFilter = "Any";
@@ -233,6 +240,10 @@ public partial class RadioViewModel
             "≤5 hops" => 5, "≤6 hops" => 6, _ => -1,
         };
         if (maxHops >= 0 && (n.HopsAway is null || n.HopsAway > maxHops)) return false;
+
+        if (NodeHeardOnFilter != "Any" &&
+            !string.Equals(n.HeardOnPreset, NodeHeardOnFilter, StringComparison.Ordinal))
+            return false;
 
         switch (NodeKeyFilter)
         {
@@ -342,6 +353,7 @@ public partial class RadioViewModel
     {
         NodeSearchText = s.NodeFilterSearch ?? string.Empty;
         if (NodeHopsFilterOptions.Contains(s.NodeFilterHops)) NodeHopsFilter = s.NodeFilterHops;
+        if (NodeHeardOnFilterOptions.Contains(s.NodeFilterHeardOn)) NodeHeardOnFilter = s.NodeFilterHeardOn;
         if (NodeKeyFilterOptions.Contains(s.NodeFilterKey)) NodeKeyFilter = s.NodeFilterKey;
         if (NodeSignedFilterOptions.Contains(s.NodeFilterSigned)) NodeSignedFilter = s.NodeFilterSigned;
         if (NodeLocationFilterOptions.Contains(s.NodeFilterLocation)) NodeLocationFilter = s.NodeFilterLocation;
@@ -377,6 +389,7 @@ public partial class RadioViewModel
     {
         s.NodeFilterSearch = NodeSearchText;
         s.NodeFilterHops = NodeHopsFilter;
+        s.NodeFilterHeardOn = NodeHeardOnFilter;
         s.NodeFilterKey = NodeKeyFilter;
         s.NodeFilterSigned = NodeSignedFilter;
         s.NodeFilterLocation = NodeLocationFilter;

@@ -47,6 +47,23 @@ public sealed class AppSettings
     /// <summary>Requested RTL-SDR RX device sample rate in Hz.</summary>
     public uint RtlSdrRxSampleRateHz { get; set; } = 2_400_000;
 
+    // -- Listening on several presets at once ---------------------------------
+
+    /// <summary>Whether the SDR also listens for every other preset whose
+    /// default-slot channel fits inside the capture, each a full participant
+    /// on its own mesh. Off by default: it widens the capture, costs CPU per
+    /// preset, and turns one node into several.</summary>
+    public bool MultiPresetEnabled { get; set; }
+
+    /// <summary>Presets the user has unticked, by name. Everything else the
+    /// region supports and the capture reaches is listened for.</summary>
+    public List<string> MonitorExcludedPresets { get; set; } = new();
+
+    /// <summary>Where the capture is centred relative to the primary, in
+    /// kHz. Null lets the plan slide the window to take in the most presets;
+    /// a value is clamped so the primary stays inside.</summary>
+    public double? MonitorCenterOffsetKHz { get; set; }
+
     /// <summary>Selected TX radio backend: "HackRf", "Sx1262" or "Null".
     /// RTL-SDR cannot transmit.</summary>
     public string TxDeviceKind { get; set; } = "HackRf";
@@ -477,6 +494,9 @@ public sealed class AppSettings
 
     public string NodeFilterSearch { get; set; } = string.Empty;
     public string NodeFilterHops { get; set; } = "Any";
+    /// <summary>"Any", a preset name, or "Custom": which listener's settings a
+    /// node was last heard on.</summary>
+    public string NodeFilterHeardOn { get; set; } = "Any";
     public string NodeFilterKey { get; set; } = "Any";
     public string NodeFilterSigned { get; set; } = "Show all";
     public string NodeFilterLocation { get; set; } = "Any";

@@ -31,8 +31,10 @@ public partial class RadioViewModel
         if (dragged is null || target is null || ReferenceEquals(dragged, target))
             return false;
 
+        // Within one list only: a channel's list is which mesh it is on.
         if (dragged is ChannelTabViewModel dragChannel && target is ChannelTabViewModel targetChannel)
-            return dragChannel.Config.Role != ChannelRole.Primary &&
+            return dragChannel.Config.Preset == targetChannel.Config.Preset &&
+                   dragChannel.Config.Role != ChannelRole.Primary &&
                    targetChannel.Config.Role != ChannelRole.Primary;
 
         return dragged is ConversationTabViewModel && target is ConversationTabViewModel;
@@ -81,8 +83,9 @@ public partial class RadioViewModel
         if (dragged.Config.Role == ChannelRole.Primary || target.Config.Role == ChannelRole.Primary)
             return false;
 
+        var listName = dragged.Config.Preset;
         var secondaries = Tabs.OfType<ChannelTabViewModel>()
-            .Where(t => t.Config.Role != ChannelRole.Primary)
+            .Where(t => t.Config.Preset == listName && t.Config.Role != ChannelRole.Primary)
             .OrderBy(t => t.Config.Index)
             .ToList();
         if (secondaries.Count < 2) return false;
@@ -98,7 +101,7 @@ public partial class RadioViewModel
 
         // Clear first: the store is keyed by index, so writing the new mapping
         // in place would collide with rows not yet moved.
-        foreach (var idx in availableIndices) _rxHost.DeleteChannelIndex(idx);
+        foreach (var idx in availableIndices) _rxHost.DeleteChannelIndex(listName, idx);
         for (int i = 0; i < secondaries.Count; i++)
         {
             secondaries[i].Config.Index = availableIndices[i];
@@ -114,8 +117,12 @@ public partial class RadioViewModel
     /// indices, leaving the conversation tabs after them untouched.</summary>
     private void ReorderChannelTabs()
     {
+        // The primary's list first, then each preset's list, each with its
+        // Primary-role channel ahead of the rest.
         var ordered = Tabs.OfType<ChannelTabViewModel>()
-            .OrderBy(t => t.Config.Role == ChannelRole.Primary ? 0 : 1)
+            .OrderBy(t => t.Config.Preset.Length == 0 ? 0 : 1)
+            .ThenBy(t => t.Config.Preset, StringComparer.Ordinal)
+            .ThenBy(t => t.Config.Role == ChannelRole.Primary ? 0 : 1)
             .ThenBy(t => t.Config.Index)
             .ToList();
 

@@ -33,6 +33,31 @@ MRF_API int  MRF_CALL mrf_core_start_rx_params(mrf_core_t* core,
                                                uint32_t bw_hz,
                                                uint8_t cr,
                                                uint64_t center_freq_hz);
+
+// One listener for mrf_core_start_rx_multi: a preset (mrf::modem::Preset
+// ordinal), or explicit parameters when sf is non-zero, on a frequency.
+typedef struct mrf_rx_listener_t {
+    int32_t  preset;
+    uint32_t sf;        // 0 = take the preset; else 7..12, with bw_hz and cr
+    uint32_t bw_hz;
+    uint32_t cr;        // 5..8 for 4/N
+    uint64_t center_freq_hz;
+} mrf_rx_listener_t;
+
+// Start RX on several listeners off one capture centred on device_center_hz.
+// The radio runs at a rate wide enough for every listener, and each
+// listener's channel is mixed down, decimated and demodulated on a worker
+// of its own. Listener 0 is the primary: the packet spectrogram follows its
+// frames, and it is what a hardware modem receives, since an SX1262 takes
+// one channel at a time and refuses more. Events carry the listener index;
+// see mrf_core_pull_event_ex. Returns 0 on success, -1 on null, -2 when the
+// core refused (no device, no supported rate covers the set, a hardware
+// modem asked for more than one), -3 on parameters out of range.
+MRF_API int MRF_CALL mrf_core_start_rx_multi(mrf_core_t* core,
+                                             const mrf_rx_listener_t* listeners,
+                                             uint32_t count,
+                                             uint64_t device_center_hz);
+
 MRF_API void MRF_CALL mrf_core_stop(mrf_core_t* core);
 MRF_API int  MRF_CALL mrf_core_is_running(const mrf_core_t* core);
 
@@ -154,6 +179,15 @@ typedef struct mrf_signal_stats_t {
 MRF_API void     MRF_CALL mrf_core_get_signal_stats(const mrf_core_t* core,
                                                     mrf_signal_stats_t* out);
 
+// Listeners in the current configuration (1 after a single-listener start),
+// and the signal level inside one listener's channel after its channel
+// filter, where mrf_core_get_signal_stats covers the whole capture. An index
+// past the count fills a silent snapshot.
+MRF_API uint32_t MRF_CALL mrf_core_listener_count(const mrf_core_t* core);
+MRF_API void     MRF_CALL mrf_core_get_listener_signal_stats(const mrf_core_t* core,
+                                                             uint32_t index,
+                                                             mrf_signal_stats_t* out);
+
 // Returns the spectrum size in bins (0 if RX is not running). The caller
 // should pre-allocate a float[spectrum_size] buffer.
 MRF_API uint32_t MRF_CALL mrf_core_spectrum_size(const mrf_core_t* core);
@@ -163,9 +197,10 @@ MRF_API uint32_t MRF_CALL mrf_core_spectrum_size(const mrf_core_t* core);
 // frequency.
 MRF_API uint32_t MRF_CALL mrf_core_sample_rate_hz(const mrf_core_t* core);
 
-// Returns the actual center frequency of the displayed spectrum in Hz. Because
-// the radio is offset-tuned, this equals the user channel frequency plus the
-// LO offset (~500 kHz). Use this for frequency-axis labels. 0 if not running.
+// Returns the centre frequency of the displayed spectrum in Hz: what the
+// radio is tuned to, which is the channel after a single-listener start and
+// the device centre after a multi-listener one. Use this for frequency-axis
+// labels. 0 if not running.
 MRF_API uint64_t MRF_CALL mrf_core_spectrum_center_hz(const mrf_core_t* core);
 
 // Copies the latest dBFS spectrum frame into out. Returns the number of bins
@@ -232,6 +267,14 @@ MRF_API uint32_t MRF_CALL mrf_core_get_device_status(const mrf_core_t* core,
 MRF_API uint32_t MRF_CALL mrf_core_pull_event(mrf_core_t* core,
                                               char* buf,
                                               uint32_t capacity);
+
+// As mrf_core_pull_event, also reporting which listener the line is about:
+// its index in the table given to mrf_core_start_rx_multi (0 after a
+// single-listener start), or -1 for the receiver as a whole. May be NULL.
+MRF_API uint32_t MRF_CALL mrf_core_pull_event_ex(mrf_core_t* core,
+                                                 char* buf,
+                                                 uint32_t capacity,
+                                                 int32_t* listener_index);
 
 // Transmit ----------------------------------------------------------------
 // 1 if the selected TX radio backend can transmit (HackRF only), else 0.

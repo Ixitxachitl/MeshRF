@@ -146,6 +146,17 @@ public sealed class NodeRecord : INotifyPropertyChanged
     /// </remarks>
     public byte?  HopsAway    { get; set; }
 
+    /// <summary>What the node was last heard on: a preset name, or
+    /// <see cref="Mesh.HeardOn.Custom"/> for a custom-parameter primary.
+    /// Empty until it has been heard over the air since this was recorded.
+    /// Last sighting wins, like <see cref="HopsAway"/>: a node has one radio
+    /// configuration, and this is the most recent evidence of it.</summary>
+    public string HeardOnPreset { get; set; } = string.Empty;
+
+    /// <summary>The channel centre it was heard on, in MHz, beside
+    /// <see cref="HeardOnPreset"/>; the two together say which mesh.</summary>
+    public double? HeardOnFreqMHz { get; set; }
+
     // The best path this node has been heard over at the geometry it is at
     // now, kept beside the protocol's value rather than replacing it. Cleared
     // whenever either end moves -- see MeshRF.Mesh.Directness.

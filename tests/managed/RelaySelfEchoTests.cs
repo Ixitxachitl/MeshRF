@@ -13,6 +13,9 @@ namespace MeshRF.Tests;
 /// </summary>
 public class RelaySelfEchoTests
 {
+    /// <summary>Where the relays go; the scheduler only carries it through.</summary>
+    private static readonly TxTarget Target = TxTarget.ForPreset(LoraPreset.LongFast, 906_875_000, 0);
+
     private const uint Me = 0xAABBCCDDu;
     private const uint Peer = 0x11223344u;
 
@@ -37,13 +40,13 @@ public class RelaySelfEchoTests
         var sent = new TaskCompletionSource();
         using var scheduler = new RelayScheduler
         {
-            Transmit = _ => { sent.TrySetResult(); return Task.CompletedTask; },
+            Transmit = (_, _) => { sent.TrySetResult(); return Task.CompletedTask; },
         };
 
         var header = Header();
         Assert.False(scheduler.WasRelayedByUs(header.From, header.PacketId));
 
-        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 0);
+        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 0, Target);
         await sent.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.True(scheduler.WasRelayedByUs(header.From, header.PacketId));
@@ -60,11 +63,11 @@ public class RelaySelfEchoTests
         var release = new TaskCompletionSource();
         using var scheduler = new RelayScheduler
         {
-            Transmit = async _ => { started.TrySetResult(); await release.Task; },
+            Transmit = async (_, _) => { started.TrySetResult(); await release.Task; },
         };
 
         var header = Header();
-        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 0);
+        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 0, Target);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.True(scheduler.WasRelayedByUs(header.From, header.PacketId));
@@ -76,10 +79,10 @@ public class RelaySelfEchoTests
     [Fact]
     public void ACanceledRelayIsNotRememberedAsOurs()
     {
-        using var scheduler = new RelayScheduler { Transmit = _ => Task.CompletedTask };
+        using var scheduler = new RelayScheduler { Transmit = (_, _) => Task.CompletedTask };
 
         var header = Header();
-        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 30_000);
+        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 30_000, Target);
         scheduler.HandleDuplicate(Context(), header, snrDb: 0f);
 
         Assert.False(scheduler.WasRelayedByUs(header.From, header.PacketId));
@@ -91,11 +94,11 @@ public class RelaySelfEchoTests
         var sent = new TaskCompletionSource();
         using var scheduler = new RelayScheduler
         {
-            Transmit = _ => { sent.TrySetResult(); return Task.CompletedTask; },
+            Transmit = (_, _) => { sent.TrySetResult(); return Task.CompletedTask; },
         };
 
         var header = Header();
-        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 0);
+        scheduler.Schedule(header, Frame(), nextHopLimit: 2, delayMs: 0, Target);
         await sent.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.False(scheduler.WasRelayedByUs(header.From, header.PacketId + 1));

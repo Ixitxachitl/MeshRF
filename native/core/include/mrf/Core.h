@@ -5,6 +5,7 @@
 #include "mrf/hal/PacketRadio.h"
 #include "mrf/hal/RadioDevice.h"
 #include "mrf/modem/Preset.h"
+#include "mrf/modem/RxListenerChain.h"
 #include "mrf/router/FloodingRouter.h"
 
 #include <cstddef>
@@ -36,8 +37,21 @@ public:
     Core(const Core&) = delete;
     Core& operator=(const Core&) = delete;
 
+    // Receive one channel: the radio is tuned to it and one demodulator runs.
     void start_rx(modem::Preset preset, std::uint64_t center_freq_hz);
     void start_rx(const modem::LoraParams& params, std::uint64_t center_freq_hz);
+
+    // Receive several channels off one capture. The radio is tuned to
+    // `device_center_hz` at a rate wide enough for every listener, and each
+    // listener's channel is mixed down, decimated and demodulated on a
+    // worker of its own. Listener 0 is the primary: the packet spectrogram
+    // follows its frames, and it is what the hardware-modem path receives,
+    // since an SX1262 takes one channel at a time and refuses more. Events
+    // carry the listener index (see pull_event). Throws if no supported
+    // sample rate covers the listeners, or a listener's parameters are ones
+    // the modem cannot take.
+    void start_rx(std::span<const modem::RxListener> listeners,
+                  std::uint64_t device_center_hz);
     void stop();
 
     // Transmit a single Meshtastic frame. `payload` is the on-air byte stream
@@ -172,9 +186,9 @@ public:
     // not running.
     [[nodiscard]] std::uint32_t sample_rate_hz() const noexcept;
 
-    // Actual center frequency of the displayed spectrum in Hz. Because the
-    // radio is offset-tuned by kLoOffsetHz, this equals the user's channel
-    // frequency plus that offset. 0 if not running.
+    // Centre frequency of the displayed spectrum in Hz: what the radio is
+    // tuned to, which is the channel for a single-listener start and the
+    // device centre for a multi-listener one. 0 if not running.
     [[nodiscard]] std::uint64_t spectrum_center_hz() const noexcept;
 
     // Copy the latest dBFS spectrum into `out`. Returns true if a frame is
@@ -214,11 +228,23 @@ public:
 
     [[nodiscard]] CoreSignalStats signal_stats() const noexcept;
 
+    // How many listeners the current configuration has (1 until a multi
+    // start), and the signal level inside one listener's channel after the
+    // channel filter, as opposed to signal_stats(), which covers the whole
+    // capture. Out-of-range indices return a silent snapshot.
+    [[nodiscard]] std::size_t listener_count() const noexcept;
+    [[nodiscard]] CoreSignalStats listener_signal_stats(std::size_t index) const noexcept;
+
     // Pop the next pending demodulator event (UTF-8) into `out`. Returns the
     // number of bytes copied (excluding any NUL), or 0 if no event is queued
     // or `out` is too small. Events are queued by the modem (e.g. "preamble
     // detected: ...") and consumed by the UI for display in the log.
     std::size_t pull_event(std::span<char> out) noexcept;
+
+    // As above, also reporting which listener the line came from: its index
+    // in the table start_rx was given, or -1 for a line about the receiver
+    // as a whole (device notices, overrun warnings).
+    std::size_t pull_event(std::span<char> out, int& listener_index) noexcept;
 
     // Human-readable name of the RX radio backend currently in use
     // (e.g. "HackRF One", or "(none)" if no RX device is selected/available).

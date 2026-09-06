@@ -578,10 +578,15 @@
                                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled" MaxHeight="220">
                                         <Grid Margin="0,6,0,0" ColumnDefinitions="120,*"
-                                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Hops" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="0" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeHopsFilterOptions}" SelectedItem="{Binding NodeHopsFilter}" />
+
+                                            <TextBlock Grid.Row="23" Grid.Column="0" Text="Heard on" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="23" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding NodeHeardOnFilterOptions}" SelectedItem="{Binding NodeHeardOnFilter}"
+                                                      ToolTip.Tip="The preset a node was last heard on" />
 
                                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Key status" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="1" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
@@ -923,6 +928,21 @@
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding HopsDisplay}"
                                                    ToolTip.Tip="{Binding HopsTip}"
+                                                   Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <!-- Which preset the node was last heard on, when the
+                                 receiver listens on several. Empty until it has
+                                 been heard since the column existed. -->
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="HeardOnPreset">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="Heard on" ToolTip.Tip="The preset this node was last heard on, or Custom for a custom-parameter primary. The tooltip on a cell gives the frequency." />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="nodes:NodeRecord">
+                                        <TextBlock Text="{Binding HeardOnPreset}"
+                                                   ToolTip.Tip="{Binding HeardOnFreqMHz, StringFormat='{}{0:0.000} MHz'}"
                                                    Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>

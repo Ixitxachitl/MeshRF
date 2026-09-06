@@ -16,6 +16,7 @@ add_library(mrf_core STATIC
     src/dsp/Spectrum.cpp
     src/dsp/Resampler.cpp
     src/modem/LoraModem.cpp
+    src/modem/RxListenerChain.cpp
     src/modem/ChirpChatRx.cpp
     src/modem/MeshtasticRx.cpp
     src/modem/LoraDecoder.cpp

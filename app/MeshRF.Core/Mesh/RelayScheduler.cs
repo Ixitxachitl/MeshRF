@@ -30,6 +30,10 @@ public sealed class RelayScheduler : IDisposable
         /// PacketHistory.cpp).</summary>
         public required byte ReceivedHopLimit { get; init; }
 
+        /// <summary>What the rebroadcast goes out on: the listener the packet
+        /// arrived on, since a relay stays on the mesh it came from.</summary>
+        public required TxTarget Target { get; init; }
+
         /// <summary>Set once the delay has elapsed and we have committed to
         /// sending. From then on the relay can no longer be called off.</summary>
         public bool Transmitting;
@@ -46,9 +50,9 @@ public sealed class RelayScheduler : IDisposable
     private readonly Queue<ulong> _recentRelayOrder = new();
     private bool _disposed;
 
-    /// <summary>Transmits the prepared frame. Runs off the caller's thread after
-    /// the delay elapses.</summary>
-    public required Func<byte[], Task> Transmit { get; init; }
+    /// <summary>Transmits the prepared frame on the given target. Runs off the
+    /// caller's thread after the delay elapses.</summary>
+    public required Func<byte[], TxTarget, Task> Transmit { get; init; }
 
     public Action<string>? Log { get; init; }
 
@@ -57,14 +61,14 @@ public sealed class RelayScheduler : IDisposable
     /// <summary>Queues a rebroadcast. A packet already scheduled is left alone —
     /// re-arming on every heard copy would push the transmission later each
     /// time and never fire.</summary>
-    public void Schedule(MeshHeader header, byte[] relayFrame, byte nextHopLimit, int delayMs)
+    public void Schedule(MeshHeader header, byte[] relayFrame, byte nextHopLimit, int delayMs, TxTarget target)
     {
         var key = Key(header.From, header.PacketId);
         lock (_lock)
         {
             if (_disposed || _pending.ContainsKey(key)) return;
         }
-        Arm(key, header, relayFrame, nextHopLimit, header.HopLimit, delayMs);
+        Arm(key, header, relayFrame, nextHopLimit, header.HopLimit, delayMs, target);
     }
 
     /// <summary>
@@ -85,12 +89,12 @@ public sealed class RelayScheduler : IDisposable
         }
 
         try { pending.Cts.Cancel(); } catch { /* already completed */ }
-        Arm(key, header, pending.RelayFrame, pending.NextHopLimit, pending.ReceivedHopLimit, delayMs);
+        Arm(key, header, pending.RelayFrame, pending.NextHopLimit, pending.ReceivedHopLimit, delayMs, pending.Target);
         Log?.Invoke($"  relay for packet {header.PacketId:x8} clamped to late window ({delayMs} ms)");
     }
 
     private void Arm(ulong key, MeshHeader header, byte[] relayFrame, byte nextHopLimit,
-                     byte receivedHopLimit, int delayMs)
+                     byte receivedHopLimit, int delayMs, TxTarget target)
     {
         Pending entry;
         lock (_lock)
@@ -102,6 +106,7 @@ public sealed class RelayScheduler : IDisposable
                 RelayFrame = relayFrame,
                 NextHopLimit = nextHopLimit,
                 ReceivedHopLimit = receivedHopLimit,
+                Target = target,
             };
             _pending[key] = entry;
         }
@@ -123,7 +128,7 @@ public sealed class RelayScheduler : IDisposable
                 // alongside the transmitter hears the frame while Transmit is
                 // still awaiting, so the record has to already be in place.
                 RememberRelayed(key);
-                await Transmit(relayFrame).ConfigureAwait(false);
+                await Transmit(relayFrame, target).ConfigureAwait(false);
                 Log?.Invoke($"  relayed packet {header.PacketId:x8} ({header.HopLimit}->{nextHopLimit}) after {delayMs} ms");
             }
             catch (OperationCanceledException)

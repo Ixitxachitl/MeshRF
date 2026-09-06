@@ -34,9 +34,12 @@ namespace MeshRF.AvaloniaApp;
 /// the point: staying silent because we could not read the packet just makes it
 /// retransmit and the mesh reflood.
 /// </param>
+/// <param name="Source">Where the packet was heard, so the ack goes back
+/// out on the same settings. Null before a source is known, which the
+/// transmitter reads as the primary.</param>
 public sealed record AckRequest(MeshHeader Header, string? ChannelName, bool Pkc,
                                 bool TextMessage, bool Duplicate, bool HasBitfield,
-                                uint ErrorReason = RoutingError.None);
+                                uint ErrorReason = RoutingError.None, RxSource? Source = null);
 
 /// <summary>
 /// <see cref="IMeshRxHost"/> for the app: decodes traffic on any configured
@@ -155,7 +158,97 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public event Action<uint, NodeTelemetryHistoryRecord>? TelemetryHistoryRecorded;
 
     byte[] IMeshRxHost.MyPrivateKeyBytes => MyPrivateKeyProvider?.Invoke() ?? Array.Empty<byte>();
-    IReadOnlyList<ChannelConfig> IMeshRxHost.Channels => Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
+    IReadOnlyList<ChannelConfig> IMeshRxHost.ChannelsFor(RxSource source) => ChannelsIn(ListNameFor(source));
+
+    /// <summary>The list a listener decodes and sends with: the primary's for
+    /// the primary (custom parameters included), the preset's own for a
+    /// secondary.</summary>
+    public static string ListNameFor(RxSource source) => source.IsPrimary ? string.Empty : source.PresetName;
+
+    /// <summary>Every channel in one list, in tab order.</summary>
+    public IReadOnlyList<ChannelConfig> ChannelsIn(string listName) =>
+        Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == listName).Select(t => t.Config).ToList();
+
+    /// <summary>Whether the preset named is one the receiver is listening on
+    /// right now. Owned by the view model, which started the receiver. A node
+    /// heard on a preset nobody is listening on is answered on the primary,
+    /// where the ack can be heard.</summary>
+    public Func<string, bool>? IsPresetListening { get; set; }
+
+    /// <summary>What a reply to a packet heard on a source goes out on. Owned
+    /// by the view model, which holds the modem settings.</summary>
+    public Func<RxSource, TxTarget>? TargetForSource { get; set; }
+
+    /// <summary>The list a node is spoken to on: its heard-on preset's, when
+    /// that preset is being listened on and has a list; otherwise the
+    /// primary's.</summary>
+    public string ListNameForNode(uint nodeNum)
+    {
+        var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
+        if (string.IsNullOrEmpty(heardOn) || heardOn == HeardOn.Custom) return string.Empty;
+        if (IsPresetListening?.Invoke(heardOn) != true) return string.Empty;
+        return Tabs.OfType<ChannelTabViewModel>().Any(t => t.Config.Preset == heardOn) ? heardOn : string.Empty;
+    }
+
+    /// <summary>The channel to send on in one list: the one named, else the
+    /// list's Primary-role channel, else its first usable one. Falls back to
+    /// the primary's list when the named list is empty.</summary>
+    public ChannelConfig? ChannelIn(string listName, string? channelName)
+    {
+        var usable = Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => t.Config.Preset == listName && !t.Config.IsDisabled)
+            .Select(t => t.Config)
+            .ToList();
+        if (usable.Count == 0)
+            return listName.Length == 0 ? null : ChannelIn(string.Empty, channelName);
+        if (!string.IsNullOrEmpty(channelName))
+        {
+            var named = usable.FirstOrDefault(c => string.Equals(c.Name, channelName, StringComparison.OrdinalIgnoreCase));
+            if (named is not null) return named;
+        }
+        return usable.FirstOrDefault(c => c.Role == ChannelRole.Primary) ?? usable[0];
+    }
+
+    /// <summary>The channel a reply to a packet heard on <paramref name="source"/>
+    /// goes out on: the one it arrived on, in that listener's list.</summary>
+    public ChannelConfig? ChannelFor(RxSource source, string? channelName) =>
+        ChannelIn(ListNameFor(source), channelName);
+
+    /// <summary>The channel a packet to <paramref name="nodeNum"/> goes out
+    /// on: the one named, in the list the node is spoken to on.</summary>
+    public ChannelConfig? ChannelForNode(uint nodeNum, string? channelName) =>
+        ChannelIn(ListNameForNode(nodeNum), channelName);
+
+    /// <summary>Which list a broadcast frame carrying <paramref name="hash"/>
+    /// belongs to: the primary's when it has a channel with that hash, else
+    /// the first list that does. Null when none does.</summary>
+    public string? ListNameForChannelHash(byte hash)
+    {
+        ChannelConfig? found = null;
+        foreach (var c in Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config))
+        {
+            if (c.IsDisabled || c.Hash != hash) continue;
+            if (c.Preset.Length == 0) return string.Empty;
+            found ??= c;
+        }
+        return found?.Preset;
+    }
+
+    /// <summary>
+    /// Gives a preset's listener a channel list if it has none: the preset's
+    /// default channel, named after it with the well-known key, which is what
+    /// every unconfigured node on that mesh is on. Only an empty list is
+    /// seeded, so what the user makes of the list afterwards stands.
+    /// </summary>
+    public void EnsureChannelList(string preset)
+    {
+        if (preset.Length == 0) return;
+        if (Tabs.OfType<ChannelTabViewModel>().Any(t => t.Config.Preset == preset)) return;
+        var seed = new ChannelConfig { Preset = preset, Index = 0, Name = preset, Role = ChannelRole.Primary };
+        _channelStore.Upsert(seed);
+        int insertAt = Tabs.OfType<ChannelTabViewModel>().Count();
+        Tabs.Insert(insertAt, NewChannelTab(seed));
+    }
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
 
@@ -182,7 +275,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// auto-reply (NodeInfo/Position/Telemetry/Traceroute). The owner (which
     /// holds the transmit-capable MeshtasticCore) wires this up; left null
     /// means such requests are simply not answered.</summary>
-    public Action<byte[]>? TransmitAutoReply { get; set; }
+    public Action<byte[], RxSource>? TransmitAutoReply { get; set; }
 
     /// <summary>How far a reply to a request addressed to us may travel, given
     /// the request's header and whether it carried Data.bitfield. The owner
@@ -195,17 +288,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// may travel). The owner holds our identity and the transmitter, so it
     /// builds the reply; the hop limit comes from here because only the request
     /// says how far away the asker was.</summary>
-    public Action<PortNum, uint, string?, byte>? AutoReplyRequested { get; set; }
+    public Action<PortNum, uint, string?, byte, RxSource>? AutoReplyRequested { get; set; }
 
     /// <summary>Raised on hearing a node we hold no NodeInfo for (node, channel
     /// it was heard on, hops it travelled). The owner decides whether to
     /// introduce us — see <see cref="PerhapsIntroduceOurselves"/>.</summary>
-    public Action<uint, string?, byte>? UnknownNodeHeard { get; set; }
+    public Action<uint, string?, byte, RxSource>? UnknownNodeHeard { get; set; }
 
     /// <summary>Raised for a directed telemetry request, carrying which metric
     /// group was asked for so the reply matches rather than always answering
     /// with device metrics, and how far the answer may travel.</summary>
-    public Action<uint, string?, TelemetryVariants, byte>? TelemetryReplyRequested { get; set; }
+    public Action<uint, string?, TelemetryVariants, byte, RxSource>? TelemetryReplyRequested { get; set; }
 
     /// <summary>Raised for a unicast addressed to us carrying want_ack, so the
     /// owner (which holds the transmitter) can send the routing ack. Failing to
@@ -223,7 +316,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Raised for every decoded packet so the owner can serialise it
     /// into the raw JSON feed.</summary>
-    public Action<MeshHeader, MeshDecodeResult, long, float?, float?, byte, string>? DecodedPacketForFeed { get; set; }
+    public Action<MeshHeader, MeshDecodeResult, long, float?, float?, byte, string, RxSource>? DecodedPacketForFeed { get; set; }
 
     /// <summary>Raised when a node's stored public key is replaced by a
     /// different one. The router caches parsed sender keys for PKC decode, so
@@ -531,30 +624,34 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     private void LoadChannels()
     {
+        // Every list, the primary's first and each in index order, which is
+        // the order the store returns them in.
         var configs = _channelStore.All();
-        if (configs.Count == 0)
+        if (!configs.Any(c => c.Preset.Length == 0))
         {
             var primary = new ChannelConfig { Index = 0, Name = "LongFast", Role = ChannelRole.Primary };
             _channelStore.Upsert(primary);
-            configs = new[] { primary };
+            configs = configs.Prepend(primary).ToList();
         }
 
-        foreach (var c in configs.OrderBy(c => c.Index))
+        foreach (var c in configs)
             Tabs.Add(NewChannelTab(c));
     }
 
     /// <summary>The channel a keyless secondary borrows from, per firmware
-    /// <c>getKey()</c>. Looked up live so it follows role edits.</summary>
-    private ChannelConfig? PrimaryChannelConfig() =>
+    /// <c>getKey()</c>: the Primary-role channel of its own list. Looked up
+    /// live so it follows role edits.</summary>
+    private ChannelConfig? PrimaryChannelConfigIn(string listName) =>
         Tabs.OfType<ChannelTabViewModel>()
-            .FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)?.Config;
+            .FirstOrDefault(t => t.Config.Preset == listName && t.Config.Role == ChannelRole.Primary)?.Config;
 
     /// <summary>Wires a config to its siblings before it reaches a tab, so key
     /// and hash resolution work the same on every path that later hands the
     /// config to the decoder or encoder.</summary>
     private ChannelTabViewModel NewChannelTab(ChannelConfig config)
     {
-        config.PrimaryProvider = PrimaryChannelConfig;
+        var listName = config.Preset;
+        config.PrimaryProvider = () => PrimaryChannelConfigIn(listName);
         return new ChannelTabViewModel(config);
     }
 
@@ -562,13 +659,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// auto-generated "Channel N" name and a fresh random PSK. Backs the "+"
     /// button: no name prompt, rename via the channel's Settings dialog
     /// afterward.</summary>
-    public ChannelTabViewModel AddChannel()
+    /// <param name="listName">The list to add to: empty for the primary's,
+    /// else a preset's.</param>
+    public ChannelTabViewModel AddChannel(string listName = "")
     {
-        var taken = Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config.Index).ToHashSet();
+        var taken = Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => t.Config.Preset == listName).Select(t => t.Config.Index).ToHashSet();
         int idx = 1;
         while (taken.Contains(idx)) idx++;
         var config = new ChannelConfig
         {
+            Preset = listName,
             Index = idx,
             Name = $"Channel {idx}",
             Role = ChannelRole.Secondary,
@@ -577,8 +678,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         };
         _channelStore.Upsert(config);
         var tab = NewChannelTab(config);
-        // Keep channel tabs contiguous ahead of conversation tabs.
+        // Keep each list's tabs together, and every channel tab ahead of the
+        // conversation tabs.
         int insertAt = Tabs.OfType<ChannelTabViewModel>().Count();
+        for (int i = Tabs.Count - 1; i >= 0; i--)
+        {
+            if (Tabs[i] is ChannelTabViewModel { Config.Preset: var p } && p == listName)
+            {
+                insertAt = i + 1;
+                break;
+            }
+        }
         Tabs.Insert(insertAt, tab);
         return tab;
     }
@@ -588,7 +698,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public bool RemoveChannel(ChannelTabViewModel? channel)
     {
         if (channel is null || channel.Config.Role == ChannelRole.Primary) return false;
-        _channelStore.Delete(channel.Config.Index);
+        _channelStore.Delete(channel.Config.Preset, channel.Config.Index);
         Tabs.Remove(channel);
         return true;
     }
@@ -607,6 +717,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         {
             foreach (var other in Tabs.OfType<ChannelTabViewModel>())
             {
+                if (other.Config.Preset != channel.Config.Preset) continue;
                 if (other.Config.Index == channel.Config.Index) continue;
                 if (other.Config.Role != ChannelRole.Primary) continue;
                 other.Config.Role = ChannelRole.Secondary;
@@ -630,8 +741,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// <returns>True if a rename happened, so the caller can persist.</returns>
     public bool SyncPrimaryChannelName(LoraPreset preset)
     {
+        // The primary's own list only: a secondary listener's default channel
+        // is named after its preset and stays so.
         var primary = Tabs.OfType<ChannelTabViewModel>()
-            .FirstOrDefault(t => t.Config.Role == ChannelRole.Primary);
+            .FirstOrDefault(t => t.Config.Preset.Length == 0 && t.Config.Role == ChannelRole.Primary);
         if (primary is null) return false;
 
         var cfg = primary.Config;
@@ -650,7 +763,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Removes one channel row by index. Used by drag-reordering,
     /// which clears the affected indices before writing the new mapping.</summary>
-    public void DeleteChannelIndex(int index) => _channelStore.Delete(index);
+    public void DeleteChannelIndex(string listName, int index) => _channelStore.Delete(listName, index);
 
     /// <summary>Writes a channel row straight through, without the
     /// primary-demotion logic in <see cref="SaveChannelConfig"/> — reordering
@@ -661,20 +774,40 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     {
         // Disabled channels are skipped: callers use this to pick a channel to
         // send on, and a disabled one has no key or hash to send with.
-        var candidates = Tabs.OfType<ChannelTabViewModel>().Where(t => !t.Config.IsDisabled);
+        // The primary's list alone: the auto-reports and scripts that look a
+        // channel up by name go out on the primary.
+        var candidates = Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => t.Config.Preset.Length == 0 && !t.Config.IsDisabled);
         if (string.IsNullOrEmpty(name)) return candidates.FirstOrDefault()?.Config;
         return candidates
             .FirstOrDefault(t => string.Equals(t.Config.Name, name, StringComparison.OrdinalIgnoreCase))?.Config;
     }
 
-    private ChannelTabViewModel? ResolveChannelTab(string? channelName)
+    /// <summary>The tab a message on a named channel belongs to. With a
+    /// source, its listener's list is searched first: two lists can each hold
+    /// a channel of the same name, and a LongFast packet belongs on the
+    /// LongFast list's tab.</summary>
+    private ChannelTabViewModel? ResolveChannelTab(string? channelName, RxSource? source = null)
     {
-        var channelTabs = Tabs.OfType<ChannelTabViewModel>();
+        var channelTabs = Tabs.OfType<ChannelTabViewModel>().ToList();
         if (!string.IsNullOrEmpty(channelName))
         {
+            if (source is not null)
+            {
+                var listName = ListNameFor(source);
+                var inList = channelTabs.FirstOrDefault(t => t.Config.Preset == listName &&
+                    string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
+                if (inList is not null) return inList;
+            }
             var match = channelTabs.FirstOrDefault(t =>
                 string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
             if (match is not null) return match;
+        }
+        if (source is not null)
+        {
+            var listName = ListNameFor(source);
+            var first = channelTabs.FirstOrDefault(t => t.Config.Preset == listName);
+            if (first is not null) return first;
         }
         return channelTabs.FirstOrDefault();
     }
@@ -910,7 +1043,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Supplies the current relay configuration. Owned by the view
     /// model, which holds the role, rebroadcast mode and modem preset.</summary>
-    public Func<RelayContext?>? RelayContextProvider { get; set; }
+    public Func<RxSource, RelayContext?>? RelayContextProvider { get; set; }
 
     /// <summary>Rebroadcasts eligible traffic after a contention delay. Null
     /// until the owner wires it up, which leaves relaying off.</summary>
@@ -928,13 +1061,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         header.RelayNode == (byte)(MyNodeNum & 0xFF) &&
         RelayScheduler?.WasRelayedByUs(header.From, header.PacketId) == true;
 
-    public void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
+    public void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb,
+                                        RxSource source)
     {
-        if (RelayScheduler is null || RelayContextProvider?.Invoke() is not { } ctx) return;
+        if (RelayScheduler is null || RelayContextProvider?.Invoke(source) is not { } ctx) return;
         // True means this copy arrived with more hops left than the one we had
         // queued, so it's worth relaying instead.
         if (RelayScheduler.HandleDuplicate(ctx, header, snrDb ?? 0f))
-            RelayIfEligible(frame, header, result, snrDb);
+            RelayIfEligible(frame, header, result, snrDb, source);
     }
 
     /// <summary>Firmware's ignore_mqtt: while set, the relay never puts
@@ -942,9 +1076,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// Ignore MQTT toggle.</summary>
     public bool IgnoreMqttNodes { get; set; }
 
-    public void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb)
+    public void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb,
+                                RxSource source)
     {
-        if (RelayScheduler is null || RelayContextProvider?.Invoke() is not { } ctx) return;
+        if (RelayScheduler is null || RelayContextProvider?.Invoke(source) is not { } ctx) return;
+        if (TargetForSource is not { } targetFor) return;
         // Suppressed senders fold into the same gate as user-ignored nodes:
         // with Ignore MQTT on, a packet that itself arrived via downlink is
         // skipped, and so is anything from a node this store has marked as
@@ -962,7 +1098,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         int delayMs = RelayPolicy.GetTxDelayMsecWeighted(
             ctx.Preset, snrDb ?? 0f, RelayPolicy.IsRouterRole(ctx.Role));
 
-        RelayScheduler.Schedule(header, relayFrame, nextHopLimit, delayMs);
+        // A relay stays on the mesh it came from.
+        RelayScheduler.Schedule(header, relayFrame, nextHopLimit, delayMs, targetFor(source));
     }
 
     /// <summary>Publishes eligible traffic to the MQTT bridge. Null until the
@@ -1164,7 +1301,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         _ => delivery.ToString(),
     };
 
-    public void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt)
+    public void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt,
+                               RxSource source)
     {
         // Checked before the upsert, since the upsert is what creates the row:
         // no record yet means this node number has never been heard on this
@@ -1173,14 +1311,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // what a user who forgot it would expect.
         bool firstSighting = IsFirstSighting(fromNode);
 
-        _nodeStore.RecordSighting(fromNode, rssiDbm: rssiDbm, snrDb: snrDb, hopsAway: hopsAway, seenViaMqtt: viaMqtt);
+        // A frame that arrived from the broker was heard on no radio at all,
+        // so it says nothing about what the node is tuned to.
+        _nodeStore.RecordSighting(fromNode, rssiDbm: rssiDbm, snrDb: snrDb, hopsAway: hopsAway, seenViaMqtt: viaMqtt,
+                                  heardOnPreset: source.FromDownlink ? null : source.PresetName,
+                                  heardOnFreqMHz: source.FromDownlink ? null : source.FreqMHz);
         MarkNodeDirty(fromNode);
 
         // Taken after the upsert, so the peer's position is whatever this
         // packet just carried rather than what it had a moment ago.
         SurveySighting?.Invoke(fromNode, hopsAway, viaMqtt, snrDb);
 
-        if (firstSighting) RaiseNewNode(fromNode, snrDb, rssiDbm, hopsAway);
+        if (firstSighting) RaiseNewNode(fromNode, snrDb, rssiDbm, hopsAway, source);
     }
 
     /// <summary>Every sighting, for the survey log to write down if it is
@@ -1211,8 +1353,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// {from.long} falls back to the id, which is why a greeting script wants a
     /// delay: in front of it. The help window says so.
     /// </remarks>
-    private void RaiseNewNode(uint nodeNum, float? snrDb, float? rssiDbm, byte hopsAway)
+    private void RaiseNewNode(uint nodeNum, float? snrDb, float? rssiDbm, byte hopsAway, RxSource source)
     {
+        // Scripts act for the primary alone.
+        if (!source.IsPrimary) return;
         var node = _nodeStore.Get(nodeNum);
         ScriptEventObserved?.Invoke(new ScriptEvent
         {
@@ -1231,22 +1375,22 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     public void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
-        long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway)
+        long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source)
     {
         // Log every successful decode.
         // Without this the log only ever shows MeshRxRouter's "(dup)" and
         // "rx undecoded" lines, making normal flood retransmissions look like
         // every packet was being rejected as a duplicate.
-        var summary = BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
+        var summary = TagForLog(source) + BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
         Log(summary);
-        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary);
+        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary, source);
 
         // First sight of this packet, so this is the full-strength ack. A
         // retransmission of it lands in OnDuplicateDecoded instead and gets the
         // cheaper 0-hop repeat.
-        if (header.WantAck) AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: false));
+        if (header.WantAck) AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: false, source));
 
-        PerhapsIntroduceOurselves(header, result, hopsAway);
+        PerhapsIntroduceOurselves(header, result, hopsAway, source);
 
         // The sender's public key as it stood before this packet. Both the
         // NodeInfo case (which has to notice a substituted key rather than
@@ -1257,7 +1401,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         switch (result.Port)
         {
             case PortNum.TextMessage:
-                HandleTextMessage(header, record, result, hopsAway);
+                HandleTextMessage(header, record, result, hopsAway, source);
                 break;
 
             case PortNum.NodeInfo when result.User is not null:
@@ -1269,7 +1413,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 {
                     if (IsDirectedRequest(header, result))
                         AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName,
-                                                   ReplyHopLimit(header, result));
+                                                   ReplyHopLimit(header, result), source);
                     break;
                 }
                 // The router skips RecordSighting for a NodeInfo record (its own
@@ -1301,6 +1445,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
+                    HeardOnPreset = source.FromDownlink ? string.Empty : source.PresetName,
+                    HeardOnFreqMHz = source.FromDownlink ? null : source.FreqMHz,
                     UserId = string.IsNullOrEmpty(result.User.Id) ? header.FromId : result.User.Id,
                     LongName = result.User.LongName,
                     ShortName = result.User.ShortName,
@@ -1338,11 +1484,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 MarkNodeDirty(MergeNodeDuplicates(header.From));
                 // Raised after the upsert, so a greeting script sees the name
                 // and key this packet carried rather than a bare node id.
-                if (firstNodeInfo) RaiseNewNode(header.From, snrDb, packetRssiDbm, hopsAway);
+                if (firstNodeInfo) RaiseNewNode(header.From, snrDb, packetRssiDbm, hopsAway, source);
                 // An advertisement may still ask us to reply with ours.
                 if (IsDirectedRequest(header, result))
                     AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName,
-                                               ReplyHopLimit(header, result));
+                                               ReplyHopLimit(header, result), source);
                 break;
 
             case PortNum.Position when result.Position is not null:
@@ -1356,7 +1502,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 {
                     if (IsDirectedRequest(header, result))
                         AutoReplyRequested?.Invoke(PortNum.Position, header.From, result.ChannelName,
-                                                   ReplyHopLimit(header, result));
+                                                   ReplyHopLimit(header, result), source);
                     break;
                 }
                 // Record a history point only when the coordinates actually
@@ -1401,7 +1547,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 {
                     TelemetryReplyRequested?.Invoke(header.From, result.ChannelName,
                                                     result.Telemetry.PresentVariants,
-                                                    ReplyHopLimit(header, result));
+                                                    ReplyHopLimit(header, result), source);
                     break;
                 }
                 var t = result.Telemetry;
@@ -1421,7 +1567,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 MarkNodeDirty(header.From);
                 if (IsDirectedRequest(header, result))
                     TelemetryReplyRequested?.Invoke(header.From, result.ChannelName, t.PresentVariants,
-                                                    ReplyHopLimit(header, result));
+                                                    ReplyHopLimit(header, result), source);
                 break;
 
             case PortNum.NodeStatus when result.StatusMessage is not null:
@@ -1432,7 +1578,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 break;
 
             case PortNum.Traceroute:
-                HandleTraceroute(header, result);
+                HandleTraceroute(header, result, source);
                 break;
 
             case PortNum.Routing:
@@ -1524,7 +1670,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// Whether we actually transmit is the owner's call — the role and airtime
     /// gates live with the transmitter.
     /// </remarks>
-    private void PerhapsIntroduceOurselves(MeshHeader header, MeshDecodeResult result, byte hopsAway)
+    private void PerhapsIntroduceOurselves(MeshHeader header, MeshDecodeResult result, byte hopsAway, RxSource source)
     {
         if (UnknownNodeHeard is null) return;
         if (header.From == 0 || header.From == MyNodeNum) return;
@@ -1535,18 +1681,23 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // anything we hear, so a bare row means we still know nothing about it.
         if (!string.IsNullOrEmpty(node?.LongName) || !string.IsNullOrEmpty(node?.ShortName)) return;
 
-        UnknownNodeHeard.Invoke(header.From, result.ChannelName, hopsAway);
+        UnknownNodeHeard.Invoke(header.From, result.ChannelName, hopsAway, source);
     }
 
     public void OnDecodeNotStored(MeshHeader header, MeshDecodeResult result,
-                                  long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway)
+                                  long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source)
     {
-        var summary = BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
+        var summary = TagForLog(source) + BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
         Log($"{summary} (not stored)");
-        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary);
+        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary, source);
     }
 
-    public void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result)
+    /// <summary>Prefix for a log line about a packet heard on a secondary
+    /// listener, naming the preset and frequency. The primary's lines are
+    /// left as they were, so the log reads the same with one listener.</summary>
+    private static string TagForLog(RxSource source) => source.IsPrimary ? string.Empty : $"[{source.Tag}] ";
+
+    public void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result, RxSource source)
     {
         if (!header.WantAck) return;
 
@@ -1564,16 +1715,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // means no ack.
         if (ReplyHops.HopsUsed(header, result.HasDataBitfield) != 0) return;
 
-        AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: true));
+        AckRequested?.Invoke(BuildAckRequest(header, result, duplicate: true, source));
     }
 
-    private static AckRequest BuildAckRequest(MeshHeader header, MeshDecodeResult result, bool duplicate)
+    private static AckRequest BuildAckRequest(MeshHeader header, MeshDecodeResult result, bool duplicate, RxSource source)
         => new(header,
                result.ChannelName,
                string.Equals(result.ChannelName, "PKC", StringComparison.Ordinal),
                result.Port is PortNum.TextMessage or PortNum.TextMessageCompressed,
                duplicate,
-               result.HasDataBitfield);
+               result.HasDataBitfield,
+               Source: source);
 
     /// <summary>
     /// A packet addressed to us that no key we hold could open. The addressing
@@ -1584,7 +1736,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// avoid. The reply is a NAK naming why, which also lets the sender's client
     /// react (a PKI_UNKNOWN_PUBKEY is answered with their NodeInfo).
     /// </summary>
-    public void OnUndecodedPacket(MeshHeader header)
+    public void OnUndecodedPacket(MeshHeader header, RxSource source)
     {
         if (!header.WantAck) return;
         if (MyNodeNum == 0 || header.IsBroadcast || header.To != MyNodeNum) return;
@@ -1604,7 +1756,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // repeats too, but a NAK is cheap and already hop-limited; treating
             // it as first-sight keeps the reply reaching as far as the request
             // came from, which is what firmware sends.
-            Duplicate: false, HasBitfield: false, ErrorReason: reason));
+            Duplicate: false, HasBitfield: false, ErrorReason: reason, Source: source));
     }
 
     /// <summary>One-line log summary of a decoded packet.</summary>
@@ -1645,7 +1797,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         };
     }
 
-    private void HandleTextMessage(MeshHeader header, MessageRecord record, MeshDecodeResult result, byte hopsAway)
+    private void HandleTextMessage(MeshHeader header, MessageRecord record, MeshDecodeResult result, byte hopsAway,
+                                   RxSource source)
     {
         uint reactionTargetId = ResolveReactionTargetId(result);
         bool isReaction = reactionTargetId != 0 && result.Emoji != 0;
@@ -1661,7 +1814,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         }
         else
         {
-            var chanTab = ResolveChannelTab(result.ChannelName);
+            var chanTab = ResolveChannelTab(result.ChannelName, source);
             existed = chanTab is not null;
             messages = chanTab?.Messages;
         }
@@ -1704,7 +1857,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             if (!isReaction && !IsNodeIgnored(header.From))
                 IncomingDirectMessage?.Invoke(AlertBell.IsIn(result.Text));
         }
-        else if (ResolveChannelTab(result.ChannelName) is { } chanTab2)
+        else if (ResolveChannelTab(result.ChannelName, source) is { } chanTab2)
         {
             MarkTabNeedsAttention(chanTab2);
             // Ring on channel traffic unless the channel is muted, the sender is
@@ -1717,7 +1870,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // Last, so a script can never delay the message appearing or the alert
         // sounding. An ignored sender is ignored here too: muting somebody
         // should not leave the app still answering them automatically.
-        if (ScriptEventObserved is { } observer && !IsNodeIgnored(header.From))
+        // Scripts act for the primary alone: a message on another preset's
+        // mesh is not theirs to answer.
+        if (ScriptEventObserved is { } observer && !IsNodeIgnored(header.From) && source.IsPrimary)
         {
             observer(BuildScriptEvent(
                 isReaction ? ScriptEventKind.Reaction : ScriptEventKind.Text,
@@ -2031,7 +2186,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// <summary>Handle a TRACEROUTE_APP frame: either the accumulated-path
     /// reply to a request we sent, or (if want_response and addressed to us)
     /// a request from someone else, auto-replied via <see cref="TransmitAutoReply"/>.</summary>
-    private void HandleTraceroute(MeshHeader header, MeshDecodeResult result)
+    private void HandleTraceroute(MeshHeader header, MeshDecodeResult result, RxSource source)
     {
         if (result.RequestId != 0 && _pendingTraceroutes.TryGetValue(result.RequestId, out var dest))
         {
@@ -2043,14 +2198,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum && result.WantResponse
             && TransmitAutoReply is { } reply)
         {
-            var primary = Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
-                          ?? Tabs.OfType<ChannelTabViewModel>().FirstOrDefault();
-            if (primary is not null)
+            // Answered on the list of the listener that heard the request,
+            // and sent on that listener's settings.
+            var channel = ChannelFor(source, result.ChannelName);
+            if (channel is not null)
             {
-                var frame = MeshEncoder.EncodeTracerouteReply(primary.Config, MyNodeNum, header.From,
+                var frame = MeshEncoder.EncodeTracerouteReply(channel, MyNodeNum, header.From,
                     (uint)Random.Shared.NextInt64(1, uint.MaxValue), header.PacketId, route: null, snrTowards: null,
                     hopLimit: ReplyHopLimit(header, result));
-                reply(frame);
+                reply(frame, source);
             }
         }
     }

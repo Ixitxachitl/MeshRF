@@ -615,7 +615,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        if (!await TransmitFrameAsync(frame))
+        if (!await TransmitFrameAsync(frame, PrimaryTarget()))
         {
             _rxHost.Log($"sync: transmit failed for \"{action.Name}\"");
             return;
@@ -859,7 +859,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 if (to != 0xFFFFFFFFu) messages = _rxHost.OpenConversation(to).Messages;
 
                 await SendTextAsync(channel, to, text, action.ReplyId,
-                                    ReplyContextFor(run, action.ReplyId), messages, action.Hops);
+                                    ReplyContextFor(run, action.ReplyId), messages, action.Hops,
+                                    target: PrimaryTarget());
                 break;
             }
 
@@ -876,7 +877,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text,
                     to: to, hopLimit: (byte)HopLimit, replyId: action.ReplyId, emoji: 1,
                     xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-                if (await TransmitFrameAsync(frame))
+                if (await TransmitFrameAsync(frame, PrimaryTarget()))
                 {
                     EchoReaction(messages, action.ReplyId, text);
                     _rxHost.PersistOutgoingReaction(to, packetId, action.ReplyId, text, channel.Name);
@@ -888,7 +889,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             // position: is a send it decided on, and the request whose distance
             // would size it is not necessarily the thing that triggered the run.
             case ScriptActionKind.NodeInfo:
-                HandleAutoReplyRequest(PortNum.NodeInfo, action.ToNode, action.ChannelName, (byte)HopLimit);
+                HandleAutoReplyRequest(PortNum.NodeInfo, action.ToNode, action.ChannelName, (byte)HopLimit, PrimarySource());
                 break;
 
             case ScriptActionKind.RequestNodeInfo:
@@ -897,7 +898,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                 break;
 
             case ScriptActionKind.Position:
-                HandleAutoReplyRequest(PortNum.Position, action.ToNode, action.ChannelName, (byte)HopLimit);
+                HandleAutoReplyRequest(PortNum.Position, action.ToNode, action.ChannelName, (byte)HopLimit, PrimarySource());
                 break;
 
             case ScriptActionKind.Waypoint:
@@ -998,7 +999,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-        if (!await TransmitFrameAsync(frame))
+        if (!await TransmitFrameAsync(frame, PrimaryTarget()))
         {
             _rxHost.Log("scripts: waypoint transmit failed");
             return;

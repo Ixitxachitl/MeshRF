@@ -301,7 +301,7 @@ public partial class RadioViewModel
     /// filling with introductions; and a node more than two hops beyond our own
     /// limit is one whose reply could never reach us anyway.
     /// </remarks>
-    private void HandleUnknownNodeHeard(uint from, string? channelName, byte hopsAway)
+    private void HandleUnknownNodeHeard(uint from, string? channelName, byte hopsAway, RxSource source)
     {
         if (!CanTransmit || from == 0) return;
         if (RelayPolicy.IsRouterish(MyRole)) return;
@@ -309,7 +309,9 @@ public partial class RadioViewModel
         if (!DutyCycleAllows(polite: true, out _)) return;
         if (hopsAway > HopLimit + 2) return;
 
-        var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+        // On the list of the listener that heard them, on that listener's
+        // settings: that is the mesh they are on.
+        var channel = _rxHost.ChannelFor(source, channelName);
         if (channel is null) return;
 
         // Built and queued here rather than through SendNodeInfoOnChannelAsync,
@@ -323,7 +325,7 @@ public partial class RadioViewModel
             wantResponse: RoleDefaults.AllowsRequestingReplies(MyRole), okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey,
             isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
-        TransmitBackground(frame);
+        TransmitBackground(frame, TargetForSource(source));
         LogFromAnyThread($"  heard new node {_rxHost.NodeDisplayName(from)}, sending our NodeInfo");
     }
 
@@ -334,10 +336,12 @@ public partial class RadioViewModel
     /// request took plus a margin, worked out by the host from the request's
     /// own header. A script asking for one of these has no request behind it
     /// and passes the configured limit.</param>
-    private void HandleAutoReplyRequest(PortNum port, uint to, string? channelName, byte hopLimit)
+    private void HandleAutoReplyRequest(PortNum port, uint to, string? channelName, byte hopLimit, RxSource source)
     {
         if (!CanTransmit || to == 0 || to == 0xFFFFFFFFu) return;
-        var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+        // On the list of the listener that heard them, on that listener's
+        // settings: that is the mesh they are on.
+        var channel = _rxHost.ChannelFor(source, channelName);
         if (channel is null) return;
 
         try
@@ -351,7 +355,7 @@ public partial class RadioViewModel
                         publicKey: TryParseKeyBase64(MyPublicKey),
                         to: to, hopLimit: hopLimit, wantResponse: false, okToMqtt: OkToMqtt,
                         isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
-                    TransmitBackground(nodeInfo);
+                    TransmitBackground(nodeInfo, TargetForSource(source));
                     break;
 
                 case PortNum.Position:
@@ -362,7 +366,7 @@ public partial class RadioViewModel
                         altitudeM: alt, altitudeIsMsl: altIsMsl,
                         precisionBits: channel.EffectivePositionPrecision,
                         to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt);
-                    TransmitBackground(position);
+                    TransmitBackground(position, TargetForSource(source));
                     break;
 
             }
@@ -380,10 +384,13 @@ public partial class RadioViewModel
     /// gets device metrics — the variant every node can answer.
     /// </summary>
     private async void HandleTelemetryReplyRequest(
-        uint to, string? channelName, TelemetryVariants wanted, byte hopLimit)
+        uint to, string? channelName, TelemetryVariants wanted, byte hopLimit, RxSource source)
     {
+        void Send(byte[] frame) => TransmitBackground(frame, TargetForSource(source));
         if (!CanTransmit || to == 0 || to == 0xFFFFFFFFu) return;
-        var channel = _rxHost.FindChannelByName(channelName) ?? PrimaryChannel();
+        // On the list of the listener that heard them, on that listener's
+        // settings: that is the mesh they are on.
+        var channel = _rxHost.ChannelFor(source, channelName);
         if (channel is null) return;
 
         try
@@ -398,7 +405,7 @@ public partial class RadioViewModel
                 if (wanted.HasFlag(TelemetryVariants.Environment) &&
                     await _openMeteo.GetWeatherAsync(lat, lon) is { } weather)
                 {
-                    TransmitBackground(MeshEncoder.EncodeTelemetryEnvironmentMetrics(
+                    Send(MeshEncoder.EncodeTelemetryEnvironmentMetrics(
                         channel, _rxHost.MyNodeNum, NextPacketId(),
                         temperatureC: weather.TemperatureC,
                         relativeHumidityPct: weather.RelativeHumidityPct,
@@ -409,7 +416,7 @@ public partial class RadioViewModel
                 if (wanted.HasFlag(TelemetryVariants.AirQuality) &&
                     await _openMeteo.GetAirQualityAsync(lat, lon) is { } aq)
                 {
-                    TransmitBackground(MeshEncoder.EncodeTelemetryAirQualityMetrics(
+                    Send(MeshEncoder.EncodeTelemetryAirQualityMetrics(
                         channel, _rxHost.MyNodeNum, NextPacketId(),
                         pm25Standard: aq.Pm25Standard, pm100Standard: aq.Pm100Standard,
                         to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt));
@@ -417,7 +424,7 @@ public partial class RadioViewModel
                 return;
             }
 
-            TransmitBackground(MeshEncoder.EncodeTelemetryDeviceMetrics(
+            Send(MeshEncoder.EncodeTelemetryDeviceMetrics(
                 channel, _rxHost.MyNodeNum, NextPacketId(),
                 batteryLevel: 101, // 101 = mains-powered, the sentinel this app reports.
                 to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt));

@@ -99,6 +99,16 @@ public enum Sx1262Board
 /// This prevents a background thread from entering the native library with a
 /// handle that <see cref="Dispose"/> is concurrently freeing (use-after-free).
 /// </summary>
+/// <summary>One listener for <see cref="MeshtasticCore.StartRxMulti"/>: a
+/// preset on a frequency, or explicit parameters when <see cref="Sf"/> is
+/// non-zero (then <see cref="BwHz"/> and <see cref="Cr"/> apply and the
+/// preset is ignored).</summary>
+public readonly record struct RxListenerSpec(LoraPreset Preset, ulong CenterFreqHz, uint Sf = 0, uint BwHz = 0, uint Cr = 0);
+
+/// <summary>A demodulator log line and which listener it is about; -1 is
+/// the receiver as a whole.</summary>
+public readonly record struct DemodEvent(int Listener, string Text);
+
 public sealed class MeshtasticCore : IDisposable
 {
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
@@ -110,7 +120,7 @@ public sealed class MeshtasticCore : IDisposable
     /// step with the native side whenever an entry point is added that the
     /// managed layer calls unconditionally.
     /// </summary>
-    private const uint RequiredAbiVersion = 9;
+    private const uint RequiredAbiVersion = 11;
 
     public MeshtasticCore()
     {
@@ -535,6 +545,77 @@ public sealed class MeshtasticCore : IDisposable
         finally { _lock.ExitReadLock(); }
     }
 
+    /// <summary>
+    /// Start the receiver on several listeners off one capture centred on
+    /// <paramref name="deviceCenterHz"/>. Listener 0 is the primary. Each
+    /// listener is a preset, or explicit parameters when <see cref="RxListenerSpec.Sf"/>
+    /// is non-zero. Throws when the core refuses: no device, no supported
+    /// sample rate covers the set, or a hardware modem asked for more than one.
+    /// </summary>
+    public void StartRxMulti(IReadOnlyList<RxListenerSpec> listeners, ulong deviceCenterHz)
+    {
+        if (listeners.Count == 0) throw new ArgumentException("no listeners", nameof(listeners));
+        _lock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            var native = new NativeMethods.RxListener[listeners.Count];
+            for (int i = 0; i < native.Length; i++)
+            {
+                var l = listeners[i];
+                native[i] = new NativeMethods.RxListener
+                {
+                    Preset = (int)l.Preset,
+                    Sf = l.Sf,
+                    BwHz = l.BwHz,
+                    Cr = l.Cr,
+                    CenterFreqHz = l.CenterFreqHz,
+                };
+            }
+            int rc;
+            unsafe
+            {
+                fixed (NativeMethods.RxListener* p = native)
+                    rc = NativeMethods.CoreStartRxMulti(_handle, p, (uint)native.Length, deviceCenterHz);
+            }
+            if (rc != 0)
+                throw new InvalidOperationException(rc switch
+                {
+                    -2 => "the receiver refused the listener set: no device, no supported sample rate covers every listener, or the SX1262 was asked for more than one channel",
+                    -3 => "a listener's parameters are out of range",
+                    _ => $"mrf_core_start_rx_multi failed (rc={rc})",
+                });
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>Listeners in the running configuration; 1 after a
+    /// single-listener start, 0 when disposed.</summary>
+    public int ListenerCount
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return _disposed ? 0 : (int)NativeMethods.CoreListenerCount(_handle); }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
+
+    /// <summary>Signal level inside one listener's channel after its channel
+    /// filter, where <see cref="GetSignalStats"/> covers the whole capture.</summary>
+    public SignalStatsSnapshot GetListenerSignalStats(int index)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            NativeMethods.CoreGetListenerSignalStats(_handle, (uint)Math.Max(0, index), out var s);
+            return new SignalStatsSnapshot(
+                s.RssiDbfs, s.PeakDbfs, s.DcRe, s.DcIm, s.TotalSamples);
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
     public void Stop()
     {
         _lock.EnterReadLock();
@@ -841,9 +922,11 @@ public sealed class MeshtasticCore : IDisposable
 
     /// <summary>
     /// Pops the next queued demodulator event (e.g. preamble-detect log
-    /// line). Returns null if none are queued.
+    /// line) with the listener it is about: its index in the set given to
+    /// <see cref="StartRxMulti"/> (0 after a single-listener start), or -1
+    /// for the receiver as a whole. Returns null if none are queued.
     /// </summary>
-    public string? PullEvent()
+    public DemodEvent? PullEvent()
     {
         _lock.EnterReadLock();
         try
@@ -853,10 +936,11 @@ public sealed class MeshtasticCore : IDisposable
             {
                 const int cap = 4096;
                 byte* buf = stackalloc byte[cap];
-                var n = NativeMethods.CorePullEvent(_handle, buf, cap);
+                int listener = -1;
+                var n = NativeMethods.CorePullEventEx(_handle, buf, cap, &listener);
                 if (n == 0) return null;
                 int len = (int)Math.Min(n, (uint)(cap - 1));
-                return System.Text.Encoding.UTF8.GetString(buf, len);
+                return new DemodEvent(listener, System.Text.Encoding.UTF8.GetString(buf, len));
             }
         }
         finally { _lock.ExitReadLock(); }

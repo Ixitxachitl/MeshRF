@@ -64,7 +64,7 @@ public partial class RadioViewModel
     /// decode, so it stays cheap and bounded.</summary>
     public void AppendDecodedPacketJson(MeshHeader header, MeshDecodeResult result,
                                         long rxEpoch, float? snrDb, float? packetRssiDbm,
-                                        byte hopsAway, string summary)
+                                        byte hopsAway, string summary, RxSource source)
     {
         try
         {
@@ -73,6 +73,12 @@ public partial class RadioViewModel
                 time = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", CultureInfo.InvariantCulture),
                 rx_epoch = rxEpoch,
                 summary,
+                listener = new
+                {
+                    index = source.Listener,
+                    preset = source.PresetName,
+                    freq_mhz = source.FreqMHz,
+                },
                 packet = new
                 {
                     from = header.From,

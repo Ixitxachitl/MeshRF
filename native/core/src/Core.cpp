@@ -6,6 +6,7 @@
 #include "mrf/dsp/SignalStats.h"
 #include "mrf/dsp/Spectrum.h"
 #include "mrf/modem/LoraModem.h"
+#include "mrf/modem/RxListenerChain.h"
 
 #include <atomic>
 #include <cmath>
@@ -16,6 +17,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <numbers>
 #include <string>
@@ -86,7 +89,9 @@ std::uint32_t nearest_supported_rate(std::span<const std::uint32_t> rates,
             best_delta = delta;
         }
     }
-    return best != 0 ? best : std::max(minimum, rates.empty() ? requested : rates.back());
+    // Nothing supported reaches the minimum: say so with 0 rather than hand
+    // back a rate the device cannot run at, which it would silently round.
+    return best;
 }
 
 std::uint32_t normalize_rx_sample_rate(hal::DeviceKind kind,
@@ -106,6 +111,86 @@ std::uint32_t normalize_rx_sample_rate(hal::DeviceKind kind,
         return std::max(requested, minimum);
     }
 }
+
+// A channel chain on a thread of its own, fed capture blocks through a
+// bounded queue. Blocks are shared, read-only, so every chain gets the one
+// copy the device callback made. See Core::Impl::chains.
+struct ChainWorker {
+    using Block = std::shared_ptr<const std::vector<hal::SampleType>>;
+    using ChannelCallback = std::function<void(std::span<const modem::Sample>)>;
+
+    // Blocks held while the worker catches up. At the device backends' 32k
+    // samples a block this is over 100 ms at 16 MS/s; a worker further
+    // behind than that is not going to catch up, and dropping whole blocks
+    // costs it the frames in flight rather than every frame after.
+    static constexpr std::size_t kMaxQueuedBlocks = 64;
+
+    explicit ChainWorker(std::unique_ptr<modem::RxListenerChain> c) : chain(std::move(c)) {}
+    ~ChainWorker() { stop(); }
+    ChainWorker(const ChainWorker&) = delete;
+    ChainWorker& operator=(const ChainWorker&) = delete;
+
+    std::unique_ptr<modem::RxListenerChain> chain;
+    std::atomic<std::uint64_t> blocks_dropped{0};
+    std::uint64_t last_drops_reported{0}; // device-callback thread only
+
+    void start(ChannelCallback on_channel) {
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            stopping_ = false;
+        }
+        thread_ = std::thread([this, cb = std::move(on_channel)] { run_(cb); });
+    }
+
+    void push(Block b) {
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            if (stopping_) return;
+            if (queue_.size() >= kMaxQueuedBlocks) {
+                queue_.pop_front();
+                blocks_dropped.fetch_add(1, std::memory_order_relaxed);
+            }
+            queue_.push_back(std::move(b));
+        }
+        cv_.notify_one();
+    }
+
+    // Stops where it is: what is queued is not worth finishing once the
+    // device has stopped, and a start_rx will replace the chain anyway.
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            stopping_ = true;
+            queue_.clear();
+        }
+        cv_.notify_all();
+        if (thread_.joinable()) thread_.join();
+    }
+
+private:
+    void run_(const ChannelCallback& cb) {
+        while (true) {
+            Block b;
+            {
+                std::unique_lock<std::mutex> lk(mu_);
+                cv_.wait(lk, [this] { return stopping_ || !queue_.empty(); });
+                if (stopping_) return;
+                b = std::move(queue_.front());
+                queue_.pop_front();
+            }
+            const auto channel =
+                chain->process(std::span<const modem::Sample>(b->data(), b->size()));
+            if (cb) cb(channel);
+        }
+    }
+
+    std::mutex mu_;
+    std::condition_variable cv_;
+    std::deque<Block> queue_;
+    bool stopping_{false};
+    std::thread thread_;
+};
+
 }
 
 struct Core::Impl {
@@ -148,8 +233,15 @@ struct Core::Impl {
     bool         amp_enable{false};
     bool         bias_tee{false};
     std::uint32_t requested_rx_sample_rate_hz{kDefaultDeviceRateHz};
-    std::unique_ptr<modem::ILoraModem> modem;
-    std::unique_ptr<dsp::Resampler> resampler;
+    // What is being listened for, in the order start_rx was given it; [0]
+    // is the primary. Remembered so a transmit() burst can resume the set.
+    std::vector<modem::RxListener> listeners;
+    std::uint64_t device_center_hz{915'000'000};
+    // One worker per channel: listeners sharing a frequency and bandwidth
+    // share a chain, and each chain drains its own queue of capture blocks
+    // on a thread of its own, so a slow SF12 demodulator cannot starve the
+    // others or the device callback.
+    std::vector<std::unique_ptr<ChainWorker>> chains;
     dsp::DcBlocker dc_blocker;
     bool dc_block_enabled{true}; // toggleable via set_device_option("dc_block", 0/1)
     dsp::SignalStats stats;
@@ -159,18 +251,13 @@ struct Core::Impl {
     std::atomic<bool> running{false};
     std::mutex start_mu;
 
-    // Last RX configuration, remembered so a transmit() burst can pause and
-    // then resume the receiver on the same preset/frequency.
-    modem::LoraParams last_rx_params{modem::params_for(modem::Preset::LongFast)};
-    std::uint64_t last_rx_center{915'000'000};
-
     // Optional raw IQ capture of the modem-input (decimated) stream, gated by
     // the MRF_IQ_CAPTURE env var (=output path) or the start_capture() API.
     // Interleaved float32 I/Q (.cf32), capped so we don't fill the disk.
     std::mutex   capture_mu;
     std::FILE*   capture_file{nullptr};
     std::size_t  capture_remaining{0};
-    std::uint32_t modem_rate{0}; // modem working sample rate (post-decimate)
+    std::uint32_t modem_rate{0}; // the primary chain's working rate (post-decimate)
     std::uint32_t device_rate{0}; // radio sample rate (raw capture rate)
     std::uint64_t last_drops_reported{0}; // throttle RX-overrun log spam
 
@@ -184,8 +271,15 @@ struct Core::Impl {
     std::uint64_t last_packet_start{0};
     std::uint64_t last_packet_end{0};
 
+    // A log line and which listener it is about: its index in `listeners`,
+    // or -1 for the receiver as a whole.
+    struct Event {
+        int listener;
+        std::string text;
+    };
+
     std::mutex events_mu;
-    std::deque<std::string> events; // produced by modem callback
+    std::deque<Event> events; // produced by the chains' callbacks
     std::uint64_t events_dropped{0};
     std::uint64_t diagnostics_shed{0};
 
@@ -204,7 +298,7 @@ struct Core::Impl {
     // travel to the reader rather than being reported from here: a full
     // queue has no slot to put the notice in, which is the one line that
     // must not be lost. Caller holds events_mu.
-    void queue_event_locked(std::string msg) {
+    void queue_event_locked(int listener, std::string msg) {
         if (events.size() >= kShedDiagnosticsAbove && is_diagnostic_line(msg)) {
             ++diagnostics_shed;
             return;
@@ -213,14 +307,22 @@ struct Core::Impl {
             events.pop_front();
             ++events_dropped;
         }
-        events.push_back(std::move(msg));
+        events.push_back(Event{listener, std::move(msg)});
     }
 
-    // Queue a line for the UI log. Used by the packet-radio path, which has no
-    // modem callback to route its diagnostics through.
-    void push_event(std::string msg) {
+    // Queue a line about one listener. Used by the packet-radio path, whose
+    // frames have no chain callback to arrive through.
+    void push_event(int listener, std::string msg) {
         std::lock_guard<std::mutex> lk(events_mu);
-        queue_event_locked(std::move(msg));
+        queue_event_locked(listener, std::move(msg));
+    }
+
+    // Queue a line about the receiver as a whole.
+    void push_event(std::string msg) { push_event(-1, std::move(msg)); }
+
+    // Stop every chain worker and join it. Safe when none is running.
+    void stop_chains() {
+        for (auto& w : chains) w->stop();
     }
 
     // Open or release the SX1262 stick to match the current RX/TX selections.
@@ -271,12 +373,21 @@ void Core::start_rx(modem::Preset preset, std::uint64_t center_freq_hz) {
 }
 
 void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_hz) {
+    const modem::RxListener one{params, center_freq_hz};
+    start_rx(std::span<const modem::RxListener>(&one, 1), center_freq_hz);
+}
+
+void Core::start_rx(std::span<const modem::RxListener> listeners,
+                    std::uint64_t device_center_hz) {
     std::lock_guard<std::mutex> lk(impl_->start_mu);
     if (impl_->running) return;
+    if (listeners.empty()) throw std::invalid_argument("start_rx: no listeners");
 
-    // Remember the active RX config so transmit() can resume it after a burst.
-    impl_->last_rx_params = params;
-    impl_->last_rx_center = center_freq_hz;
+    // Remember the set so transmit() can resume it after a burst.
+    impl_->listeners.assign(listeners.begin(), listeners.end());
+    impl_->device_center_hz = device_center_hz;
+    const modem::LoraParams& params = impl_->listeners.front().params;
+    const std::uint64_t center_freq_hz = impl_->listeners.front().center_freq_hz;
 
     // Hardware modem path. None of the pipeline below exists here: there is no
     // IQ, so no resampler, no spectrum, no waterfall, no packet spectrogram and
@@ -284,6 +395,10 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
     // same event lines the software demodulator emits so every layer above —
     // decrypt, protobuf, routing, MQTT, UI — is unchanged.
     if (impl_->rx_requested_kind == hal::DeviceKind::Sx1262) {
+        if (listeners.size() > 1) {
+            impl_->push_event("SX1262: a hardware modem receives one channel at a time");
+            throw std::runtime_error("SX1262 receives one channel at a time");
+        }
         impl_->sync_packet_radio();
         if (!impl_->packet_radio) {
             impl_->push_event(std::string("SX1262: ") + hal::packet_radio_status());
@@ -309,10 +424,10 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
                 char head[128];
                 std::snprintf(head, sizeof(head),
                               "preamble: SF%u BW%uk hardware peak=%.1fdB",
-                              static_cast<unsigned>(impl_->last_rx_params.spreading_factor),
-                              static_cast<unsigned>(impl_->last_rx_params.bandwidth_hz / 1000u),
+                              static_cast<unsigned>(impl_->listeners.front().params.spreading_factor),
+                              static_cast<unsigned>(impl_->listeners.front().params.bandwidth_hz / 1000u),
                               p.snr_db);
-                impl_->push_event(head);
+                impl_->push_event(0, head);
 
                 std::string hex;
                 hex.reserve(p.payload.size() * 2);
@@ -327,7 +442,7 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
                 char line[96];
                 std::snprintf(line, sizeof(line), "payload[OK] len=%zu crc=0000/0000 ",
                               p.payload.size());
-                impl_->push_event(std::string(line) + hex);
+                impl_->push_event(0, std::string(line) + hex);
             }, error)) {
             impl_->push_event("SX1262: could not start receive \xE2\x80\x94 " + error);
             throw std::runtime_error("SX1262 receive failed to start: " + error);
@@ -341,16 +456,38 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
         return;
     }
 
-    impl_->modem = modem::make_modem(params);
-    impl_->modem->set_frame_callback([this](const modem::DecodedFrame& frame) {
-        std::lock_guard<std::mutex> iq_lk(impl_->iq_mu);
-        impl_->last_packet_start = frame.sample_index;
-        impl_->last_packet_end = frame.end_sample_index;
-    });
-    impl_->modem->set_event_callback([this](std::string msg) {
-        std::lock_guard<std::mutex> ev_lk(impl_->events_mu);
-        impl_->queue_event_locked(std::move(msg));
-    });
+    // Group the listeners into chains, one per (offset, bandwidth), so the
+    // listeners on one channel share its mixer and filter. Constructing a
+    // modem per listener here validates its parameters before any device is
+    // touched, and gives the rate the chip stream will run at.
+    struct ChainSpec {
+        std::int64_t offset_hz;
+        std::uint32_t bandwidth_hz;
+        std::vector<modem::RxListenerChain::Member> members;
+    };
+    std::vector<ChainSpec> specs;
+    std::uint32_t minimum_rate = 0;
+    for (std::size_t i = 0; i < impl_->listeners.size(); ++i) {
+        const auto& l = impl_->listeners[i];
+        const std::int64_t offset = static_cast<std::int64_t>(l.center_freq_hz) -
+                                    static_cast<std::int64_t>(device_center_hz);
+        auto spec = std::find_if(specs.begin(), specs.end(), [&](const ChainSpec& s) {
+            return s.offset_hz == offset && s.bandwidth_hz == l.params.bandwidth_hz;
+        });
+        if (spec == specs.end()) {
+            specs.push_back(ChainSpec{offset, l.params.bandwidth_hz, {}});
+            spec = specs.end() - 1;
+        }
+        spec->members.push_back({static_cast<int>(i), l.params});
+
+        // The capture has to run at the chip stream's rate at least, and
+        // reach the far edge of every channel.
+        const std::uint32_t chip_rate = modem::make_modem(l.params)->working_sample_rate_hz();
+        const double reach = 2.0 * (std::abs(static_cast<double>(offset)) +
+                                    l.params.bandwidth_hz / 2.0);
+        minimum_rate = std::max({minimum_rate, chip_rate,
+                                 static_cast<std::uint32_t>(std::ceil(reach))});
+    }
 
     if (!impl_->rx_radio) {
         impl_->rx_radio = hal::open_device(impl_->rx_requested_kind);
@@ -359,31 +496,61 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
     if (!impl_->rx_radio)
         throw std::runtime_error("No RX device selected or available");
     hal::RxConfig rx{};
-    rx.center_freq_hz = center_freq_hz;
+    rx.center_freq_hz = device_center_hz;
     rx.lna_gain_db = impl_->lna_db;
     rx.vga_gain_db = impl_->vga_db;
     rx.amp_enable  = impl_->amp_enable;
-    const std::uint32_t target = impl_->modem->working_sample_rate_hz();
     // Keep the radio at a supported device rate chosen by the user, but never
-    // below the modem's working rate.
+    // below what the listeners need.
     rx.sample_rate_hz = normalize_rx_sample_rate(
-        impl_->rx_radio->kind(), impl_->requested_rx_sample_rate_hz, target);
+        impl_->rx_radio->kind(), impl_->requested_rx_sample_rate_hz, minimum_rate);
+    if (rx.sample_rate_hz == 0)
+        throw std::runtime_error("No supported sample rate covers every listener");
 
-    impl_->resampler = std::make_unique<dsp::Resampler>(rx.sample_rate_hz, target);
+    // Build the chains against the real device rate. stop() joined the
+    // previous workers, so nothing is reading the old chains.
+    impl_->chains.clear();
+    for (const auto& spec : specs) {
+        auto chain = std::make_unique<modem::RxListenerChain>(
+            rx.sample_rate_hz, spec.offset_hz, spec.bandwidth_hz,
+            std::span<const modem::RxListenerChain::Member>(spec.members));
+        chain->set_frame_callback([this](int listener, const modem::DecodedFrame& frame) {
+            // The packet spectrogram follows the primary alone: its ring is
+            // the primary's channel, and another listener's sample indices
+            // refer to a different stream.
+            if (listener != 0) return;
+            std::lock_guard<std::mutex> iq_lk(impl_->iq_mu);
+            impl_->last_packet_start = frame.sample_index;
+            impl_->last_packet_end = frame.end_sample_index;
+        });
+        chain->set_event_callback([this](int listener, std::string msg) {
+            std::lock_guard<std::mutex> ev_lk(impl_->events_mu);
+            impl_->queue_event_locked(listener, std::move(msg));
+        });
+        impl_->chains.push_back(std::make_unique<ChainWorker>(std::move(chain)));
+    }
+    ChainWorker* primary = nullptr;
+    for (auto& w : impl_->chains)
+        if (w->chain->has_listener(0)) primary = w.get();
+    const std::uint32_t target = primary->chain->working_rate_hz();
+
     impl_->dc_blocker.reset();
     impl_->stats.reset();
     impl_->spectrum = std::make_unique<dsp::Spectrum>(kSpectrumFftSize);
     impl_->spectrum->set_history_frame_stride(compute_history_frame_stride(rx.sample_rate_hz));
     impl_->last_drops_reported = 0;
-    // Allocate enough modem-rate IQ history for full-frame packet snapshots.
-    // Long SF12 frames can run ~10 seconds for max-length packets, and the UI
-    // only commits the snapshot after CRC OK, so a short ring can lose the
-    // preamble before the snapshot is requested.
+    // Enough modem-rate IQ history for full-frame packet snapshots. Long SF12
+    // frames can run ~10 seconds for max-length packets, and the UI only
+    // commits the snapshot after CRC OK, so a short ring can lose the
+    // preamble before the snapshot is requested. Kept across restarts of the
+    // same size: a shared-radio transmit re-enters here for every burst, and
+    // the ring is close to 100 MB.
     {
         constexpr std::size_t kPacketHistorySeconds = 12u;
+        const std::size_t want = static_cast<std::size_t>(target) * kPacketHistorySeconds;
         std::lock_guard<std::mutex> ring_init_lk(impl_->iq_mu);
-        impl_->iq_ring.assign(static_cast<std::size_t>(target) * kPacketHistorySeconds,
-                              std::complex<float>{0.0f, 0.0f});
+        if (impl_->iq_ring.size() != want)
+            impl_->iq_ring.assign(want, std::complex<float>{0.0f, 0.0f});
         impl_->iq_pos = 0;
         impl_->iq_filled = 0;
         impl_->iq_total_samples = 0;
@@ -400,67 +567,90 @@ void Core::start_rx(const modem::LoraParams& params, std::uint64_t center_freq_h
         start_capture(path);
     }
 
-    impl_->rx_radio->start_rx(rx, [this](const hal::SampleType* s, std::size_t n) {
-        // 0. Strip the DC offset from the raw zero-IF input so the rest of
-        //    the pipeline (stats, spectrum, modem) doesn't see a giant
-        //    center-bin spike. HackRF / RTL-SDR / etc. all leak LO into the
-        //    baseband; without this, the waterfall has a permanent vertical
-        //    line at the tuned frequency.
-        impl_->work.assign(s, s + n);
-        if (impl_->dc_block_enabled)
-            impl_->dc_blocker.process(std::span<hal::SampleType>(impl_->work));
-        // 1. Spectrum / waterfall on the DC-blocked signal.
-        impl_->spectrum->push({impl_->work.data(), n});
-        const hal::SampleType* clean = impl_->work.data();
-        // 2. Stats.
-        impl_->stats.process({clean, n});
-        // 3. Optional raw IQ capture.
-        {
-            std::lock_guard<std::mutex> clk(impl_->capture_mu);
-            if (impl_->capture_file && impl_->capture_remaining > 0) {
-                const std::size_t take = std::min(impl_->capture_remaining, n);
-                std::fwrite(clean, sizeof(hal::SampleType), take,
-                            impl_->capture_file);
-                impl_->capture_remaining -= take;
-                if (impl_->capture_remaining == 0) {
-                    std::fflush(impl_->capture_file);
-                    std::fclose(impl_->capture_file);
-                    impl_->capture_file = nullptr;
-                }
-            }
-        }
-        // 3. Decimate to the modem's working rate, then hand to the modem.
-        auto resampled = impl_->resampler->process({clean, n});
-        impl_->modem->process_rx({resampled.data(), resampled.size()});
-
-        // 3b. Append to the rolling IQ ring for the last-packet spectrogram.
-        {
+    // Workers before the device, so the first block has somewhere to go.
+    for (auto& w : impl_->chains) {
+        const bool is_primary = (w.get() == primary);
+        w->start([this, is_primary](std::span<const modem::Sample> channel) {
+            // The rolling ring for the last-packet spectrogram is the
+            // primary's channel.
+            if (!is_primary) return;
             std::lock_guard<std::mutex> ring_lk(impl_->iq_mu);
             const std::size_t cap = impl_->iq_ring.size();
-            if (cap > 0) {
-                for (const auto& sample : resampled) {
-                    impl_->iq_ring[impl_->iq_pos] =
-                        std::complex<float>{sample.real(), sample.imag()};
-                    impl_->iq_pos = (impl_->iq_pos + 1u) % cap;
-                    if (impl_->iq_filled < cap) ++impl_->iq_filled;
-                    ++impl_->iq_total_samples;
+            if (cap == 0) return;
+            for (const auto& sample : channel) {
+                impl_->iq_ring[impl_->iq_pos] = sample;
+                impl_->iq_pos = (impl_->iq_pos + 1u) % cap;
+                if (impl_->iq_filled < cap) ++impl_->iq_filled;
+                ++impl_->iq_total_samples;
+            }
+        });
+    }
+
+    try {
+        impl_->rx_radio->start_rx(rx, [this](const hal::SampleType* s, std::size_t n) {
+            // 0. Strip the DC offset from the raw zero-IF input so the rest of
+            //    the pipeline (stats, spectrum, chains) doesn't see a giant
+            //    center-bin spike. HackRF / RTL-SDR / etc. all leak LO into the
+            //    baseband; without this, the waterfall has a permanent vertical
+            //    line at the tuned frequency.
+            impl_->work.assign(s, s + n);
+            if (impl_->dc_block_enabled)
+                impl_->dc_blocker.process(std::span<hal::SampleType>(impl_->work));
+            // 1. Spectrum / waterfall on the DC-blocked signal.
+            impl_->spectrum->push({impl_->work.data(), n});
+            const hal::SampleType* clean = impl_->work.data();
+            // 2. Stats.
+            impl_->stats.process({clean, n});
+            // 3. Optional raw IQ capture.
+            {
+                std::lock_guard<std::mutex> clk(impl_->capture_mu);
+                if (impl_->capture_file && impl_->capture_remaining > 0) {
+                    const std::size_t take = std::min(impl_->capture_remaining, n);
+                    std::fwrite(clean, sizeof(hal::SampleType), take,
+                                impl_->capture_file);
+                    impl_->capture_remaining -= take;
+                    if (impl_->capture_remaining == 0) {
+                        std::fflush(impl_->capture_file);
+                        std::fclose(impl_->capture_file);
+                        impl_->capture_file = nullptr;
+                    }
                 }
             }
-        }
+            // 4. Hand the block to every chain: one copy, shared read-only.
+            auto block = std::make_shared<const std::vector<hal::SampleType>>(impl_->work);
+            for (auto& w : impl_->chains) w->push(block);
 
-        // 4. Report dropped samples (ring overflow = consumer can't keep up).
-        //    Throttled to once per ~0.5 s of new drops so the log isn't spammed.
-        if (impl_->rx_radio) {
-            const std::uint64_t drops = impl_->rx_radio->dropped_samples();
-            if (drops > impl_->last_drops_reported + impl_->device_rate / 2) {
-                impl_->last_drops_reported = drops;
-                std::lock_guard<std::mutex> lk(impl_->events_mu);
-                impl_->queue_event_locked("WARNING: dropped " +
-                                          std::to_string(drops) +
-                                          " samples (RX overrun)");
+            // 5. Report dropped samples (ring overflow = consumer can't keep up).
+            //    Throttled to once per ~0.5 s of new drops so the log isn't spammed.
+            if (impl_->rx_radio) {
+                const std::uint64_t drops = impl_->rx_radio->dropped_samples();
+                if (drops > impl_->last_drops_reported + impl_->device_rate / 2) {
+                    impl_->last_drops_reported = drops;
+                    std::lock_guard<std::mutex> lk(impl_->events_mu);
+                    impl_->queue_event_locked(-1, "WARNING: dropped " +
+                                                  std::to_string(drops) +
+                                                  " samples (RX overrun)");
+                }
             }
-        }
-    });
+            // 6. And blocks a chain dropped because its demodulators fell
+            //    behind. Throttled the same way, per chain.
+            for (auto& w : impl_->chains) {
+                const std::uint64_t dropped = w->blocks_dropped.load(std::memory_order_relaxed);
+                if (dropped < w->last_drops_reported + 16u) continue;
+                w->last_drops_reported = dropped;
+                char msg[160];
+                std::snprintf(msg, sizeof(msg),
+                              "WARNING: listener chain at %+.3f MHz dropped %llu blocks (demodulator overrun)",
+                              static_cast<double>(w->chain->offset_hz()) / 1e6,
+                              static_cast<unsigned long long>(dropped));
+                std::lock_guard<std::mutex> lk(impl_->events_mu);
+                impl_->queue_event_locked(-1, msg);
+            }
+        });
+    } catch (...) {
+        impl_->stop_chains();
+        throw;
+    }
 
     // Re-apply cached device-specific options now that the radio is open and
     // the stream is running (RTL-SDR only acquires its handle in start_rx).
@@ -476,6 +666,8 @@ void Core::stop() {
     // parks the RF switch. Safe when it was never started.
     if (impl_->packet_radio) impl_->packet_radio->stop_rx();
     if (impl_->rx_radio) impl_->rx_radio->stop_rx();
+    // No block arrives once the device has stopped, so the workers can go.
+    impl_->stop_chains();
     // The RX callback has now stopped; safe to close any capture.
     stop_capture();
     impl_->running = false;
@@ -632,8 +824,13 @@ bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_h
     // 5. Pause RX only when TX shares the same HackRF handle. If RX is on a
     // separate device (for example RTL-SDR), keep receiving during TX.
     const bool was_running = is_running();
-    const auto rx_params = impl_->last_rx_params;
-    const std::uint64_t rx_center = impl_->last_rx_center;
+    std::vector<modem::RxListener> rx_listeners;
+    std::uint64_t rx_center = 0;
+    {
+        std::lock_guard<std::mutex> lk(impl_->start_mu);
+        rx_listeners = impl_->listeners;
+        rx_center = impl_->device_center_hz;
+    }
     if (was_running && tx_uses_rx_radio) stop();
 
     // 6. Stream the buffer once via the HackRF TX callback, blocking until the
@@ -704,7 +901,8 @@ bool Core::transmit(const modem::LoraParams& params, std::uint64_t center_freq_h
     }
 
     // 7. Resume RX if a shared-radio burst paused it.
-    if (was_running && tx_uses_rx_radio) start_rx(rx_params, rx_center);
+    if (was_running && tx_uses_rx_radio)
+        start_rx(std::span<const modem::RxListener>(rx_listeners), rx_center);
     return true;
 }
 
@@ -744,6 +942,21 @@ bool Core::is_capturing() const noexcept {
 
 bool Core::is_running() const noexcept { return impl_->running; }
 
+std::size_t Core::listener_count() const noexcept {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    return impl_->listeners.size();
+}
+
+CoreSignalStats Core::listener_signal_stats(std::size_t index) const noexcept {
+    std::lock_guard<std::mutex> lk(impl_->start_mu);
+    for (const auto& w : impl_->chains) {
+        if (!w->chain->has_listener(static_cast<int>(index))) continue;
+        const auto s = w->chain->stats();
+        return CoreSignalStats{s.rssi_dbfs, s.peak_dbfs, s.dc_re, s.dc_im, s.total_samples};
+    }
+    return CoreSignalStats{-120.0f, -120.0f, 0.0f, 0.0f, 0u};
+}
+
 void Core::set_gains(std::uint8_t lna_db, std::uint8_t vga_db, bool amp) {
     // Clamp to HackRF-legal ranges.
     if (lna_db > 40) lna_db = 40;
@@ -777,7 +990,7 @@ std::uint32_t Core::sample_rate_hz() const noexcept {
 }
 
 std::uint64_t Core::spectrum_center_hz() const noexcept {
-    return impl_->running ? impl_->last_rx_center : 0u;
+    return impl_->running ? impl_->device_center_hz : 0u;
 }
 
 bool Core::latest_spectrum(std::span<float> out) const {
@@ -852,11 +1065,14 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     std::uint8_t sf = 11;
     std::uint32_t bw = 250'000u;
     std::uint16_t preamble = 16u;
-    if (impl_->modem) {
-        const auto& p = impl_->modem->params();
-        sf = p.spreading_factor;
-        if (p.bandwidth_hz) bw = p.bandwidth_hz;
-        preamble = p.preamble_symbols;
+    {
+        std::lock_guard<std::mutex> lk(impl_->start_mu);
+        if (!impl_->listeners.empty()) {
+            const auto& p = impl_->listeners.front().params;
+            sf = p.spreading_factor;
+            if (p.bandwidth_hz) bw = p.bandwidth_hz;
+            preamble = p.preamble_symbols;
+        }
     }
     // Samples per LoRa symbol at the modem rate (= 2^SF * oversampling).
     const std::size_t sym_samples =
@@ -1344,7 +1560,13 @@ const char* Core::device_status() const noexcept {
 }
 
 std::size_t Core::pull_event(std::span<char> out) noexcept {
+    int ignored = -1;
+    return pull_event(out, ignored);
+}
+
+std::size_t Core::pull_event(std::span<char> out, int& listener_index) noexcept {
     std::lock_guard<std::mutex> lk(impl_->events_mu);
+    listener_index = -1;
     if (out.empty()) return 0;
 
     // Served ahead of the queue, and formatted into the caller's buffer
@@ -1376,8 +1598,9 @@ std::size_t Core::pull_event(std::span<char> out) noexcept {
 
     if (impl_->events.empty()) return 0;
     const auto& front = impl_->events.front();
-    std::size_t n = std::min(front.size(), out.size() - 1);
-    std::memcpy(out.data(), front.data(), n);
+    listener_index = front.listener;
+    std::size_t n = std::min(front.text.size(), out.size() - 1);
+    std::memcpy(out.data(), front.text.data(), n);
     out[n] = '\0';
     impl_->events.pop_front();
     return n;

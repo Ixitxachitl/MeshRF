@@ -154,6 +154,8 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("favorite", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("seen_via_mqtt", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("node_status", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("heard_on_preset", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("heard_on_freq_mhz", "REAL");
         AddColumnIfMissing("pm10_std",  "INTEGER");
         AddColumnIfMissing("pm25_std",  "INTEGER");
         AddColumnIfMissing("pm100_std", "INTEGER");
@@ -285,7 +287,8 @@ public sealed class NodeStore : IDisposable
                                        pm10_env, pm25_env, pm100_env,
                                        ch1_voltage_v, ch1_current_ma,
                                        ch2_voltage_v, ch2_current_ma,
-                                       ch3_voltage_v, ch3_current_ma)
+                                       ch3_voltage_v, ch3_current_ma,
+                                       heard_on_preset, heard_on_freq_mhz)
                 VALUES ($node_num, $user_id, $long_name, $short_name,
                         $hw_model, $role, $last_heard, MAX($seen_via_mqtt, 0),
                         $snr, $rssi, $hops,
@@ -300,7 +303,8 @@ public sealed class NodeStore : IDisposable
                                     $mute_rtttl, $ignored, $node_status,
                                     $pm10std, $pm25std, $pm100std,
                                     $pm10env, $pm25env, $pm100env,
-                                    $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i)
+                                    $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i,
+                                    $heard_on_preset, $heard_on_freq)
                 ON CONFLICT(node_num) DO UPDATE SET
                     user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
                     long_name        = COALESCE(NULLIF(excluded.long_name, ''),  long_name),
@@ -343,7 +347,9 @@ public sealed class NodeStore : IDisposable
                     ch2_voltage_v    = COALESCE(excluded.ch2_voltage_v,  ch2_voltage_v),
                     ch2_current_ma   = COALESCE(excluded.ch2_current_ma, ch2_current_ma),
                     ch3_voltage_v    = COALESCE(excluded.ch3_voltage_v,  ch3_voltage_v),
-                    ch3_current_ma   = COALESCE(excluded.ch3_current_ma, ch3_current_ma);
+                    ch3_current_ma   = COALESCE(excluded.ch3_current_ma, ch3_current_ma),
+                    heard_on_preset  = COALESCE(NULLIF(excluded.heard_on_preset, ''), heard_on_preset),
+                    heard_on_freq_mhz = COALESCE(excluded.heard_on_freq_mhz, heard_on_freq_mhz);
                 """;
             // A relayed packet can still carry a number this database has
             // retired; resolving here is what keeps the ghost row from
@@ -402,6 +408,8 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$heard_on_preset", rec.HeardOnPreset ?? string.Empty);
+            cmd.Parameters.AddWithValue("$heard_on_freq", (object?)rec.HeardOnFreqMHz ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
     }
@@ -487,10 +495,15 @@ public sealed class NodeStore : IDisposable
     /// <summary>Touch last-heard / RSSI / SNR for an existing or new node.
     /// <paramref name="seenViaMqtt"/> is the transport of this sighting and
     /// overwrites the stored flag either way — callers always know it.</summary>
+    /// <param name="heardOnPreset">What the node was heard on, a preset name
+    /// or <see cref="Mesh.HeardOn.Custom"/>; null or empty leaves the stored
+    /// value alone, for a sighting that did not come over the air.</param>
     public void RecordSighting(uint nodeNum, float? rssiDbm = null,
                                float? snrDb = null, byte? hopsAway = null,
                                DateTimeOffset? when = null,
-                               bool seenViaMqtt = false)
+                               bool seenViaMqtt = false,
+                               string? heardOnPreset = null,
+                               double? heardOnFreqMHz = null)
     {
         var ts = (when ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds();
         Upsert(new NodeRecord
@@ -501,6 +514,8 @@ public sealed class NodeStore : IDisposable
             RssiDbm = rssiDbm,
             SnrDb = snrDb,
             HopsAway = hopsAway,
+            HeardOnPreset = heardOnPreset ?? string.Empty,
+            HeardOnFreqMHz = heardOnFreqMHz,
         });
     }
 
@@ -1379,6 +1394,8 @@ public sealed class NodeStore : IDisposable
             Ch2CurrentMa          = Nullable<float>("ch2_current_ma"),
             Ch3VoltageV           = Nullable<float>("ch3_voltage_v"),
             Ch3CurrentMa          = Nullable<float>("ch3_current_ma"),
+            HeardOnPreset         = ReadStringOrEmpty(r, "heard_on_preset"),
+            HeardOnFreqMHz        = Nullable<double>("heard_on_freq_mhz"),
         };
     }
 

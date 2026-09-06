@@ -11,6 +11,12 @@ namespace MeshRF.Tests;
 /// swallowed — so the only thing that proves a save lands at all, or that a
 /// file left half-written by a crash is recoverable, is reading the file back.
 /// </summary>
+/// <summary>The settings file is reached through a static override, so the
+/// classes that redirect it must not run at the same time as each other.</summary>
+[CollectionDefinition("settings-file", DisableParallelization = true)]
+public sealed class SettingsFileCollection { }
+
+[Collection("settings-file")]
 public sealed class AppSettingsPersistenceTests : IDisposable
 {
     private readonly string _dir;

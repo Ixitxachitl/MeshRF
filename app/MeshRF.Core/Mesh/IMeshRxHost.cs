@@ -20,8 +20,10 @@ public interface IMeshRxHost
     /// <summary>Our X25519 private key (32 bytes), or empty if we don't have one yet.</summary>
     byte[] MyPrivateKeyBytes { get; }
 
-    /// <summary>Configured channels, used to try channel-PSK decode against each in turn.</summary>
-    IReadOnlyList<ChannelConfig> Channels { get; }
+    /// <summary>The channels a frame heard on <paramref name="source"/> is
+    /// tried against, each in turn: the list belonging to that listener's
+    /// preset. A node on several presets has a channel list per preset.</summary>
+    IReadOnlyList<ChannelConfig> ChannelsFor(RxSource source);
 
     /// <summary>Current overall receiver RSSI (dBFS), used for the MessageRecord's
     /// RssiDbfs field — distinct from the per-packet <c>packetRssiDbm</c> parameters,
@@ -34,7 +36,8 @@ public interface IMeshRxHost
     void Log(string message);
 
     /// <summary>Always called first for a non-echo frame, decoded or not.</summary>
-    void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt);
+    void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt,
+                        RxSource source);
 
     void MarkNodeDirty(uint nodeNum);
 
@@ -56,8 +59,8 @@ public interface IMeshRxHost
     /// exact undecoded packet was already seen recently.</summary>
     bool RememberUndecodedPacket(MeshHeader header);
 
-    void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb);
-    void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb);
+    void HandleDuplicateForRelay(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb, RxSource source);
+    void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb, RxSource source);
     void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm);
 
     /// <summary>
@@ -67,7 +70,7 @@ public interface IMeshRxHost
     /// position updates, games, etc.) here.
     /// </summary>
     void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
-                          long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway);
+                          long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source);
 
     /// <summary>
     /// A frame decoded successfully but is a dedup hit — the sender is
@@ -79,7 +82,7 @@ public interface IMeshRxHost
     /// Defaulted to a no-op so hosts that predate the ack path keep compiling
     /// unchanged.
     /// </summary>
-    void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result) { }
+    void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result, RxSource source) { }
 
     /// <summary>
     /// A frame decoded successfully, but <see cref="MessageStore"/> threw, so
@@ -92,7 +95,7 @@ public interface IMeshRxHost
     /// Defaulted to a no-op, like <see cref="OnDuplicateDecoded"/>.
     /// </summary>
     void OnDecodeNotStored(MeshHeader header, MeshDecodeResult result,
-                           long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway) { }
+                           long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source) { }
 
     /// <summary>
     /// A frame no key we hold could decrypt. The plaintext header still says who
@@ -102,5 +105,5 @@ public interface IMeshRxHost
     ///
     /// Defaulted to a no-op, like <see cref="OnDuplicateDecoded"/>.
     /// </summary>
-    void OnUndecodedPacket(MeshHeader header) { }
+    void OnUndecodedPacket(MeshHeader header, RxSource source) { }
 }

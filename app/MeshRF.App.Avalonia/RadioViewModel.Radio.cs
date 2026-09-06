@@ -33,32 +33,45 @@ public partial class RadioViewModel
     private const int RxBusyPollMs = 20;
 
     private readonly object _rxBusyLock = new();
-    private DateTime _rxBusyUntilUtc = DateTime.MinValue;
+    /// <summary>Per listener: a frame on one preset's channel says nothing
+    /// about another's, unless the two channels overlap.</summary>
+    private readonly Dictionary<int, DateTime> _rxBusyUntilUtc = new();
 
-    /// <summary>Mark RX busy for at least <paramref name="hold"/> from now.
-    /// Called from the event drain when a preamble is detected.</summary>
-    private void MarkRxBusy(DateTime nowUtc, TimeSpan hold)
+    /// <summary>Mark a listener's channel busy for at least <paramref name="hold"/>
+    /// from now. Called from the event drain when a preamble is detected.</summary>
+    private void MarkRxBusy(int listener, DateTime nowUtc, TimeSpan hold)
     {
         var until = nowUtc + hold;
         lock (_rxBusyLock)
         {
-            if (until > _rxBusyUntilUtc) _rxBusyUntilUtc = until;
+            if (!_rxBusyUntilUtc.TryGetValue(listener, out var current) || until > current)
+                _rxBusyUntilUtc[listener] = until;
         }
     }
 
     /// <summary>A payload line ends the frame the preamble started, so drop the
     /// hold immediately rather than waiting it out.</summary>
-    private void MarkRxFrameComplete(DateTime nowUtc)
+    private void MarkRxFrameComplete(int listener, DateTime nowUtc)
     {
-        lock (_rxBusyLock) _rxBusyUntilUtc = nowUtc;
+        lock (_rxBusyLock) _rxBusyUntilUtc[listener] = nowUtc;
     }
 
-    private bool IsRxBusy(DateTime nowUtc)
+    /// <summary>Whether a burst on <paramref name="listener"/>'s channel would
+    /// land on a reception: its own, or one on a channel that overlaps it.</summary>
+    private bool IsRxBusy(DateTime nowUtc, int listener)
     {
-        lock (_rxBusyLock) return nowUtc < _rxBusyUntilUtc;
+        lock (_rxBusyLock)
+        {
+            foreach (var (other, until) in _rxBusyUntilUtc)
+            {
+                if (nowUtc >= until) continue;
+                if (other == listener || ChannelsOverlap(listener, other)) return true;
+            }
+            return false;
+        }
     }
 
-    private async Task WaitForRxIdleAsync(TimeSpan maxWait, CancellationToken ct = default)
+    private async Task WaitForRxIdleAsync(TimeSpan maxWait, int listener, CancellationToken ct = default)
     {
         if (maxWait <= TimeSpan.Zero) return;
 
@@ -66,7 +79,7 @@ public partial class RadioViewModel
         while (true)
         {
             var now = DateTime.UtcNow;
-            if (!IsRxBusy(now)) return;
+            if (!IsRxBusy(now, listener)) return;
 
             var elapsed = now - start;
             if (elapsed >= maxWait) return;
@@ -79,9 +92,9 @@ public partial class RadioViewModel
     /// <summary>Opportunistic CSMA-like defer: wait for the channel to go idle
     /// up to a small bound, then add a short random backoff so several nodes
     /// answering the same packet don't key up in unison.</summary>
-    private async Task WaitForTxOpportunityAsync(CancellationToken ct = default)
+    private async Task WaitForTxOpportunityAsync(int listener, CancellationToken ct = default)
     {
-        await WaitForRxIdleAsync(RxBusyMaxWait, ct).ConfigureAwait(false);
+        await WaitForRxIdleAsync(RxBusyMaxWait, listener, ct).ConfigureAwait(false);
         await Task.Delay(Random.Shared.Next(8, 24), ct).ConfigureAwait(false);
     }
 
@@ -95,11 +108,13 @@ public partial class RadioViewModel
     /// receipt. Goes through the same gate and channel-idle defer as an
     /// awaited send; failures are swallowed because auto-replies are
     /// best-effort.</summary>
-    private void TransmitBackground(byte[] frame)
+    private void TransmitBackground(byte[] frame) => TransmitBackground(frame, TargetForFrame(frame));
+
+    private void TransmitBackground(byte[] frame, TxTarget target)
     {
         _ = Task.Run(async () =>
         {
-            try { await TransmitFrameAsync(frame).ConfigureAwait(false); }
+            try { await TransmitFrameAsync(frame, target).ConfigureAwait(false); }
             catch { /* best-effort */ }
         });
     }
@@ -112,7 +127,7 @@ public partial class RadioViewModel
     /// express "off" for router roles, since firmware coerces NONE to ALL for
     /// them, so the opt-in is kept separate.
     /// </summary>
-    private RelayContext? BuildRelayContext()
+    private RelayContext? BuildRelayContext(RxSource source)
     {
         if (!RoutingRelayEnabled) return null;
         if (!CanTransmit) return null;
@@ -121,7 +136,9 @@ public partial class RadioViewModel
             MyRole ?? string.Empty,
             EffectiveRebroadcastMode,
             _rxHost.MyNodeNum,
-            SelectedPreset,
+            // The contention delay is worked out for the preset the packet
+            // arrived on, since that is where the rebroadcast goes.
+            source.Preset ?? SelectedPreset,
             _nodeStore.Get,
             _nodeStore.All,
             MyIsLicensed);
@@ -164,6 +181,9 @@ public partial class RadioViewModel
         bool nak = request.ErrorReason != RoutingError.None;
         bool reliable = request.TextMessage && !request.Duplicate && !nak;
         byte hopLimit = request.Duplicate ? (byte)0 : ResponseHopLimit(header, request.HasBitfield);
+        // Back out on the settings the packet came in on.
+        var source = request.Source ?? PrimarySource();
+        var target = TargetForSource(source);
 
         // Firmware guards the repeat ack with !findInTxQueue(p->from, p->id):
         // no second ack while the first is still waiting to go out. MeshRF has
@@ -200,9 +220,12 @@ public partial class RadioViewModel
             }
             else
             {
+                // On the list of the listener that heard the packet: the
+                // sender is on that mesh, and an ack sealed with another
+                // list's key is noise to it.
                 var channel = nak
-                    ? PrimaryChannel()
-                    : _rxHost.FindChannelByName(request.ChannelName) ?? PrimaryChannel();
+                    ? _rxHost.ChannelFor(source, null)
+                    : _rxHost.ChannelFor(source, request.ChannelName);
                 if (channel is not null)
                     frame = MeshEncoder.EncodeRouting(
                         channel, _rxHost.MyNodeNum, header.From, packetId, header.PacketId,
@@ -210,12 +233,12 @@ public partial class RadioViewModel
             }
 
             if (frame is null) return;
-            TransmitBackground(frame);
+            TransmitBackground(frame, target);
             if (nak)
                 _rxHost.Log($"  NAK (reason={request.ErrorReason}) to {header.FromId} for id {header.PacketId:x8}");
             if (reliable)
                 _ackRetransmits[packetId] = new AckRetransmit(
-                    frame, DateTime.UtcNow + AckRetxInterval, AckRetxAttempts);
+                    frame, DateTime.UtcNow + AckRetxInterval, AckRetxAttempts, target);
         }
         catch (Exception ex)
         {
@@ -245,7 +268,8 @@ public partial class RadioViewModel
 
     /// <param name="NextTxUtc">When to send the next copy.</param>
     /// <param name="Remaining">Copies left after the one already sent.</param>
-    private sealed record AckRetransmit(byte[] Frame, DateTime NextTxUtc, int Remaining);
+    /// <param name="Target">What the copies go out on: the same as the first.</param>
+    private sealed record AckRetransmit(byte[] Frame, DateTime NextTxUtc, int Remaining, TxTarget Target);
 
     /// <summary>Acks sent with want_ack that the peer hasn't confirmed yet,
     /// keyed by the ack's own packet id.</summary>
@@ -296,7 +320,7 @@ public partial class RadioViewModel
                 NextTxUtc = now + AckRetxInterval,
                 Remaining = retx.Remaining - 1,
             };
-            TransmitBackground(retx.Frame);
+            TransmitBackground(retx.Frame, retx.Target);
         }
     }
 
@@ -328,9 +352,91 @@ public partial class RadioViewModel
     private static readonly Regex PreamblePeakRegex = new(
         @"peak=(?<peak>-?\d+(?:\.\d+)?)dB", RegexOptions.Compiled);
 
-    /// <summary>Peak-above-noise from the last preamble, used as the SNR for
-    /// the payload that follows it.</summary>
-    private float? _lastPreamblePeakDb;
+    /// <summary>Peak-above-noise from the last preamble on each listener,
+    /// used as the SNR for the payload that follows it there. Per listener,
+    /// because the lines of several listeners' frames interleave in the
+    /// queue.</summary>
+    private readonly Dictionary<int, float?> _lastPreamblePeakDb = new();
+
+    private float? TakePreamblePeak(int listener) =>
+        _lastPreamblePeakDb.Remove(listener, out var peak) ? peak : null;
+
+    // -- Listeners and where a transmission goes ------------------------------
+
+    /// <summary>The receiver's listeners by index, as it was started; the
+    /// primary alone until a multi-preset start.</summary>
+    private RxSource[] _rxSources = [];
+
+    private RxSource PrimarySource() => RxSource.Primary(SelectedPreset, IsCustomLoraParams, CenterFreqMHz);
+
+    private RxSource SourceFor(int listener) =>
+        listener >= 0 && listener < _rxSources.Length ? _rxSources[listener] : PrimarySource();
+
+    /// <summary>The toolbar configuration as a transmit target.</summary>
+    private TxTarget PrimaryTarget()
+    {
+        var hz = (ulong)Math.Round(CenterFreqMHz * 1_000_000.0);
+        return IsCustomLoraParams
+            ? TxTarget.ForParams(OverrideSf, (uint)Math.Round(OverrideBwKhz * 1000.0), OverrideCr, hz, 0)
+            : TxTarget.ForPreset(SelectedPreset, hz, 0);
+    }
+
+    /// <summary>What a reply to a packet heard on <paramref name="source"/>
+    /// goes out on: the same settings.</summary>
+    private TxTarget TargetForSource(RxSource source)
+    {
+        if (source.IsPrimary || source.Preset is null) return PrimaryTarget();
+        return TxTarget.ForPreset(source.Preset.Value, (ulong)Math.Round(source.FreqMHz * 1_000_000.0), source.Listener);
+    }
+
+    /// <summary>What a packet to a node goes out on: the settings it was last
+    /// heard on, when that preset is one the receiver is listening on now,
+    /// so the answer can be heard; otherwise the primary.</summary>
+    private TxTarget TargetForNode(uint nodeNum)
+    {
+        var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
+        if (string.IsNullOrEmpty(heardOn)) return PrimaryTarget();
+        foreach (var s in _rxSources)
+            if (!s.IsPrimary && s.PresetName == heardOn) return TargetForSource(s);
+        return PrimaryTarget();
+    }
+
+    /// <summary>The target of a list of channels: the listener whose preset
+    /// owns it, or the primary for its own list.</summary>
+    private TxTarget TargetForList(string? listName)
+    {
+        if (string.IsNullOrEmpty(listName)) return PrimaryTarget();
+        foreach (var s in _rxSources)
+            if (!s.IsPrimary && s.PresetName == listName) return TargetForSource(s);
+        return PrimaryTarget();
+    }
+
+    /// <summary>
+    /// Where a finished frame goes, read off the frame itself: a packet to a
+    /// node goes out on that node's settings, a broadcast on the preset whose
+    /// list holds the channel it was sealed with. Every send in the app that
+    /// does not name its target passes through here, so auto-reports, which
+    /// are sealed with the primary's channels, land on the primary.
+    /// </summary>
+    private TxTarget TargetForFrame(byte[] frame)
+    {
+        if (!MeshHeader.TryParse(frame, out var header)) return PrimaryTarget();
+        if (!header.IsBroadcast && header.To != 0) return TargetForNode(header.To);
+        return TargetForList(_rxHost.ListNameForChannelHash(header.ChannelHash));
+    }
+
+    /// <summary>Bandwidth of a listener's channel, for the overlap test.</summary>
+    private uint BandwidthHz(RxSource s) => s.IsCustom || s.Preset is null
+        ? (uint)Math.Round(OverrideBwKhz * 1000.0)
+        : (uint)Math.Round(LoraParamsHelper.FromPreset(s.Preset.Value, ChannelPlan.IsWideLora(SelectedRegion)).BwKhz * 1000.0);
+
+    private bool ChannelsOverlap(int a, int b)
+    {
+        var sa = SourceFor(a);
+        var sb = SourceFor(b);
+        double gapHz = Math.Abs(sa.FreqMHz - sb.FreqMHz) * 1e6;
+        return gapHz < (BandwidthHz(sa) + BandwidthHz(sb)) / 2.0;
+    }
 
     /// <summary>Preamble and payload lines arrive per frame and carry long hex;
     /// they're handled structurally instead of being echoed to the log.</summary>
@@ -376,8 +482,12 @@ public partial class RadioViewModel
             double elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
             if (elapsedMs >= MaxRxDrainMsPerTick) break;
 
-            var ev = _core.PullEvent();
-            if (ev is null) break;
+            var pulled = _core.PullEvent();
+            if (pulled is null) break;
+            var ev = pulled.Value.Text;
+            // A line about the receiver as a whole (-1) is filed under the
+            // primary; nothing below reads its index for such a line anyway.
+            int listener = Math.Max(0, pulled.Value.Listener);
             var nowUtc = DateTime.UtcNow;
 
             // The modem indents the lines of a frame under its preamble, so
@@ -391,20 +501,22 @@ public partial class RadioViewModel
             {
                 // A preamble marks the start of a frame: hold off transmitting,
                 // and keep its peak-above-noise as the SNR for the payload.
-                MarkRxBusy(nowUtc, RxBusyDefaultHold);
+                MarkRxBusy(listener, nowUtc, RxBusyDefaultHold);
                 var pm = PreamblePeakRegex.Match(kind);
                 if (pm.Success && float.TryParse(pm.Groups["peak"].Value,
                         NumberStyles.Float, CultureInfo.InvariantCulture, out var peak))
-                    _lastPreamblePeakDb = peak;
+                    _lastPreamblePeakDb[listener] = peak;
             }
             else if (kind.StartsWith("payload", StringComparison.Ordinal))
             {
-                MarkRxFrameComplete(nowUtc);
+                MarkRxFrameComplete(listener, nowUtc);
             }
 
-            DecodePayloadIfPossible(kind);
+            DecodePayloadIfPossible(kind, listener);
 
-            if (IsCrcOkPayload(kind)) PacketDecoded?.Invoke();
+            // The packet spectrogram follows the primary: its IQ ring is the
+            // primary's channel.
+            if (listener == 0 && IsCrcOkPayload(kind)) PacketDecoded?.Invoke();
         }
     }
 }

@@ -8,6 +8,7 @@
 #include <string_view>
 #include <new>
 #include <span>
+#include <vector>
 
 extern "C" {
 
@@ -57,6 +58,40 @@ MRF_API int MRF_CALL mrf_core_start_rx_params(mrf_core_t* core,
         const double t_sym_ms = static_cast<double>(1u << sf) / (bw_hz / 1000.0);
         p.low_data_rate_optimize = (t_sym_ms >= 16.0);
         core->core.start_rx(p, center_freq_hz);
+        return 0;
+    } catch (...) {
+        return -2;
+    }
+}
+
+MRF_API int MRF_CALL mrf_core_start_rx_multi(mrf_core_t* core,
+                                             const mrf_rx_listener_t* listeners,
+                                             uint32_t count,
+                                             uint64_t device_center_hz) {
+    if (!core) return -1;
+    if (!listeners || count == 0) return -3;
+    std::vector<mrf::modem::RxListener> set;
+    set.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const mrf_rx_listener_t& l = listeners[i];
+        mrf::modem::RxListener r{};
+        if (l.sf != 0) {
+            // Same guard as mrf_core_start_rx_params: sf is a shift amount
+            // further down, and bw_hz a divisor.
+            if (l.sf < 7 || l.sf > 12 || l.bw_hz == 0) return -3;
+            r.params.spreading_factor = static_cast<uint8_t>(l.sf);
+            r.params.bandwidth_hz     = l.bw_hz;
+            r.params.coding_rate      = static_cast<uint8_t>(l.cr);
+            const double t_sym_ms = static_cast<double>(1u << l.sf) / (l.bw_hz / 1000.0);
+            r.params.low_data_rate_optimize = (t_sym_ms >= 16.0);
+        } else {
+            r.params = mrf::modem::params_for(static_cast<mrf::modem::Preset>(l.preset));
+        }
+        r.center_freq_hz = l.center_freq_hz;
+        set.push_back(r);
+    }
+    try {
+        core->core.start_rx(std::span<const mrf::modem::RxListener>(set), device_center_hz);
         return 0;
     } catch (...) {
         return -2;
@@ -231,6 +266,23 @@ MRF_API void MRF_CALL mrf_core_get_signal_stats(const mrf_core_t* core,
     out->total_samples = s.total_samples;
 }
 
+MRF_API uint32_t MRF_CALL mrf_core_listener_count(const mrf_core_t* core) {
+    if (!core) return 0u;
+    return static_cast<uint32_t>(core->core.listener_count());
+}
+
+MRF_API void MRF_CALL mrf_core_get_listener_signal_stats(const mrf_core_t* core,
+                                                         uint32_t index,
+                                                         mrf_signal_stats_t* out) {
+    if (!core || !out) return;
+    const auto s = core->core.listener_signal_stats(index);
+    out->rssi_dbfs     = s.rssi_dbfs;
+    out->peak_dbfs     = s.peak_dbfs;
+    out->dc_re         = s.dc_re;
+    out->dc_im         = s.dc_im;
+    out->total_samples = s.total_samples;
+}
+
 MRF_API uint32_t MRF_CALL mrf_core_spectrum_size(const mrf_core_t* core) {
     if (!core) return 0u;
     return static_cast<uint32_t>(core->core.spectrum_size());
@@ -342,6 +394,17 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_event(mrf_core_t* core,
         core->core.pull_event(std::span<char>(buf, capacity)));
 }
 
+MRF_API uint32_t MRF_CALL mrf_core_pull_event_ex(mrf_core_t* core,
+                                                 char* buf,
+                                                 uint32_t capacity,
+                                                 int32_t* listener_index) {
+    if (!core || !buf || capacity == 0) return 0u;
+    int index = -1;
+    const auto n = core->core.pull_event(std::span<char>(buf, capacity), index);
+    if (listener_index) *listener_index = index;
+    return static_cast<uint32_t>(n);
+}
+
 MRF_API int32_t MRF_CALL mrf_core_can_transmit(const mrf_core_t* core) {
     return (core && core->core.can_transmit()) ? 1 : 0;
 }
@@ -441,6 +504,8 @@ MRF_API int32_t MRF_CALL mrf_set_custom_spi_board(
 // 9: SX1262 receive path and serial-based stick selection.
 // 10: SX1262 over the host's own SPI bus (uConsole AIO V2, Pi HATs), with a
 //     declarable custom pin map and power model.
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 10u; }
+// 11: several listeners off one capture (mrf_core_start_rx_multi), events
+//     that say which listener they are about, per-listener signal stats.
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 11u; }
 
 } // extern "C"

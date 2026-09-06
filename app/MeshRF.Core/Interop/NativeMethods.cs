@@ -26,6 +26,21 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_start_rx_params")]
     public static partial int CoreStartRxParams(nint core, byte sf, uint bwHz, byte cr, ulong centerFreqHz);
 
+    /// <summary>Mirrors <c>mrf_rx_listener_t</c>: fixed-width, naturally
+    /// aligned fields, 24 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RxListener
+    {
+        public int Preset;
+        public uint Sf;
+        public uint BwHz;
+        public uint Cr;
+        public ulong CenterFreqHz;
+    }
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_start_rx_multi")]
+    public static unsafe partial int CoreStartRxMulti(nint core, RxListener* listeners, uint count, ulong deviceCenterHz);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_stop")]
     public static partial void CoreStop(nint core);
 
@@ -121,6 +136,12 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_get_signal_stats")]
     public static partial void CoreGetSignalStats(nint core, out SignalStats stats);
 
+    [LibraryImport(Dll, EntryPoint = "mrf_core_listener_count")]
+    public static partial uint CoreListenerCount(nint core);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_get_listener_signal_stats")]
+    public static partial void CoreGetListenerSignalStats(nint core, uint index, out SignalStats stats);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_spectrum_size")]
     public static partial uint CoreSpectrumSize(nint core);
 
@@ -161,6 +182,9 @@ internal static partial class NativeMethods
 
     [LibraryImport(Dll, EntryPoint = "mrf_core_pull_event")]
     public static unsafe partial uint CorePullEvent(nint core, byte* buf, uint capacity);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_pull_event_ex")]
+    public static unsafe partial uint CorePullEventEx(nint core, byte* buf, uint capacity, int* listenerIndex);
 
     [LibraryImport(Dll, EntryPoint = "mrf_core_can_transmit")]
     public static partial int CoreCanTransmit(nint core);

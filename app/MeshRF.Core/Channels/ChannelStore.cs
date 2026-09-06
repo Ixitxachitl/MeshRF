@@ -41,21 +41,67 @@ public sealed class ChannelStore : IDisposable
 
     private void EnsureSchema()
     {
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS channels (
-                idx                 INTEGER PRIMARY KEY,
-                name                TEXT    NOT NULL DEFAULT '',
-                psk                 BLOB    NOT NULL,
-                role                INTEGER NOT NULL DEFAULT 0,
-                position_precision  INTEGER NOT NULL DEFAULT 13,
-                uplink_enabled      INTEGER NOT NULL DEFAULT 0,
-                downlink_enabled    INTEGER NOT NULL DEFAULT 0
-            );
-            """;
-        cmd.ExecuteNonQuery();
+        using (var cmd = _conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS channels (
+                    preset              TEXT    NOT NULL DEFAULT '',
+                    idx                 INTEGER NOT NULL,
+                    name                TEXT    NOT NULL DEFAULT '',
+                    psk                 BLOB    NOT NULL,
+                    role                INTEGER NOT NULL DEFAULT 0,
+                    position_precision  INTEGER NOT NULL DEFAULT 13,
+                    uplink_enabled      INTEGER NOT NULL DEFAULT 0,
+                    downlink_enabled    INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (preset, idx)
+                );
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        // A database from before there was more than one list is keyed by
+        // idx alone. SQLite cannot change a primary key in place, so the
+        // table is rebuilt around the new key with every existing row in the
+        // primary's list, which is the list they were.
+        bool hasPreset;
+        using (var check = _conn.CreateCommand())
+        {
+            check.CommandText = "SELECT 1 FROM pragma_table_info('channels') WHERE name = 'preset'";
+            hasPreset = check.ExecuteScalar() is not null;
+        }
+        if (hasPreset) return;
+
+        using var tx = _conn.BeginTransaction();
+        using (var rebuild = _conn.CreateCommand())
+        {
+            rebuild.Transaction = tx;
+            rebuild.CommandText = """
+                CREATE TABLE channels_by_preset (
+                    preset              TEXT    NOT NULL DEFAULT '',
+                    idx                 INTEGER NOT NULL,
+                    name                TEXT    NOT NULL DEFAULT '',
+                    psk                 BLOB    NOT NULL,
+                    role                INTEGER NOT NULL DEFAULT 0,
+                    position_precision  INTEGER NOT NULL DEFAULT 13,
+                    uplink_enabled      INTEGER NOT NULL DEFAULT 0,
+                    downlink_enabled    INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (preset, idx)
+                );
+                INSERT INTO channels_by_preset (preset, idx, name, psk, role, position_precision,
+                                                uplink_enabled, downlink_enabled)
+                    SELECT '', idx, name, psk, role, position_precision,
+                           uplink_enabled, downlink_enabled
+                      FROM channels;
+                DROP TABLE channels;
+                ALTER TABLE channels_by_preset RENAME TO channels;
+                """;
+            rebuild.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 
+    /// <summary>Writes a channel into the list its <see cref="ChannelConfig.Preset"/>
+    /// names, replacing the row at its index there.</summary>
     public void Upsert(ChannelConfig c)
     {
         ThrowIfDisposed();
@@ -65,10 +111,10 @@ public sealed class ChannelStore : IDisposable
         {
             using var cmd = _conn.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO channels (idx, name, psk, role, position_precision,
+                INSERT INTO channels (preset, idx, name, psk, role, position_precision,
                                       uplink_enabled, downlink_enabled)
-                VALUES ($idx, $name, $psk, $role, $pp, $up, $dn)
-                ON CONFLICT(idx) DO UPDATE SET
+                VALUES ($preset, $idx, $name, $psk, $role, $pp, $up, $dn)
+                ON CONFLICT(preset, idx) DO UPDATE SET
                     name               = excluded.name,
                     psk                = excluded.psk,
                     role               = excluded.role,
@@ -76,6 +122,7 @@ public sealed class ChannelStore : IDisposable
                     uplink_enabled     = excluded.uplink_enabled,
                     downlink_enabled   = excluded.downlink_enabled;
                 """;
+            cmd.Parameters.AddWithValue("$preset", c.Preset ?? string.Empty);
             cmd.Parameters.AddWithValue("$idx",  c.Index);
             cmd.Parameters.AddWithValue("$name", c.Name);
             cmd.Parameters.AddWithValue("$psk",  ProtectPsk(c.Psk));
@@ -87,19 +134,48 @@ public sealed class ChannelStore : IDisposable
         }
     }
 
-    public void Delete(int index)
+    /// <summary>Removes the row at <paramref name="index"/> in the primary's
+    /// list.</summary>
+    public void Delete(int index) => Delete(string.Empty, index);
+
+    /// <summary>Removes the row at <paramref name="index"/> in one list.</summary>
+    public void Delete(string preset, int index)
     {
         ThrowIfDisposed();
         lock (_gate)
         {
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM channels WHERE idx = $i";
+            cmd.CommandText = "DELETE FROM channels WHERE preset = $p AND idx = $i";
+            cmd.Parameters.AddWithValue("$p", preset ?? string.Empty);
             cmd.Parameters.AddWithValue("$i", index);
             cmd.ExecuteNonQuery();
         }
     }
 
-    public IReadOnlyList<ChannelConfig> All()
+    /// <summary>Every channel in every list, the primary's list first and
+    /// each list in index order.</summary>
+    public IReadOnlyList<ChannelConfig> All() => Query(null);
+
+    /// <summary>One list: the primary's for an empty name.</summary>
+    public IReadOnlyList<ChannelConfig> ForPreset(string preset) => Query(preset ?? string.Empty);
+
+    /// <summary>The names of the lists that hold at least one channel, the
+    /// primary's (empty) first.</summary>
+    public IReadOnlyList<string> Presets()
+    {
+        ThrowIfDisposed();
+        var list = new List<string>();
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT DISTINCT preset FROM channels ORDER BY preset = '' DESC, preset ASC";
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) list.Add(rd.GetString(0));
+        }
+        return list;
+    }
+
+    private IReadOnlyList<ChannelConfig> Query(string? preset)
     {
         ThrowIfDisposed();
         var list = new List<ChannelConfig>();
@@ -108,16 +184,19 @@ public sealed class ChannelStore : IDisposable
             using var cmd = _conn.CreateCommand();
             cmd.CommandText = """
                 SELECT idx, name, psk, role, position_precision,
-                       uplink_enabled, downlink_enabled
+                       uplink_enabled, downlink_enabled, preset
                   FROM channels
-                 ORDER BY idx ASC
+                 WHERE $p IS NULL OR preset = $p
+                 ORDER BY preset = '' DESC, preset ASC, idx ASC
                 """;
+            cmd.Parameters.AddWithValue("$p", (object?)preset ?? DBNull.Value);
             using var rd = cmd.ExecuteReader();
             while (rd.Read())
             {
                 bool recovered = TryUnprotectPsk((byte[])rd.GetValue(2), out var psk);
                 list.Add(new ChannelConfig
                 {
+                    Preset            = rd.GetString(7),
                     Index             = rd.GetInt32(0),
                     Name              = rd.GetString(1),
                     Psk               = psk,
@@ -164,17 +243,17 @@ public sealed class ChannelStore : IDisposable
     /// </remarks>
     private void ProtectStoredKeys()
     {
-        List<(int Index, byte[] Psk)> plain = new();
+        List<(string Preset, int Index, byte[] Psk)> plain = new();
         lock (_gate)
         {
             using var read = _conn.CreateCommand();
-            read.CommandText = "SELECT idx, psk FROM channels";
+            read.CommandText = "SELECT idx, psk, preset FROM channels";
             using var rd = read.ExecuteReader();
             while (rd.Read())
             {
                 var stored = (byte[])rd.GetValue(1);
                 if (stored.Length > 0 && !SecretProtection.IsProtected(stored))
-                    plain.Add((rd.GetInt32(0), stored));
+                    plain.Add((rd.GetString(2), rd.GetInt32(0), stored));
             }
         }
 
@@ -183,12 +262,13 @@ public sealed class ChannelStore : IDisposable
         lock (_gate)
         {
             using var tx = _conn.BeginTransaction();
-            foreach (var (index, psk) in plain)
+            foreach (var (preset, index, psk) in plain)
             {
                 using var cmd = _conn.CreateCommand();
                 cmd.Transaction = tx;
-                cmd.CommandText = "UPDATE channels SET psk = $psk WHERE idx = $idx";
+                cmd.CommandText = "UPDATE channels SET psk = $psk WHERE preset = $p AND idx = $idx";
                 cmd.Parameters.AddWithValue("$psk", ProtectPsk(psk));
+                cmd.Parameters.AddWithValue("$p", preset);
                 cmd.Parameters.AddWithValue("$idx", index);
                 cmd.ExecuteNonQuery();
             }
