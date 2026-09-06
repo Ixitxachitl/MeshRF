@@ -457,7 +457,7 @@ public partial class RadioViewModel
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
-            if (!await TransmitFrameAsync(frame))
+            if (!await TransmitFrameAsync(frame, TargetForChannel(selectedChannel, to ?? 0xFFFFFFFFu)))
             {
                 StatusText = "Transmit failed (device cannot transmit).";
                 return;

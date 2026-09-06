@@ -109,8 +109,6 @@ public partial class RadioViewModel
     /// receipt. Goes through the same gate and channel-idle defer as an
     /// awaited send; failures are swallowed because auto-replies are
     /// best-effort.</summary>
-    private void TransmitBackground(byte[] frame) => TransmitBackground(frame, TargetForFrame(frame));
-
     private void TransmitBackground(byte[] frame, TxTarget target)
     {
         _ = Task.Run(async () =>
@@ -438,20 +436,6 @@ public partial class RadioViewModel
         foreach (var s in _rxSources)
             if (!s.IsPrimary && s.PresetName == listName) return TargetForSource(s);
         return PrimaryTarget();
-    }
-
-    /// <summary>
-    /// Where a finished frame goes, read off the frame itself: a packet to a
-    /// node goes out on that node's settings, a broadcast on the preset whose
-    /// list holds the channel it was sealed with. Every send in the app that
-    /// does not name its target passes through here, so auto-reports, which
-    /// are sealed with the primary's channels, land on the primary.
-    /// </summary>
-    private TxTarget TargetForFrame(byte[] frame)
-    {
-        if (!MeshHeader.TryParse(frame, out var header)) return PrimaryTarget();
-        if (!header.IsBroadcast && header.To != 0) return TargetForNode(header.To);
-        return TargetForList(_rxHost.ListNameForChannelHash(header.ChannelHash));
     }
 
     /// <summary>Bandwidth of a listener's channel, for the overlap test.</summary>

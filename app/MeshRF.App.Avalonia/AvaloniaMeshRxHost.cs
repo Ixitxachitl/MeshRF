@@ -355,21 +355,6 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public ChannelConfig? ChannelForNode(uint nodeNum, string? channelName) =>
         ChannelIn(ListNameForNode(nodeNum), channelName);
 
-    /// <summary>Which list a broadcast frame carrying <paramref name="hash"/>
-    /// belongs to: the primary's when it has a channel with that hash, else
-    /// the first list that does. Null when none does.</summary>
-    public string? ListNameForChannelHash(byte hash)
-    {
-        ChannelConfig? found = null;
-        foreach (var c in Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config))
-        {
-            if (c.IsDisabled || c.Hash != hash) continue;
-            if (c.Preset.Length == 0) return string.Empty;
-            found ??= c;
-        }
-        return found?.Preset;
-    }
-
     /// <summary>
     /// Gives a preset's listener a channel list if it has none: the preset's
     /// default channel, named after it with the well-known key, which is what
@@ -612,7 +597,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // address, so it needs letting into the room on its own terms.
             bool channelNote = IsChannelNote(m);
             if (!channelNote && m.ToNode != 0xFFFFFFFFu) continue; // DMs are rebuilt separately below.
-            var tab = ResolveChannelTab(m.Channel);
+            var tab = ResolveChannelTabIn(m.Preset, m.Channel);
             if (tab is null) continue;
 
             if (IsReactionRecord(m))
@@ -933,27 +918,36 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// source, its listener's list is searched first: two lists can each hold
     /// a channel of the same name, and a LongFast packet belongs on the
     /// LongFast list's tab.</summary>
-    private ChannelTabViewModel? ResolveChannelTab(string? channelName, RxSource? source = null)
+    private ChannelTabViewModel? ResolveChannelTab(string? channelName, RxSource? source = null) =>
+        ResolveChannelTabIn(source is null ? null : ListNameFor(source), channelName);
+
+    /// <summary>
+    /// The tab a message on a named channel belongs to, searched in one
+    /// mesh's list. The mesh matters and is not optional in practice: two
+    /// lists can each hold a channel of the same name, and picking the first
+    /// match by name alone files one mesh's traffic into another's tab.
+    /// </summary>
+    /// <param name="listName">Null looks anywhere, for a caller that has no
+    /// mesh to go on.</param>
+    private ChannelTabViewModel? ResolveChannelTabIn(string? listName, string? channelName)
     {
         var channelTabs = Tabs.OfType<ChannelTabViewModel>().ToList();
+        if (listName is not null)
+        {
+            var inList = channelTabs.Where(t => t.Config.Preset == listName).ToList();
+            if (!string.IsNullOrEmpty(channelName))
+            {
+                var named = inList.FirstOrDefault(t =>
+                    string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
+                if (named is not null) return named;
+            }
+            if (inList.Count > 0) return inList[0];
+        }
         if (!string.IsNullOrEmpty(channelName))
         {
-            if (source is not null)
-            {
-                var listName = ListNameFor(source);
-                var inList = channelTabs.FirstOrDefault(t => t.Config.Preset == listName &&
-                    string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
-                if (inList is not null) return inList;
-            }
             var match = channelTabs.FirstOrDefault(t =>
                 string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
             if (match is not null) return match;
-        }
-        if (source is not null)
-        {
-            var listName = ListNameFor(source);
-            var first = channelTabs.FirstOrDefault(t => t.Config.Preset == listName);
-            if (first is not null) return first;
         }
         return channelTabs.FirstOrDefault();
     }

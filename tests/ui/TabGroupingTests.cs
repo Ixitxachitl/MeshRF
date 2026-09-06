@@ -2,6 +2,7 @@
 using MeshRF;
 using MeshRF.AvaloniaApp;
 using MeshRF.Channels;
+using MeshRF.Messages;
 using MeshRF.Nodes;
 using Xunit;
 
@@ -223,6 +224,61 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         var convo = vm.Tabs.OfType<ConversationTabViewModel>().Single(t => t.NodeNum == 0x5555u);
         Assert.Equal(string.Empty, convo.TabGroup);
     }));
+
+    /// <summary>
+    /// Somebody running MediumFast may perfectly well have named their own
+    /// primary channel "LongFast", and the LongFast mesh has a channel of
+    /// that name too. Replaying history by channel name alone filed one
+    /// mesh's messages into the other's tab.
+    /// </summary>
+    [Fact]
+    public void HistoryGoesBackToTheMeshItCameFromWhenTwoShareAChannelName() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        // A station on MediumFast whose own channel is called "LongFast",
+        // alongside the LongFast mesh's channel of the same name.
+        using (var channels = new ChannelStore())
+        {
+            channels.Upsert(new ChannelConfig
+            {
+                Preset = "", Index = 0, Name = "LongFast", Role = ChannelRole.Primary,
+            });
+            channels.Upsert(new ChannelConfig
+            {
+                Preset = nameof(LoraPreset.LongFast), Index = 0, Name = "LongFast", Role = ChannelRole.Primary,
+            });
+        }
+        using (var messages = new MessageStore())
+        {
+            messages.Add(Broadcast(1, "", "mine"));
+            messages.Add(Broadcast(2, nameof(LoraPreset.LongFast), "theirs"));
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        using var vm = Station();
+
+        var mine = vm.Tabs.OfType<ChannelTabViewModel>().Single(t => t.Config.Preset.Length == 0);
+        var theirs = vm.Tabs.OfType<ChannelTabViewModel>()
+            .Single(t => t.Config.Preset == nameof(LoraPreset.LongFast));
+
+        Assert.Contains(mine.Messages, m => m.Text == "mine");
+        Assert.DoesNotContain(mine.Messages, m => m.Text == "theirs");
+        Assert.Contains(theirs.Messages, m => m.Text == "theirs");
+        Assert.DoesNotContain(theirs.Messages, m => m.Text == "mine");
+    }));
+
+    private static MessageRecord Broadcast(uint packetId, string preset, string text) => new()
+    {
+        PacketId = packetId,
+        FromNode = 0x3840dd32u,
+        ToNode = 0xFFFFFFFFu,
+        Channel = "LongFast",
+        Preset = preset,
+        PortNum = (int)MeshRF.Mesh.PortNum.TextMessage,
+        Text = text,
+        Decrypted = true,
+        RxEpoch = 1000 + packetId,
+    };
 
     /// <summary>A drag may not carry a tab onto another mesh: which mesh a
     /// channel is on is what its key and its frequency mean.</summary>

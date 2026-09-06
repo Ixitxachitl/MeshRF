@@ -2484,8 +2484,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// deferred until the channel is idle. Never call Core.Transmit directly —
     /// concurrent sends race on the shared native handle, and keying up during
     /// a reception collides with the traffic being received.</summary>
-    private Task<bool> TransmitFrameAsync(byte[] frame) => TransmitFrameAsync(frame, TargetForFrame(frame));
-
     /// <param name="target">What the frame goes out on. The overload above
     /// reads it off the frame; callers answering a packet name the listener
     /// it arrived on.</param>
@@ -3004,7 +3002,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeNodeInfoRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
             hopLimit: (byte)HopLimit);
-        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, node.NodeNum)))
+        { StatusText = "Transmit failed."; return; }
         var name = _rxHost.NodeDisplayName(node.NodeNum);
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "nodeinfo", $"Requested NodeInfo from {name}…");
     }
@@ -3021,7 +3020,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             hwModel: (uint)Math.Max(0, HardwareModels.Id(_settings.UserHwModel)), role: RoleEnumValue(_settings.UserRole),
             publicKey: TryParseKeyBase64(_settings.UserPublicKey),
             to: node.NodeNum, hopLimit: (byte)HopLimit, wantResponse: true);
-        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, node.NodeNum)))
+        { StatusText = "Transmit failed."; return; }
         var name = _rxHost.NodeDisplayName(node.NodeNum);
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "nodeinfo", $"Exchanged NodeInfo with {name}…");
     }
@@ -3058,7 +3058,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodePositionRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
             hopLimit: (byte)HopLimit);
-        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, node.NodeNum)))
+        { StatusText = "Transmit failed."; return; }
         _lastPositionRequestUtc = DateTime.UtcNow;
         var name = _rxHost.NodeDisplayName(node.NodeNum);
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "position",
@@ -3080,7 +3081,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             var frame = MeshEncoder.EncodePosition(channel, _rxHost.MyNodeNum, packetId, lat, lon,
                 altitudeM: _settings.HomeAltitude, precisionBits: channel.EffectivePositionPrecision,
                 to: node.NodeNum, hopLimit: (byte)HopLimit);
-            await TransmitFrameAsync(frame);
+            await TransmitFrameAsync(frame, TargetForChannel(channel, node.NodeNum));
         }
         catch { /* precision 0 or similar — best-effort */ }
     }
@@ -3094,7 +3095,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeTelemetryRequest(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
             hopLimit: (byte)HopLimit);
-        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, node.NodeNum)))
+        { StatusText = "Transmit failed."; return; }
         var name = _rxHost.NodeDisplayName(node.NodeNum);
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "telemetry", $"Requested telemetry from {name}…");
     }
@@ -3110,7 +3112,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var packetId = NextPacketId();
         var frame = MeshEncoder.EncodeTraceroute(primary, _rxHost.MyNodeNum, node.NodeNum, packetId,
             hopLimit: (byte)HopLimit);
-        if (!await TransmitFrameAsync(frame)) { StatusText = "Transmit failed."; return; }
+        if (!await TransmitFrameAsync(frame, TargetForChannel(primary, node.NodeNum)))
+        { StatusText = "Transmit failed."; return; }
         _lastTracerouteUtc = DateTime.UtcNow;
         _rxHost.RegisterOutgoingTraceroute(packetId, node.NodeNum);
         var name = _rxHost.NodeDisplayName(node.NodeNum);
@@ -3156,7 +3159,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             hopLimit: (byte)HopLimit, wantResponse: wantResponse, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey,
             isLicensed: MyIsLicensed, isUnmessagable: EffectiveIsUnmessagable);
-        StatusText = await TransmitFrameAsync(frame) ? "Sent NodeInfo." : "Transmit failed.";
+        StatusText = await TransmitFrameAsync(frame, TargetForChannel(channel, to ?? 0xFFFFFFFFu))
+            ? "Sent NodeInfo." : "Transmit failed.";
     }
 
     [RelayCommand]
@@ -3181,7 +3185,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-        if (await TransmitFrameAsync(frame))
+        if (await TransmitFrameAsync(frame, TargetForChannel(channel, to ?? 0xFFFFFFFFu)))
         {
             StatusText = "Sent position.";
             // Smart broadcast measures movement from what the mesh was last
@@ -3226,7 +3230,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             to: to ?? 0xFFFFFFFFu,
             hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-        if (await TransmitFrameAsync(frame))
+        if (await TransmitFrameAsync(frame, TargetForChannel(channel, to ?? 0xFFFFFFFFu)))
         {
             StatusText = "Sent device metrics.";
             _rxHost.RecordSelfTelemetry(new MeshTelemetry

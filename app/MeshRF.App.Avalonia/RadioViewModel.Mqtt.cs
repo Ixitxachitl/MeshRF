@@ -365,7 +365,8 @@ public partial class RadioViewModel
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
         _rxHost.Log($"  MQTT JSON command '{cmd.Type}' -> {targetChannel.Name}");
-        TransmitBackground(frame);
+        // The bridge speaks for the primary's mesh alone, in both directions.
+        TransmitBackground(frame, PrimaryTarget());
     }
 
     // -- Uplink -------------------------------------------------------------

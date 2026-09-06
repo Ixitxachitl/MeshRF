@@ -78,6 +78,7 @@ public sealed class MessageStore : IDisposable
         AddColumnIfMissing("emoji", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("is_reaction", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("via_mqtt", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("preset", "TEXT NOT NULL DEFAULT ''");
 
         // Backfill obvious historical reaction rows for older DBs that predate
         // the explicit is_reaction flag.
@@ -120,9 +121,9 @@ public sealed class MessageStore : IDisposable
                 INSERT OR IGNORE INTO messages
                     (packet_id, from_node, to_node, channel, portnum, reply_id,
                      emoji, is_reaction, text,
-                     payload_hex, decrypted, via_mqtt, rx_epoch, rssi_dbfs, snr_db, delivery)
+                     payload_hex, decrypted, via_mqtt, rx_epoch, rssi_dbfs, snr_db, delivery, preset)
                     VALUES ($pid, $from, $to, $chan, $port, $reply, $emoji, $isReaction, $text,
-                        $hex, $dec, $mqtt, $rx, $rssi, $snr, $del);
+                        $hex, $dec, $mqtt, $rx, $rssi, $snr, $del, $preset);
                 """;
             cmd.Parameters.AddWithValue("$pid",  m.PacketId);
             cmd.Parameters.AddWithValue("$from", m.FromNode);
@@ -140,6 +141,7 @@ public sealed class MessageStore : IDisposable
             cmd.Parameters.AddWithValue("$rssi", (object?)m.RssiDbfs ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$snr",  (object?)m.SnrDb ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$del",  m.Delivery);
+            cmd.Parameters.AddWithValue("$preset", m.Preset ?? string.Empty);
             return cmd.ExecuteNonQuery() > 0;
         }
     }
@@ -306,7 +308,9 @@ public sealed class MessageStore : IDisposable
     /// along with the app-written notes posted into it — those are addressed to
     /// us rather than to the broadcast address, so they need naming
     /// separately.</summary>
-    public void ClearChannel(string channel)
+    /// <param name="preset">The mesh the channel is on, so clearing one
+    /// mesh's "LongFast" leaves another mesh's alone.</param>
+    public void ClearChannel(string channel, string preset = "")
     {
         ThrowIfDisposed();
         lock (_gate)
@@ -314,11 +318,12 @@ public sealed class MessageStore : IDisposable
             using var cmd = _conn.CreateCommand();
             cmd.CommandText = """
                 DELETE FROM messages
-                WHERE channel = $c
+                WHERE channel = $c AND preset = $p
                   AND ((portnum = 1 AND to_node = 4294967295)
                     OR (portnum = $note AND from_node = 0));
                 """;
             cmd.Parameters.AddWithValue("$c", channel ?? string.Empty);
+            cmd.Parameters.AddWithValue("$p", preset ?? string.Empty);
             cmd.Parameters.AddWithValue("$note", ConversationNotePort);
             cmd.ExecuteNonQuery();
         }
@@ -380,6 +385,7 @@ public sealed class MessageStore : IDisposable
             FromNode   = (uint)r.GetInt64(r.GetOrdinal("from_node")),
             ToNode     = (uint)r.GetInt64(r.GetOrdinal("to_node")),
             Channel    = r.GetString(r.GetOrdinal("channel")),
+            Preset     = r.IsDBNull(r.GetOrdinal("preset")) ? string.Empty : r.GetString(r.GetOrdinal("preset")),
             PortNum    = r.GetInt32(r.GetOrdinal("portnum")),
             ReplyId    = (uint)r.GetInt64(r.GetOrdinal("reply_id")),
             Emoji      = (uint)r.GetInt64(r.GetOrdinal("emoji")),

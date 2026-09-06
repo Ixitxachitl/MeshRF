@@ -26,6 +26,15 @@ public sealed class MessageRecord
     /// <summary>Channel name the packet decoded on (empty if undecoded).</summary>
     public string Channel { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Which mesh it was heard on: empty for the primary's, otherwise the
+    /// preset. A channel name is not unique — two meshes can each have a
+    /// "LongFast", and one of them can be somebody's primary running an
+    /// entirely different preset — so the name alone cannot say which tab a
+    /// stored message belongs to.
+    /// </summary>
+    public string Preset { get; set; } = string.Empty;
+
     /// <summary>Meshtastic port number (application type).</summary>
     public int PortNum { get; set; }
 
