@@ -89,6 +89,33 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public Func<string, bool>? IsPresetShown { get; set; }
 
     /// <summary>
+    /// The preset whose channel list is also the primary's, or empty when
+    /// there is none. Set when the toolbar comes to sit on a preset's own
+    /// mesh — LongFast on LongFast's default slot, say — which makes that
+    /// preset's list and the primary's two descriptions of one mesh.
+    /// </summary>
+    /// <remarks>
+    /// They are treated as one rather than merged, because a merge cannot be
+    /// undone: switch the preset back and the channels set up for that mesh
+    /// would be stranded among the primary's. Nothing moves on disk; the two
+    /// lists are simply read together for as long as they are the same mesh.
+    /// </remarks>
+    public string PrimaryMeshList { get; set; } = string.Empty;
+
+    /// <summary>The mesh a list belongs to: its own, unless the primary has
+    /// come to occupy it.</summary>
+    private string GroupForList(string listName) =>
+        listName.Length > 0 && listName == PrimaryMeshList ? string.Empty : listName;
+
+    /// <summary>The lists that make up one mesh. Two, when the primary sits
+    /// on a preset's own mesh; otherwise the one.</summary>
+    private IEnumerable<string> ListsInGroup(string group)
+    {
+        yield return group;
+        if (group.Length == 0 && PrimaryMeshList.Length > 0) yield return PrimaryMeshList;
+    }
+
+    /// <summary>
     /// Which mesh's tabs are on show: empty for the primary's, otherwise the
     /// preset. One mesh at a time, picked from the strip's own dropdown — a
     /// wide capture can be listening for a dozen presets, and every one of
@@ -194,7 +221,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     private string GroupOf(ITabItem tab) => tab switch
     {
-        ChannelTabViewModel channel => channel.Config.Preset,
+        ChannelTabViewModel channel => GroupForList(channel.Config.Preset),
         // Where they were heard if we know it, else where we were reading
         // them when the conversation was opened, else the primary.
         ConversationTabViewModel conversation =>
@@ -294,7 +321,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public event Action<uint, NodeTelemetryHistoryRecord>? TelemetryHistoryRecorded;
 
     byte[] IMeshRxHost.MyPrivateKeyBytes => MyPrivateKeyProvider?.Invoke() ?? Array.Empty<byte>();
-    IReadOnlyList<ChannelConfig> IMeshRxHost.ChannelsFor(RxSource source) => ChannelsIn(ListNameFor(source));
+    IReadOnlyList<ChannelConfig> IMeshRxHost.ChannelsFor(RxSource source)
+    {
+        var lists = ListsInGroup(ListNameFor(source)).ToHashSet(StringComparer.Ordinal);
+        return Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => lists.Contains(t.Config.Preset))
+            .Select(t => t.Config)
+            .ToList();
+    }
 
     /// <summary>The list a listener decodes and sends with: the primary's for
     /// the primary (custom parameters included), the preset's own for a
@@ -331,8 +365,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// the primary's list when the named list is empty.</summary>
     public ChannelConfig? ChannelIn(string listName, string? channelName)
     {
+        var lists = ListsInGroup(listName).ToHashSet(StringComparer.Ordinal);
         var usable = Tabs.OfType<ChannelTabViewModel>()
-            .Where(t => t.Config.Preset == listName && !t.Config.IsDisabled)
+            .Where(t => lists.Contains(t.Config.Preset) && !t.Config.IsDisabled)
             .Select(t => t.Config)
             .ToList();
         if (usable.Count == 0)
@@ -935,6 +970,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (listName is not null)
         {
             var inList = channelTabs.Where(t => t.Config.Preset == listName).ToList();
+            // A message filed against the primary's own list, on a mesh the
+            // primary has since come to occupy, belongs with that mesh's tabs.
+            if (inList.Count == 0 && listName.Length == 0 && PrimaryMeshList.Length > 0)
+                inList = channelTabs.Where(t => t.Config.Preset == PrimaryMeshList).ToList();
             if (!string.IsNullOrEmpty(channelName))
             {
                 var named = inList.FirstOrDefault(t =>

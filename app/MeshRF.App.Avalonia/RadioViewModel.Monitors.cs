@@ -110,6 +110,13 @@ public partial class RadioViewModel
         _shownPresets = plan.Listeners.Where(l => !l.IsPrimary && l.Preset is not null)
                             .Select(l => l.Preset!.Value.ToString())
                             .ToHashSet(StringComparer.Ordinal);
+        // A preset left out because the primary is already on its channel is
+        // the one whose list the primary now shares — the plan works that out
+        // from the frequency, so it is not decided twice.
+        _rxHost.PrimaryMeshList = plan.LeftOut
+            .Where(x => x.Reason == MonitorPlan.LeftOutReason.IsPrimary)
+            .Select(x => x.Preset.ToString())
+            .FirstOrDefault() ?? string.Empty;
         // A mesh gets its channel list when it is chosen, not when the
         // receiver is started: the point of choosing it is to set its
         // channels up, which needs them to exist.

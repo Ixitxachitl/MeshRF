@@ -2,8 +2,10 @@
 using MeshRF;
 using MeshRF.AvaloniaApp;
 using MeshRF.Channels;
+using MeshRF.Mesh;
 using MeshRF.Messages;
 using MeshRF.Nodes;
+using MeshRF.Waypoints;
 using Xunit;
 
 namespace MeshRF.UiTests;
@@ -279,6 +281,81 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Decrypted = true,
         RxEpoch = 1000 + packetId,
     };
+
+    /// <summary>
+    /// Making a preset the primary puts the toolbar on that preset's own
+    /// mesh, so the channels set up for it while it was a secondary are the
+    /// primary's channels now. They used to go dark, along with their
+    /// history, while the same mesh carried on under the primary's list.
+    /// </summary>
+    [Fact]
+    public void APresetPromotedToPrimaryKeepsTheChannelsSetUpForIt() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+
+        // A private channel of the user's own on the LongFast mesh.
+        Show(vm, nameof(LoraPreset.LongFast));
+        vm.SelectedTab = ChannelsOn(vm, nameof(LoraPreset.LongFast));
+        vm.AddChannelCommand.Execute(null);
+        var mine = (ChannelTabViewModel)vm.SelectedTab!;
+        Assert.True(mine.IsTabListed);
+
+        // Now run LongFast as the primary.
+        vm.SelectedPreset = LoraPreset.LongFast;
+        vm.RefreshMonitors();
+
+        // It is no longer a mesh of its own, and its channels are the
+        // primary's — shown, and grouped there.
+        Assert.DoesNotContain(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+        Assert.True(mine.IsTabListed, "a channel on the mesh the primary now occupies stays usable");
+        Assert.Equal(string.Empty, mine.TabGroup);
+        Assert.Equal(nameof(LoraPreset.LongFast), mine.Config.Preset);
+    }));
+
+    /// <summary>
+    /// And the receiver reads them: a channel is no use if its tab is shown
+    /// but nothing it carries can be decrypted.
+    /// </summary>
+    [Fact]
+    public void ThePrimaryDecryptsWithBothListsOfTheMeshItOccupies() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using var nodes = new NodeStore();
+        using var channels = new ChannelStore();
+        using var waypoints = new WaypointStore();
+        using var messages = new MessageStore();
+
+        channels.Upsert(new ChannelConfig { Preset = "", Index = 0, Name = "LongFast", Role = ChannelRole.Primary });
+        channels.Upsert(new ChannelConfig
+        {
+            Preset = nameof(LoraPreset.LongFast), Index = 0, Name = "LongFast", Role = ChannelRole.Primary,
+        });
+        channels.Upsert(new ChannelConfig
+        {
+            Preset = nameof(LoraPreset.LongFast), Index = 1, Name = "club", Psk = ChannelConfig.NewRandomPsk(),
+        });
+
+        var host = new AvaloniaMeshRxHost(nodes, channels, waypoints, messages, 0x99u, Array.Empty<uint>());
+        var primary = RxSource.Primary(LoraPreset.LongFast, isCustom: false, 906.875);
+
+        // While LongFast is a mesh of its own, the primary reads its own list.
+        Assert.All(((IMeshRxHost)host).ChannelsFor(primary), c => Assert.Equal(string.Empty, c.Preset));
+
+        // Once the primary sits on LongFast's own channel, both lists describe
+        // that one mesh and the receiver reads them together.
+        host.PrimaryMeshList = nameof(LoraPreset.LongFast);
+        var onPrimary = ((IMeshRxHost)host).ChannelsFor(primary);
+        Assert.Contains(onPrimary, c => c.Preset.Length == 0);
+        Assert.Contains(onPrimary, c => c.Name == "club" && c.Preset == nameof(LoraPreset.LongFast));
+
+        // A secondary still reads its own list alone.
+        var other = new RxSource(1, LoraPreset.MediumFast, false, 913.125);
+        Assert.All(((IMeshRxHost)host).ChannelsFor(other),
+                   c => Assert.Equal(nameof(LoraPreset.MediumFast), c.Preset));
+    }));
 
     /// <summary>A drag may not carry a tab onto another mesh: which mesh a
     /// channel is on is what its key and its frequency mean.</summary>
