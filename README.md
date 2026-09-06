@@ -46,7 +46,67 @@ Current release line: **v2.4.0**
 - Software LoRa demod/mod with Meshtastic-oriented preset support.
 - Optional receive conditioning features (including DC blocking).
 - Live spectrum and waterfall with packet-linked snapshot support (SDR receive
-  only — a hardware modem produces no IQ).
+  only — a hardware modem produces no IQ), with each demodulated channel
+  marked across it.
+- Several presets received at once off one capture, each a mesh this station
+  is a full node on. See [Listening on several presets](#listening-on-several-presets).
+
+### Listening on several presets
+
+A capture wide enough to cover them can carry more than one Meshtastic
+channel. With **Presets…** (beside the frequency box) switched on, the
+receiver also listens for every other preset whose default-slot channel fits
+inside the capture, and this station becomes a full node on each of those
+meshes rather than a monitor of them: their nodes go in the node list, their
+messages into tabs, and it acknowledges and relays for them.
+
+Off by default, and off it changes nothing: the receiver takes exactly the
+single-channel path it always did.
+
+Each channel gets a chain of its own — mixed down to baseband, decimated, and
+demodulated on a thread of its own — so what this costs is CPU per preset
+rather than anything on the air. Presets whose default slots coincide share
+one chain.
+
+**What decides which presets fit** is the sample rate, since that is how much
+spectrum the capture covers. A HackRF runs its baseband filter below the
+selected rate (1.75 MHz at 2.4 MS/s, 15 MHz at 16), so the window is narrower
+than the rate suggests. The Presets window lists every preset in the region
+with its default slot and frequency, and for one that does not fit it names
+the rate that would reach it. The capture need not be centred on the primary:
+it slides to take in the most presets, which is what lets a 10 MS/s window
+hold both a MediumFast primary at 913.125 MHz and LongFast at 906.875 when
+centring on the primary would need 16. The offset can also be set by hand.
+
+Only presets on their **default slots** are listened for — where a node with
+an unrenamed primary channel lands. A mesh on a renamed slot is reachable
+only as the primary. Listening for every preset on every slot would need a
+channelizer rather than a chain per channel.
+
+**What the primary keeps to itself:**
+
+| | |
+| --- | --- |
+| Auto reports, scripts | Primary only |
+| MQTT uplink and downlink | Primary only — traffic from another preset's mesh is not this gateway's to publish |
+| Spectrum, waterfall, packet snapshot | The capture, and the primary's channel |
+| Channel utilisation | The primary's channel, which is what device metrics report on |
+
+Everything else follows the mesh a packet came from. An acknowledgement, a
+relay, an introduction and a reply to a request all go back out on the
+listener that heard it; a message to a node goes out on the settings that
+node was last heard on. Each node records that, and the node list shows and
+filters by it — the preset name, or **Custom** when it was heard on a primary
+running custom SF/BW/CR.
+
+**Channels are per preset.** A channel only means anything on the mesh it
+belongs to, so each listener has a channel list of its own, seeded with that
+preset's default channel the first time it is listened on. Decrypt tries the
+arriving listener's list alone, and a message sent from a tab goes out on the
+preset that owns it. Existing channels stay in the primary's list.
+
+An SX1262 is a hardware modem and receives one channel at a time, so the
+feature is unavailable while one is the receiver.
 
 ### SX1262 hardware modems
 
