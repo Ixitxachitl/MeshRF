@@ -136,17 +136,8 @@ public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChange
     /// on the row would explain. A default-preset primary has no name of its
     /// own, which is why an empty one is a label rather than a blank.
     /// </remarks>
-    public string ChannelText
-    {
-        get
-        {
-            var name = string.IsNullOrWhiteSpace(Channel) ? "(primary)" : Channel;
-            // Two meshes can each have a channel of that name, so the preset
-            // is what says which one this marker is on — and which one a
-            // resend or an edit would go out on.
-            return Preset.Length == 0 ? name : $"{name} · {Preset}";
-        }
-    }
+    public string ChannelText =>
+        string.IsNullOrWhiteSpace(Channel) ? "(primary)" : Channel;
 
     /// <summary>
     /// Which channel list this marker belongs to, and so which listener's
@@ -158,6 +149,22 @@ public sealed class WaypointRecord : System.ComponentModel.INotifyPropertyChange
     /// is correct for them: there was only the primary to have heard them.
     /// </remarks>
     public string Preset { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the marker was heard on, named the way a node's is: the preset,
+    /// or <see cref="Mesh.HeardOn.Custom"/> for settings no preset matches.
+    /// Empty for one that never came over the air, and for markers stored
+    /// before this was recorded.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Preset"/> rather than instead of it, because the two
+    /// answer different questions. That one says which channel list the
+    /// marker belongs to, so a resend is sealed and tuned correctly, and is
+    /// empty for the primary's. This one names the mesh, which for the
+    /// primary is whatever preset it is running — the same thing the node
+    /// list means by "heard on".
+    /// </remarks>
+    public string HeardOnPreset { get; set; } = string.Empty;
 
     public long RxEpoch { get; set; }
 

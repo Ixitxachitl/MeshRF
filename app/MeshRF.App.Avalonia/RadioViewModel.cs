@@ -3467,6 +3467,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             PacketId = packetId,
             Channel = original.Channel,
             Preset = original.Preset,
+            HeardOnPreset = original.HeardOnPreset,
             Name = edit.Name,
             Description = edit.Description,
             Icon = edit.Icon,

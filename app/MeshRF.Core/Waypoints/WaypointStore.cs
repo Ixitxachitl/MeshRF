@@ -78,6 +78,7 @@ public sealed class WaypointStore : IDisposable
         // recorded, since nothing else on those rows could say otherwise.
         EnsureColumn("to_node", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("preset", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn("heard_on_preset", "TEXT NOT NULL DEFAULT ''");
     }
 
     /// <summary>
@@ -155,14 +156,14 @@ public sealed class WaypointStore : IDisposable
                      latitude, longitude, altitude_m,
                      expire_epoch, locked_to, to_node, rx_epoch,
                      geofence_radius, bbox_west, bbox_south, bbox_east, bbox_north,
-                     notify_on_enter, notify_on_exit, notify_favorites_only, preset)
+                     notify_on_enter, notify_on_exit, notify_favorites_only, preset, heard_on_preset)
                 VALUES
                     ($from, $wid, $pid, $chan,
                      $name, $desc, $icon,
                      $lat, $lon, $alt,
                      $exp, $lock, $to, $rx,
                      $geor, $bw, $bs, $be, $bn,
-                     $nen, $nex, $nfav, $preset)
+                     $nen, $nex, $nfav, $preset, $heard_on)
                 ON CONFLICT(waypoint_id) DO UPDATE SET
                     packet_id             = excluded.packet_id,
                     channel               = excluded.channel,
@@ -184,7 +185,8 @@ public sealed class WaypointStore : IDisposable
                     notify_on_enter       = excluded.notify_on_enter,
                     notify_on_exit        = excluded.notify_on_exit,
                     notify_favorites_only = excluded.notify_favorites_only,
-                    preset                = excluded.preset
+                    preset                = excluded.preset,
+                    heard_on_preset       = COALESCE(NULLIF(excluded.heard_on_preset, ''), heard_on_preset)
                 RETURNING id;
                 """;
             cmd.Parameters.AddWithValue("$from", rec.FromNode);
@@ -192,6 +194,7 @@ public sealed class WaypointStore : IDisposable
             cmd.Parameters.AddWithValue("$pid", rec.PacketId);
             cmd.Parameters.AddWithValue("$chan", rec.Channel ?? string.Empty);
             cmd.Parameters.AddWithValue("$preset", rec.Preset ?? string.Empty);
+            cmd.Parameters.AddWithValue("$heard_on", rec.HeardOnPreset ?? string.Empty);
             cmd.Parameters.AddWithValue("$name", rec.Name ?? string.Empty);
             cmd.Parameters.AddWithValue("$desc", rec.Description ?? string.Empty);
             cmd.Parameters.AddWithValue("$icon", (object?)rec.Icon ?? DBNull.Value);
@@ -274,6 +277,7 @@ public sealed class WaypointStore : IDisposable
             PacketId    = (uint)r.GetInt64(r.GetOrdinal("packet_id")),
             Channel     = r.GetString(r.GetOrdinal("channel")),
             Preset      = r.GetString(r.GetOrdinal("preset")),
+            HeardOnPreset = r.GetString(r.GetOrdinal("heard_on_preset")),
             Name        = r.GetString(r.GetOrdinal("name")),
             Description = r.GetString(r.GetOrdinal("description")),
             Icon        = Nullable<uint>("icon"),

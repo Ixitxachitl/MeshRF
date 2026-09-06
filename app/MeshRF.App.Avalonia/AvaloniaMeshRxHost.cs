@@ -2323,6 +2323,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             PacketId = header.PacketId,
             Channel = result.ChannelName,
             Preset = ListNameFor(source),
+            // A marker the broker handed in was heard on no radio, so it says
+            // nothing about which mesh it came off.
+            HeardOnPreset = source.FromDownlink ? string.Empty : source.PresetName,
             // Broadcast is the absence of an address, not an address of its own.
             ToNode = header.IsBroadcast ? 0 : header.To,
             Name = wp.Name,

@@ -439,6 +439,11 @@ public partial class RadioViewModel
         return PrimarySource();
     }
 
+    /// <summary>What the mesh behind a channel list is called: the preset
+    /// that owns it, or whatever the primary is running for its own.</summary>
+    private string MeshNameForList(string? listName) =>
+        string.IsNullOrEmpty(listName) ? PrimarySource().PresetName : listName;
+
     /// <summary>The target of a list of channels: the listener whose preset
     /// owns it, or the primary for its own list.</summary>
     private TxTarget TargetForList(string? listName)

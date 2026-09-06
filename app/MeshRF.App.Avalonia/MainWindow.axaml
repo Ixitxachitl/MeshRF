@@ -1018,6 +1018,11 @@
                                 <DataGridTextColumn Header="Description" Width="2*" Binding="{Binding Description}" />
                                 <DataGridTextColumn Header="From" Width="96" Binding="{Binding FromId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Channel" Width="110" Binding="{Binding ChannelText}" />
+                                <!-- The mesh it came off, named the way the node
+                                     list names one. Blank for a marker that
+                                     never came over the air, and for those
+                                     stored before this was recorded. -->
+                                <DataGridTextColumn Header="Heard on" Width="96" Binding="{Binding HeardOnPreset}" />
                                 <DataGridTextColumn Header="To" Width="96" Binding="{Binding ToId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Lat" Width="88" Binding="{Binding Latitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Lon" Width="88" Binding="{Binding Longitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />

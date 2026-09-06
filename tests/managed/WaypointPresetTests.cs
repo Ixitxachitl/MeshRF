@@ -68,15 +68,47 @@ public sealed class WaypointPresetTests : IDisposable
         Assert.Equal("LongFast", back.Preset);
     }
 
-    /// <summary>The column says which mesh, since the name alone cannot.</summary>
+    /// <summary>The channel column is the channel; which mesh it came off is
+    /// a column of its own, as it is in the node list.</summary>
     [Fact]
-    public void TheChannelColumnNamesThePresetWhenThereIsOne()
+    public void TheChannelColumnIsTheChannelAndTheMeshIsItsOwn()
     {
-        Assert.Equal("club · LongFast", Marker(1, "club", "LongFast").ChannelText);
-        Assert.Equal("club", Marker(1, "club", "").ChannelText);
+        Assert.Equal("club", Marker(1, "club", "LongFast").ChannelText);
         // A default primary has no name of its own, so the label stands in.
         Assert.Equal("(primary)", Marker(1, "", "").ChannelText);
-        Assert.Equal("(primary) · LongFast", Marker(1, "", "LongFast").ChannelText);
+    }
+
+    /// <summary>
+    /// Which list a marker is in and which mesh it came off are different
+    /// facts: the list is empty for the primary's, but the mesh is whatever
+    /// preset the primary is running, which is what the column has to show.
+    /// </summary>
+    [Fact]
+    public void TheMeshItWasHeardOnIsStoredBesideTheListItIsIn()
+    {
+        using var store = new WaypointStore(_db);
+
+        var onPrimary = Marker(1, "club", "");
+        onPrimary.HeardOnPreset = "MediumFast";
+        store.Upsert(onPrimary);
+
+        var onLongFast = Marker(2, "club", "LongFast");
+        onLongFast.HeardOnPreset = "LongFast";
+        store.Upsert(onLongFast);
+
+        var all = store.All();
+        var first = Assert.Single(all, w => w.WaypointId == 1);
+        Assert.Equal(string.Empty, first.Preset);
+        Assert.Equal("MediumFast", first.HeardOnPreset);
+        var second = Assert.Single(all, w => w.WaypointId == 2);
+        Assert.Equal("LongFast", second.Preset);
+        Assert.Equal("LongFast", second.HeardOnPreset);
+
+        // An edit that says nothing about where it was heard leaves it alone.
+        var edit = Marker(2, "club", "LongFast");
+        edit.Name = "moved";
+        store.Upsert(edit);
+        Assert.Equal("LongFast", Assert.Single(store.All(), w => w.WaypointId == 2).HeardOnPreset);
     }
 
     /// <summary>

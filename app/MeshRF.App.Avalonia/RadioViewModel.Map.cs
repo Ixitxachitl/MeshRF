@@ -470,6 +470,7 @@ public partial class RadioViewModel
                 PacketId = packetId,
                 Channel = selectedChannel.Name,
                 Preset = selectedChannel.Preset,
+                HeardOnPreset = MeshNameForList(selectedChannel.Preset),
                 ToNode = to ?? 0,
                 Name = name,
                 Description = description,
