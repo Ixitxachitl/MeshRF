@@ -91,7 +91,7 @@
          the previous tab instead of between them.
 
          Margin is what opens that gap, because the tab's chrome (the
-         LayoutRoot border styled below) is sized to the whole TabItem: a
+         bordered header the item template draws) fills the TabItem: a
          rule placed inside the header would be enclosed by the tab box
          rather than separating it from the one before. The rule is drawn
          back out into the gap with a negative margin, and ClipToBounds
@@ -130,26 +130,36 @@
     <Style Selector="TabItem /template/ Rectangle#PART_SelectedPipe">
         <Setter Property="IsVisible" Value="False" />
     </Style>
+    <!-- The theme's own tab box is left blank: the header template draws the
+         one on screen, so painting this one too put a rounded outline inside
+         a tab-shaped box and made a channel tab read differently from the
+         mesh tab above it. Cleared rather than left alone, since the Fluent
+         default is a filled box of its own. -->
     <Style Selector="TabItem /template/ Border#LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="4,4,0,0" />
-    </Style>
-    <Style Selector="TabItem:pointerover /template/ Border#LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource BrushHover}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style Selector="TabItem:selected /template/ Border#LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TabItem:pointerover /template/ Border#LayoutRoot">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
 
-    <!-- The mesh tabs above the channel strip. Painted the way the channel
-         tabs are — panel fill unselected, the page's own fill selected, so
-         the chosen one reads as continuous with what is below it — but as
-         plain borders carrying the app's own classes, which keeps them clear
-         of any theme's internal part names. -->
+    <!-- One tab, wherever it appears: the row of meshes and the strip of
+         channels and conversations below it are drawn as the same box. Panel
+         fill unselected, the page's own fill selected, so the current one
+         reads as continuous with what it opens onto.
+
+         A plain border carrying the app's own classes rather than a theme's
+         tab chrome, for the reason the tab header template gives: a part name
+         that stops matching after a theme update takes the chrome with it and
+         says nothing. Selection arrives two ways because the two rows know it
+         two ways — the meshes from the view model, the tabs from the strip
+         they are in — and both are listed after the hover rule so a hovered
+         current tab stays looking current. -->
     <Style Selector="Border.meshTab">
         <Setter Property="Background" Value="{DynamicResource BrushPanelBackground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BrushTabBorder}" />
@@ -161,6 +171,9 @@
         <Setter Property="Background" Value="{DynamicResource BrushHover}" />
     </Style>
     <Style Selector="Border.meshTab.selected">
+        <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
+    </Style>
+    <Style Selector="TabItem:selected Border.meshTab">
         <Setter Property="Background" Value="{DynamicResource BrushAppBackground}" />
     </Style>
 
