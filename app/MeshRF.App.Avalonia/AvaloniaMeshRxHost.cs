@@ -980,13 +980,24 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
                 if (named is not null) return named;
             }
-            if (inList.Count > 0) return inList[0];
         }
+
+        // The mesh either was not recorded — messages stored before there was
+        // more than one — or names no channel that is still there. The name is
+        // then the only evidence left of where it belongs, and it beats
+        // dropping the message on whatever happens to be the first tab of a
+        // mesh that never carried it.
         if (!string.IsNullOrEmpty(channelName))
         {
             var match = channelTabs.FirstOrDefault(t =>
                 string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase));
             if (match is not null) return match;
+        }
+
+        if (listName is not null)
+        {
+            var first = channelTabs.FirstOrDefault(t => t.Config.Preset == listName);
+            if (first is not null) return first;
         }
         return channelTabs.FirstOrDefault();
     }

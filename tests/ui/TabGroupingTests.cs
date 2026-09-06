@@ -178,6 +178,46 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
     }));
 
     /// <summary>
+    /// A message stored before there was more than one mesh records none, and
+    /// its channel may well not exist on the primary's. Filing it on the
+    /// primary's first tab put it on a mesh that never carried it — and then
+    /// answering its sender from there would have gone out on the wrong one.
+    /// The channel it names is the evidence that is left.
+    /// </summary>
+    [Fact]
+    public void AMessageWithNoRecordedMeshFollowsTheChannelItNames() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using (var channels = new ChannelStore())
+        {
+            channels.Upsert(new ChannelConfig
+            {
+                Preset = "", Index = 0, Name = "MediumFast", Role = ChannelRole.Primary,
+            });
+            channels.Upsert(new ChannelConfig
+            {
+                Preset = nameof(LoraPreset.LongFast), Index = 0, Name = "LongFast", Role = ChannelRole.Primary,
+            });
+        }
+        using (var messages = new MessageStore())
+        {
+            var stale = Broadcast(9, "", "a straggler");
+            stale.Channel = "LongFast";   // named a mesh it never recorded
+            messages.Add(stale);
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        using var vm = Station();
+
+        var longFast = vm.Tabs.OfType<ChannelTabViewModel>()
+            .Single(t => t.Config.Preset == nameof(LoraPreset.LongFast));
+        var primary = vm.Tabs.OfType<ChannelTabViewModel>().Single(t => t.Config.Preset.Length == 0);
+
+        Assert.Contains(longFast.Messages, m => m.Text == "a straggler");
+        Assert.DoesNotContain(primary.Messages, m => m.Text == "a straggler");
+    }));
+
+    /// <summary>
     /// A peer whose node record we do not hold — never had a NodeInfo, or
     /// forgot it — still has to be answered on the mesh their message was
     /// read on. Otherwise the reply goes out on the primary, where they are
