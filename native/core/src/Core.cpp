@@ -38,6 +38,9 @@ constexpr std::uint32_t kWaterfallTargetFps = 60u;
 constexpr std::uint32_t kWaterfallMaxFramesToPull = 64u;
 constexpr std::uint32_t kHackRfStableMaxRateHz = 16'000'000u;
 constexpr std::uint32_t kRtlSdrDecodeSafeMaxRateHz = 2'560'000u;
+// How often one chain may report that it is falling behind. Overruns come in
+// bursts, and a line per burst is a flood.
+constexpr auto kOverrunReportInterval = std::chrono::seconds(5);
 constexpr std::uint32_t kHackRfRatesHz[] = {
     2'000'000u,
     2'400'000u,
@@ -133,6 +136,7 @@ struct ChainWorker {
     std::unique_ptr<modem::RxListenerChain> chain;
     std::atomic<std::uint64_t> blocks_dropped{0};
     std::uint64_t last_drops_reported{0}; // device-callback thread only
+    std::chrono::steady_clock::time_point last_report{}; // ditto
 
     void start(ChannelCallback on_channel) {
         {
@@ -247,7 +251,6 @@ struct Core::Impl {
     dsp::SignalStats stats;
     std::unique_ptr<dsp::Spectrum> spectrum;
     router::FloodingRouter flooder{};
-    std::vector<hal::SampleType> work; // scratch for DC-blocking
     std::atomic<bool> running{false};
     std::mutex start_mu;
 
@@ -593,12 +596,17 @@ void Core::start_rx(std::span<const modem::RxListener> listeners,
             //    center-bin spike. HackRF / RTL-SDR / etc. all leak LO into the
             //    baseband; without this, the waterfall has a permanent vertical
             //    line at the tuned frequency.
-            impl_->work.assign(s, s + n);
+            // Built once and handed round: the spectrum, the stats, the
+            // capture and every chain read the same block. Copying it into a
+            // scratch buffer and then again into the shared one moved a
+            // quarter of a megabyte twice per block, five hundred times a
+            // second at 16 MS/s.
+            auto owned = std::make_shared<std::vector<hal::SampleType>>(s, s + n);
             if (impl_->dc_block_enabled)
-                impl_->dc_blocker.process(std::span<hal::SampleType>(impl_->work));
+                impl_->dc_blocker.process(std::span<hal::SampleType>(*owned));
             // 1. Spectrum / waterfall on the DC-blocked signal.
-            impl_->spectrum->push({impl_->work.data(), n});
-            const hal::SampleType* clean = impl_->work.data();
+            impl_->spectrum->push({owned->data(), n});
+            const hal::SampleType* clean = owned->data();
             // 2. Stats.
             impl_->stats.process({clean, n});
             // 3. Optional raw IQ capture.
@@ -616,8 +624,8 @@ void Core::start_rx(std::span<const modem::RxListener> listeners,
                     }
                 }
             }
-            // 4. Hand the block to every chain: one copy, shared read-only.
-            auto block = std::make_shared<const std::vector<hal::SampleType>>(impl_->work);
+            // 4. Hand the block to every chain, read-only from here on.
+            ChainWorker::Block block = std::move(owned);
             for (auto& w : impl_->chains) w->push(block);
 
             // 5. Report dropped samples (ring overflow = consumer can't keep up).
@@ -634,14 +642,29 @@ void Core::start_rx(std::span<const modem::RxListener> listeners,
             }
             // 6. And blocks a chain dropped because its demodulators fell
             //    behind. Throttled the same way, per chain.
+            //    Named by the frequency it is actually on rather than an
+            //    offset, since that is what identifies the preset to stop
+            //    listening for, and reported at most once a chain every few
+            //    seconds: a machine that cannot keep up drops in bursts, and
+            //    a line per sixteen blocks buried the log in them.
+            const auto now = std::chrono::steady_clock::now();
             for (auto& w : impl_->chains) {
                 const std::uint64_t dropped = w->blocks_dropped.load(std::memory_order_relaxed);
-                if (dropped < w->last_drops_reported + 16u) continue;
+                if (dropped == w->last_drops_reported) continue;
+                if (now - w->last_report < kOverrunReportInterval) continue;
+                const std::uint64_t since = dropped - w->last_drops_reported;
                 w->last_drops_reported = dropped;
-                char msg[160];
+                w->last_report = now;
+                const double mhz =
+                    (static_cast<double>(impl_->device_center_hz) +
+                     static_cast<double>(w->chain->offset_hz())) / 1e6;
+                char msg[224];
                 std::snprintf(msg, sizeof(msg),
-                              "WARNING: listener chain at %+.3f MHz dropped %llu blocks (demodulator overrun)",
-                              static_cast<double>(w->chain->offset_hz()) / 1e6,
+                              "WARNING: %.3f MHz is not being demodulated fast enough \xE2\x80\x94 "
+                              "%llu blocks lost (%llu in all). Lower the sample rate, or stop "
+                              "listening for presets you do not need.",
+                              mhz,
+                              static_cast<unsigned long long>(since),
                               static_cast<unsigned long long>(dropped));
                 std::lock_guard<std::mutex> lk(impl_->events_mu);
                 impl_->queue_event_locked(-1, msg);
