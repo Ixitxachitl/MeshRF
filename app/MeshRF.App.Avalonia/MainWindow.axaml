@@ -1096,7 +1096,8 @@
                             <local:ChannelOverlay Grid.Row="1"
                                                   CenterFreqHz="{Binding SpectrumCenterHz}"
                                                   SpanHz="{Binding SpectrumSpanHz}"
-                                                  Bands="{Binding ChannelBands}" />
+                                                  Bands="{Binding ChannelBands}"
+                                                  Colormap="{Binding WaterfallColormap}" />
                             <!-- Frozen spectrogram of the most recently decoded packet. -->
                             <Border Grid.Row="2" Margin="0,2,0,2"
                                     Background="#DD101418"
