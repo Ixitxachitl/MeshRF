@@ -18,7 +18,8 @@ namespace MeshRF;
 public static class MonitorPlan
 {
     /// <summary>One channel to demodulate.</summary>
-    /// <param name="Preset">Null for a custom-parameter primary.</param>
+    /// <param name="Preset">What these settings amount to, or null when they
+    /// amount to no preset at all.</param>
     public sealed record Listener(LoraPreset? Preset, bool IsCustom, byte Sf, uint BwHz, byte Cr,
                                   double FreqMHz, bool IsPrimary)
     {
@@ -106,14 +107,22 @@ public static class MonitorPlan
                                IReadOnlyList<uint> availableRatesHz, bool enabled,
                                IReadOnlyCollection<string> excludedPresets, double? centerOffsetKHz)
     {
-        var primaryListener = new Listener(primary.IsCustom ? null : primary.Preset, primary.IsCustom,
+        bool wideLora = ChannelPlan.IsWideLora(region);
+        // Hand-set parameters that amount to a preset are named for it: they
+        // are the same mesh, and calling them nothing but "custom" hid which
+        // mesh the station was actually on.
+        LoraPreset? primaryPreset = primary.IsCustom
+            ? LoraParamsHelper.TryPresetFor(primary.Sf, primary.BwHz / 1000.0, wideLora, out var matched)
+                ? matched : null
+            : primary.Preset;
+        var primaryListener = new Listener(primaryPreset, primary.IsCustom,
                                            primary.Sf, primary.BwHz, primary.Cr, primary.FreqMHz, IsPrimary: true);
         double half = UsableHalfSpanMHz(kind, rateHz);
 
         if (!enabled || kind == RadioDeviceKind.Sx1262)
             return new Result(primary.FreqMHz, 0, new[] { primaryListener }, Array.Empty<LeftOut>(), half);
 
-        bool wide = ChannelPlan.IsWideLora(region);
+        bool wide = wideLora;
         var candidates = new List<Listener>();
         var leftOut = new List<LeftOut>();
         foreach (var preset in Enum.GetValues<LoraPreset>())

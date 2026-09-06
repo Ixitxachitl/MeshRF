@@ -9,9 +9,11 @@ namespace MeshRF.Mesh;
 /// </summary>
 /// <param name="Listener">Index in the listener set the receiver was started
 /// with; 0 is the primary.</param>
-/// <param name="Preset">The preset, or null when the primary runs custom
-/// SF/BW/CR, which no preset names.</param>
-/// <param name="IsCustom">True for the custom-parameter primary.</param>
+/// <param name="Preset">The preset these settings amount to, or null when
+/// they amount to none — hand-set parameters that match a preset carry it,
+/// since they are the same mesh.</param>
+/// <param name="IsCustom">True when the parameters were typed in rather than
+/// chosen. Says how they were arrived at, not what they are.</param>
 /// <param name="FreqMHz">Channel centre in MHz.</param>
 /// <param name="FromDownlink">True for a frame the MQTT bridge handed in:
 /// it is handled as the primary's, but it was heard on no radio, so it says
@@ -23,14 +25,16 @@ public sealed record RxSource(int Listener, LoraPreset? Preset, bool IsCustom, d
 
     /// <summary>The preset's name, or <see cref="HeardOn.Custom"/>. What a
     /// node stores as where it was heard.</summary>
-    public string PresetName => HeardOn.Name(Preset, IsCustom);
+    public string PresetName => HeardOn.Name(Preset);
 
     /// <summary>Preset and frequency together, for log lines and the JSON
     /// feed: "LongFast 906.875".</summary>
     public string Tag => HeardOn.Tag(PresetName, FreqMHz);
 
-    public static RxSource Primary(LoraPreset preset, bool isCustom, double freqMHz) =>
-        new(0, isCustom ? null : preset, isCustom, freqMHz);
+    /// <param name="preset">What the primary's settings amount to, or null
+    /// when they amount to no preset at all.</param>
+    public static RxSource Primary(LoraPreset? preset, bool isCustom, double freqMHz) =>
+        new(0, preset, isCustom, freqMHz);
 }
 
 /// <summary>
@@ -43,8 +47,8 @@ public static class HeardOn
     /// as: no preset names those settings.</summary>
     public const string Custom = "Custom";
 
-    public static string Name(LoraPreset? preset, bool isCustom) =>
-        isCustom || preset is null ? Custom : preset.Value.ToString();
+    public static string Name(LoraPreset? preset) =>
+        preset is null ? Custom : preset.Value.ToString();
 
     public static string Tag(string presetName, double freqMHz) =>
         $"{presetName} {freqMHz.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)}";

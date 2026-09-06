@@ -366,7 +366,18 @@ public partial class RadioViewModel
     /// primary alone until a multi-preset start.</summary>
     private RxSource[] _rxSources = [];
 
-    private RxSource PrimarySource() => RxSource.Primary(SelectedPreset, IsCustomLoraParams, CenterFreqMHz);
+    private RxSource PrimarySource() =>
+        RxSource.Primary(PrimaryPreset(), IsCustomLoraParams, CenterFreqMHz);
+
+    /// <summary>What the primary's settings amount to: the chosen preset, or
+    /// the one hand-set parameters match, or none.</summary>
+    private LoraPreset? PrimaryPreset()
+    {
+        if (!IsCustomLoraParams) return SelectedPreset;
+        return LoraParamsHelper.TryPresetFor(OverrideSf, OverrideBwKhz,
+                                             ChannelPlan.IsWideLora(SelectedRegion), out var matched)
+            ? matched : null;
+    }
 
     private RxSource SourceFor(int listener) =>
         listener >= 0 && listener < _rxSources.Length ? _rxSources[listener] : PrimarySource();

@@ -12,11 +12,38 @@ namespace MeshRF.Tests;
 public class HeardOnTests
 {
     [Fact]
-    public void APresetIsNamedAndACustomPrimaryIsCustom()
+    public void SettingsAreNamedForWhatTheyAmountTo()
     {
-        Assert.Equal("LongFast", HeardOn.Name(LoraPreset.LongFast, isCustom: false));
-        Assert.Equal(HeardOn.Custom, HeardOn.Name(null, isCustom: true));
-        Assert.Equal(HeardOn.Custom, HeardOn.Name(LoraPreset.LongFast, isCustom: true));
+        Assert.Equal("LongFast", HeardOn.Name(LoraPreset.LongFast));
+        Assert.Equal(HeardOn.Custom, HeardOn.Name(null));
+    }
+
+    /// <summary>
+    /// Settings typed in by hand are not a different mesh for being typed.
+    /// SF11 at 250 kHz is LongFast whichever way it was arrived at, and
+    /// naming it "Custom" hid which mesh the station was on.
+    /// </summary>
+    [Fact]
+    public void HandSetParametersAreNamedForThePresetTheyMatch()
+    {
+        Assert.True(LoraParamsHelper.TryPresetFor(11, 250.0, wideLora: false, out var longFast));
+        Assert.Equal(LoraPreset.LongFast, longFast);
+        Assert.True(LoraParamsHelper.TryPresetFor(9, 250.0, wideLora: false, out var mediumFast));
+        Assert.Equal(LoraPreset.MediumFast, mediumFast);
+        // The narrow presets are unscaled, so they match in a wide region too.
+        Assert.True(LoraParamsHelper.TryPresetFor(7, 62.5, wideLora: true, out var narrowFast));
+        Assert.Equal(LoraPreset.NarrowFast, narrowFast);
+        // And the scaled ones match their scaled bandwidth there.
+        Assert.True(LoraParamsHelper.TryPresetFor(11, 812.5, wideLora: true, out var wideLongFast));
+        Assert.Equal(LoraPreset.LongFast, wideLongFast);
+
+        // Settings no preset uses stay unnamed rather than being rounded to
+        // the nearest one.
+        Assert.False(LoraParamsHelper.TryPresetFor(12, 250.0, wideLora: false, out _));
+        Assert.False(LoraParamsHelper.TryPresetFor(11, 200.0, wideLora: false, out _));
+
+        Assert.Equal("LongFast", RxSource.Primary(longFast, isCustom: true, 906.875).PresetName);
+        Assert.Equal(HeardOn.Custom, RxSource.Primary(null, isCustom: true, 906.875).PresetName);
     }
 
     [Fact]
@@ -35,7 +62,7 @@ public class HeardOnTests
         Assert.Equal("MediumFast 913.125", s.Tag);
         Assert.False(s.FromDownlink);
 
-        var custom = RxSource.Primary(LoraPreset.MediumFast, isCustom: true, 913.125);
+        var custom = RxSource.Primary(null, isCustom: true, 913.125);
         Assert.Null(custom.Preset);
         Assert.Equal(HeardOn.Custom, custom.PresetName);
     }

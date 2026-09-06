@@ -20,6 +20,32 @@ public static class LoraParamsHelper
     /// rate are the same either way, and the Lite/Narrow/Tiny presets are
     /// unscaled, exactly as <c>modemPresetToParams()</c> has it.
     /// </summary>
+    /// <summary>
+    /// The preset a spreading factor and bandwidth amount to, if any. Settings
+    /// typed in by hand are not a different mesh for being typed: SF11 at
+    /// 250 kHz is LongFast whichever way it was arrived at, so it is named for
+    /// what it is.
+    /// </summary>
+    /// <remarks>
+    /// Spreading factor and bandwidth alone, because they are what decides
+    /// whether two stations can hear each other at all: the coding rate
+    /// travels in each packet's own header, so it varies within a mesh rather
+    /// than defining one. No two presets share a spreading factor and
+    /// bandwidth, so at most one can match.
+    /// </remarks>
+    public static bool TryPresetFor(byte sf, double bwKhz, bool wideLora, out LoraPreset preset)
+    {
+        foreach (var candidate in Enum.GetValues<LoraPreset>())
+        {
+            var p = FromPreset(candidate, wideLora);
+            if (p.Sf != sf || Math.Abs(p.BwKhz - bwKhz) > 0.001) continue;
+            preset = candidate;
+            return true;
+        }
+        preset = default;
+        return false;
+    }
+
     public static PresetLoraParams FromPreset(LoraPreset preset, bool wideLora = false) => preset switch
     {
         LoraPreset.ShortTurbo   => new(7,  wideLora ? 1625.0  : 500.0, 5),

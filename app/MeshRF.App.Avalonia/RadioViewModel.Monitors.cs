@@ -161,7 +161,7 @@ public partial class RadioViewModel
 
         foreach (var l in plan.Listeners)
         {
-            string name = l.IsCustom ? MeshRF.Mesh.HeardOn.Custom : l.Preset!.Value.ToString();
+            string name = MeshRF.Mesh.HeardOn.Name(l.Preset);
             rows.Add((l.FreqMHz, new MonitorPresetRow
             {
                 Preset = l.Preset ?? SelectedPreset,
@@ -237,23 +237,23 @@ public partial class RadioViewModel
             foreach (var s in _rxSources)
             {
                 double bwHz = BandwidthHz(s);
-                ChannelBands.Add(new ChannelBand(BandLabel(s.Preset, s.IsCustom, s.FreqMHz),
+                ChannelBands.Add(new ChannelBand(BandLabel(s.Preset, s.FreqMHz),
                                                  s.FreqMHz * 1e6, bwHz, s.IsPrimary));
             }
             return;
         }
 
         foreach (var l in plan.Listeners)
-            ChannelBands.Add(new ChannelBand(BandLabel(l.Preset, l.IsCustom, l.FreqMHz),
+            ChannelBands.Add(new ChannelBand(BandLabel(l.Preset, l.FreqMHz),
                                              l.FreqMHz * 1e6, l.BwHz, l.IsPrimary));
     }
 
     /// <summary>What a band is called on the waterfall: the preset, and the
     /// slot when it is not that preset's default, which is what tells two
     /// meshes on one preset apart.</summary>
-    private string BandLabel(LoraPreset? preset, bool isCustom, double freqMHz)
+    private string BandLabel(LoraPreset? preset, double freqMHz)
     {
-        if (isCustom || preset is not { } p) return MeshRF.Mesh.HeardOn.Custom;
+        if (preset is not { } p) return MeshRF.Mesh.HeardOn.Custom;
         double defaultFreq = MonitorPlan.DefaultSlotFrequencyMHz(SelectedRegion, p);
         if (Math.Abs(defaultFreq - freqMHz) < 1e-6) return p.ToString();
         var slot = SlotTextFor(p, freqMHz);
