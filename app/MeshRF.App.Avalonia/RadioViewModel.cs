@@ -1665,12 +1665,29 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <summary>Firmware's "no slot chosen" sentinel (<c>channel_num == 0</c>),
     /// offered in the picker as "Auto": the frequency then follows the region,
     /// preset and primary channel name instead of being pinned.</summary>
+    /// <summary>
+    /// The bandwidth the slot grid is built from: the one actually in use,
+    /// which is the preset's until it is typed over. Firmware divides the band
+    /// by the bandwidth it is running, so a hand-set 125 kHz sits on the
+    /// 125 kHz grid however the preset picker is left.
+    /// </summary>
+    private double PrimaryBandwidthMHz() => OverrideBwKhz / 1000.0;
+
+    /// <summary>
+    /// The slot Auto resolves to: firmware's hash of the primary channel's
+    /// name over the grid in use, falling back to the display name of the
+    /// preset the settings amount to when that channel is unnamed.
+    /// </summary>
+    private int PrimaryDefaultSlot() => ChannelPlan.DefaultSlot(
+        SelectedRegion, PrimaryBandwidthMHz(), PrimaryChannelName(),
+        ChannelPlan.PresetName(PrimaryPreset() ?? SelectedPreset));
+
     private const int AutoSlot = 0;
 
     /// <summary>Resolves <see cref="AutoSlot"/> to the slot it currently stands
     /// for; any other value is already the answer.</summary>
     private int EffectiveSlot(int slot) => slot == AutoSlot
-        ? ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName())
+        ? PrimaryDefaultSlot()
         : slot;
 
     /// <summary>The slot <see cref="AutoSlot"/> currently stands for, shown
@@ -1681,8 +1698,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private void RebuildSlots(bool snapToDefault = false)
     {
-        var count = ChannelPlan.SlotCount(SelectedRegion, SelectedPreset);
-        AutoResolvedSlot = ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName());
+        var count = ChannelPlan.SlotCount(SelectedRegion, PrimaryBandwidthMHz());
+        AutoResolvedSlot = PrimaryDefaultSlot();
         // Snapping to the default means going back to Auto rather than pinning
         // the slot the default currently resolves to — same frequency today,
         // but it keeps following a later preset change or channel rename.
@@ -1704,7 +1721,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
 
         _suppressRetune = true;
-        try { CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, EffectiveSlot(desired)); }
+        try { CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, PrimaryBandwidthMHz(), EffectiveSlot(desired)); }
         finally { _suppressRetune = false; }
     }
 
@@ -2005,7 +2022,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // AutoSlot is a real selection, not the "nothing selected" the old
         // `value <= 0` guard treated it as; only a negative is out of range.
         if (_suppressSlotSync || value < AutoSlot) return;
-        CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, SelectedPreset, EffectiveSlot(value));
+        CenterFreqMHz = ChannelPlan.FrequencyMHz(SelectedRegion, PrimaryBandwidthMHz(), EffectiveSlot(value));
         SaveSettings();
     }
 

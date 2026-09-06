@@ -250,17 +250,31 @@ public static class ChannelPlan
     /// <summary>The bandwidth actually used, after firmware's clamp to the
     /// region's default preset for a band too narrow to hold the requested
     /// one.</summary>
-    private static double EffectiveBandwidthMHz(in RegionInfo info, LoraPreset preset)
+    private static double EffectiveBandwidthMHz(in RegionInfo info, LoraPreset preset) =>
+        EffectiveBandwidthMHz(info, BandwidthMHz(preset, info.WideLora));
+
+    /// <summary>The bandwidth actually used, after firmware's clamp to the
+    /// region's default preset for a band too narrow to hold the one
+    /// asked for.</summary>
+    private static double EffectiveBandwidthMHz(in RegionInfo info, double bandwidthMHz)
     {
-        var bw = BandwidthMHz(preset, info.WideLora);
-        if (info.FreqEndMHz - info.FreqStartMHz >= SlotWidthMHz(info, bw)) return bw;
+        if (info.FreqEndMHz - info.FreqStartMHz >= SlotWidthMHz(info, bandwidthMHz)) return bandwidthMHz;
         return BandwidthMHz(info.DefaultPreset, info.WideLora);
     }
 
-    public static int SlotCount(Region region, LoraPreset preset)
+    public static int SlotCount(Region region, LoraPreset preset) =>
+        SlotCount(region, BandwidthMHz(preset, IsWideLora(region)));
+
+    /// <summary>
+    /// How many slots a bandwidth divides the region's band into. Taken as a
+    /// bandwidth rather than a preset because that is what firmware uses: a
+    /// station running hand-set parameters is on the grid its bandwidth makes,
+    /// whatever preset is named beside it.
+    /// </summary>
+    public static int SlotCount(Region region, double bandwidthMHz)
     {
         var info = Info(region);
-        var width = SlotWidthMHz(info, EffectiveBandwidthMHz(info, preset));
+        var width = SlotWidthMHz(info, EffectiveBandwidthMHz(info, bandwidthMHz));
         // Firmware rounds (RadioInterface.cpp) — it does not truncate. A band
         // that isn't an exact multiple of the slot width gets the nearest whole
         // number of slots, so flooring here would shift every hashed default
@@ -274,13 +288,17 @@ public static class ChannelPlan
     /// <summary>1-indexed slot → center MHz. Firmware's
     /// <c>freqStart + (bw / 2000) + padding + (channel_num * freqSlotWidth)</c>
     /// with <c>channel_num</c> 0-based.</summary>
-    public static double FrequencyMHz(Region region, LoraPreset preset, int slot)
+    public static double FrequencyMHz(Region region, LoraPreset preset, int slot) =>
+        FrequencyMHz(region, BandwidthMHz(preset, IsWideLora(region)), slot);
+
+    /// <summary>1-indexed slot → center MHz, on the grid a bandwidth makes.</summary>
+    public static double FrequencyMHz(Region region, double bandwidthMHz, int slot)
     {
-        var max = SlotCount(region, preset);
+        var max = SlotCount(region, bandwidthMHz);
         if (slot < 1)   slot = 1;
         if (slot > max) slot = max;
         var info = Info(region);
-        var bw = EffectiveBandwidthMHz(info, preset);
+        var bw = EffectiveBandwidthMHz(info, bandwidthMHz);
         return info.FreqStartMHz
              + bw / 2.0
              + info.Profile.PaddingMHz
@@ -313,12 +331,21 @@ public static class ChannelPlan
     /// reports; <see cref="FrequencyMHz"/> still clamps into band so the
     /// transmit gate has something sane to refuse.
     /// </remarks>
-    public static int DefaultSlot(Region region, LoraPreset preset, string channelName = "")
+    public static int DefaultSlot(Region region, LoraPreset preset, string channelName = "") =>
+        DefaultSlot(region, BandwidthMHz(preset, IsWideLora(region)), channelName, PresetName(preset));
+
+    /// <summary>
+    /// 1-indexed default slot on the grid a bandwidth makes.
+    /// </summary>
+    /// <param name="fallbackName">What firmware hashes when the primary
+    /// channel has no name of its own: the display name of the preset the
+    /// radio is configured for.</param>
+    public static int DefaultSlot(Region region, double bandwidthMHz, string channelName, string fallbackName)
     {
-        var n = SlotCount(region, preset);
+        var n = SlotCount(region, bandwidthMHz);
         var overrideSlot = Info(region).OverrideSlot;
         if (overrideSlot > 0) return overrideSlot;
-        var name = string.IsNullOrEmpty(channelName) ? PresetName(preset) : channelName;
+        var name = string.IsNullOrEmpty(channelName) ? fallbackName : channelName;
         return (int)(Djb2(name) % (uint)n) + 1;
     }
 }

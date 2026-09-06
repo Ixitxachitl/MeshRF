@@ -668,8 +668,7 @@ public partial class RadioViewModel
         get
         {
             double defaultMHz = ChannelPlan.FrequencyMHz(
-                SelectedRegion, SelectedPreset,
-                ChannelPlan.DefaultSlot(SelectedRegion, SelectedPreset, PrimaryChannelName()));
+                SelectedRegion, PrimaryBandwidthMHz(), PrimaryDefaultSlot());
             return Math.Abs(CenterFreqMHz - defaultMHz) < 0.0005;
         }
     }

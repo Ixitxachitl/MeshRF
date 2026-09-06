@@ -315,4 +315,41 @@ public class ChannelPlanTests
         var r = ChannelPlan.Range(Region.LORA_24);
         Assert.True(r.FreqStartMHz > 960.0);
     }
+
+    /// <summary>
+    /// The slot grid is the band divided by the bandwidth in use, which is
+    /// what firmware does — so hand-set parameters sit on the grid their own
+    /// bandwidth makes rather than the one the preset picker was left on.
+    /// </summary>
+    [Fact]
+    public void TheGridFollowsTheBandwidthInUseNotThePresetNamedBesideIt()
+    {
+        // 125 kHz typed over a 250 kHz preset is the 125 kHz grid.
+        Assert.Equal(ChannelPlan.SlotCount(Region.US, LoraPreset.LongModerate),
+                     ChannelPlan.SlotCount(Region.US, 0.125));
+        Assert.NotEqual(ChannelPlan.SlotCount(Region.US, LoraPreset.LongFast),
+                        ChannelPlan.SlotCount(Region.US, 0.125));
+
+        // And a bandwidth that is a preset's gives that preset's frequencies.
+        for (int slot = 1; slot <= 20; slot++)
+            Assert.Equal(ChannelPlan.FrequencyMHz(Region.US, LoraPreset.LongFast, slot),
+                         ChannelPlan.FrequencyMHz(Region.US, 0.250, slot), 6);
+    }
+
+    /// <summary>
+    /// An unnamed primary channel is hashed under the preset's display name,
+    /// so hand-set parameters land where the preset they amount to would.
+    /// </summary>
+    [Fact]
+    public void AnUnnamedChannelHashesUnderThePresetTheSettingsAmountTo()
+    {
+        int byPreset = ChannelPlan.DefaultSlot(Region.US, LoraPreset.LongFast);
+        int byBandwidth = ChannelPlan.DefaultSlot(Region.US, 0.250, "", "LongFast");
+        Assert.Equal(byPreset, byBandwidth);
+        Assert.Equal(906.875, ChannelPlan.FrequencyMHz(Region.US, 0.250, byBandwidth), 6);
+
+        // A named channel is hashed on its own name either way.
+        Assert.Equal(ChannelPlan.DefaultSlot(Region.US, LoraPreset.LongFast, "club"),
+                     ChannelPlan.DefaultSlot(Region.US, 0.250, "club", "LongFast"));
+    }
 }
