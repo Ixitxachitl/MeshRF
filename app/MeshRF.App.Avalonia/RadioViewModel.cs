@@ -238,22 +238,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnMultiPresetEnabledChanged(bool value)
     {
         SaveSettings();
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
     }
 
     partial void OnMonitorCenterOffsetKHzChanged(double? value)
     {
         SaveSettings();
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
     }
 
     /// <summary>The Monitors window edits the exclusion list in place and
-    /// says so here.</summary>
-    public void MonitorExclusionsChanged()
-    {
-        SaveSettings();
-        RefreshPlannedSpectrumCenter();
-    }
+    /// says so here. It refreshes the rows itself afterwards.</summary>
+    public void MonitorExclusionsChanged() => SaveSettings();
 
     /// <summary>What the receiver would be started with right now.</summary>
     public MonitorPlan.Result BuildMonitorPlan()
@@ -270,8 +266,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// centred, which with several listeners need not be the primary.</summary>
     private void RefreshPlannedSpectrumCenter()
     {
-        if (_core is null || IsRunning || !_settingsLoaded) return;
-        SpectrumCenterHz = BuildMonitorPlan().DeviceCenterMHz * 1_000_000.0;
+        if (_core is null || !_settingsLoaded) return;
+        if (!IsRunning) SpectrumCenterHz = BuildMonitorPlan().DeviceCenterMHz * 1_000_000.0;
+        RefreshMonitors();
     }
 
     [ObservableProperty]
@@ -1542,6 +1539,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (_core.IsRunning)
         {
             _core.Stop();
+            _rxSources = [];
+            RefreshPlannedSpectrumCenter();
         }
         else
         {
@@ -1614,6 +1613,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         lock (_rxBusyLock) _rxBusyUntilUtc.Clear();
         _lastPreamblePeakDb.Clear();
         SpectrumCenterHz = plan.DeviceCenterMHz * 1_000_000.0;
+        // The bands now mark what is actually being received.
+        RefreshMonitors();
     }
 
     private void ApplyGains()
@@ -1715,6 +1716,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // radio transmits.
         SendMessageCommand.NotifyCanExecuteChanged();
         SaveSettings();
+        RefreshPlannedSpectrumCenter();
     }
 
     /// <summary>Re-reads the attached sticks. Only called when an SX1262 is
@@ -1835,6 +1837,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         StoreSavedRxSampleRateHz(SelectedDevice, value.Hz);
         SpectrumSpanHz = value.Hz;
         SaveSettings();
+        // A wider capture reaches more presets, so the set changes with it.
+        RefreshPlannedSpectrumCenter();
     }
 
     private IReadOnlyList<SampleRateOption> BuildRxSampleRateOptions(RadioDeviceKind kind)
@@ -1928,6 +1932,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RebuildSlots(snapToDefault: true);
         SaveSettings();
         RefreshEffectiveSettings();
+        RefreshPlannedSpectrumCenter();
     }
 
     partial void OnSelectedRegionChanged(Region value)
@@ -1945,6 +1950,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         ApplyTxBandLimits();
         ApplyRegionPowerLimit();
         RefreshEffectiveSettings();
+        // Every preset's slot plan is the region's, so the whole set moves.
+        RefreshPlannedSpectrumCenter();
         // A move to a band that doesn't touch the one we were operating in has
         // to be confirmed. Only once the constructor has established a starting
         // band: restoring a saved region is not a change. Nothing to confirm

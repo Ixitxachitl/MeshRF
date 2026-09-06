@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:MeshRF.AvaloniaApp"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.MonitorsWindow"
+        x:DataType="app:RadioViewModel"
+        Title="Listen on several presets"
+        Width="720" Height="560"
+        MinWidth="600" MinHeight="440"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Grid Margin="12" ColumnDefinitions="Auto,*"
+          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*">
+
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Foreground="{DynamicResource BrushSubtle}" FontSize="11"
+                   Text="One wide capture can carry more than one Meshtastic channel. With this on, the receiver also listens for every other preset whose default-slot channel fits inside the capture, and this station is a full node on each of those meshes: it stores their nodes, shows their messages, acknowledges and relays for them. Auto reports, scripts and MQTT stay on the primary. Each preset gets a channel list of its own, seeded with its default channel." />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Enabled" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <CheckBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+                  Content="Listen for every preset that fits the capture"
+                  IsChecked="{Binding MultiPresetEnabled, Mode=TwoWay}"
+                  IsEnabled="{Binding CanEditMonitors}"
+                  ToolTip.Tip="Off by default. It widens nothing by itself — what fits depends on the sample rate you have chosen." />
+
+        <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Margin="0,2,0,6" TextWrapping="Wrap"
+                   FontSize="11" Foreground="{DynamicResource BrushSubtle}"
+                   IsVisible="{Binding HasMonitorsNote}"
+                   Text="{Binding MonitorsUnavailableNote}" />
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Capture centre" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4" Spacing="8">
+            <CheckBox Content="Auto" VerticalAlignment="Center"
+                      IsChecked="{Binding MonitorCenterAuto, Mode=TwoWay}"
+                      IsEnabled="{Binding CanEditMonitors}"
+                      ToolTip.Tip="Put the capture where it takes in the most presets. The primary always stays inside it." />
+            <TextBox Width="90" VerticalAlignment="Center" FontFamily="Consolas"
+                     local:RejectInvalidBehavior.IsEnabled="True"
+                     Text="{Binding MonitorCenterOffsetText, Mode=TwoWay}"
+                     IsEnabled="{Binding !MonitorCenterAuto}"
+                     ToolTip.Tip="Offset from the primary in kHz, negative for below it. Clamped so the primary's own channel stays inside the capture." />
+            <TextBlock Text="kHz from the primary" VerticalAlignment="Center"
+                       FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="Receive path" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas"
+                   VerticalAlignment="Center" TextWrapping="Wrap"
+                   Foreground="{DynamicResource BrushSubtle}"
+                   Text="{Binding MonitorStatusText}" />
+
+        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,12,0,4"
+                   Text="Presets in this region" FontWeight="SemiBold" />
+
+        <Border Grid.Row="6" Grid.ColumnSpan="2"
+                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding MonitorPresets}" Margin="4">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="app:MonitorPresetRow">
+                            <Grid ColumnDefinitions="Auto,130,90,110,*" Margin="0,1">
+                                <CheckBox Grid.Column="0" Margin="2,0,6,0" VerticalAlignment="Center"
+                                          IsChecked="{Binding Included, Mode=TwoWay}"
+                                          IsEnabled="{Binding CanChoose}" />
+                                <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="{Binding SlotText}" VerticalAlignment="Center"
+                                           FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+                                <TextBlock Grid.Column="3" Text="{Binding FreqText}" VerticalAlignment="Center"
+                                           FontFamily="Consolas" FontSize="11" />
+                                <TextBlock Grid.Column="4" Text="{Binding StatusText}" VerticalAlignment="Center"
+                                           TextWrapping="Wrap" FontSize="11"
+                                           Foreground="{DynamicResource BrushSubtle}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Window>

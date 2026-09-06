@@ -1021,6 +1021,17 @@ public partial class MainWindow : Window
 
     private MqttSettingsWindow? _mqttWindow;
 
+    private MonitorsWindow? _monitorsWindow;
+
+    private void OnOpenMonitors(object? sender, RoutedEventArgs e)
+    {
+        if (_monitorsWindow is not null) { _monitorsWindow.Activate(); return; }
+        _monitorsWindow = new MonitorsWindow { DataContext = _viewModel };
+        _viewModel.RefreshMonitors();
+        _monitorsWindow.Closed += (_, _) => _monitorsWindow = null;
+        _monitorsWindow.Show(this);
+    }
+
     private void OnOpenMqttSettings(object? sender, RoutedEventArgs e)
     {
         if (_mqttWindow is not null) { _mqttWindow.Activate(); return; }

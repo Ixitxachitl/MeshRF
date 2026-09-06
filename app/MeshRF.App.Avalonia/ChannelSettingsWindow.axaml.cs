@@ -40,6 +40,12 @@ public partial class ChannelSettingsWindow : Window
         w.UplinkCheck.IsChecked = channel.Config.UplinkEnabled;
         w.DownlinkCheck.IsChecked = channel.Config.DownlinkEnabled;
         w.HashText.Text = HashLabel(channel.Config);
+        bool primaryList = channel.Config.Preset.Length == 0;
+        w.ListText.Text = primaryList
+            ? "the primary, whatever the toolbar is set to"
+            : channel.Config.Preset;
+        w.MqttLabel.IsVisible = primaryList;
+        w.MqttRow.IsVisible = primaryList;
         w._loading = false;
         w.Show(owner);
     }

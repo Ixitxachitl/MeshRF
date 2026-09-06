@@ -8,7 +8,7 @@
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
-    <Grid Margin="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+    <Grid Margin="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
         <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Margin="0,4,8,4" VerticalAlignment="Center" />
         <!-- Text fields commit on LostFocus rather than per keystroke: the name
@@ -60,8 +60,10 @@
                   Content="Mute incoming ringtone on this channel" Click="OnFieldChanged"
                   ToolTip.Tip="Mute RTTTL ringtone for text messages on this channel" />
 
-        <TextBlock Grid.Row="5" Grid.Column="0" Text="MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
-        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4" Spacing="16">
+        <!-- Hidden on a preset's own list: only the primary's traffic is
+             uplinked or downlinked, so the boxes would promise nothing. -->
+        <TextBlock Name="MqttLabel" Grid.Row="5" Grid.Column="0" Text="MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <StackPanel Name="MqttRow" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4" Spacing="16">
             <CheckBox Name="UplinkCheck" VerticalAlignment="Center" Content="Uplink" Click="OnFieldChanged"
                       ToolTip.Tip="Publish this channel's traffic to the configured MQTT broker (requires the MQTT bridge to be enabled)." />
             <CheckBox Name="DownlinkCheck" VerticalAlignment="Center" Content="Downlink" Click="OnFieldChanged"
@@ -70,7 +72,13 @@
 
         <!-- Empty unless something is wrong: this is where a rejected PSK is
              reported, since the PSK box itself must keep whatever was typed. -->
-        <TextBlock Name="StatusText" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2"
+        <!-- Which mesh this channel belongs to. Fixed when the channel is
+             made: its list is which listener decodes and sends it. -->
+        <TextBlock Grid.Row="6" Grid.Column="0" Text="Listened on" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <TextBlock Name="ListText" Grid.Row="6" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+                   Foreground="{DynamicResource BrushSubtle}" />
+
+        <TextBlock Name="StatusText" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2"
                    Margin="0,12,0,0" TextWrapping="Wrap"
                    Foreground="{DynamicResource BrushSubtle}" />
     </Grid>

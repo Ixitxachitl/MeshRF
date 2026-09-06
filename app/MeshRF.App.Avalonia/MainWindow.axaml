@@ -236,6 +236,9 @@
                 <TextBlock Text="Freq (MHz)" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
                          FontSize="11" Width="100" Height="26" Margin="0,0,8,2" />
+                <Button Content="Presets…" FontSize="11" Height="26" Padding="8,0" Margin="0,0,8,2"
+                        Click="OnOpenMonitors"
+                        ToolTip.Tip="Listen for other presets alongside this one, off the same capture" />
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />
                 <!-- Drawn, not typed: see ToggleButtonGeometry for why a ▶
                      character came out as a colour emoji next to a flat ■.
@@ -1084,6 +1087,16 @@
                                                  CeilDb="{Binding WaterfallCeilDb, Mode=TwoWay}"
                                                  AutoLevels="{Binding WaterfallAutoLevels, Mode=TwoWay}"
                                                  Colormap="{Binding WaterfallColormap}" />
+                            <!-- Over the live waterfall, in its own cell: the
+                                 waterfall is an Image that only blits its
+                                 bitmap. Marks each channel being demodulated,
+                                 which with one listener is still worth seeing.
+                                 Not over the frozen snapshot below, which is a
+                                 different span entirely. -->
+                            <local:ChannelOverlay Grid.Row="1"
+                                                  CenterFreqHz="{Binding SpectrumCenterHz}"
+                                                  SpanHz="{Binding SpectrumSpanHz}"
+                                                  Bands="{Binding ChannelBands}" />
                             <!-- Frozen spectrogram of the most recently decoded packet. -->
                             <Border Grid.Row="2" Margin="0,2,0,2"
                                     Background="#DD101418"
