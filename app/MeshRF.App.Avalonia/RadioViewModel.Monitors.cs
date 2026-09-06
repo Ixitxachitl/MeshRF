@@ -76,6 +76,11 @@ public partial class RadioViewModel
     /// the plan is not read back as the user unticking something.</summary>
     private bool _rebuildingMonitorRows;
 
+    /// <summary>The presets the plan would listen for, which is what decides
+    /// whose channels are offered. Kept apart from the running listeners: a
+    /// stopped receiver still has the meshes its operator has chosen.</summary>
+    private HashSet<string> _shownPresets = new(StringComparer.Ordinal);
+
     /// <summary>Off on a hardware modem, which receives one channel at a
     /// time, and while the receiver is running, since the set is fixed at
     /// start.</summary>
@@ -101,6 +106,18 @@ public partial class RadioViewModel
 
         var plan = BuildMonitorPlan();
         RefreshChannelBands(plan);
+
+        _shownPresets = plan.Listeners.Where(l => !l.IsPrimary && l.Preset is not null)
+                            .Select(l => l.Preset!.Value.ToString())
+                            .ToHashSet(StringComparer.Ordinal);
+        // A mesh gets its channel list when it is chosen, not when the
+        // receiver is started: the point of choosing it is to set its
+        // channels up, which needs them to exist.
+        foreach (var preset in _shownPresets) _rxHost.EnsureChannelList(preset);
+        _rxHost.RefreshTabGroups();
+        // A tab that has just been taken away cannot stay selected.
+        if (SelectedTab is { IsTabListed: false })
+            SelectedTab = Tabs.FirstOrDefault(t => t.IsTabListed);
 
         _rebuildingMonitorRows = true;
         try

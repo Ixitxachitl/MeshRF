@@ -1152,7 +1152,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // consulted when RoutingRelayEnabled is on (see RelayContextProvider).
         _rxHost.RelayContextProvider = BuildRelayContext;
         _rxHost.TargetForSource = TargetForSource;
+        // What can be replied on is what is running; what has tabs is what is
+        // planned, so turning a preset on shows its channels before the
+        // receiver is started and stopping it does not take them away.
         _rxHost.IsPresetListening = name => _rxSources.Any(s => !s.IsPrimary && s.PresetName == name);
+        _rxHost.IsPresetShown = name => _shownPresets.Contains(name);
         _rxHost.RelayScheduler = new RelayScheduler
         {
             Transmit = (frame, target) => TransmitFrameAsync(frame, target),
@@ -1591,9 +1595,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
         else
         {
-            // Each secondary preset decodes and sends with a list of its own,
-            // seeded with its default channel the first time it is listened
-            // on.
+            // Each secondary preset decodes and sends with a list of its own.
+            // Normally already seeded when the preset was chosen; done again
+            // here for a set that came straight from settings.
             foreach (var s in sources.Skip(1)) _rxHost.EnsureChannelList(s.PresetName);
             var specs = new List<RxListenerSpec>();
             foreach (var l in plan.Listeners)

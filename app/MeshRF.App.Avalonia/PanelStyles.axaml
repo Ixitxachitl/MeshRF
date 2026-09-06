@@ -104,6 +104,10 @@
                 Value="{Binding StartsTabGroup,
                                 Converter={x:Static local:TabGroupMarginConverter.Instance}}" />
         <Setter Property="ClipToBounds" Value="{Binding !StartsTabGroup}" />
+        <!-- A channel on a mesh nobody is listening for keeps its messages and
+             its key, and comes back the moment that preset is listened for
+             again; it is simply not offered meanwhile. -->
+        <Setter Property="IsVisible" Value="{Binding IsTabListed}" />
     </Style>
     <!-- Fluent marks the selected tab with a coloured pipe pinned to the
          bottom edge of the header. With the shorter header this app uses it

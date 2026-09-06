@@ -1202,6 +1202,18 @@
                                 <Rectangle Width="1" Margin="-17,3,0,3"
                                            IsVisible="{Binding StartsTabGroup}"
                                            Fill="{DynamicResource BrushTabBorder}" />
+                                <!-- The mesh this run of tabs is on, on the tab
+                                     that opens it: "Primary" for the toolbar's
+                                     own, otherwise the preset being listened
+                                     for. It leads the group rather than sitting
+                                     in any one tab's box, which is what makes a
+                                     conversation say which mesh it is held
+                                     over. -->
+                                <TextBlock Text="{Binding TabGroupLabel}"
+                                           IsVisible="{Binding StartsTabGroup}"
+                                           VerticalAlignment="Center" Margin="0,0,6,0"
+                                           FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource BrushSubtle}" />
                                 <Border Padding="8,3" CornerRadius="3" Background="Transparent"
                                         BorderBrush="{DynamicResource BrushTabBorder}" BorderThickness="1">
                                     <StackPanel Orientation="Horizontal" Spacing="4">

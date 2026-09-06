@@ -37,7 +37,11 @@ public partial class RadioViewModel
                    dragChannel.Config.Role != ChannelRole.Primary &&
                    targetChannel.Config.Role != ChannelRole.Primary;
 
-        return dragged is ConversationTabViewModel && target is ConversationTabViewModel;
+        // Conversations move among the ones held over the same mesh: their
+        // group is which mesh that is, not something the user picks.
+        return dragged is ConversationTabViewModel dragConvo
+            && target is ConversationTabViewModel targetConvo
+            && dragConvo.TabGroup == targetConvo.TabGroup;
     }
 
     /// <summary>Applies a drop. Returns true when the order actually changed.</summary>
@@ -55,17 +59,21 @@ public partial class RadioViewModel
     }
 
     /// <summary>DM tabs are presentation only, so this is a plain move within
-    /// the conversation group — no channel indices are touched.</summary>
+    /// the run of conversations on one mesh — no channel indices are touched.
+    /// </summary>
     private bool ReorderConversationsByDrag(ConversationTabViewModel dragged, ConversationTabViewModel target)
     {
         int dragIndex = Tabs.IndexOf(dragged);
         int targetIndex = Tabs.IndexOf(target);
         if (dragIndex < 0 || targetIndex < 0 || dragIndex == targetIndex) return false;
 
-        // Conversations always sit after the channels; refuse anything that
-        // would interleave them.
-        int channelCount = Tabs.OfType<ChannelTabViewModel>().Count();
-        if (dragIndex < channelCount || targetIndex < channelCount) return false;
+        // The conversations on one mesh sit after that mesh's channels;
+        // refuse anything that would interleave them or cross into another.
+        int firstOfGroup = 0;
+        while (firstOfGroup < Tabs.Count
+               && !(Tabs[firstOfGroup] is ConversationTabViewModel c && c.TabGroup == dragged.TabGroup))
+            firstOfGroup++;
+        if (dragIndex < firstOfGroup || targetIndex < firstOfGroup) return false;
 
         Tabs.Move(dragIndex, targetIndex);
         SelectedTab = dragged;
@@ -113,24 +121,12 @@ public partial class RadioViewModel
         return true;
     }
 
-    /// <summary>Re-sorts the channel tabs to match their (just rewritten)
-    /// indices, leaving the conversation tabs after them untouched.</summary>
+    /// <summary>Re-sorts the tabs to match the channel indices just
+    /// rewritten. The order itself belongs to the host, which groups the tabs
+    /// by the mesh they are on.</summary>
     private void ReorderChannelTabs()
     {
-        // The primary's list first, then each preset's list, each with its
-        // Primary-role channel ahead of the rest.
-        var ordered = Tabs.OfType<ChannelTabViewModel>()
-            .OrderBy(t => t.Config.Preset.Length == 0 ? 0 : 1)
-            .ThenBy(t => t.Config.Preset, StringComparer.Ordinal)
-            .ThenBy(t => t.Config.Role == ChannelRole.Primary ? 0 : 1)
-            .ThenBy(t => t.Config.Index)
-            .ToList();
-
-        for (int i = 0; i < ordered.Count; i++)
-        {
-            int current = Tabs.IndexOf(ordered[i]);
-            if (current != i) Tabs.Move(current, i);
-            ordered[i].NotifyConfigChanged();
-        }
+        _rxHost.RefreshTabGroups();
+        foreach (var tab in Tabs.OfType<ChannelTabViewModel>()) tab.NotifyConfigChanged();
     }
 }
