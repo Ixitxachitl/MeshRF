@@ -1157,6 +1157,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // receiver is started and stopping it does not take them away.
         _rxHost.IsPresetListening = name => _rxSources.Any(s => !s.IsPrimary && s.PresetName == name);
         _rxHost.IsPresetShown = name => _shownPresets.Contains(name);
+        // The picker follows the tabs that exist; it only reads the host, so
+        // it is safe from inside the collection's own notification.
+        Tabs.CollectionChanged += (_, _) => RefreshTabGroupOptions();
+        _rxHost.TabAttentionChanged += RefreshTabGroupAttention;
         _rxHost.RelayScheduler = new RelayScheduler
         {
             Transmit = (frame, target) => TransmitFrameAsync(frame, target),

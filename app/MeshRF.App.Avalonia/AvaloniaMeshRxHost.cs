@@ -88,36 +88,75 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// </summary>
     public Func<string, bool>? IsPresetShown { get; set; }
 
-    /// <summary>Guards the reordering below against the collection change it
-    /// raises itself.</summary>
-    private bool _regrouping;
+    /// <summary>
+    /// Which mesh's tabs are on show: empty for the primary's, otherwise the
+    /// preset. One mesh at a time, picked from the strip's own dropdown — a
+    /// wide capture can be listening for a dozen presets, and every one of
+    /// them having its channels in one strip would be unusable.
+    /// </summary>
+    public string ShownGroup { get; private set; } = string.Empty;
+
+    /// <summary>Shows one mesh's tabs. Returns false if that was already the
+    /// one on show.</summary>
+    public bool ShowGroup(string group)
+    {
+        if (ShownGroup == group) return false;
+        ShownGroup = group;
+        RefreshTabGroups();
+        return true;
+    }
 
     /// <summary>
-    /// Sorts the tabs into one group per mesh — the primary's first, then each
-    /// preset being listened for — with that mesh's channels ahead of the
-    /// conversations held on it, and labels the tab that opens each group.
+    /// The meshes that have tabs and can be shown, the primary's first. A
+    /// preset that is no longer listened for keeps its channels but is not
+    /// offered: there is nothing they could send or hear.
+    /// </summary>
+    public IReadOnlyList<string> TabGroups() => Tabs
+        .Select(t => t.TabGroup)
+        .Where(g => g.Length == 0 || IsPresetShown?.Invoke(g) == true)
+        .Distinct(StringComparer.Ordinal)
+        .OrderBy(g => g.Length == 0 ? 0 : 1)
+        .ThenBy(g => g, StringComparer.Ordinal)
+        .ToList();
+
+    /// <summary>True when a mesh that is not on show has something unread.
+    /// Hiding a mesh must not hide the fact that it is talking.</summary>
+    public bool GroupNeedsAttention(string group) =>
+        Tabs.Any(t => t.TabGroup == group && t.TabNeedsAttention);
+
+    /// <summary>Raised when a tab is marked unread, so the mesh dropdown can
+    /// show that a hidden one has traffic.</summary>
+    public event Action? TabAttentionChanged;
+
+    /// <summary>
+    /// Works out which mesh each tab belongs to, shows the chosen mesh's, and
+    /// puts them in order: that mesh's channels first, then the conversations
+    /// held over it.
     /// </summary>
     /// <remarks>
-    /// A conversation belongs to the mesh its peer was last heard on, so the
-    /// tab strip says which mesh you are talking to somebody over. Sorting is
-    /// stable, so the order the user dragged tabs into survives a regroup.
+    /// <para>A conversation belongs to the mesh its peer was last heard on, so
+    /// the strip is the set of tabs for one mesh rather than a pile of every
+    /// mesh at once.</para>
+    /// <para><paramref name="reorder"/> is off while a collection change is
+    /// being dispatched. <see cref="ObservableCollection{T}"/> refuses to be
+    /// modified from inside its own notification once more than one listener
+    /// is attached, and the tab control is always the second — so moving a tab
+    /// there threw, which is what opening a conversation from a message used
+    /// to do. Ordering is left to the explicit call that follows the add.</para>
     /// </remarks>
-    public void RefreshTabGroups()
+    private void ApplyTabGrouping(bool reorder)
     {
-        if (_regrouping) return;
-        _regrouping = true;
-        try
+        foreach (var tab in Tabs)
         {
-            foreach (var tab in Tabs)
-            {
-                tab.TabGroup = GroupOf(tab);
-                // A channel on a mesh nobody is listening for keeps its
-                // messages and its key, but has nothing to say or hear.
-                tab.IsTabListed = tab is not ChannelTabViewModel channel
-                                  || channel.Config.Preset.Length == 0
-                                  || IsPresetShown?.Invoke(channel.Config.Preset) == true;
-            }
+            tab.TabGroup = GroupOf(tab);
+            // A channel on a mesh that is not on show keeps its messages and
+            // its key; it is simply not offered.
+            tab.IsTabListed = tab.TabGroup == ShownGroup;
+        }
 
+        if (reorder)
+        {
+            // Stable, so the order the user dragged tabs into survives.
             var order = Tabs
                 .OrderBy(t => t.TabGroup.Length == 0 ? 0 : 1)
                 .ThenBy(t => t.TabGroup, StringComparer.Ordinal)
@@ -130,36 +169,28 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 int at = Tabs.IndexOf(order[i]);
                 if (at != i) Tabs.Move(at, i);
             }
-
-            // The label rides on the first *shown* tab of each group, or a
-            // group whose channels are all hidden would leave its name on
-            // something invisible.
-            string? current = null;
-            foreach (var tab in Tabs)
-            {
-                if (!tab.IsTabListed)
-                {
-                    if (tab.StartsTabGroup) tab.StartsTabGroup = false;
-                    if (tab.TabGroupLabel.Length > 0) tab.TabGroupLabel = string.Empty;
-                    continue;
-                }
-                bool starts = tab.TabGroup != current;
-                current = tab.TabGroup;
-                if (tab.StartsTabGroup != starts) tab.StartsTabGroup = starts;
-                var label = starts ? LabelForGroup(tab.TabGroup) : string.Empty;
-                if (tab.TabGroupLabel != label) tab.TabGroupLabel = label;
-            }
         }
-        finally
+
+        // The rule still separates this mesh's channels from its
+        // conversations, which is the one boundary left inside a strip that
+        // now holds a single mesh.
+        bool seen = false;
+        foreach (var tab in Tabs)
         {
-            _regrouping = false;
+            bool starts = tab.IsTabListed && !seen && tab is ConversationTabViewModel;
+            if (starts) seen = true;
+            if (tab.StartsTabGroup != starts) tab.StartsTabGroup = starts;
         }
     }
+
+    /// <summary>Regroups and reorders. Call after adding or removing tabs,
+    /// never from inside a collection-changed handler.</summary>
+    public void RefreshTabGroups() => ApplyTabGrouping(reorder: true);
 
     /// <summary>The primary's mesh is whatever the toolbar is set to, which
     /// may be a preset or a hand-tuned configuration, so it is named for what
     /// it is rather than for a preset it might not have.</summary>
-    private static string LabelForGroup(string group) => group.Length == 0 ? "Primary" : group;
+    public static string LabelForGroup(string group) => group.Length == 0 ? "Primary" : group;
 
     private string GroupOf(ITabItem tab) => tab switch
     {
@@ -228,6 +259,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (tab is null) return;
         if (ReferenceEquals(SelectedTabProvider?.Invoke(), tab)) return;
         tab.TabNeedsAttention = true;
+        TabAttentionChanged?.Invoke();
     }
 
     /// <summary>Unit-aware formatters for history display strings. Owned by the
@@ -334,6 +366,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         _channelStore.Upsert(seed);
         int insertAt = Tabs.OfType<ChannelTabViewModel>().Count();
         Tabs.Insert(insertAt, NewChannelTab(seed));
+        RefreshTabGroups();
     }
     public float CurrentRssiDbfs { get; set; } = float.NegativeInfinity;
     float IMeshRxHost.CurrentRssiDbfs => CurrentRssiDbfs;
@@ -503,7 +536,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         _messageStore = messageStore;
         MyNodeNum = myNodeNum;
 
-        Tabs.CollectionChanged += (_, _) => RefreshTabGroups();
+        // Grouping only, no reordering: this runs inside the collection's own
+        // notification, where it may not be modified. Whoever added the tab
+        // calls RefreshTabGroups afterwards to put it in place.
+        Tabs.CollectionChanged += (_, _) => ApplyTabGrouping(reorder: false);
 
         // Every waypoint that arrives learns who is looking at it, so the lock
         // column can tell our own locks from someone else's. Done from the
@@ -722,6 +758,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
         foreach (var c in configs)
             Tabs.Add(NewChannelTab(c));
+        RefreshTabGroups();
     }
 
     /// <summary>The channel a keyless secondary borrows from, per firmware
@@ -776,6 +813,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             }
         }
         Tabs.Insert(insertAt, tab);
+        RefreshTabGroups();
         return tab;
     }
 
@@ -926,6 +964,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         }
         ApplyHistoryReactions(convo.Messages, reactions);
 
+        // After the add, never during it: see ApplyTabGrouping.
+        RefreshTabGroups();
         OpenConversationsChanged?.Invoke();
         return convo;
     }
@@ -935,6 +975,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     {
         _conversationsByNode.Remove(convo.NodeNum);
         Tabs.Remove(convo);
+        RefreshTabGroups();
         OpenConversationsChanged?.Invoke();
     }
 

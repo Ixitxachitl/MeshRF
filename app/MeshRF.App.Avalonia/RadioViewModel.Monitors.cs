@@ -114,7 +114,11 @@ public partial class RadioViewModel
         // receiver is started: the point of choosing it is to set its
         // channels up, which needs them to exist.
         foreach (var preset in _shownPresets) _rxHost.EnsureChannelList(preset);
+        // A mesh that is no longer listened for cannot stay on show.
+        if (_rxHost.ShownGroup.Length > 0 && !_shownPresets.Contains(_rxHost.ShownGroup))
+            _rxHost.ShowGroup(string.Empty);
         _rxHost.RefreshTabGroups();
+        RefreshTabGroupOptions();
         // A tab that has just been taken away cannot stay selected.
         if (SelectedTab is { IsTabListed: false })
             SelectedTab = Tabs.FirstOrDefault(t => t.IsTabListed);

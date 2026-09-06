@@ -8,10 +8,10 @@ using Xunit;
 namespace MeshRF.UiTests;
 
 /// <summary>
-/// The tab strip is grouped by the mesh each tab is on: the primary's
-/// channels and conversations first, then a group per preset being listened
-/// for. A channel on a preset nobody is listening for is kept but not
-/// offered, because there is nothing it could send or hear.
+/// The tab strip holds one mesh at a time, picked from a dropdown: its
+/// channels, then the conversations held over it. A wide capture can be
+/// listening for a dozen presets, and all of their channels in one strip
+/// would be unusable.
 /// </summary>
 public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
 {
@@ -28,78 +28,103 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
     private static ChannelTabViewModel ChannelsOn(RadioViewModel vm, string preset) =>
         vm.Tabs.OfType<ChannelTabViewModel>().First(t => t.Config.Preset == preset);
 
+    private static void Show(RadioViewModel vm, string group) =>
+        vm.SelectedTabGroupOption = vm.TabGroupOptions.Single(o => o.Group == group);
+
     [Fact]
-    public void WithOneMeshEverythingSitsUnderPrimary() => Ui(() => TempDataDirectory.With(() =>
+    public void WithOneMeshThereIsNothingToPick() => Ui(() => TempDataDirectory.With(() =>
     {
         using var vm = Station();
         vm.MultiPresetEnabled = false;
+        vm.RefreshMonitors();
 
+        Assert.False(vm.HasSeveralMeshes);
+        Assert.Equal(string.Empty, Assert.Single(vm.TabGroupOptions).Group);
         Assert.All(vm.Tabs, t => Assert.Equal(string.Empty, t.TabGroup));
         Assert.All(vm.Tabs, t => Assert.True(t.IsTabListed));
-        // The label leads the run, on the first tab and nowhere else.
-        Assert.Equal("Primary", vm.Tabs[0].TabGroupLabel);
-        Assert.True(vm.Tabs[0].StartsTabGroup);
-        Assert.All(vm.Tabs.Skip(1), t => Assert.Equal(string.Empty, t.TabGroupLabel));
     }));
 
     [Fact]
-    public void APresetBeingListenedForGetsAGroupOfItsOwn() => Ui(() => TempDataDirectory.With(() =>
-    {
-        using var vm = Station();
-        vm.MultiPresetEnabled = true;
-        // Listening for LongFast seeds it a channel list, which becomes tabs.
-        vm.RefreshMonitors();
-
-        var longFast = ChannelsOn(vm, nameof(LoraPreset.LongFast));
-        Assert.True(longFast.IsTabListed);
-        Assert.Equal(nameof(LoraPreset.LongFast), longFast.TabGroup);
-
-        // The primary's mesh comes first, and each group is labelled once.
-        var listed = vm.Tabs.Where(t => t.IsTabListed).ToList();
-        Assert.Equal(string.Empty, listed[0].TabGroup);
-        Assert.Equal("Primary", listed[0].TabGroupLabel);
-        var opener = Assert.Single(listed, t => t.TabGroupLabel == nameof(LoraPreset.LongFast));
-        Assert.True(opener.StartsTabGroup);
-        Assert.True(listed.IndexOf(opener) > 0, "the primary's mesh leads the strip");
-    }));
-
-    [Fact]
-    public void AChannelOnAMeshNobodyListensForIsKeptButNotOffered() => Ui(() => TempDataDirectory.With(() =>
+    public void EachMeshBeingListenedForIsOfferedInThePicker() => Ui(() => TempDataDirectory.With(() =>
     {
         using var vm = Station();
         vm.MultiPresetEnabled = true;
         vm.RefreshMonitors();
 
-        // Give the LongFast list a channel of the user's own.
-        var added = vm.Tabs.OfType<ChannelTabViewModel>().Count(t => t.Config.Preset == nameof(LoraPreset.LongFast));
-        Assert.True(added > 0);
+        Assert.True(vm.HasSeveralMeshes);
+        // The primary's mesh leads, and is what is shown to begin with.
+        Assert.Equal(string.Empty, vm.TabGroupOptions[0].Group);
+        Assert.Equal("Primary", vm.TabGroupOptions[0].Label);
+        Assert.Equal(string.Empty, vm.SelectedTabGroupOption!.Group);
+        Assert.Contains(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
 
-        // Stop listening for it: the tabs go, the channels do not.
-        var longFastRow = vm.MonitorPresets.Single(r => r.Name == nameof(LoraPreset.LongFast));
-        longFastRow.Included = false;
+        // Only the primary's tabs are on show.
+        Assert.All(vm.Tabs.Where(t => t.IsTabListed), t => Assert.Equal(string.Empty, t.TabGroup));
+        Assert.False(ChannelsOn(vm, nameof(LoraPreset.LongFast)).IsTabListed);
+    }));
 
+    [Fact]
+    public void PickingAMeshShowsItsTabsAndOnlyThose() => Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+
+        Show(vm, nameof(LoraPreset.LongFast));
+
+        Assert.True(ChannelsOn(vm, nameof(LoraPreset.LongFast)).IsTabListed);
+        Assert.All(vm.Tabs.Where(t => t.IsTabListed),
+                   t => Assert.Equal(nameof(LoraPreset.LongFast), t.TabGroup));
+        // Selection follows, rather than staying on a tab that is now hidden.
+        Assert.True(vm.SelectedTab!.IsTabListed);
+    }));
+
+    [Fact]
+    public void AChannelOnAMeshNotShownIsKeptAndComesBack() => Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+
+        int longFastChannels = vm.Tabs.OfType<ChannelTabViewModel>()
+            .Count(t => t.Config.Preset == nameof(LoraPreset.LongFast));
+        Assert.True(longFastChannels > 0);
+
+        // Stop listening for it: the mesh leaves the picker, its channels stay.
+        vm.MonitorPresets.Single(r => r.Name == nameof(LoraPreset.LongFast)).Included = false;
+
+        Assert.DoesNotContain(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+        Assert.Equal(longFastChannels, vm.Tabs.OfType<ChannelTabViewModel>()
+            .Count(t => t.Config.Preset == nameof(LoraPreset.LongFast)));
         Assert.All(vm.Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == nameof(LoraPreset.LongFast)),
                    t => Assert.False(t.IsTabListed));
-        // Its channels are still on file, and no group is left labelled for a
-        // mesh with nothing shown on it.
-        Assert.NotEmpty(vm.Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == nameof(LoraPreset.LongFast)));
-        Assert.DoesNotContain(vm.Tabs.Where(t => t.IsTabListed), t => t.TabGroup == nameof(LoraPreset.LongFast));
-        Assert.DoesNotContain(vm.Tabs, t => t.TabGroupLabel == nameof(LoraPreset.LongFast));
 
-        // Listen again and they come back, with what was in them.
-        longFastRow.Included = true;
-        Assert.All(vm.Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == nameof(LoraPreset.LongFast)),
-                   t => Assert.True(t.IsTabListed));
+        vm.MonitorPresets.Single(r => r.Name == nameof(LoraPreset.LongFast)).Included = true;
+        Assert.Contains(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
     }));
 
     [Fact]
-    public void AConversationSitsUnderTheMeshItsPeerWasHeardOn() => Ui(() => TempDataDirectory.With(() =>
+    public void ShowingAMeshThatStopsBeingListenedForFallsBackToThePrimary() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+        Show(vm, nameof(LoraPreset.LongFast));
+
+        vm.MonitorPresets.Single(r => r.Name == nameof(LoraPreset.LongFast)).Included = false;
+
+        Assert.Equal(string.Empty, vm.SelectedTabGroupOption!.Group);
+        Assert.True(vm.SelectedTab!.IsTabListed);
+    }));
+
+    [Fact]
+    public void AConversationBelongsToTheMeshItsPeerWasHeardOn() => Ui(() => TempDataDirectory.With(() =>
     {
         using var vm = Station();
         vm.MultiPresetEnabled = true;
         vm.RefreshMonitors();
 
-        // One peer heard on the primary, one on LongFast.
         var store = new NodeStore();
         store.RecordSighting(0x1111u, heardOnPreset: nameof(LoraPreset.MediumFast), heardOnFreqMHz: 913.125);
         store.RecordSighting(0x2222u, heardOnPreset: nameof(LoraPreset.LongFast), heardOnFreqMHz: 906.875);
@@ -113,33 +138,40 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         var onLongFast = vm.Tabs.OfType<ConversationTabViewModel>().Single(t => t.NodeNum == 0x2222u);
 
         // The primary's peer was heard on the toolbar's own preset, which is
-        // the primary mesh rather than a group of its own.
+        // the primary mesh rather than a mesh of its own.
         Assert.Equal(string.Empty, onPrimary.TabGroup);
         Assert.Equal(nameof(LoraPreset.LongFast), onLongFast.TabGroup);
+        Assert.True(onPrimary.IsTabListed);
+        Assert.False(onLongFast.IsTabListed);
 
-        // And it sits with that mesh's channels, after them.
-        int channel = vm.Tabs.IndexOf(ChannelsOn(vm, nameof(LoraPreset.LongFast)));
-        Assert.True(vm.Tabs.IndexOf(onLongFast) > channel,
-                    "a conversation follows the channels of the mesh it is held over");
-        Assert.True(vm.Tabs.IndexOf(onPrimary) < channel,
-                    "and the primary's conversations come before the next mesh starts");
+        // And on its own mesh it follows that mesh's channels.
+        Show(vm, nameof(LoraPreset.LongFast));
+        Assert.True(onLongFast.IsTabListed);
+        Assert.True(vm.Tabs.IndexOf(onLongFast) > vm.Tabs.IndexOf(ChannelsOn(vm, nameof(LoraPreset.LongFast))));
     }));
 
+    /// <summary>
+    /// Opening a conversation adds a tab, and the tab strip is bound to that
+    /// collection — so reordering from inside the change notification threw,
+    /// which is what double-clicking a sender's name used to do.
+    /// </summary>
     [Fact]
-    public void SelectionLeavesATabThatHasJustBeenTakenAway() => Ui(() => TempDataDirectory.With(() =>
+    public void OpeningAConversationWhileTheStripIsBoundDoesNotThrow() =>
+        Ui(() => TempDataDirectory.With(() =>
     {
         using var vm = Station();
         vm.MultiPresetEnabled = true;
         vm.RefreshMonitors();
 
-        var longFast = ChannelsOn(vm, nameof(LoraPreset.LongFast));
-        vm.SelectedTab = longFast;
+        // A second listener on the collection is what makes it refuse a
+        // modification during its own notification; the real strip is one.
+        vm.Tabs.CollectionChanged += (_, _) => { };
 
-        vm.MonitorPresets.Single(r => r.Name == nameof(LoraPreset.LongFast)).Included = false;
+        vm.MessageNodeCommand.Execute(new NodeRecord { NodeNum = 0x3333u });
+        vm.MessageNodeCommand.Execute(new NodeRecord { NodeNum = 0x4444u });
 
-        Assert.False(longFast.IsTabListed);
-        Assert.NotSame(longFast, vm.SelectedTab);
-        Assert.True(vm.SelectedTab!.IsTabListed);
+        Assert.Contains(vm.Tabs.OfType<ConversationTabViewModel>(), t => t.NodeNum == 0x3333u);
+        Assert.Contains(vm.Tabs.OfType<ConversationTabViewModel>(), t => t.NodeNum == 0x4444u);
     }));
 
     /// <summary>A drag may not carry a tab onto another mesh: which mesh a
@@ -157,6 +189,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         vm.AddChannelCommand.Execute(null);
         var onPrimary = (ChannelTabViewModel)vm.SelectedTab!;
 
+        Show(vm, nameof(LoraPreset.LongFast));
         vm.SelectedTab = ChannelsOn(vm, nameof(LoraPreset.LongFast));
         vm.AddChannelCommand.Execute(null);
         var onLongFast = (ChannelTabViewModel)vm.SelectedTab!;

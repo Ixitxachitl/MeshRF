@@ -1159,6 +1159,27 @@
                                 Content="+" FontSize="13" VerticalAlignment="Center"
                                 Command="{Binding AddChannelCommand}"
                                 ToolTip.Tip="Add a new channel (random PSK)" />
+                        <!-- Which mesh's tabs the strip is showing. Appears
+                             only once there is more than one to choose. A dot
+                             marks a mesh that has something unread, since
+                             hiding one must not hide that it is talking. -->
+                        <ComboBox DockPanel.Dock="Right" Height="22" FontSize="11" MinWidth="120"
+                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                  IsVisible="{Binding HasSeveralMeshes}"
+                                  ItemsSource="{Binding TabGroupOptions}"
+                                  SelectedItem="{Binding SelectedTabGroupOption}"
+                                  ToolTip.Tip="Which mesh's channels and conversations to show">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="local:TabGroupOption">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                                        <Ellipse Width="6" Height="6" VerticalAlignment="Center"
+                                                 IsVisible="{Binding NeedsAttention}"
+                                                 Fill="{DynamicResource BrushOverridden}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                         <TextBlock Text="Channels" FontWeight="Bold" Margin="4,0,0,0" VerticalAlignment="Center" />
                     </DockPanel>
 
@@ -1202,18 +1223,6 @@
                                 <Rectangle Width="1" Margin="-17,3,0,3"
                                            IsVisible="{Binding StartsTabGroup}"
                                            Fill="{DynamicResource BrushTabBorder}" />
-                                <!-- The mesh this run of tabs is on, on the tab
-                                     that opens it: "Primary" for the toolbar's
-                                     own, otherwise the preset being listened
-                                     for. It leads the group rather than sitting
-                                     in any one tab's box, which is what makes a
-                                     conversation say which mesh it is held
-                                     over. -->
-                                <TextBlock Text="{Binding TabGroupLabel}"
-                                           IsVisible="{Binding StartsTabGroup}"
-                                           VerticalAlignment="Center" Margin="0,0,6,0"
-                                           FontSize="10" FontWeight="SemiBold"
-                                           Foreground="{DynamicResource BrushSubtle}" />
                                 <Border Padding="8,3" CornerRadius="3" Background="Transparent"
                                         BorderBrush="{DynamicResource BrushTabBorder}" BorderThickness="1">
                                     <StackPanel Orientation="Horizontal" Spacing="4">

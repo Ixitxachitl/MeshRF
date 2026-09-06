@@ -40,10 +40,6 @@ public interface ITabItem
     /// </summary>
     string TabGroup { get; set; }
 
-    /// <summary>What the group is called on screen, on the tab that opens it
-    /// and blank on the rest.</summary>
-    string TabGroupLabel { get; set; }
-
     /// <summary>
     /// Whether the tab is shown at all. A channel on a preset that is not
     /// being listened for is kept — its messages and its key are still

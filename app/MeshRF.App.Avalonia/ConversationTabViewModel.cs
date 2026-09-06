@@ -45,9 +45,6 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     private string _tabGroup = string.Empty;
 
     [ObservableProperty]
-    private string _tabGroupLabel = string.Empty;
-
-    [ObservableProperty]
     private bool _isTabListed = true;
 
     public ConversationTabViewModel(uint nodeNum, string peerName,
