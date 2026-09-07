@@ -40,12 +40,17 @@ public partial class ChannelSettingsWindow : Window
         w.UplinkCheck.IsChecked = channel.Config.UplinkEnabled;
         w.DownlinkCheck.IsChecked = channel.Config.DownlinkEnabled;
         w.HashText.Text = HashLabel(channel.Config);
-        bool primaryList = channel.Config.Preset.Length == 0;
+        w.StatusText.IsVisible = false;
+        // MQTT is the primary's alone, so the rows for it only appear on the
+        // mesh this station is actually on.
+        bool primaryList = channel.Config.Preset == viewModel.PrimaryListName;
         w.ListText.Text = primaryList
-            ? "the primary, whatever the toolbar is set to"
+            ? $"{channel.Config.Preset} — the mesh this station is on"
             : channel.Config.Preset;
-        w.MqttLabel.IsVisible = primaryList;
-        w.MqttRow.IsVisible = primaryList;
+        w.UplinkLabel.IsVisible = primaryList;
+        w.UplinkCheck.IsVisible = primaryList;
+        w.DownlinkLabel.IsVisible = primaryList;
+        w.DownlinkCheck.IsVisible = primaryList;
         w._loading = false;
         w.Show(owner);
     }
@@ -211,7 +216,7 @@ public partial class ChannelSettingsWindow : Window
         var psk = PskFromText(PskBox.Text, out var pskMessage);
         if (psk is null)
         {
-            StatusText.Text = pskMessage;
+            ShowStatus(pskMessage);
             return;
         }
 
@@ -240,6 +245,14 @@ public partial class ChannelSettingsWindow : Window
         RefreshPrecisionOptions();
         // Carries a warning about a key that saved but offers no privacy, and
         // clears a PSK rejection once the field parses again.
-        StatusText.Text = pskMessage ?? string.Empty;
+        ShowStatus(pskMessage);
+    }
+
+    /// <summary>Writes the status line, collapsing it when there is nothing to
+    /// say so the dialog does not carry an empty row and its margin.</summary>
+    private void ShowStatus(string? message)
+    {
+        StatusText.Text = message ?? string.Empty;
+        StatusText.IsVisible = !string.IsNullOrEmpty(message);
     }
 }

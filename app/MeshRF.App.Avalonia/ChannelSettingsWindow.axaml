@@ -8,39 +8,56 @@
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource BrushAppBackground}">
-    <Grid Margin="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+    <!-- Two columns: a label and the control it names, one pair per row (see
+         the row-per-setting convention the other config dialogs follow). The
+         hints are sentences rather than labels, so each one gets a row of its
+         own under the control it is about and the full content width to run
+         in. They used to share a third column with the key buttons, which left
+         them a 237 px sliver to wrap in and squeezed the PSK box down to 264 —
+         too narrow to read the 44 characters of a 32-byte key. -->
+    <Grid Margin="14" ColumnDefinitions="Auto,*" RowSpacing="0" ColumnSpacing="10"
+          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
-        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" Margin="0,3" />
         <!-- Text fields commit on LostFocus rather than per keystroke: the name
              feeds the channel hash and the PSK is only meaningful once fully
              typed, so saving mid-edit would churn the store and briefly define
              a channel nobody meant. -->
-        <TextBox Name="NameBox" Grid.Row="0" Grid.Column="1" Margin="0,4,0,4" LostFocus="OnFieldChanged" />
-        <TextBlock Name="HashText" Grid.Row="0" Grid.Column="2" Margin="8,4,0,4"
-                   Foreground="{DynamicResource BrushSubtle}" VerticalAlignment="Center" />
+        <TextBox Name="NameBox" Grid.Row="0" Grid.Column="1" Margin="0,3" LostFocus="OnFieldChanged" />
 
-        <TextBlock Grid.Row="1" Grid.Column="0" Text="Role" Margin="0,4,8,4" VerticalAlignment="Center" />
-        <ComboBox Name="RoleCombo" Grid.Row="1" Grid.Column="1" Margin="0,4,0,4" HorizontalAlignment="Left" Width="160"
+        <!-- The byte this name and key fold into on the air. It belongs under
+             the name because that is what changes it. -->
+        <TextBlock Name="HashText" Grid.Row="1" Grid.Column="1" Margin="2,-2,0,3"
+                   FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Role" VerticalAlignment="Center" Margin="0,3" />
+        <ComboBox Name="RoleCombo" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Width="170" Margin="0,3"
                   SelectionChanged="OnFieldChanged" />
 
-        <TextBlock Grid.Row="2" Grid.Column="0" Text="PSK" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Key" VerticalAlignment="Center" Margin="0,3" />
         <!-- Masked by default. A channel key is the whole of that channel's
              privacy, and this dialog gets opened in front of other people and
              on shared screens. -->
-        <TextBox Name="PskBox" Grid.Row="2" Grid.Column="1" Margin="0,4,0,4" FontFamily="Consolas"
+        <TextBox Name="PskBox" Grid.Row="3" Grid.Column="1" FontFamily="Consolas" Margin="0,3"
                  LostFocus="OnFieldChanged" PasswordChar="●"
                  RevealPassword="{Binding #PskReveal.IsChecked}"
                  ToolTip.Tip="Empty = the primary's key on a secondary, no encryption on the primary. AQ== = the default public key, as the other Meshtastic apps write it. Otherwise paste base64 or hex" />
-        <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Margin="8,4,0,4" Spacing="4">
-            <ToggleButton Name="PskReveal" Content="Show" Padding="8,2"
+
+        <!-- Under the box rather than beside it: four buttons in a third column
+             set that column's width for the whole dialog. -->
+        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,1,0,3" Spacing="6">
+            <ToggleButton Name="PskReveal" Content="Show" Padding="10,2" FontSize="12"
                           ToolTip.Tip="Show the key in the clear" />
-            <Button Content="Default" Padding="8,2" Click="OnUseDefaultKey" />
-            <Button Content="Rnd 16" Padding="8,2" Click="OnRandom16" />
-            <Button Content="Rnd 32" Padding="8,2" Click="OnRandom32" />
+            <Button Content="Default" Padding="10,2" FontSize="12" Click="OnUseDefaultKey"
+                    ToolTip.Tip="The well-known Meshtastic default key, written the way the phone and web apps show it" />
+            <Button Content="Random 16" Padding="10,2" FontSize="12" Click="OnRandom16"
+                    ToolTip.Tip="A fresh AES128 key" />
+            <Button Content="Random 32" Padding="10,2" FontSize="12" Click="OnRandom32"
+                    ToolTip.Tip="A fresh AES256 key" />
         </StackPanel>
 
-        <TextBlock Grid.Row="3" Grid.Column="0" Text="Location sharing" Margin="0,4,8,4" VerticalAlignment="Center" />
-        <ComboBox Name="PrecisionCombo" Grid.Row="3" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
+        <TextBlock Grid.Row="5" Grid.Column="0" Text="Location sharing" VerticalAlignment="Center" Margin="0,3" />
+        <ComboBox Name="PrecisionCombo" Grid.Row="5" Grid.Column="1" HorizontalAlignment="Left" Width="230" Margin="0,3"
                   SelectionChanged="OnFieldChanged"
                   ToolTip.Tip="How precisely your location is shared on this channel">
             <ComboBox.ItemTemplate>
@@ -49,37 +66,42 @@
                 </DataTemplate>
             </ComboBox.ItemTemplate>
         </ComboBox>
+
         <!-- Says why the finer settings are missing when the key is a public
              one; blank and collapsed otherwise. -->
-        <TextBlock Name="PrecisionNote" Grid.Row="3" Grid.Column="2" Margin="8,4,0,4"
-                   VerticalAlignment="Center" MaxWidth="260" TextWrapping="Wrap"
-                   FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+        <TextBlock Name="PrecisionNote" Grid.Row="6" Grid.Column="1" Margin="2,-2,0,3"
+                   TextWrapping="Wrap" FontSize="11"
+                   Foreground="{DynamicResource BrushSubtle}" />
 
-        <TextBlock Grid.Row="4" Grid.Column="0" Text="Mute ringtone" Margin="0,4,8,4" VerticalAlignment="Center" />
-        <CheckBox Name="MuteRtttlCheck" Grid.Row="4" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
-                  Content="Mute incoming ringtone on this channel" Click="OnFieldChanged"
-                  ToolTip.Tip="Mute RTTTL ringtone for text messages on this channel" />
+        <TextBlock Grid.Row="7" Grid.Column="0" Text="Ringtone" VerticalAlignment="Center" Margin="0,3" />
+        <CheckBox Name="MuteRtttlCheck" Grid.Row="7" Grid.Column="1" VerticalAlignment="Center" Margin="0,3"
+                  Content="Mute incoming messages on this channel" Click="OnFieldChanged"
+                  ToolTip.Tip="Mute the RTTTL ringtone for text messages on this channel" />
 
-        <!-- Hidden on a preset's own list: only the primary's traffic is
-             uplinked or downlinked, so the boxes would promise nothing. -->
-        <TextBlock Name="MqttLabel" Grid.Row="5" Grid.Column="0" Text="MQTT" Margin="0,4,8,4" VerticalAlignment="Center" />
-        <StackPanel Name="MqttRow" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4" Spacing="16">
-            <CheckBox Name="UplinkCheck" VerticalAlignment="Center" Content="Uplink" Click="OnFieldChanged"
-                      ToolTip.Tip="Publish this channel's traffic to the configured MQTT broker (requires the MQTT bridge to be enabled)." />
-            <CheckBox Name="DownlinkCheck" VerticalAlignment="Center" Content="Downlink" Click="OnFieldChanged"
-                      ToolTip.Tip="Accept this channel's traffic from the MQTT broker and inject it into the local mesh (requires the MQTT bridge to be enabled)." />
-        </StackPanel>
+        <!-- Hidden on another mesh's list: only this station's own traffic is
+             uplinked or downlinked, so the boxes would promise nothing. A row
+             each, rather than two ticks sharing one "MQTT" heading — they are
+             separate settings and each says what it does. -->
+        <TextBlock Name="UplinkLabel" Grid.Row="8" Grid.Column="0" Text="MQTT uplink" VerticalAlignment="Center" Margin="0,3" />
+        <CheckBox Name="UplinkCheck" Grid.Row="8" Grid.Column="1" VerticalAlignment="Center" Margin="0,3"
+                  Content="Publish this channel to the broker" Click="OnFieldChanged"
+                  ToolTip.Tip="Publish this channel's traffic to the configured MQTT broker (requires the MQTT bridge to be enabled)." />
+
+        <TextBlock Name="DownlinkLabel" Grid.Row="9" Grid.Column="0" Text="MQTT downlink" VerticalAlignment="Center" Margin="0,3" />
+        <CheckBox Name="DownlinkCheck" Grid.Row="9" Grid.Column="1" VerticalAlignment="Center" Margin="0,3"
+                  Content="Accept this channel from the broker" Click="OnFieldChanged"
+                  ToolTip.Tip="Accept this channel's traffic from the MQTT broker and inject it into the local mesh (requires the MQTT bridge to be enabled)." />
+
+        <!-- Which mesh this channel belongs to. Fixed when the channel is
+             made: its list is which listener decodes and sends it. -->
+        <TextBlock Grid.Row="10" Grid.Column="0" Text="Mesh" VerticalAlignment="Center" Margin="0,3" />
+        <TextBlock Name="ListText" Grid.Row="10" Grid.Column="1" VerticalAlignment="Center" Margin="0,3"
+                   TextWrapping="Wrap" Foreground="{DynamicResource BrushSubtle}" />
 
         <!-- Empty unless something is wrong: this is where a rejected PSK is
              reported, since the PSK box itself must keep whatever was typed. -->
-        <!-- Which mesh this channel belongs to. Fixed when the channel is
-             made: its list is which listener decodes and sends it. -->
-        <TextBlock Grid.Row="6" Grid.Column="0" Text="Listened on" Margin="0,4,8,4" VerticalAlignment="Center" />
-        <TextBlock Name="ListText" Grid.Row="6" Grid.Column="1" Margin="0,4,0,4" VerticalAlignment="Center"
-                   Foreground="{DynamicResource BrushSubtle}" />
-
-        <TextBlock Name="StatusText" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2"
-                   Margin="0,12,0,0" TextWrapping="Wrap"
+        <TextBlock Name="StatusText" Grid.Row="11" Grid.ColumnSpan="2"
+                   Margin="0,10,0,0" TextWrapping="Wrap" FontSize="12"
                    Foreground="{DynamicResource BrushSubtle}" />
     </Grid>
 </Window>
