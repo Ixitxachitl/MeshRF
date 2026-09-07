@@ -566,6 +566,90 @@ public static class MeshEncoder
     }
 
     /// <summary>
+    /// A periodic advertisement (MESH_BEACON_APP <c>MeshBeacon</c> protobuf):
+    /// something to read and, optionally, the mesh this station is inviting
+    /// the reader onto.
+    /// </summary>
+    /// <param name="channel">The channel this copy is sealed with, which is
+    /// also the mesh it must be transmitted on.</param>
+    /// <param name="offerChannel">The channel being advertised, or null to
+    /// offer none. Its name and PSK go on the air exactly as stored, since a
+    /// listener has to be able to reproduce the channel byte for byte.</param>
+    /// <param name="offerPreset">The advertised mesh's preset, or null when
+    /// none is named.</param>
+    /// <param name="offerRegion">The advertised mesh's region, UNSET to name
+    /// none.</param>
+    /// <remarks>
+    /// Zero-hop and unacknowledged, as firmware sends them
+    /// (<c>MeshBeaconModule</c> sets <c>hop_limit = 0</c> and
+    /// <c>want_ack = false</c>): an advertisement that could be reflooded
+    /// across the mesh it is announcing itself to would be spam.
+    /// </remarks>
+    public static byte[] EncodeBeacon(ChannelConfig channel,
+                                      uint from,
+                                      uint packetId,
+                                      string? message,
+                                      ChannelConfig? offerChannel = null,
+                                      LoraPreset? offerPreset = null,
+                                      Region offerRegion = Region.UNSET,
+                                      byte hopLimit = BeaconPolicy.HopLimit,
+                                      bool okToMqtt = false,
+                                      byte[]? xeddsaPrivateKey = null,
+                                      byte[]? xeddsaPublicKey = null)
+    {
+        var beacon = new ProtoWriter();
+        // The cap is firmware's, counted in bytes rather than characters, and
+        // it is applied here so no path can put an over-long one on the air.
+        var text = BeaconPolicy.TrimMessage(message);
+        if (text.Length > 0) beacon.WriteStringField(1, text);
+
+        if (offerChannel is not null)
+        {
+            var settings = new ProtoWriter();
+            // ChannelSettings: psk = 2, name = 3. Written in tag order, and
+            // only when set — a blank name is a real Meshtastic channel name
+            // meaning "called after the preset", so it is left off rather than
+            // written empty, exactly as an unnamed channel goes out.
+            if (offerChannel.Psk.Length > 0) settings.WriteBytesField(2, offerChannel.Psk);
+            if (offerChannel.Name.Length > 0) settings.WriteStringField(3, offerChannel.Name);
+            beacon.WriteBytesField(2, settings.ToArray());
+        }
+
+        if (offerRegion != Region.UNSET) beacon.WriteVarintField(3, (uint)offerRegion);
+        if (offerPreset is { } preset && TryModemPresetValue(preset, out var presetValue))
+            beacon.WriteVarintField(4, presetValue);
+
+        return Encode(channel, from, 0xFFFFFFFFu, packetId, PortNum.MeshBeacon,
+                      beacon.ToArray(), hopLimit, wantAck: false,
+                      wantResponse: false, okToMqtt: okToMqtt,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
+    }
+
+    /// <summary>
+    /// A preset's number in the protobuf's own <c>ModemPreset</c>, which is
+    /// not this app's enum order: LONG_FAST is 0 there and LongFast is 6 here,
+    /// so a cast would advertise an entirely different mesh.
+    /// </summary>
+    /// <remarks>
+    /// Matched by name against the generated enum rather than through a table
+    /// kept by hand, which could only agree with the schema or be wrong. Every
+    /// preset this app has does have a value today; false is for one it gains
+    /// before the schema does, where inventing a number would put an undefined
+    /// value on the air. The beacon then advertises its channel and its region
+    /// and names no preset, which is a beacon firmware already understands.
+    /// </remarks>
+    private static bool TryModemPresetValue(LoraPreset preset, out uint value)
+    {
+        value = 0;
+        if (!Enum.TryParse<Meshtastic.Protobufs.Config.Types.LoRaConfig.Types.ModemPreset>(
+                preset.ToString(), ignoreCase: false, out var proto))
+            return false;
+        if (!Enum.IsDefined(proto)) return false;
+        value = (uint)(int)proto;
+        return true;
+    }
+
+    /// <summary>
     /// Broadcast or unicast a waypoint (WAYPOINT_APP <c>Waypoint</c> protobuf).
     /// Mirrors the upstream fields: id, lat/lon, optional expiry/lock/name/
     /// description/icon, plus the optional circular (<paramref name="geofenceRadiusM"/>)

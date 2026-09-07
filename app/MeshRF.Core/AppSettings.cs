@@ -59,6 +59,11 @@ public sealed class AppSettings
     /// region supports and the capture reaches is listened for.</summary>
     public List<string> MonitorExcludedPresets { get; set; } = new();
 
+    /// <summary>What this station advertises to strangers, and where. Off by
+    /// default: a beacon is unsolicited traffic, so it is something the
+    /// operator turns on rather than something they inherit.</summary>
+    public Mesh.BeaconSettings Beacon { get; set; } = new();
+
     /// <summary>Where the capture is centred relative to the primary, in
     /// kHz. Null lets the plan slide the window to take in the most presets;
     /// a value is clamped so the primary stays inside.</summary>
