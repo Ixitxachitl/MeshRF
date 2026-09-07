@@ -16,6 +16,12 @@ public sealed class MessageStore : IDisposable
     /// real Meshtastic port range so it never collides with a decoded packet.</summary>
     public const int ConversationNotePort = 0x10000;
 
+    /// <summary>MESH_BEACON_APP. Replayed into channel tabs alongside text,
+    /// because a beacon is a message with an offer attached and the offer is
+    /// rebuilt from the stored payload — so a restart does not lose the chance
+    /// to accept one still standing.</summary>
+    public const int BeaconPort = (int)Mesh.PortNum.MeshBeacon;
+
     // Microsoft.Data.Sqlite does not guarantee a single SqliteConnection is
     // safe for concurrent commands from multiple threads, and this store's
     // single connection is shared across whatever threads call into it (e.g.
@@ -226,17 +232,38 @@ public sealed class MessageStore : IDisposable
             cmd.CommandText = """
                 SELECT * FROM (
                     SELECT * FROM messages
-                    WHERE portnum IN (1, $note) AND decrypted = 1
+                    WHERE portnum IN (1, $beacon, $note) AND decrypted = 1
                     ORDER BY rx_epoch DESC, id DESC
                     LIMIT $n
                 ) ORDER BY rx_epoch ASC, id ASC;
                 """;
+            cmd.Parameters.AddWithValue("$beacon", BeaconPort);
             cmd.Parameters.AddWithValue("$note", ConversationNotePort);
             cmd.Parameters.AddWithValue("$n", limit);
             using var rd = cmd.ExecuteReader();
             while (rd.Read()) list.Add(Read(rd));
         }
         return list;
+    }
+
+    /// <summary>
+    /// Re-files every stored packet from one mesh onto another, so replayed
+    /// history lands on the tabs its channels have moved to. Returns how many
+    /// rows moved. Companion to <see cref="Channels.ChannelStore.MoveList"/>:
+    /// the primary's traffic used to be filed under no mesh name at all.
+    /// </summary>
+    public int MoveMesh(string from, string to)
+    {
+        ThrowIfDisposed();
+        if (string.Equals(from, to, StringComparison.Ordinal)) return 0;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE messages SET preset = $to WHERE preset = $from";
+            cmd.Parameters.AddWithValue("$to", to);
+            cmd.Parameters.AddWithValue("$from", from);
+            return cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>

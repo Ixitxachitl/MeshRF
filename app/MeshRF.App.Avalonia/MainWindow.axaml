@@ -103,6 +103,32 @@
                                                      Margin="0,2,0,0"
                                                      FontSize="13" TextWrapping="Wrap"
                                                      ContextMenu="{DynamicResource MessageContextMenu}" />
+                                <!-- A beacon advertises a mesh: the channel it is
+                                     spoken on, the preset and the region. Nothing
+                                     here is applied by arriving — firmware caches an
+                                     offer and applies none of it — so the channel is
+                                     added on a press, and only when this station has
+                                     no channel of that name and key on that mesh
+                                     already. -->
+                                <Border IsVisible="{Binding HasOffer}" Margin="0,7,0,0" Padding="9,6,9,8"
+                                        CornerRadius="7" BorderThickness="1"
+                                        BorderBrush="{DynamicResource BrushTabBorder}"
+                                        Background="{DynamicResource BrushPanelBackground}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Offer.Summary}" FontSize="12"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Offer.StatusText}" FontSize="11"
+                                                   Margin="0,3,0,0" TextWrapping="Wrap"
+                                                   IsVisible="{Binding Offer.HasStatus}"
+                                                   Foreground="{DynamicResource BrushSubtle}" />
+                                        <Button Content="Add channel" FontSize="12"
+                                                Margin="0,7,0,0" Padding="10,3"
+                                                HorizontalAlignment="Left"
+                                                IsVisible="{Binding Offer.CanAdd}"
+                                                Command="{Binding #RootWindow.DataContext.AcceptBeaconOfferCommand}"
+                                                CommandParameter="{Binding Offer}" />
+                                    </StackPanel>
+                                </Border>
                                 <ItemsControl ItemsSource="{Binding Reactions}" Margin="0,5,0,0"
                                               IsVisible="{Binding HasReactions}">
                                     <ItemsControl.ItemsPanel>
@@ -236,7 +262,7 @@
                 <TextBlock Text="Freq (MHz)" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,2" />
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Text="{Binding CenterFreqMHz}" IsEnabled="{Binding !IsRunning}"
                          FontSize="11" Width="100" Height="26" Margin="0,0,8,2" />
-                <Button Content="Presets…" FontSize="11" Height="26" Padding="8,0" Margin="0,0,8,2"
+                <Button Content="Listeners…" FontSize="11" Height="26" Padding="8,0" Margin="0,0,8,2"
                         Click="OnOpenMonitors"
                         ToolTip.Tip="Listen for other presets alongside this one, off the same capture" />
                 <Border Width="1" Margin="2,2,10,6" Background="{DynamicResource BrushPanelBorder}" />

@@ -19,23 +19,19 @@ public partial class ChannelTabViewModel : ObservableObject, ITabItem
     public string DisplayName =>
         string.IsNullOrEmpty(Config.Name) ? $"Channel {Config.Index}" : Config.Name;
 
-    public string TabHeader
+    /// <summary>
+    /// The tab's caption. The mesh is not repeated here: one mesh's tabs are
+    /// on show at a time and the row above the strip names it, so appending
+    /// the preset to every channel on it said the same thing on every tab.
+    /// </summary>
+    public string TabHeader => Config.Role switch
     {
-        get
-        {
-            var header = Config.Role switch
-            {
-                ChannelRole.Primary => $"{DisplayName} ★",
-                // A disabled channel keeps its tab and history but is inert on the air:
-                // it decodes nothing and can't be sent on, so say so in the header.
-                ChannelRole.Disabled => $"{DisplayName} (off)",
-                _ => DisplayName,
-            };
-            // A channel in a secondary preset's list says which: two lists can
-            // each hold a "LongFast", and only one of them is on LongFast.
-            return Config.Preset.Length == 0 ? header : $"{header} · {Config.Preset}";
-        }
-    }
+        ChannelRole.Primary => $"{DisplayName} ★",
+        // A disabled channel keeps its tab and history but is inert on the air:
+        // it decodes nothing and can't be sent on, so say so in the header.
+        ChannelRole.Disabled => $"{DisplayName} (off)",
+        _ => DisplayName,
+    };
 
     public bool CanClose => false;
 

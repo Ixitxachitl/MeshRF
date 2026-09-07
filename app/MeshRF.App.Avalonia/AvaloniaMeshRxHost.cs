@@ -89,30 +89,40 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public Func<string, bool>? IsPresetShown { get; set; }
 
     /// <summary>
-    /// The preset whose channel list is also the primary's, or empty when
-    /// there is none. Set when the toolbar comes to sit on a preset's own
-    /// mesh — LongFast on LongFast's default slot, say — which makes that
-    /// preset's list and the primary's two descriptions of one mesh.
+    /// The list the primary's channels live in: the preset the toolbar is set
+    /// to. Set by the owner, which holds that setting.
     /// </summary>
     /// <remarks>
-    /// They are treated as one rather than merged, because a merge cannot be
-    /// undone: switch the preset back and the channels set up for that mesh
-    /// would be stranded among the primary's. Nothing moves on disk; the two
-    /// lists are simply read together for as long as they are the same mesh.
+    /// <para>A mesh is one list, named for its preset, and the primary's is no
+    /// exception. It used to be a list with no name, which meant the mesh the
+    /// toolbar sat on could be described by two lists at once — the nameless
+    /// one and the preset's — and everything that had to reason about "the
+    /// mesh" had to remember to look in both. It mostly did not: a channel
+    /// already in one list was offered again from the other, and an offered
+    /// channel filed into the emptier of them was promoted to a second Primary
+    /// beside the one already there.</para>
+    /// <para>Overrides do not move it. Choosing MediumFast and then hand-editing
+    /// the parameters leaves the station's channels on MediumFast, because the
+    /// preset is what the operator chose the list to be.</para>
     /// </remarks>
-    public string PrimaryMeshList { get; set; } = string.Empty;
+    public string PrimaryListName { get; private set; } = string.Empty;
 
-    /// <summary>The mesh a list belongs to: its own, unless the primary has
-    /// come to occupy it.</summary>
-    private string GroupForList(string listName) =>
-        listName.Length > 0 && listName == PrimaryMeshList ? string.Empty : listName;
-
-    /// <summary>The lists that make up one mesh. Two, when the primary sits
-    /// on a preset's own mesh; otherwise the one.</summary>
-    private IEnumerable<string> ListsInGroup(string group)
+    /// <summary>
+    /// Points the primary at its preset's list, seeding it if that mesh has no
+    /// channels yet, and brings the tab strip with it. Returns true when the
+    /// mesh actually changed.
+    /// </summary>
+    public bool SetPrimaryList(string listName)
     {
-        yield return group;
-        if (group.Length == 0 && PrimaryMeshList.Length > 0) yield return PrimaryMeshList;
+        if (listName.Length == 0 || listName == PrimaryListName) return false;
+        var was = PrimaryListName;
+        PrimaryListName = listName;
+        EnsureChannelList(listName);
+        // The strip was showing the old primary's mesh, which is no longer the
+        // one this station is on.
+        if (was.Length == 0 || ShownGroup == was) ShownGroup = listName;
+        RefreshTabGroups();
+        return true;
     }
 
     /// <summary>
@@ -140,9 +150,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// </summary>
     public IReadOnlyList<string> TabGroups() => Tabs
         .Select(t => t.TabGroup)
-        .Where(g => g.Length == 0 || IsPresetShown?.Invoke(g) == true)
+        .Where(g => g == PrimaryListName || IsPresetShown?.Invoke(g) == true)
         .Distinct(StringComparer.Ordinal)
-        .OrderBy(g => g.Length == 0 ? 0 : 1)
+        .OrderBy(g => g == PrimaryListName ? 0 : 1)
         .ThenBy(g => g, StringComparer.Ordinal)
         .ToList();
 
@@ -185,7 +195,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         {
             // Stable, so the order the user dragged tabs into survives.
             var order = Tabs
-                .OrderBy(t => t.TabGroup.Length == 0 ? 0 : 1)
+                .OrderBy(t => t.TabGroup == PrimaryListName ? 0 : 1)
                 .ThenBy(t => t.TabGroup, StringComparer.Ordinal)
                 .ThenBy(t => t is ChannelTabViewModel ? 0 : 1)
                 .ThenBy(t => t is ChannelTabViewModel c ? c.Config.Index : 0)
@@ -214,19 +224,18 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// never from inside a collection-changed handler.</summary>
     public void RefreshTabGroups() => ApplyTabGrouping(reorder: true);
 
-    /// <summary>The primary's mesh is whatever the toolbar is set to, which
-    /// may be a preset or a hand-tuned configuration, so it is named for what
-    /// it is rather than for a preset it might not have.</summary>
+    /// <summary>Every mesh is named for its preset, the primary's included.
+    /// The fallback covers a list from before they were named.</summary>
     public static string LabelForGroup(string group) => group.Length == 0 ? "Primary" : group;
 
     private string GroupOf(ITabItem tab) => tab switch
     {
-        ChannelTabViewModel channel => GroupForList(channel.Config.Preset),
+        ChannelTabViewModel channel => channel.Config.Preset,
         // Where they were heard if we know it, else where we were reading
         // them when the conversation was opened, else the primary.
         ConversationTabViewModel conversation =>
             GroupForNode(conversation.NodeNum) ?? Available(conversation.MeshHint),
-        _ => string.Empty,
+        _ => PrimaryListName,
     };
 
     /// <summary>
@@ -239,14 +248,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     {
         var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
         if (string.IsNullOrEmpty(heardOn)) return null;
-        if (heardOn == HeardOn.Custom) return string.Empty;
-        return IsPresetShown?.Invoke(heardOn) == true ? heardOn : string.Empty;
+        if (heardOn == HeardOn.Custom) return PrimaryListName;
+        return IsPresetShown?.Invoke(heardOn) == true ? heardOn : PrimaryListName;
     }
 
     /// <summary>A mesh name, or the primary when that mesh is not one being
     /// listened for.</summary>
     private string Available(string group) =>
-        group.Length > 0 && IsPresetShown?.Invoke(group) == true ? group : string.Empty;
+        group.Length > 0 && IsPresetShown?.Invoke(group) == true ? group : PrimaryListName;
 
     /// <summary>The mesh an open conversation is being held over, or null if
     /// there is no tab for that peer.</summary>
@@ -321,23 +330,27 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public event Action<uint, NodeTelemetryHistoryRecord>? TelemetryHistoryRecorded;
 
     byte[] IMeshRxHost.MyPrivateKeyBytes => MyPrivateKeyProvider?.Invoke() ?? Array.Empty<byte>();
-    IReadOnlyList<ChannelConfig> IMeshRxHost.ChannelsFor(RxSource source)
-    {
-        var lists = ListsInGroup(ListNameFor(source)).ToHashSet(StringComparer.Ordinal);
-        return Tabs.OfType<ChannelTabViewModel>()
-            .Where(t => lists.Contains(t.Config.Preset))
-            .Select(t => t.Config)
-            .ToList();
-    }
+    IReadOnlyList<ChannelConfig> IMeshRxHost.ChannelsFor(RxSource source) =>
+        ChannelsIn(ListNameFor(source));
 
     /// <summary>The list a listener decodes and sends with: the primary's for
     /// the primary (custom parameters included), the preset's own for a
     /// secondary.</summary>
-    public static string ListNameFor(RxSource source) => source.IsPrimary ? string.Empty : source.PresetName;
+    public string ListNameFor(RxSource source) => source.IsPrimary ? PrimaryListName : source.PresetName;
 
     /// <summary>Every channel in one list, in tab order.</summary>
     public IReadOnlyList<ChannelConfig> ChannelsIn(string listName) =>
         Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == listName).Select(t => t.Config).ToList();
+
+    /// <summary>
+    /// Where a preset's mesh sits at this station: the channel list it owns,
+    /// and what stands between the station and hearing it — empty when
+    /// nothing does. Owned by the view model, which holds the region, the
+    /// toolbar's own settings and the listener plan, and so is the only thing
+    /// that can tell a mesh the primary is already on from one nothing is
+    /// tuned to. Left null, a preset gets a list of its own and no note.
+    /// </summary>
+    public Func<LoraPreset, Region, (string ListName, string Note)>? MeshForPreset { get; set; }
 
     /// <summary>Whether the preset named is one the receiver is listening on
     /// right now. Owned by the view model, which started the receiver. A node
@@ -355,9 +368,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public string ListNameForNode(uint nodeNum)
     {
         var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
-        if (string.IsNullOrEmpty(heardOn) || heardOn == HeardOn.Custom) return string.Empty;
-        if (IsPresetListening?.Invoke(heardOn) != true) return string.Empty;
-        return Tabs.OfType<ChannelTabViewModel>().Any(t => t.Config.Preset == heardOn) ? heardOn : string.Empty;
+        if (string.IsNullOrEmpty(heardOn) || heardOn == HeardOn.Custom) return PrimaryListName;
+        if (IsPresetListening?.Invoke(heardOn) != true) return PrimaryListName;
+        return Tabs.OfType<ChannelTabViewModel>().Any(t => t.Config.Preset == heardOn) ? heardOn : PrimaryListName;
     }
 
     /// <summary>The channel to send on in one list: the one named, else the
@@ -365,13 +378,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// the primary's list when the named list is empty.</summary>
     public ChannelConfig? ChannelIn(string listName, string? channelName)
     {
-        var lists = ListsInGroup(listName).ToHashSet(StringComparer.Ordinal);
         var usable = Tabs.OfType<ChannelTabViewModel>()
-            .Where(t => lists.Contains(t.Config.Preset) && !t.Config.IsDisabled)
+            .Where(t => t.Config.Preset == listName && !t.Config.IsDisabled)
             .Select(t => t.Config)
             .ToList();
         if (usable.Count == 0)
-            return listName.Length == 0 ? null : ChannelIn(string.Empty, channelName);
+            return listName == PrimaryListName ? null : ChannelIn(PrimaryListName, channelName);
         if (!string.IsNullOrEmpty(channelName))
         {
             var named = usable.FirstOrDefault(c => string.Equals(c.Name, channelName, StringComparison.OrdinalIgnoreCase));
@@ -565,15 +577,21 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     private bool IsDirectedRequest(MeshHeader header, MeshDecodeResult result) =>
         MyNodeNum != 0 && !header.IsBroadcast && header.To == MyNodeNum && result.WantResponse;
 
+    /// <param name="primaryList">The list the primary's channels live in: the
+    /// preset the toolbar is set to. Taken here rather than set afterwards
+    /// because loading the channels needs to know which mesh is the
+    /// station's, and that happens in this constructor.</param>
     public AvaloniaMeshRxHost(NodeStore nodeStore, ChannelStore channelStore, WaypointStore waypointStore,
         MessageStore messageStore, uint myNodeNum, IReadOnlyList<uint> openConversationNodeNums,
-        IReadOnlyDictionary<uint, string>? conversationMeshes = null)
+        IReadOnlyDictionary<uint, string>? conversationMeshes = null, string primaryList = "")
     {
         _nodeStore = nodeStore;
         _channelStore = channelStore;
         _waypointStore = waypointStore;
         _messageStore = messageStore;
         MyNodeNum = myNodeNum;
+        PrimaryListName = primaryList;
+        ShownGroup = primaryList;
 
         // Grouping only, no reordering: this runs inside the collection's own
         // notification, where it may not be modified. Whoever added the tab
@@ -678,8 +696,21 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Replay one stored row, rendering reply-linked messages with
     /// their quoted context the same way live ones are.</summary>
-    private ChannelMessage BuildHistoryMessage(MessageRecord m, IList<ChannelMessage> existing) =>
-        m.ReplyId != 0 ? BuildReplyLinkedMessage(m, existing) : ToChannelMessage(m);
+    /// <remarks>
+    /// A beacon keeps nothing of its offer in columns of its own — the packet
+    /// is stored, so the offer is worked out again against the channels this
+    /// station holds now rather than the ones it held when the beacon arrived.
+    /// One that has since been accepted replays as already-added.
+    /// </remarks>
+    private ChannelMessage BuildHistoryMessage(MessageRecord m, IList<ChannelMessage> existing)
+    {
+        if (m.PortNum == MessageStore.BeaconPort)
+        {
+            var beacon = MeshDecoder.ParseBeacon(TryParseHex(m.PayloadHex)) ?? new MeshBeacon();
+            return BuildBeaconMessage(m, beacon, m.Preset, NodeDisplayName(m.FromNode));
+        }
+        return m.ReplyId != 0 ? BuildReplyLinkedMessage(m, existing) : ToChannelMessage(m);
+    }
 
     /// <summary>Sender label on a geofence crossing, live and replayed alike.
     /// The row carries the channel it was posted into, not the fence, so a
@@ -791,9 +822,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // Every list, the primary's first and each in index order, which is
         // the order the store returns them in.
         var configs = _channelStore.All();
-        if (!configs.Any(c => c.Preset.Length == 0))
+        if (PrimaryListName.Length > 0 && !configs.Any(c => c.Preset == PrimaryListName))
         {
-            var primary = new ChannelConfig { Index = 0, Name = "LongFast", Role = ChannelRole.Primary };
+            var primary = new ChannelConfig
+            {
+                Preset = PrimaryListName,
+                Index = 0,
+                Name = PrimaryListName,
+                Role = ChannelRole.Primary,
+            };
             _channelStore.Upsert(primary);
             configs = configs.Prepend(primary).ToList();
         }
@@ -910,7 +947,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // The primary's own list only: a secondary listener's default channel
         // is named after its preset and stays so.
         var primary = Tabs.OfType<ChannelTabViewModel>()
-            .FirstOrDefault(t => t.Config.Preset.Length == 0 && t.Config.Role == ChannelRole.Primary);
+            .FirstOrDefault(t => t.Config.Preset == PrimaryListName && t.Config.Role == ChannelRole.Primary);
         if (primary is null) return false;
 
         var cfg = primary.Config;
@@ -943,7 +980,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // The primary's list alone: the auto-reports and scripts that look a
         // channel up by name go out on the primary.
         var candidates = Tabs.OfType<ChannelTabViewModel>()
-            .Where(t => t.Config.Preset.Length == 0 && !t.Config.IsDisabled);
+            .Where(t => t.Config.Preset == PrimaryListName && !t.Config.IsDisabled);
         if (string.IsNullOrEmpty(name)) return candidates.FirstOrDefault()?.Config;
         return candidates
             .FirstOrDefault(t => string.Equals(t.Config.Name, name, StringComparison.OrdinalIgnoreCase))?.Config;
@@ -970,10 +1007,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (listName is not null)
         {
             var inList = channelTabs.Where(t => t.Config.Preset == listName).ToList();
-            // A message filed against the primary's own list, on a mesh the
-            // primary has since come to occupy, belongs with that mesh's tabs.
-            if (inList.Count == 0 && listName.Length == 0 && PrimaryMeshList.Length > 0)
-                inList = channelTabs.Where(t => t.Config.Preset == PrimaryMeshList).ToList();
+            // History from before the primary's list had a name belongs to the
+            // mesh that list has since become.
+            if (inList.Count == 0 && listName.Length == 0)
+                inList = channelTabs.Where(t => t.Config.Preset == PrimaryListName).ToList();
             if (!string.IsNullOrEmpty(channelName))
             {
                 var named = inList.FirstOrDefault(t =>
@@ -1608,6 +1645,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 HandleTextMessage(header, record, result, hopsAway, source);
                 break;
 
+            case PortNum.MeshBeacon when result.Beacon is not null:
+                HandleBeacon(header, record, result.Beacon, source);
+                break;
+
             case PortNum.NodeInfo when result.User is not null:
                 // An empty NodeInfo payload carrying want_response is a pure
                 // *request*, not an advertisement. Answering it is how other
@@ -1997,6 +2038,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 => $"{prefix}: node=!{result.NeighborInfo.NodeId:x8} neighbors={result.NeighborInfo.Neighbors.Count}{size}",
             PortNum.StoreForward when result.StoreForward is not null
                 => $"{prefix}: type={result.StoreForward.Type}{size}",
+            PortNum.MeshBeacon when result.Beacon is not null
+                => $"{prefix}: \"{TrimForReplyPreview(result.Beacon.Message)}\"{BeaconOfferLog(result.Beacon)}{size}",
             _ => $"{prefix}: to={header.ToId}{size}",
         };
     }
@@ -2083,6 +2126,135 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 header, record, result, isDirectToUs, hopsAway,
                 emoji: isReaction ? ResolveReactionGlyph(result.Text, result.Emoji) : string.Empty));
         }
+    }
+
+    /// <summary>
+    /// Files a received beacon into the tab for the channel it decoded on, as
+    /// a bubble carrying whatever the sender wrote and, when it advertised a
+    /// mesh, an offer to add that channel.
+    /// </summary>
+    /// <remarks>
+    /// A beacon is a notice board rather than a message: no ringtone, no
+    /// script trigger, no reply. Firmware draws the same line — the listener
+    /// module deliberately does not raise EVENT_RECEIVED_MSG for one, so that
+    /// a beacon cannot make every node in earshot answer it.
+    /// </remarks>
+    private void HandleBeacon(MeshHeader header, MessageRecord record, MeshBeacon beacon, RxSource source)
+    {
+        var tab = ResolveChannelTab(record.Channel, source);
+        if (tab is null) return;
+
+        tab.Messages.Add(BuildBeaconMessage(record, beacon, ListNameFor(source), NodeDisplayName(header.From)));
+        while (tab.Messages.Count > MaxMessagesPerTab) tab.Messages.RemoveAt(0);
+        MarkTabNeedsAttention(tab);
+    }
+
+    /// <summary>The bubble one beacon becomes, live or replayed.</summary>
+    private ChannelMessage BuildBeaconMessage(MessageRecord record, MeshBeacon beacon, string heardOnList,
+                                              string senderName) =>
+        new()
+        {
+            Timestamp = record.RxTime,
+            FromId = senderName,
+            SenderNodeNum = record.FromNode,
+            // A beacon may carry an offer and no words at all, and an empty
+            // bubble would say less than the port it arrived on.
+            Text = beacon.Message.Length > 0 ? beacon.Message : "(beacon)",
+            RssiDbm = record.RssiDbfs,
+            SnrDb = record.SnrDb,
+            PacketId = record.PacketId,
+            IsIgnoredSender = IsNodeIgnored(record.FromNode),
+            Offer = beacon.HasOffer ? BuildBeaconOffer(beacon, heardOnList) : null,
+        };
+
+    /// <summary>
+    /// Resolves an advertised mesh against the channels this station holds.
+    /// Only the parts that need the tab list are decided here — which list the
+    /// channel belongs in, and whether anything is listening for it.
+    /// </summary>
+    private BeaconOffer BuildBeaconOffer(MeshBeacon beacon, string heardOnList)
+    {
+        var (listName, note) = MeshForOffer(beacon, heardOnList);
+        return BeaconOffer.For(beacon, listName, LabelForGroup(listName), ChannelsIn(listName), note);
+    }
+
+    /// <summary>
+    /// The mesh an advertised channel belongs to: the one for the preset the
+    /// beacon named, or — when it named none — the one it was heard on, since
+    /// a channel offered without a preset is offered for the mesh carrying it.
+    /// </summary>
+    /// <remarks>
+    /// Which list that is cannot be answered from the tab list alone. A
+    /// station whose toolbar sits on MediumFast's own channel is on that mesh
+    /// whether or not it is listening for anything else, and its channels
+    /// belong with the primary's — so the question goes to the view model,
+    /// which holds the settings that decide it.
+    /// </remarks>
+    private (string ListName, string Note) MeshForOffer(MeshBeacon beacon, string heardOnList)
+    {
+        if (beacon.Preset is not { } preset) return (heardOnList, string.Empty);
+        return MeshForPreset?.Invoke(preset, beacon.Region) ?? (preset.ToString(), string.Empty);
+    }
+
+    /// <summary>The offer as the packet log renders it, after the message.</summary>
+    private static string BeaconOfferLog(MeshBeacon beacon)
+    {
+        if (!beacon.HasOffer) return string.Empty;
+        var parts = new List<string>();
+        if (beacon.HasChannel) parts.Add($"chan={beacon.ChannelName}");
+        if (beacon.Preset is { } preset) parts.Add($"preset={preset}");
+        if (beacon.Region != Region.UNSET) parts.Add($"region={beacon.Region}");
+        return " offers " + string.Join(" ", parts);
+    }
+
+    /// <summary>
+    /// Accepts an offer: adds the advertised channel to the mesh it was
+    /// advertised for and returns its tab, or null when there is nothing left
+    /// to add. A mesh with no list yet gets this channel as its primary, which
+    /// is what firmware requires of every list.
+    /// </summary>
+    public ChannelTabViewModel? AcceptBeaconOffer(BeaconOffer offer)
+    {
+        if (!offer.CanAdd) return null;
+
+        var taken = Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => t.Config.Preset == offer.ListName).Select(t => t.Config.Index).ToHashSet();
+        int idx = taken.Count == 0 ? 0 : 1;
+        while (taken.Contains(idx)) idx++;
+
+        var config = offer.ToChannel(idx);
+        // Firmware allows a mesh exactly one Primary, and every key-less
+        // secondary borrows that channel's key. The question is asked of the
+        // whole mesh rather than the one list, because a mesh the primary sits
+        // on is described by two lists — its own and the preset's — and asking
+        // only the emptier of them promoted an offered channel to a second
+        // Primary alongside the one already there.
+        bool meshHasPrimary = Tabs.OfType<ChannelTabViewModel>()
+            .Any(t => t.Config.Preset == offer.ListName && t.Config.Role == ChannelRole.Primary);
+        if (!meshHasPrimary) config.Role = ChannelRole.Primary;
+        _channelStore.Upsert(config);
+
+        var tab = NewChannelTab(config);
+        int insertAt = Tabs.OfType<ChannelTabViewModel>().Count();
+        for (int i = Tabs.Count - 1; i >= 0; i--)
+        {
+            if (Tabs[i] is ChannelTabViewModel { Config.Preset: var list } && list == offer.ListName)
+            {
+                insertAt = i + 1;
+                break;
+            }
+        }
+        Tabs.Insert(insertAt, tab);
+        // The offered mesh is usually not the one being read — the beacon was
+        // heard here, but the channel belongs to the preset it named — so the
+        // strip is taken to it, or the new tab would appear nowhere.
+        ShowGroup(offer.ListName);
+        RefreshTabGroups();
+
+        offer.CanAdd = false;
+        offer.StatusText = $"Added to {offer.ListLabel}.";
+        Log($"  beacon offer accepted: {config.Name} -> {offer.ListLabel}");
+        return tab;
     }
 
     private bool IsNodeRtttlMuted(uint nodeNum) => _nodeStore.Get(nodeNum)?.MuteRtttl == true;

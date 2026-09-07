@@ -450,7 +450,7 @@ public partial class RadioViewModel
     {
         if (string.IsNullOrEmpty(listName)) return PrimaryTarget();
         // A list the primary has come to occupy is the primary's own mesh.
-        if (listName == _rxHost.PrimaryMeshList) return PrimaryTarget();
+        if (listName == _rxHost.PrimaryListName) return PrimaryTarget();
         foreach (var s in _rxSources)
             if (!s.IsPrimary && s.PresetName == listName) return TargetForSource(s);
         return PrimaryTarget();

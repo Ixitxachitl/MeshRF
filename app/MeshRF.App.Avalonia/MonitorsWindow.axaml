@@ -4,7 +4,7 @@
         xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
         x:Class="MeshRF.AvaloniaApp.MonitorsWindow"
         x:DataType="app:RadioViewModel"
-        Title="Listen on several presets"
+        Title="Listeners"
         Width="720" Height="560"
         MinWidth="600" MinHeight="440"
         WindowStartupLocation="CenterOwner"
@@ -51,7 +51,7 @@
                    Text="{Binding MonitorStatusText}" />
 
         <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,12,0,4"
-                   Text="Presets in this region" FontWeight="SemiBold" />
+                   Text="Listeners in this region" FontWeight="SemiBold" />
 
         <Border Grid.Row="6" Grid.ColumnSpan="2"
                 BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">

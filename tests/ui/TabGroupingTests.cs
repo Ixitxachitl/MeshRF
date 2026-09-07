@@ -42,9 +42,12 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         vm.RefreshMonitors();
 
         Assert.False(vm.HasSeveralMeshes);
-        Assert.Equal(string.Empty, Assert.Single(vm.TabGroupOptions).Group);
-        Assert.All(vm.Tabs, t => Assert.Equal(string.Empty, t.TabGroup));
-        Assert.All(vm.Tabs, t => Assert.True(t.IsTabListed));
+        Assert.Equal(nameof(LoraPreset.MediumFast), Assert.Single(vm.TabGroupOptions).Group);
+        // Every tab on show is the station's own mesh. A list left behind by an
+        // earlier preset keeps its channels but is not offered, since nothing
+        // is listening for that mesh.
+        Assert.All(vm.Tabs.Where(t => t.IsTabListed),
+                   t => Assert.Equal(nameof(LoraPreset.MediumFast), t.TabGroup));
     }));
 
     [Fact]
@@ -56,16 +59,16 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
 
         Assert.True(vm.HasSeveralMeshes);
         // The primary's mesh leads, and is what is shown to begin with.
-        Assert.Equal(string.Empty, vm.TabGroupOptions[0].Group);
-        Assert.Equal("Primary", vm.TabGroupOptions[0].Label);
-        Assert.Equal(string.Empty, vm.SelectedTabGroupOption!.Group);
+        Assert.Equal(nameof(LoraPreset.MediumFast), vm.TabGroupOptions[0].Group);
+        Assert.Equal(nameof(LoraPreset.MediumFast), vm.TabGroupOptions[0].Label);
+        Assert.Equal(nameof(LoraPreset.MediumFast), vm.SelectedTabGroupOption!.Group);
         // Exactly one mesh tab is painted as the one on show.
         Assert.Single(vm.TabGroupOptions, o => o.IsSelected);
         Assert.True(vm.TabGroupOptions[0].IsSelected);
         Assert.Contains(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
 
         // Only the primary's tabs are on show.
-        Assert.All(vm.Tabs.Where(t => t.IsTabListed), t => Assert.Equal(string.Empty, t.TabGroup));
+        Assert.All(vm.Tabs.Where(t => t.IsTabListed), t => Assert.Equal(nameof(LoraPreset.MediumFast), t.TabGroup));
         Assert.False(ChannelsOn(vm, nameof(LoraPreset.LongFast)).IsTabListed);
     }));
 
@@ -123,7 +126,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
 
         vm.MonitorPresets.Single(r => r.Name == nameof(LoraPreset.LongFast)).Included = false;
 
-        Assert.Equal(string.Empty, vm.SelectedTabGroupOption!.Group);
+        Assert.Equal(nameof(LoraPreset.MediumFast), vm.SelectedTabGroupOption!.Group);
         Assert.True(vm.SelectedTab!.IsTabListed);
     }));
 
@@ -148,7 +151,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
 
         // The primary's peer was heard on the toolbar's own preset, which is
         // the primary mesh rather than a mesh of its own.
-        Assert.Equal(string.Empty, onPrimary.TabGroup);
+        Assert.Equal(nameof(LoraPreset.MediumFast), onPrimary.TabGroup);
         Assert.Equal(nameof(LoraPreset.LongFast), onLongFast.TabGroup);
 
         // Opening the second one took the strip to its mesh, so it is the
@@ -157,7 +160,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Assert.True(onLongFast.IsTabListed);
         Assert.False(onPrimary.IsTabListed);
 
-        Show(vm, string.Empty);
+        Show(vm, nameof(LoraPreset.MediumFast));
         Assert.True(onPrimary.IsTabListed);
         Assert.False(onLongFast.IsTabListed);
 
@@ -185,7 +188,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         store.RecordSighting(0x6666u, heardOnPreset: nameof(LoraPreset.LongFast), heardOnFreqMHz: 906.875);
         store.Dispose();
 
-        Assert.Equal(string.Empty, vm.SelectedTabGroupOption!.Group);
+        Assert.Equal(nameof(LoraPreset.MediumFast), vm.SelectedTabGroupOption!.Group);
 
         vm.MessageNodeCommand.Execute(new NodeRecord { NodeNum = 0x6666u });
 
@@ -237,7 +240,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         {
             channels.Upsert(new ChannelConfig
             {
-                Preset = "", Index = 0, Name = "MediumFast", Role = ChannelRole.Primary,
+                Preset = nameof(LoraPreset.MediumFast), Index = 0, Name = "MediumFast", Role = ChannelRole.Primary,
             });
             channels.Upsert(new ChannelConfig
             {
@@ -246,7 +249,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         }
         using (var messages = new MessageStore())
         {
-            var stale = Broadcast(9, "", "a straggler");
+            var stale = Broadcast(9, nameof(LoraPreset.MediumFast), "a straggler");
             stale.Channel = "LongFast";   // named a mesh it never recorded
             messages.Add(stale);
         }
@@ -256,7 +259,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
 
         var longFast = vm.Tabs.OfType<ChannelTabViewModel>()
             .Single(t => t.Config.Preset == nameof(LoraPreset.LongFast));
-        var primary = vm.Tabs.OfType<ChannelTabViewModel>().Single(t => t.Config.Preset.Length == 0);
+        var primary = vm.Tabs.OfType<ChannelTabViewModel>().Single(t => t.Config.Preset == nameof(LoraPreset.MediumFast));
 
         Assert.Contains(longFast.Messages, m => m.Text == "a straggler");
         Assert.DoesNotContain(primary.Messages, m => m.Text == "a straggler");
@@ -309,7 +312,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         vm.MessageSenderCommand.Execute(new ChannelMessage { SenderNodeNum = 0x5555u, Text = "test" });
 
         var convo = vm.Tabs.OfType<ConversationTabViewModel>().Single(t => t.NodeNum == 0x5555u);
-        Assert.Equal(string.Empty, convo.TabGroup);
+        Assert.Equal(nameof(LoraPreset.MediumFast), convo.TabGroup);
     }));
 
     /// <summary>
@@ -328,7 +331,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         {
             channels.Upsert(new ChannelConfig
             {
-                Preset = "", Index = 0, Name = "LongFast", Role = ChannelRole.Primary,
+                Preset = nameof(LoraPreset.MediumFast), Index = 0, Name = "LongFast", Role = ChannelRole.Primary,
             });
             channels.Upsert(new ChannelConfig
             {
@@ -337,14 +340,14 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         }
         using (var messages = new MessageStore())
         {
-            messages.Add(Broadcast(1, "", "mine"));
+            messages.Add(Broadcast(1, nameof(LoraPreset.MediumFast), "mine"));
             messages.Add(Broadcast(2, nameof(LoraPreset.LongFast), "theirs"));
         }
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
 
         using var vm = Station();
 
-        var mine = vm.Tabs.OfType<ChannelTabViewModel>().Single(t => t.Config.Preset.Length == 0);
+        var mine = vm.Tabs.OfType<ChannelTabViewModel>().Single(t => t.Config.Preset == nameof(LoraPreset.MediumFast));
         var theirs = vm.Tabs.OfType<ChannelTabViewModel>()
             .Single(t => t.Config.Preset == nameof(LoraPreset.LongFast));
 
@@ -352,6 +355,87 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Assert.DoesNotContain(mine.Messages, m => m.Text == "theirs");
         Assert.Contains(theirs.Messages, m => m.Text == "theirs");
         Assert.DoesNotContain(theirs.Messages, m => m.Text == "mine");
+    }));
+
+    /// <summary>
+    /// A preset ticked in Listeners is a mesh the operator has chosen. The
+    /// capture not reaching it at the sample rate they happen to be running is
+    /// a reason it hears nothing, not a reason to take its channels and its
+    /// history off the strip.
+    /// </summary>
+    [Fact]
+    public void ATickedPresetKeepsItsTabsEvenWhenTheCaptureCannotReachIt() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        // Wide enough to reach LongFast, so its list exists and is on show.
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+        Assert.Contains(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+
+        // Now narrow the capture until it cannot hold LongFast beside the
+        // primary. It is still ticked, so it is still a mesh of this station's.
+        vm.SelectedRxSampleRate = vm.SampleRateOptions.Single(o => o.Hz == 2_400_000u);
+        vm.RefreshMonitors();
+
+        var plan = vm.BuildMonitorPlan();
+        Assert.DoesNotContain(plan.Listeners, l => l.Preset == LoraPreset.LongFast && !l.IsPrimary);
+        Assert.Contains(plan.LeftOut, x => x.Preset == LoraPreset.LongFast
+                                           && x.Reason == MonitorPlan.LeftOutReason.OutOfRange);
+
+        Assert.Contains(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+        Assert.True(ChannelsOn(vm, nameof(LoraPreset.LongFast)).Config.Name.Length > 0);
+    }));
+
+    /// <summary>
+    /// The chosen meshes are on the strip the moment the app is up, before the
+    /// receiver has been started.
+    /// </summary>
+    /// <remarks>
+    /// They used to appear only once something happened to rebuild them —
+    /// opening Listeners, changing a setting, or starting RX. The constructor
+    /// did ask, but through RefreshPlannedSpectrumCenter, which runs before
+    /// the native core is constructed and returns early on that, so on a cold
+    /// start the mesh set was never built and every preset's tabs but the
+    /// primary's were missing until the operator pressed play.
+    /// </remarks>
+    [Fact]
+    public void TheChosenMeshesAreOnTheStripBeforeTheReceiverIsStarted() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        // A session that set the station up and quit. Settings are written
+        // behind a debounce, so the next launch only sees them once flushed.
+        using (var first = Station())
+        {
+            first.MultiPresetEnabled = true;
+            first.RefreshMonitors();
+            Assert.Contains(first.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+        }
+        AppSettings.FlushPendingWrites(TimeSpan.FromSeconds(5));
+
+        // The next launch, with nothing touched and RX never started.
+        using var reopened = new RadioViewModel();
+
+        Assert.False(reopened.IsRunning);
+        Assert.Equal(nameof(LoraPreset.MediumFast), reopened.PrimaryListName);
+        Assert.Contains(reopened.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+        Assert.True(reopened.HasSeveralMeshes);
+    }));
+
+    /// <summary>Unticking it is the operator saying they are done with that
+    /// mesh, and that does take its tabs off the strip.</summary>
+    [Fact]
+    public void AnUntickedPresetLosesItsTabs() => Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+        Assert.Contains(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+
+        vm.MonitorExcludedPresets.Add(nameof(LoraPreset.LongFast));
+        vm.RefreshMonitors();
+
+        Assert.DoesNotContain(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
     }));
 
     private static MessageRecord Broadcast(uint packetId, string preset, string text) => new()
@@ -392,12 +476,14 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         vm.SelectedPreset = LoraPreset.LongFast;
         vm.RefreshMonitors();
 
-        // It is no longer a mesh of its own, and its channels are the
-        // primary's — shown, and grouped there.
-        Assert.DoesNotContain(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
+        // Nothing moved. That mesh is simply the station's now, so its list is
+        // the primary's list and its channels are shown.
+        Assert.Equal(nameof(LoraPreset.LongFast), vm.PrimaryListName);
         Assert.True(mine.IsTabListed, "a channel on the mesh the primary now occupies stays usable");
-        Assert.Equal(string.Empty, mine.TabGroup);
+        Assert.Equal(nameof(LoraPreset.LongFast), mine.TabGroup);
         Assert.Equal(nameof(LoraPreset.LongFast), mine.Config.Preset);
+        // And it leads the picker, as the mesh being read.
+        Assert.Equal(nameof(LoraPreset.LongFast), vm.TabGroupOptions[0].Group);
     }));
 
     /// <summary>
@@ -405,7 +491,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
     /// but nothing it carries can be decrypted.
     /// </summary>
     [Fact]
-    public void ThePrimaryDecryptsWithBothListsOfTheMeshItOccupies() =>
+    public void ThePrimaryDecryptsWithTheListOfTheMeshItIsOn() =>
         Ui(() => TempDataDirectory.With(() =>
     {
         using var nodes = new NodeStore();
@@ -413,7 +499,6 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         using var waypoints = new WaypointStore();
         using var messages = new MessageStore();
 
-        channels.Upsert(new ChannelConfig { Preset = "", Index = 0, Name = "LongFast", Role = ChannelRole.Primary });
         channels.Upsert(new ChannelConfig
         {
             Preset = nameof(LoraPreset.LongFast), Index = 0, Name = "LongFast", Role = ChannelRole.Primary,
@@ -422,21 +507,22 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         {
             Preset = nameof(LoraPreset.LongFast), Index = 1, Name = "club", Psk = ChannelConfig.NewRandomPsk(),
         });
+        channels.Upsert(new ChannelConfig
+        {
+            Preset = nameof(LoraPreset.MediumFast), Index = 0, Name = "MediumFast", Role = ChannelRole.Primary,
+        });
 
-        var host = new AvaloniaMeshRxHost(nodes, channels, waypoints, messages, 0x99u, Array.Empty<uint>());
+        var host = new AvaloniaMeshRxHost(nodes, channels, waypoints, messages, 0x99u, Array.Empty<uint>(),
+                                          primaryList: nameof(LoraPreset.LongFast));
         var primary = RxSource.Primary(LoraPreset.LongFast, isCustom: false, 906.875);
 
-        // While LongFast is a mesh of its own, the primary reads its own list.
-        Assert.All(((IMeshRxHost)host).ChannelsFor(primary), c => Assert.Equal(string.Empty, c.Preset));
-
-        // Once the primary sits on LongFast's own channel, both lists describe
-        // that one mesh and the receiver reads them together.
-        host.PrimaryMeshList = nameof(LoraPreset.LongFast);
+        // One list per mesh, the primary's included: it reads the list named
+        // for the preset it is on, and every channel there.
         var onPrimary = ((IMeshRxHost)host).ChannelsFor(primary);
-        Assert.Contains(onPrimary, c => c.Preset.Length == 0);
-        Assert.Contains(onPrimary, c => c.Name == "club" && c.Preset == nameof(LoraPreset.LongFast));
+        Assert.All(onPrimary, c => Assert.Equal(nameof(LoraPreset.LongFast), c.Preset));
+        Assert.Contains(onPrimary, c => c.Name == "club");
 
-        // A secondary still reads its own list alone.
+        // A secondary reads its own list alone.
         var other = new RxSource(1, LoraPreset.MediumFast, false, 913.125);
         Assert.All(((IMeshRxHost)host).ChannelsFor(other),
                    c => Assert.Equal(nameof(LoraPreset.MediumFast), c.Preset));
@@ -453,7 +539,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
 
         // A secondary on each mesh, since the role-primary channel of a list
         // is pinned and refuses a drag on its own account.
-        vm.SelectedTab = vm.Tabs.OfType<ChannelTabViewModel>().First(t => t.Config.Preset.Length == 0);
+        vm.SelectedTab = vm.Tabs.OfType<ChannelTabViewModel>().First(t => t.Config.Preset == nameof(LoraPreset.MediumFast));
         vm.AddChannelCommand.Execute(null);
         var onPrimary = (ChannelTabViewModel)vm.SelectedTab!;
 
@@ -462,7 +548,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         vm.AddChannelCommand.Execute(null);
         var onLongFast = (ChannelTabViewModel)vm.SelectedTab!;
 
-        Assert.Equal(string.Empty, onPrimary.Config.Preset);
+        Assert.Equal(nameof(LoraPreset.MediumFast), onPrimary.Config.Preset);
         Assert.Equal(nameof(LoraPreset.LongFast), onLongFast.Config.Preset);
         Assert.False(vm.CanReorderTabPair(onPrimary, onLongFast), "a channel may not cross to another mesh");
     }));

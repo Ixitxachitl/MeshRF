@@ -8,7 +8,7 @@ using Xunit;
 namespace MeshRF.UiTests;
 
 /// <summary>
-/// The Presets window says what the receiver will listen for and what is
+/// The Listeners window says what the receiver will listen for and what is
 /// stopping the rest, so the rows have to be the plan's own answer rather
 /// than a stored list that can drift from it.
 /// </summary>
@@ -25,6 +25,58 @@ public class MonitorsWindowTests(HeadlessAvalonia ui) : RenderTest(ui)
         vm.SelectedRxSampleRate = vm.SampleRateOptions.Single(o => o.Hz == rateHz);
         return vm;
     }
+
+    /// <summary>
+    /// One row per mesh. The preset the primary is already receiving used to
+    /// appear twice — once as the primary listener and again as a preset left
+    /// out for being the primary's own channel — drawing "MediumFast … primary"
+    /// directly above "MediumFast … the primary's own channel".
+    /// </summary>
+    [Fact]
+    public void ThePrimarysPresetIsListedOnce() => Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station(10_000_000u);
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+
+        var mediumFast = vm.MonitorPresets.Where(r => r.Name == nameof(LoraPreset.MediumFast)).ToList();
+
+        Assert.Single(mediumFast);
+        Assert.Equal("primary", mediumFast[0].StatusText);
+        Assert.Equal("slot 45", mediumFast[0].SlotText);
+        // And no row anywhere is the leftover phrasing for it.
+        Assert.DoesNotContain(vm.MonitorPresets, r => r.StatusText == "the primary's own channel");
+    }));
+
+    /// <summary>
+    /// The axis shows where the capture will be before it is running. With
+    /// several meshes to reach, that centre is not the primary's own channel —
+    /// and it used to stay on the primary until the operator pressed play,
+    /// because the ask ran before the native core existed and was gated on it.
+    /// </summary>
+    [Fact]
+    public void TheCaptureCentreIsPlannedBeforeTheReceiverIsStarted() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using (var first = Station(10_000_000u))
+        {
+            first.MultiPresetEnabled = true;
+            first.RefreshMonitors();
+        }
+        AppSettings.FlushPendingWrites(TimeSpan.FromSeconds(5));
+
+        using var reopened = new RadioViewModel();
+        Assert.False(reopened.IsRunning);
+
+        // Several meshes fit at this rate, so the capture slides off the
+        // primary to take them in.
+        var plan = reopened.BuildMonitorPlan();
+        Assert.True(plan.Listeners.Count > 1);
+        Assert.NotEqual(reopened.CenterFreqMHz, plan.DeviceCenterMHz, 3);
+
+        // And the axis is already showing that, not the primary's channel.
+        Assert.Equal(plan.DeviceCenterMHz * 1e6, reopened.SpectrumCenterHz, 0);
+    }));
 
     [Fact]
     public void OffItIsThePrimaryAloneAndTheWaterfallShowsOneChannel() => Ui(() => TempDataDirectory.With(() =>

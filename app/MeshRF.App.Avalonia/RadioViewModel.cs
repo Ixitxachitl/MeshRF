@@ -252,6 +252,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public void MonitorExclusionsChanged() => SaveSettings();
 
     /// <summary>What the receiver would be started with right now.</summary>
+    /// <summary>The mesh this station is on: the list the primary's channels
+    /// live in, named after the preset the toolbar is set to.</summary>
+    public string PrimaryListName => _rxHost.PrimaryListName;
+
     public MonitorPlan.Result BuildMonitorPlan()
     {
         var primary = new MonitorPlan.Primary(SelectedPreset, IsCustomLoraParams, OverrideSf,
@@ -262,11 +266,94 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                                  MultiPresetEnabled, MonitorExcludedPresets, MonitorCenterOffsetKHz);
     }
 
+    /// <summary>
+    /// The mesh a preset names, as this station is set up: which channel list
+    /// its channels belong in, and what stands between the station and
+    /// hearing it. Answers what a beacon advertising that preset amounts to
+    /// here.
+    /// </summary>
+    /// <remarks>
+    /// <para>The toolbar's own preset is the primary's mesh, and its channels
+    /// are the primary's list. That holds whatever the frequency and modem
+    /// parameters have been overridden to: picking MediumFast and then
+    /// hand-editing the settings does not move that station's channel list
+    /// somewhere else, so a beacon advertising MediumFast is still advertising
+    /// the mesh being read.</para>
+    /// <para>Every other preset is asked of the plan rather than of the
+    /// running listeners, so the answer is the same whether or not the
+    /// receiver has been started — and matched on frequency as well as preset,
+    /// the way the plan itself decides what the primary is already receiving.
+    /// The same preset on another slot is another mesh.</para>
+    /// </remarks>
+    public (string ListName, string Note) MeshForPreset(LoraPreset preset, Region advertised)
+    {
+        string listName = preset.ToString();
+
+        // Another region is another band. The slot grid is the region's, so
+        // there is no frequency here to compare against theirs.
+        if (advertised != Region.UNSET && advertised != SelectedRegion)
+            return (listName, $"Advertised for {advertised}; this station is set to {SelectedRegion}.");
+
+        // The mesh this station is on, by the operator's own choice of preset.
+        if (preset == SelectedPreset) return (_rxHost.PrimaryListName, string.Empty);
+
+        if (!ChannelPlan.Supports(SelectedRegion, preset))
+            return (listName, $"{SelectedRegion} has no room for {preset}.");
+
+        double freq = MonitorPlan.DefaultSlotFrequencyMHz(SelectedRegion, preset);
+        var on = BuildMonitorPlan().Listeners
+            .FirstOrDefault(l => !l.IsPrimary && l.Preset == preset && Math.Abs(l.FreqMHz - freq) < 1e-6);
+
+        return on is null
+            ? (listName, $"Not listening for {preset} — add it in Listeners to hear this mesh.")
+            : (listName, string.Empty);
+    }
+
+    /// <summary>
+    /// Folds the old nameless primary list into the list named after the
+    /// preset the station is on, taking its stored messages with it so
+    /// replayed history lands on the same tabs.
+    /// </summary>
+    /// <remarks>
+    /// The two used to be separate: a nameless list for the primary, and a
+    /// list per preset for everything else — which meant the mesh the toolbar
+    /// sat on was described twice over, and code that reasoned about "the
+    /// mesh" had to remember to look in both places. It is one list now.
+    /// Channels moved in keep their order and are re-indexed past anything the
+    /// target list already holds, so a seeded default channel is not
+    /// overwritten by the real ones arriving.
+    /// </remarks>
+    private void MigratePrimaryChannelList(string preset)
+    {
+        if (string.IsNullOrEmpty(preset)) return;
+        try
+        {
+            int moved = _channelStore.MoveList(string.Empty, preset);
+            if (moved == 0) return;
+            int refiled = _messageStore.MoveMesh(string.Empty, preset);
+            StatusText = $"Moved {moved} channel(s) and {refiled} stored packet(s) onto the {preset} mesh.";
+        }
+        catch (Exception ex)
+        {
+            // A failed move leaves the nameless list where it was, which still
+            // loads — the tabs are simply labelled the old way.
+            StatusText = $"Could not move the primary's channels onto {preset}: {ex.Message}";
+        }
+    }
+
     /// <summary>While stopped, the axis shows where the capture will be
     /// centred, which with several listeners need not be the primary.</summary>
+    /// <remarks>
+    /// Gated on the settings being loaded and nothing else. It used to want a
+    /// native core too, which nothing here reads: the plan is arithmetic over
+    /// the region, the preset and the sample rate. That guard is why the
+    /// waterfall opened centred on the primary and only moved to the capture
+    /// centre once RX had been started — the constructor asks before the core
+    /// is built, so the ask was thrown away.
+    /// </remarks>
     private void RefreshPlannedSpectrumCenter()
     {
-        if (_core is null || !_settingsLoaded) return;
+        if (!_settingsLoaded) return;
         if (!IsRunning) SpectrumCenterHz = BuildMonitorPlan().DeviceCenterMHz * 1_000_000.0;
         RefreshMonitors();
     }
@@ -1133,8 +1220,24 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var myNodeNum = _settings.UserNodeNum != 0
             ? _settings.UserNodeNum
             : (uint)Random.Shared.NextInt64(1, 0xFFFFFFFE);
+        // The mesh this station is on, as a name a channel list can be keyed
+        // by. Taken from the enum rather than the stored string so a settings
+        // file naming a preset this build does not have cannot key a list to
+        // something no preset will ever match again.
+        var primaryList = (Enum.TryParse<LoraPreset>(savedPreset, out var savedLoraPreset)
+            ? savedLoraPreset
+            : SelectedPreset).ToString();
+
+        // One-time: the primary's channels used to live in a list with no
+        // name. They belong to the preset the station is on, which is the list
+        // every other mesh is already keyed by. Runs before the host loads the
+        // channels, and only while a nameless list still exists — after the
+        // move there is none, and nothing creates one again.
+        MigratePrimaryChannelList(primaryList);
+
         _rxHost = new AvaloniaMeshRxHost(_nodeStore, _channelStore, _waypointStore, _messageStore, myNodeNum,
-                                         savedOpenConversations, savedConversationMeshes);
+                                         savedOpenConversations, savedConversationMeshes,
+                                         primaryList: primaryList);
         _rxHost.LogLines.CollectionChanged += OnLogLinesChanged;
         _rxHost.OpenConversationsChanged += SaveOpenConversations;
         _rxHost.IncomingDirectMessage += PlayIncomingRingtone;
@@ -1158,6 +1261,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // planned, so turning a preset on shows its channels before the
         // receiver is started and stopping it does not take them away.
         _rxHost.IsPresetListening = name => _rxSources.Any(s => !s.IsPrimary && s.PresetName == name);
+        _rxHost.MeshForPreset = MeshForPreset;
         _rxHost.IsPresetShown = name => _shownPresets.Contains(name);
         // The picker follows the tabs that exist; it only reads the host, so
         // it is safe from inside the collection's own notification.
@@ -1425,6 +1529,22 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         {
             StatusText = $"Native bridge unavailable: {ex.Message}";
         }
+
+        // Where the capture will sit and which meshes are on the strip, worked
+        // out now that the sample rate is known — which it only is once the
+        // device above has been selected.
+        //
+        // The earlier call cannot do it: it runs before the sample rate has
+        // been restored, so it plans against nothing. Until this existed, the
+        // waterfall opened centred on the primary rather than on the capture,
+        // and every preset's tabs but the primary's were missing, both of them
+        // only righting themselves when something later happened to refresh —
+        // opening Listeners, changing a setting, or starting RX.
+        //
+        // Outside the try, so a machine with no native bridge still gets its
+        // meshes and its axis: both are arithmetic over the settings, not
+        // questions about hardware.
+        RefreshPlannedSpectrumCenter();
 
         _pollTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -1953,6 +2073,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedPresetChanged(LoraPreset value)
     {
+        // The primary's channels are the chosen preset's mesh, so changing the
+        // preset changes which list is in front of the operator. Done first:
+        // the primary channel rename below acts on that list.
+        _rxHost.SetPrimaryList(value.ToString());
+        RefreshTabGroupOptions();
         // Autofill SF/BW/CR from the new preset — preset is the anchor, so
         // overwriting any prior manual override here is the right UX.
         ApplyPresetToLoraParams(value);
@@ -2892,6 +3017,18 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     // tab joins the LongFast list.
     private void AddChannel() =>
         SelectedTab = _rxHost.AddChannel((SelectedTab as ChannelTabViewModel)?.Config.Preset ?? string.Empty);
+
+    /// <summary>Takes a mesh a beacon advertised, adding its channel and
+    /// showing the tab it becomes.</summary>
+    [RelayCommand]
+    private void AcceptBeaconOffer(BeaconOffer? offer)
+    {
+        if (offer is null) return;
+        if (_rxHost.AcceptBeaconOffer(offer) is not { } tab) return;
+        RefreshTabGroupOptions();
+        SelectedTab = tab;
+        StatusText = $"Added {tab.Config.Name} to {offer.ListLabel}.";
+    }
 
     public bool CanRemoveSelectedChannel => SelectedTab is ChannelTabViewModel { Config.Role: not ChannelRole.Primary };
 

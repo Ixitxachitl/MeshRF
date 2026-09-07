@@ -100,6 +100,86 @@ public sealed class ChannelStore : IDisposable
         tx.Commit();
     }
 
+    /// <summary>
+    /// Moves every channel in one list into another, keeping their order.
+    /// Returns how many moved; 0 when the source list is empty, which is what
+    /// makes calling this on every start harmless.
+    /// </summary>
+    /// <remarks>
+    /// This exists for one migration: the primary's channels used to live in a
+    /// list with no name, beside a second list named after the preset the
+    /// primary was running — two lists describing one mesh. They are now the
+    /// same list, named after the preset, so the nameless one is folded into
+    /// it. Indices are re-based past whatever the target already holds, since
+    /// (list, index) is the primary key and the two lists were numbered
+    /// independently.
+    /// </remarks>
+    public int MoveList(string from, string to)
+    {
+        ThrowIfDisposed();
+        if (string.Equals(from, to, StringComparison.Ordinal)) return 0;
+        lock (_gate)
+        {
+            using var tx = _conn.BeginTransaction();
+
+            int moved;
+            using (var count = _conn.CreateCommand())
+            {
+                count.Transaction = tx;
+                count.CommandText = "SELECT COUNT(*) FROM channels WHERE preset = $from";
+                count.Parameters.AddWithValue("$from", from);
+                moved = Convert.ToInt32(count.ExecuteScalar() ?? 0);
+            }
+            if (moved == 0) return 0;
+
+            int offset;
+            using (var max = _conn.CreateCommand())
+            {
+                max.Transaction = tx;
+                max.CommandText = "SELECT IFNULL(MAX(idx), -1) + 1 FROM channels WHERE preset = $to";
+                max.Parameters.AddWithValue("$to", to);
+                offset = Convert.ToInt32(max.ExecuteScalar() ?? 0);
+            }
+
+            // No row can collide: every moved row lands in the target list at
+            // an index past everything already there, and they keep their
+            // order relative to each other.
+            using (var move = _conn.CreateCommand())
+            {
+                move.Transaction = tx;
+                move.CommandText = """
+                    UPDATE channels SET preset = $to, idx = idx + $offset
+                     WHERE preset = $from;
+                    """;
+                move.Parameters.AddWithValue("$to", to);
+                move.Parameters.AddWithValue("$from", from);
+                move.Parameters.AddWithValue("$offset", offset);
+                move.ExecuteNonQuery();
+            }
+
+            // Firmware allows a list exactly one Primary, and both lists had
+            // one of their own. The lowest index keeps it — that is the target
+            // mesh's own primary where it had one, and the incoming list's
+            // where it did not — and the rest become ordinary secondaries.
+            using (var demote = _conn.CreateCommand())
+            {
+                demote.Transaction = tx;
+                demote.CommandText = """
+                    UPDATE channels SET role = $secondary
+                     WHERE preset = $to AND role = $primary
+                       AND idx > (SELECT MIN(idx) FROM channels WHERE preset = $to AND role = $primary);
+                    """;
+                demote.Parameters.AddWithValue("$to", to);
+                demote.Parameters.AddWithValue("$primary", (int)ChannelRole.Primary);
+                demote.Parameters.AddWithValue("$secondary", (int)ChannelRole.Secondary);
+                demote.ExecuteNonQuery();
+            }
+
+            tx.Commit();
+            return moved;
+        }
+    }
+
     /// <summary>Writes a channel into the list its <see cref="ChannelConfig.Preset"/>
     /// names, replacing the row at its index there.</summary>
     public void Upsert(ChannelConfig c)

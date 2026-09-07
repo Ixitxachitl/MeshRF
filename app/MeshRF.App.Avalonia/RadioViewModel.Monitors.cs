@@ -113,23 +113,26 @@ public partial class RadioViewModel
         var plan = BuildMonitorPlan();
         RefreshChannelBands(plan);
 
-        _shownPresets = plan.Listeners.Where(l => !l.IsPrimary && l.Preset is not null)
+        // Every mesh the operator has chosen, which is not the same as every
+        // mesh the receiver can reach today. A preset ticked in Listeners whose
+        // channel falls outside the capture at the current sample rate is still
+        // a mesh they have set channels up for, and hiding its tabs took their
+        // history and their keys away over a sample rate. Unticked and
+        // unsupported presets stay hidden: those are not chosen at all.
+        _shownPresets = plan.Listeners
+                            .Where(l => !l.IsPrimary && l.Preset is not null)
                             .Select(l => l.Preset!.Value.ToString())
+                            .Concat(plan.LeftOut
+                                        .Where(x => x.Reason == MonitorPlan.LeftOutReason.OutOfRange)
+                                        .Select(x => x.Preset.ToString()))
                             .ToHashSet(StringComparer.Ordinal);
-        // A preset left out because the primary is already on its channel is
-        // the one whose list the primary now shares — the plan works that out
-        // from the frequency, so it is not decided twice.
-        _rxHost.PrimaryMeshList = plan.LeftOut
-            .Where(x => x.Reason == MonitorPlan.LeftOutReason.IsPrimary)
-            .Select(x => x.Preset.ToString())
-            .FirstOrDefault() ?? string.Empty;
         // A mesh gets its channel list when it is chosen, not when the
         // receiver is started: the point of choosing it is to set its
         // channels up, which needs them to exist.
         foreach (var preset in _shownPresets) _rxHost.EnsureChannelList(preset);
         // A mesh that is no longer listened for cannot stay on show.
-        if (_rxHost.ShownGroup.Length > 0 && !_shownPresets.Contains(_rxHost.ShownGroup))
-            _rxHost.ShowGroup(string.Empty);
+        if (_rxHost.ShownGroup != _rxHost.PrimaryListName && !_shownPresets.Contains(_rxHost.ShownGroup))
+            _rxHost.ShowGroup(_rxHost.PrimaryListName);
         _rxHost.RefreshTabGroups();
         RefreshTabGroupOptions();
         // A tab that has just been taken away cannot stay selected.
@@ -181,8 +184,17 @@ public partial class RadioViewModel
             }));
         }
 
+        // The preset the primary is already receiving is the primary, and it
+        // has a row above. Listing it again as left-out drew one mesh twice —
+        // "MediumFast … primary" over "MediumFast … the primary's own
+        // channel". A custom primary that matches no preset keeps the
+        // left-out row, which is the only place its mesh is named.
+        var primaryPreset = plan.Listeners.FirstOrDefault(l => l.IsPrimary)?.Preset;
+
         foreach (var x in plan.LeftOut)
         {
+            if (x.Reason == MonitorPlan.LeftOutReason.IsPrimary && x.Preset == primaryPreset) continue;
+
             string status = x.Reason switch
             {
                 MonitorPlan.LeftOutReason.IsPrimary => "the primary's own channel",
