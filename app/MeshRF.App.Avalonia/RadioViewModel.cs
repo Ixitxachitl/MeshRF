@@ -1422,6 +1422,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // compile-time defaults over the saved schedules and then read them
         // back as "off".
         LoadAutoReportSettings();
+        LoadBeaconSettings(_settings.Beacon);
         LoadMqttSettings(_settings);
         // Before the _settingsLoaded gate below, for the same reason as the
         // auto-report load: the SaveSettings() there writes every field, so a
@@ -1530,6 +1531,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             StatusText = $"Native bridge unavailable: {ex.Message}";
         }
 
+        RefreshBeaconChannelOptions();
+
         // Where the capture will sit and which meshes are on the strip, worked
         // out now that the sample rate is known — which it only is once the
         // device above has been selected.
@@ -1582,6 +1585,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (IsRunning)
         {
             KickAutoReportTick();
+            KickBeaconTick();
             SweepAckRetransmits();
         }
 
@@ -2501,6 +2505,10 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.Slot = SelectedSlot;
         _settings.MultiPresetEnabled = MultiPresetEnabled;
         _settings.MonitorExcludedPresets = MonitorExcludedPresets.ToList();
+        // Takes the target, like every other line here: writing the field
+        // would land in memory and never on disk, which is the trap this
+        // method's shadow exists to make visible.
+        _settings.Beacon = BuildBeaconSettings();
         _settings.MonitorCenterOffsetKHz = MonitorCenterOffsetKHz;
         _settings.OverrideSf = OverrideSf;
         _settings.OverrideBwHz = (uint)Math.Round(OverrideBwKhz * 1000.0);

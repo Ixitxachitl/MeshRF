@@ -1,0 +1,134 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:MeshRF.AvaloniaApp"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.BeaconSettingsWindow"
+        x:Name="BeaconRoot"
+        x:DataType="app:RadioViewModel"
+        Title="Beacon"
+        Width="620" Height="620"
+        MinWidth="520" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <!-- Two columns, a label and the control it names, one pair per row, with
+         each hint on its own row underneath at the full content width. Same
+         shape as the channel dialog. -->
+    <Grid Margin="14" ColumnDefinitions="Auto,*" ColumnSpacing="10"
+          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
+
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,0,0,10"
+                   FontSize="11" Foreground="{DynamicResource BrushSubtle}"
+                   Text="A beacon is a short advertisement broadcast on a schedule: something to read, and optionally a channel to invite people onto. Every copy is sent zero-hop, so it reaches only who can hear this station directly and is never reflooded. Nothing is transmitted until a channel is on the list at the bottom." />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Broadcast" VerticalAlignment="Center" Margin="0,3" />
+        <CheckBox Name="EnabledCheck" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="0,3"
+                  Content="Broadcast a beacon on the schedule below"
+                  IsChecked="{Binding BeaconEnabled, Mode=TwoWay}"
+                  ToolTip.Tip="The one switch. Off, nothing is broadcast whatever else is set here." />
+
+        <TextBlock Grid.Row="2" Grid.Column="1" Margin="2,-2,0,4" TextWrapping="Wrap"
+                   FontSize="11" Foreground="{DynamicResource BrushSubtle}"
+                   Text="{Binding BeaconSummary}" />
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Message" VerticalAlignment="Top" Margin="0,6,0,3" />
+        <!-- The picker sits beside the box rather than under it, where the
+             byte count goes: it acts on the box, and the count reports on it. -->
+        <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,3">
+            <Button DockPanel.Dock="Right" Content="😀" Margin="4,0,0,0" Padding="6,1"
+                    VerticalAlignment="Top"
+                    Click="OnPickBeaconEmoji" ToolTip.Tip="Insert an emoji" />
+            <TextBox Name="MessageBox"
+                     AcceptsReturn="False" TextWrapping="Wrap" MinHeight="56"
+                     Text="{Binding BeaconMessage, Mode=TwoWay}"
+                     ToolTip.Tip="What the beacon says. Firmware caps this at 100 bytes of UTF-8; anything longer is cut on a character boundary before it goes out." />
+        </DockPanel>
+
+        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="2,-2,0,4" Spacing="8">
+            <TextBlock Text="{Binding BeaconMessageCount}" FontSize="11"
+                       Foreground="{DynamicResource BrushSubtle}" />
+            <TextBlock Text="over the cap — it will be cut" FontSize="11"
+                       IsVisible="{Binding BeaconMessageTooLong}"
+                       Foreground="{DynamicResource BrushOverridden}" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="5" Grid.Column="0" Text="Every" VerticalAlignment="Center" Margin="0,3" />
+        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,3" Spacing="8">
+            <TextBox Width="90" VerticalAlignment="Center" FontFamily="Consolas"
+                     local:RejectInvalidBehavior.IsEnabled="True"
+                     Text="{Binding BeaconIntervalMinutesText, Mode=TwoWay}"
+                     ToolTip.Tip="Minutes between broadcasts. Firmware's floor is 60 minutes and anything shorter is raised to it." />
+            <TextBlock Text="minutes (60 minimum)" VerticalAlignment="Center"
+                       FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="6" Grid.Column="0" Text="Offer channel" VerticalAlignment="Center" Margin="0,3" />
+        <CheckBox Name="OfferCheck" Grid.Row="6" Grid.Column="1" VerticalAlignment="Center" Margin="0,3"
+                  Content="Advertise one of my channels"
+                  IsChecked="{Binding BeaconOfferChannelEnabled, Mode=TwoWay}"
+                  ToolTip.Tip="Puts the channel's name and key in the beacon, so a listening client can offer to add it. The key is then known to everyone in earshot." />
+
+        <ComboBox Name="OfferCombo" Grid.Row="7" Grid.Column="1" Margin="0,0,0,3"
+                  HorizontalAlignment="Stretch"
+                  IsEnabled="{Binding BeaconOfferChannelEnabled}"
+                  ItemsSource="{Binding BeaconChannelOptions}"
+                  SelectedItem="{Binding BeaconOfferChannel, Mode=TwoWay}">
+            <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="app:BeaconChannelOption">
+                    <TextBlock Text="{Binding Label}" />
+                </DataTemplate>
+            </ComboBox.ItemTemplate>
+        </ComboBox>
+
+        <TextBlock Grid.Row="8" Grid.Column="1" Margin="2,-2,0,6" TextWrapping="Wrap"
+                   FontSize="11" Foreground="{DynamicResource BrushSubtle}"
+                   IsVisible="{Binding BeaconOfferChannelEnabled}"
+                   Text="The advertised channel's key goes out in the clear, and its mesh's preset and region go with it. Offer a channel you are happy for anyone in earshot to join." />
+
+        <TextBlock Grid.Row="9" Grid.ColumnSpan="2" Margin="0,6,0,4"
+                   Text="Broadcast on these channels" FontWeight="SemiBold" />
+
+        <Border Grid.Row="10" Grid.ColumnSpan="2"
+                BorderBrush="{DynamicResource BrushPanelBorder}" BorderThickness="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding BeaconTargets}" Margin="4">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="app:BeaconTargetRow">
+                            <Grid ColumnDefinitions="*,Auto" Margin="2,3">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Label}" />
+                                    <TextBlock Text="{Binding Note}" FontSize="11" TextWrapping="Wrap"
+                                               IsVisible="{Binding HasNote}"
+                                               Foreground="{DynamicResource BrushOverridden}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="Remove" FontSize="12" Padding="10,2"
+                                        VerticalAlignment="Center"
+                                        Command="{Binding #BeaconRoot.DataContext.RemoveBeaconTargetCommand}"
+                                        CommandParameter="{Binding}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Sending one off the schedule is on the Quick send bar, beside the
+             other things this station broadcasts on demand, rather than being
+             reachable only from here. It is an extra beacon and leaves the
+             schedule where it was. -->
+        <Grid Grid.Row="11" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0"
+              ColumnSpacing="8">
+            <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                      ItemsSource="{Binding BeaconChannelOptions}"
+                      SelectedItem="{Binding BeaconTargetToAdd, Mode=TwoWay}">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="app:BeaconChannelOption">
+                        <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Grid.Column="1" Content="Add" Padding="12,3"
+                    Command="{Binding AddBeaconTargetCommand}" />
+        </Grid>
+    </Grid>
+</Window>

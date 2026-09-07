@@ -721,6 +721,45 @@ public partial class MainWindow : Window
         await SendPromptedAsync("Send status on which channel?", _viewModel.SendNodeStatusOnChannelAsync);
 
     /// <summary>
+    /// Quick send's beacon.
+    /// </summary>
+    /// <remarks>
+    /// Every other button on this bar asks which channel to send on, and that
+    /// question is also what catches a stray click. A beacon carries its own
+    /// destination list, so without this it would go out on all of them, on
+    /// the air, from a single press. The prompt names what will be said and
+    /// where, since that is configured in another window and may have been set
+    /// up a long time ago.
+    /// </remarks>
+    private async void OnSendBeaconPrompted(object? sender, RoutedEventArgs e)
+    {
+        var targets = _viewModel.BeaconTargets;
+        // Nothing would go out, so there is nothing to confirm: let the
+        // command run and say why.
+        if (targets.Count == 0 || !_viewModel.BeaconHasAnythingToSay)
+        {
+            _viewModel.SendBeaconNowCommand.Execute(null);
+            return;
+        }
+
+        var where = string.Join("\n", targets.Select(t => $"    {t.Label}"));
+        var says = string.IsNullOrWhiteSpace(_viewModel.BeaconMessage)
+            ? "an offer with no message"
+            : $"“{_viewModel.BeaconMessage}”";
+        var offer = _viewModel.BeaconOfferChannelEnabled && _viewModel.BeaconOfferChannel is { } offered
+            ? $"\n\nAdvertising {offered.Label}. Its key goes out in the clear."
+            : string.Empty;
+
+        if (!await ConfirmDialog.ConfirmAsync(this, "Send beacon",
+                $"Broadcast {says} on:\n{where}{offer}\n\n" +
+                "An extra beacon — the next scheduled one still goes out when it was due.",
+                confirmText: "Send"))
+            return;
+
+        _viewModel.SendBeaconNowCommand.Execute(null);
+    }
+
+    /// <summary>
     /// Runs the script behind one of the buttons a quick_send trigger added.
     /// A button set to ask prompts for its destination exactly like the
     /// built-in quick sends; one that named a channel or a node goes there
@@ -1020,6 +1059,7 @@ public partial class MainWindow : Window
     }
 
     private MqttSettingsWindow? _mqttWindow;
+    private BeaconSettingsWindow? _beaconWindow;
 
     /// <summary>Picks which mesh the channel strip below is showing. A
     /// pointer handler rather than a button, so the tab is the app's own
@@ -1040,6 +1080,13 @@ public partial class MainWindow : Window
         _viewModel.RefreshMonitors();
         _monitorsWindow.Closed += (_, _) => _monitorsWindow = null;
         _monitorsWindow.Show(this);
+    }
+
+    private void OnOpenBeaconSettings(object? sender, RoutedEventArgs e)
+    {
+        if (_beaconWindow is not null) { _beaconWindow.Activate(); return; }
+        _beaconWindow = BeaconSettingsWindow.Open(this, _viewModel);
+        _beaconWindow.Closed += (_, _) => _beaconWindow = null;
     }
 
     private void OnOpenMqttSettings(object? sender, RoutedEventArgs e)

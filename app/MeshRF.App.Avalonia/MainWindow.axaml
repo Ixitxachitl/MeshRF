@@ -462,6 +462,9 @@
                 <Button Content="Scripts" Padding="8,2"
                         Click="OnOpenScripts"
                         ToolTip.Tip="Automation scripts: reply to messages and send on a schedule" />
+                <Button Content="Beacon" Padding="8,2"
+                        Click="OnOpenBeaconSettings"
+                        ToolTip.Tip="Broadcast a short advertisement on a schedule: what it says, how often, and the channels it goes out on" />
                 <Button Content="MQTT" Padding="8,2"
                         Click="OnOpenMqttSettings"
                         ToolTip.Tip="Open the MQTT bridge settings (uplink/downlink to a broker)" />
@@ -492,6 +495,11 @@
                         ToolTip.Tip="Fetch PM2.5/PM10 from the Open-Meteo air quality API, then broadcast TELEMETRY air quality metrics" />
                 <Button Content="Status" Padding="10,3" Click="OnSendNodeStatusPrompted"
                         ToolTip.Tip="Broadcast your NODE_STATUS_APP text on the primary channel" />
+                <!-- A beacon carries its own destination list, so this asks
+                     for confirmation where the others ask for a channel. -->
+                <Button Content="Beacon" Padding="10,3"
+                        Click="OnSendBeaconPrompted"
+                        ToolTip.Tip="Broadcast the beacon now on every channel on its list, whatever its schedule says. An extra beacon: the next scheduled one still goes out when it was due." />
                 <!-- Buttons the scripts asked for, after the built-in
                      ones. Empty unless a script has a quick_send
                      trigger, so the bar looks unchanged without one. -->
