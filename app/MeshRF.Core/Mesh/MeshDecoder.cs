@@ -92,6 +92,9 @@ public sealed class MeshDecodeResult
     /// <summary>Parsed StoreForward (STORE_FORWARD_APP); null otherwise.</summary>
     public MeshStoreForward? StoreForward { get; init; }
 
+    /// <summary>Parsed MeshBeacon (MESH_BEACON_APP); null otherwise.</summary>
+    public MeshBeacon? Beacon { get; init; }
+
     /// <summary>Raw decrypted application payload (the Data.payload bytes).</summary>
     public byte[] AppPayload { get; init; } = Array.Empty<byte>();
 }
@@ -365,6 +368,48 @@ public sealed class MeshStoreForward
 }
 
 /// <summary>
+/// Subset of the Meshtastic <c>MeshBeacon</c> protobuf: a message a node
+/// broadcasts periodically, optionally naming the mesh it speaks for — a
+/// channel's name and key, a modem preset and a region.
+/// </summary>
+/// <remarks>
+/// The offer is an invitation, never a setting. Firmware caches it for its
+/// client and applies none of it (MeshBeaconListenerModule::handleReceivedProtobuf),
+/// and the offered PSK is a convenience token rather than a secret: anyone in
+/// earshot of the beacon has it.
+/// </remarks>
+public sealed class MeshBeacon
+{
+    /// <summary>MeshBeacon.message — the human-readable part, capped at 100
+    /// bytes by the sending firmware.</summary>
+    public string Message { get; init; } = string.Empty;
+
+    /// <summary>Whether offer_channel was present at all, as distinct from
+    /// present and blank.</summary>
+    public bool HasChannel { get; init; }
+
+    /// <summary>offer_channel.name. Blank is a real Meshtastic channel name: it
+    /// means the channel is called after the modem preset.</summary>
+    public string ChannelName { get; init; } = string.Empty;
+
+    /// <summary>offer_channel.psk exactly as sent, Meshtastic's single-byte
+    /// shorthands included, so it can be stored the way any other channel's
+    /// key is.</summary>
+    public byte[] ChannelPsk { get; init; } = Array.Empty<byte>();
+
+    /// <summary>offer_preset, or null when the beacon named no preset.</summary>
+    public LoraPreset? Preset { get; init; }
+
+    /// <summary>offer_region, UNSET when unnamed or when it is a region code
+    /// this app has no channel plan for.</summary>
+    public Region Region { get; init; } = MeshRF.Region.UNSET;
+
+    /// <summary>Whether the beacon advertised a mesh as well as saying
+    /// something.</summary>
+    public bool HasOffer => HasChannel || Preset is not null || Region != MeshRF.Region.UNSET;
+}
+
+/// <summary>
 /// Turns a decoded LoRa frame (16-byte header + encrypted payload) into a
 /// structured <see cref="MeshDecodeResult"/> by trying each known channel's
 /// PSK, AES-CTR decrypting, and parsing the inner protobufs.
@@ -610,6 +655,7 @@ public static class MeshDecoder
         MeshRouteDiscovery? route = null;
         MeshNeighborInfo? neighborInfo = null;
         MeshStoreForward? storeForward = null;
+        MeshBeacon? beacon = null;
         int routingError = -1;
 
         switch (port)
@@ -644,6 +690,9 @@ public static class MeshDecoder
             case PortNum.StoreForward:
                 storeForward = ParseStoreForward(payload);
                 break;
+            case PortNum.MeshBeacon:
+                beacon = ParseBeacon(payload);
+                break;
         }
 
         return new MeshDecodeResult
@@ -660,6 +709,7 @@ public static class MeshDecoder
             RouteDiscovery = route,
             NeighborInfo = neighborInfo,
             StoreForward = storeForward,
+            Beacon = beacon,
             WantResponse = wantResponse,
             RequestId = requestId,
             ReplyId = replyId,
@@ -675,6 +725,39 @@ public static class MeshDecoder
             RoutingError = routingError,
             AppPayload = payload,
         };
+    }
+
+    /// <summary>
+    /// MeshBeacon (MESH_BEACON_APP). Public because message history replays
+    /// beacons from their stored payload. The generated parser is used rather
+    /// than this file's hand-rolled readers because the offer nests a whole
+    /// ChannelSettings, and a preset or region this build does not know is
+    /// dropped rather than guessed at.
+    /// </summary>
+    public static MeshBeacon? ParseBeacon(byte[] data)
+    {
+        try
+        {
+            var msg = Meshtastic.Protobufs.MeshBeacon.Parser.ParseFrom(data);
+            LoraPreset? preset = null;
+            if (msg.HasOfferPreset && Enum.TryParse<LoraPreset>(msg.OfferPreset.ToString(), out var p))
+                preset = p;
+            return new MeshBeacon
+            {
+                Message = msg.Message ?? string.Empty,
+                HasChannel = msg.OfferChannel is not null,
+                ChannelName = msg.OfferChannel?.Name ?? string.Empty,
+                ChannelPsk = msg.OfferChannel?.Psk?.ToByteArray() ?? Array.Empty<byte>(),
+                Preset = preset,
+                Region = Enum.IsDefined(typeof(Region), (int)msg.OfferRegion)
+                    ? (Region)(int)msg.OfferRegion
+                    : MeshRF.Region.UNSET,
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static MeshStatusMessage? ParseStatusMessage(byte[] data)

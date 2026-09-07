@@ -49,6 +49,13 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>Packet id this message replies to (0 when not reply-linked).</summary>
     public uint ReplyToPacketId { get; init; }
 
+    /// <summary>The mesh a beacon advertised, when this bubble is one; null
+    /// otherwise. Carries its own state, so the offer can go from addable to
+    /// added without the bubble being rebuilt.</summary>
+    public BeaconOffer? Offer { get; init; }
+
+    public bool HasOffer => Offer is not null;
+
     /// <summary>Aggregated reactions attached to this message.</summary>
     public ObservableCollection<MessageReaction> Reactions { get; } = new();
 
