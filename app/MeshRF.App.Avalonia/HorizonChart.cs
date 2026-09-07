@@ -62,6 +62,10 @@ public sealed class HorizonChart : Control
     private IReadOnlyList<HorizonTarget> _targets = [];
     private UnitSystem _units = UnitSystem.Metric;
 
+    /// <summary>Where each node was last drawn, so the pointer can find one.
+    /// Rebuilt every render: the view turns, and they turn with it.</summary>
+    private readonly List<(Point At, HorizonTarget Target)> _dots = [];
+
     private double _centreBearing = 180;
     private double _spanDeg = 360;
     private bool _turned;
@@ -158,7 +162,7 @@ public sealed class HorizonChart : Control
             context.DrawLine(HorizontalPen, new Point(LeftPad, horizontal),
                              new Point(LeftPad + plotW, horizontal));
 
-            DrawTargets(context, X, Y);
+            DrawTargets(context, plotW, plotH, X, Y);
             DrawDepthKey(context, profile, plotW);
             DrawViewNote(context);
         }
@@ -247,12 +251,23 @@ public sealed class HorizonChart : Control
         (byte)Math.Min(255, ground.G + 30),
         (byte)Math.Min(255, ground.B + 27));
 
-    /// <summary>Nodes where they would appear against the skyline. Labels are
-    /// dropped rather than overlapped: a stack of unreadable names says less
-    /// than a few readable ones over a row of dots.</summary>
-    private void DrawTargets(DrawingContext context, Func<double, double> x, Func<double, double> y)
+    /// <summary>Nodes where they would appear against the skyline, each named
+    /// wherever its name fits: beside the dot for preference, then over or under
+    /// it. Two neighbours a degree apart in bearing but a degree apart in
+    /// elevation are two readable labels, where a rule that only looked along
+    /// the row threw one of them away.
+    ///
+    /// A name is still dropped when nothing at all is free, since a stack of
+    /// unreadable ones says less than a few readable ones over a row of dots.
+    /// Hovering the dot names it, so nothing on the chart stays anonymous.
+    /// </summary>
+    private void DrawTargets(
+        DrawingContext context, double plotW, double plotH,
+        Func<double, double> x, Func<double, double> y)
     {
-        double lastLabelRight = double.NegativeInfinity;
+        _dots.Clear();
+        var taken = new List<Rect>();
+        var plot = new Rect(LeftPad, TopPad, plotW, plotH);
 
         var onScreen = _targets
             .Select(t => (Target: t, Offset: Offset(t.BearingDegrees)))
@@ -266,18 +281,87 @@ public sealed class HorizonChart : Control
             var fill = target.IsVisible ? VisibleFill : HiddenFill;
 
             context.DrawEllipse(fill, null, new Point(px, py), 3.5, 3.5);
+            _dots.Add((new Point(px, py), target));
 
             var label = new FormattedText(
                 target.Name, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
                 LabelTypeface, 10, LabelText);
-            double left = px + 6;
-            if (left < lastLabelRight) continue;
+
+            if (FreeBoxFor(px, py, label, plot, taken) is not { } box) continue;
 
             context.FillRectangle(LabelBackground,
-                new Rect(left - 2, py - label.Height / 2, label.Width + 4, label.Height));
-            context.DrawText(label, new Point(left, py - label.Height / 2));
-            lastLabelRight = left + label.Width + 6;
+                new Rect(box.X - 2, box.Y, box.Width + 4, box.Height));
+            context.DrawText(label, box.TopLeft);
+
+            // Claimed with a margin, so two names clearing each other by a pixel
+            // do not read as one.
+            taken.Add(box.Inflate(3));
         }
+    }
+
+    /// <summary>The first placement inside the chart and clear of the names
+    /// already down, or nothing when a name has nowhere left to go.</summary>
+    private static Rect? FreeBoxFor(
+        double px, double py, FormattedText label, Rect plot, List<Rect> taken)
+    {
+        double w = label.Width, h = label.Height;
+
+        Rect[] places =
+        [
+            new(px + 6, py - h / 2, w, h),      // beside it, reading away from the dot
+            new(px - 6 - w, py - h / 2, w, h),
+            new(px - w / 2, py - 7 - h, w, h),  // over it, where the sky usually is
+            new(px - w / 2, py + 7, w, h),
+            new(px + 6, py - 7 - h, w, h),      // and the corners, before giving up
+            new(px - 6 - w, py - 7 - h, w, h),
+            new(px + 6, py + 7, w, h),
+            new(px - 6 - w, py + 7, w, h),
+        ];
+
+        foreach (var box in places)
+        {
+            if (!plot.Contains(box)) continue;
+            if (taken.Any(t => t.Intersects(box))) continue;
+            return box;
+        }
+
+        return null;
+    }
+
+    /// <summary>The node under the pointer, if one is near enough to be what
+    /// the pointer means.</summary>
+    private HorizonTarget? Under(Point p)
+    {
+        HorizonTarget? found = null;
+        double nearest = 8 * 8;
+
+        foreach (var (at, target) in _dots)
+        {
+            double dx = p.X - at.X, dy = p.Y - at.Y;
+            double distance = dx * dx + dy * dy;
+            if (distance > nearest) continue;
+
+            nearest = distance;
+            found = target;
+        }
+
+        return found;
+    }
+
+    /// <summary>A node in one line: where it stands, and by how much the ground
+    /// clears it or hides it — the figure a mast is chosen from.</summary>
+    private string Describe(HorizonTarget target)
+    {
+        string where =
+            $"{target.Name} — {DisplayUnits.FormatShortDistance(target.DistanceM, _units)} " +
+            $"{CompassName(target.BearingDegrees)}";
+
+        if (double.IsInfinity(target.ClearanceDeg))
+            return $"{where}, nothing between";
+
+        return target.IsVisible
+            ? $"{where}, clear by {target.ClearanceDeg:0.0}°"
+            : $"{where}, hidden by {-target.ClearanceDeg:0.0}°";
     }
 
     /// <summary>What the shading means, in the units the app is set to. The
@@ -409,16 +493,33 @@ public sealed class HorizonChart : Control
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        if (!_dragging) return;
+        var p = e.GetPosition(this);
 
-        double plotW = Bounds.Width - LeftPad - RightPad;
-        double x = e.GetPosition(this).X;
-        double dx = x - _lastX;
-        if (plotW <= 4 || dx == 0) return;
-        _lastX = x;
+        if (_dragging)
+        {
+            double plotW = Bounds.Width - LeftPad - RightPad;
+            double dx = p.X - _lastX;
+            if (plotW <= 4 || dx == 0) return;
+            _lastX = p.X;
 
-        // The country follows the pointer, as if the drag had hold of it.
-        Turn(-dx / plotW * _spanDeg);
+            // The country follows the pointer, as if the drag had hold of it.
+            Turn(-dx / plotW * _spanDeg);
+            return;
+        }
+
+        // A node whose name was crowded off the chart is still a dot, and the
+        // pointer is how it says which node it is. Only touched when it changes:
+        // this runs on every move, and a tooltip is not free.
+        string? tip = Under(p) is { } target ? Describe(target) : null;
+        if (ToolTip.GetTip(this) as string != tip) ToolTip.SetTip(this, tip);
+    }
+
+    /// <summary>Drop the tooltip on the way out, or it stays armed over
+    /// whatever is layered on top of the chart.</summary>
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        if (ToolTip.GetTip(this) is not null) ToolTip.SetTip(this, null);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)

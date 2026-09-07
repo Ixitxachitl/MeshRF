@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Threading;
 using MeshRF.AvaloniaApp;
 using MeshRF.Map;
 using MeshRF.Mesh;
@@ -362,5 +364,100 @@ public class ChartRenderTests(HeadlessAvalonia ui) : RenderTest(ui)
 
         Assert.Equal(360, chart.SpanDegrees, 1);
         Assert.Equal(180, chart.CentreBearing, 1);
+    });
+
+    /// <summary>Ink in the colour the node labels are drawn in. The captions in
+    /// the corners and the axis figures are a dimmer grey, so this counts names
+    /// and nothing else.</summary>
+    private static int NameInk(Rendered image) => image.CountNear("#E6E6E6", tolerance: 40, within: Plot);
+
+    [Fact]
+    public void NodesCrowdedIntoOneBearingAreStillNamed() => Ui(() =>
+    {
+        // Three neighbours in the same direction at different heights: one
+        // column of the chart, but nothing is actually in anything else's way.
+        // A rule that only looked along the row named the first and dropped the
+        // other two.
+        var profile = EastwardRidges();
+
+        var one = new HorizonChart();
+        one.Show(profile, [new HorizonTarget("Alpha Node", 90, 3000, 1.0, 0.2)], UnitSystem.Metric);
+        int alone = NameInk(Rendered.Draw(one, W, H));
+
+        var three = new HorizonChart();
+        three.Show(profile,
+        [
+            new HorizonTarget("Alpha Node", 90, 3000, 1.0, 0.2),
+            new HorizonTarget("Bravo Node", 90.4, 3200, 2.6, 0.2),
+            new HorizonTarget("Delta Node", 90.8, 3400, 4.2, 0.2),
+        ], UnitSystem.Metric);
+        int crowded = NameInk(Rendered.Draw(three, W, H));
+
+        Assert.True(alone > 20, $"the one name did not draw ({alone} px)");
+        Assert.True(crowded > alone * 2.4,
+            $"names stacked over one bearing were dropped: {crowded} px against {alone} for one");
+    });
+
+    /// <summary>Where a node was drawn, found by its own colour — the only way
+    /// to point at something a chart placed for itself.</summary>
+    private static Point DotIn(Rendered image, string hex)
+    {
+        for (int y = Plot.Y; y < Plot.Y + Plot.Height; y++)
+            for (int x = Plot.X; x < Plot.X + Plot.Width; x++)
+            {
+                var (r, g, b) = image.At(x, y);
+                var want = Avalonia.Media.Color.Parse(hex);
+                if (Math.Abs(r - want.R) < 20 && Math.Abs(g - want.G) < 20 && Math.Abs(b - want.B) < 20)
+                    return new Point(x + 2, y + 2);
+            }
+
+        Assert.Fail("no node was drawn to point at");
+        return default;
+    }
+
+    [Fact]
+    public void HoveringANodeNamesIt() => Ui(() =>
+    {
+        // What a name crowded off the chart falls back on, and the only place
+        // the clearance figure is written down.
+        var profile = EastwardRidges();
+        HorizonTarget[] nodes = [new("Ridge Repeater", 90, 3000, 2.0, 0.5)];
+
+        var found = new HorizonChart();
+        found.Show(profile, nodes, UnitSystem.Metric);
+        var dot = DotIn(Rendered.Draw(found, W, H), "#66BB6A");
+
+        var chart = new HorizonChart();
+        chart.Show(profile, nodes, UnitSystem.Metric);
+
+        string? tip = null;
+        Rendered.Draw(chart, W, H, window =>
+        {
+            window.MouseMove(dot);
+            Dispatcher.UIThread.RunJobs();
+            tip = ToolTip.GetTip(chart) as string;
+        });
+
+        Assert.NotNull(tip);
+        Assert.Contains("Ridge Repeater", tip);
+        Assert.Contains("clear by", tip);
+    });
+
+    [Fact]
+    public void PointingAtBareSkyNamesNothing() => Ui(() =>
+    {
+        var chart = new HorizonChart();
+        chart.Show(EastwardRidges(), [new HorizonTarget("Ridge Repeater", 90, 3000, 2.0, 0.5)],
+                   UnitSystem.Metric);
+
+        string? tip = "not asked yet";
+        Rendered.Draw(chart, W, H, window =>
+        {
+            window.MouseMove(new Point(700, 60));
+            Dispatcher.UIThread.RunJobs();
+            tip = ToolTip.GetTip(chart) as string;
+        });
+
+        Assert.Null(tip);
     });
 }
