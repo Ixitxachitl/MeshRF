@@ -56,6 +56,15 @@ public partial class ChannelMessage : ObservableObject
 
     public bool HasOffer => Offer is not null;
 
+    /// <summary>True for a bubble that came from a beacon, whether or not it
+    /// carries an offer or any words.</summary>
+    public bool IsBeacon { get; init; }
+
+    /// <summary>Whether there is anything to draw as text. A beacon that
+    /// carries only an invitation has none, and an empty line above the card
+    /// would be a gap with nothing in it.</summary>
+    public bool HasText => DisplayText.Length > 0;
+
     /// <summary>Aggregated reactions attached to this message.</summary>
     public ObservableCollection<MessageReaction> Reactions { get; } = new();
 

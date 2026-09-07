@@ -663,7 +663,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
             var replayed = BuildHistoryMessage(m, tab.Messages);
             if (channelNote) replayed.FromId = GeofenceNoteLabel;
-            tab.Messages.Add(replayed);
+            // Two stored packets, one beacon — combined on replay as they were
+            // when they arrived, or a restart would split them again.
+            if (!TryCombineSplitBeacon(tab.Messages, replayed)) tab.Messages.Add(replayed);
         }
         foreach (var (tab, reactions) in deferred)
             ApplyHistoryReactions(tab.Messages, reactions);
@@ -2090,7 +2092,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             }
             else if (existed)
             {
-                messages.Add(new ChannelMessage
+                var bubble = new ChannelMessage
                 {
                     // Resolved name, not the raw !id — history replay uses
                     // NodeDisplayName, so using the id here is what made a
@@ -2102,7 +2104,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     SnrDb = record.SnrDb,
                     PacketId = header.PacketId,
                     IsIgnoredSender = IsNodeIgnored(header.From),
-                });
+                };
+                // The words half of a split beacon, when an invitation from
+                // this sender is already waiting for them.
+                if (!TryCombineSplitBeacon(messages, bubble)) messages.Add(bubble);
             }
             while (messages.Count > MaxMessagesPerTab) messages.RemoveAt(0); // oldest first now
         }
@@ -2155,7 +2160,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         var tab = ResolveChannelTab(record.Channel, source);
         if (tab is null) return;
 
-        tab.Messages.Add(BuildBeaconMessage(record, beacon, ListNameFor(source), NodeDisplayName(header.From)));
+        var bubble = BuildBeaconMessage(record, beacon, ListNameFor(source), NodeDisplayName(header.From));
+        // The other half may already be on the tab, in which case this is not
+        // a second bubble but the rest of that one.
+        if (!TryCombineSplitBeacon(tab.Messages, bubble)) tab.Messages.Add(bubble);
         while (tab.Messages.Count > MaxMessagesPerTab) tab.Messages.RemoveAt(0);
         MarkTabNeedsAttention(tab);
     }
@@ -2169,15 +2177,98 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             Timestamp = record.RxTime,
             FromId = senderName,
             SenderNodeNum = record.FromNode,
-            // A beacon may carry an offer and no words at all, and an empty
-            // bubble would say less than the port it arrived on.
-            Text = beacon.Message.Length > 0 ? beacon.Message : "(beacon)",
+            IsBeacon = true,
+            // A beacon may carry an offer and no words at all, and then the
+            // invitation is the whole bubble.
+            Text = beacon.Message,
             RssiDbm = record.RssiDbfs,
             SnrDb = record.SnrDb,
             PacketId = record.PacketId,
             IsIgnoredSender = IsNodeIgnored(record.FromNode),
             Offer = beacon.HasOffer ? BuildBeaconOffer(beacon, heardOnList) : null,
         };
+
+    /// <summary>
+    /// How far apart the two halves of a split beacon may arrive and still be
+    /// one thing. Firmware sends them back to back, but each waits for a clear
+    /// channel of its own, so they are not simultaneous.
+    /// </summary>
+    private static readonly TimeSpan SplitBeaconWindow = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Folds the two packets of a split beacon into one bubble, if the one
+    /// arriving is the other half of one already shown. Returns true when it
+    /// did, meaning the caller has nothing left to add.
+    /// </summary>
+    /// <remarks>
+    /// Firmware's FLAG_LEGACY_SPLIT sends a beacon carrying both words and an
+    /// invitation as two packets — a MESH_BEACON_APP with the offer alone and
+    /// a TEXT_MESSAGE_APP with the words alone — so that nodes which decode
+    /// only text still get the words. Shown as they arrive that is two bubbles
+    /// for one beacon, the invitation orphaned from the sentence that explains
+    /// it.
+    ///
+    /// Either half may arrive first, so both directions are handled. The
+    /// earlier bubble is replaced in place rather than mutated: a message is
+    /// immutable once shown, and replacing at the same index keeps it where
+    /// the reader last saw it.
+    /// </remarks>
+    public static bool TryCombineSplitBeacon(IList<ChannelMessage> messages, ChannelMessage arriving)
+    {
+        // Only the two shapes the split produces: an invitation with no words,
+        // or words with no invitation. A beacon that carried both in one
+        // packet is already whole and merges with nothing.
+        bool arrivingIsOffer = arriving.IsBeacon && arriving.HasOffer && !arriving.HasText;
+        bool arrivingIsWords = !arriving.IsBeacon && arriving.HasText && !arriving.HasOffer;
+        if (!arrivingIsOffer && !arrivingIsWords) return false;
+
+        // Recent, from the same node, and the half this one is missing. Only a
+        // few back: the two halves arrive together, and reaching further would
+        // start attaching invitations to unrelated conversation.
+        for (int i = messages.Count - 1, seen = 0; i >= 0 && seen < 8; i--, seen++)
+        {
+            var earlier = messages[i];
+            if (earlier.SenderNodeNum != arriving.SenderNodeNum) continue;
+            if (arriving.Timestamp - earlier.Timestamp > SplitBeaconWindow) break;
+
+            bool earlierIsWords = !earlier.IsBeacon && earlier.HasText && !earlier.HasOffer;
+            bool earlierIsOffer = earlier.IsBeacon && earlier.HasOffer && !earlier.HasText;
+
+            if (arrivingIsOffer && earlierIsWords)
+            {
+                messages[i] = CombinedBeacon(words: earlier, offer: arriving);
+                return true;
+            }
+            if (arrivingIsWords && earlierIsOffer)
+            {
+                messages[i] = CombinedBeacon(words: arriving, offer: earlier);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// One bubble from the two halves: the words, the invitation, and the
+    /// earlier of the two timestamps so it stays where it was in the
+    /// conversation.
+    /// </summary>
+    private static ChannelMessage CombinedBeacon(ChannelMessage words, ChannelMessage offer) => new()
+    {
+        Timestamp = words.Timestamp <= offer.Timestamp ? words.Timestamp : offer.Timestamp,
+        FromId = words.FromId,
+        SenderNodeNum = words.SenderNodeNum,
+        Text = words.Text,
+        IsBeacon = true,
+        Offer = offer.Offer,
+        // The words are the half a reply or a reaction can target, so its
+        // packet id is the one worth keeping.
+        PacketId = words.PacketId,
+        RssiDbm = words.RssiDbm ?? offer.RssiDbm,
+        SnrDb = words.SnrDb ?? offer.SnrDb,
+        IsOutgoing = words.IsOutgoing,
+        IsIgnoredSender = words.IsIgnoredSender,
+    };
 
     /// <summary>
     /// Files a beacon this station sent into the channel it went out on, and

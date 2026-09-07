@@ -97,10 +97,15 @@
                                      reach the Border, so it carries the menu itself —
                                      this is the part of the bubble people actually
                                      right-click. -->
+                                <!-- Hidden when there is nothing to say: a
+                                     beacon can carry an invitation and no
+                                     words, and an empty line above the card
+                                     would be a gap with nothing in it. -->
                                 <SelectableTextBlock local:MarkdownText.Text="{Binding DisplayText}"
                                                      local:MarkdownText.Suffix="{Binding DeliveryGlyph}"
                                                      local:MarkdownText.SuffixBrush="{Binding Delivery, Converter={StaticResource DeliveryMarkForeground}}"
                                                      Margin="0,2,0,0"
+                                                     IsVisible="{Binding HasText}"
                                                      FontSize="13" TextWrapping="Wrap"
                                                      ContextMenu="{DynamicResource MessageContextMenu}" />
                                 <!-- A beacon advertises a mesh: the channel it is
