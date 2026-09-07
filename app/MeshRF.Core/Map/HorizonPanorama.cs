@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 namespace MeshRF.Map;
 
+/// <summary>One edge of ground standing against whatever lies behind it: a
+/// ridge crest, as seen from the antenna. Everything short of it in that
+/// direction is lower, and the ground immediately beyond it is hidden.
+/// </summary>
+public readonly record struct HorizonCrest(
+    double ElevationAngleDeg,
+    double DistanceM,
+    double GroundM);
+
 /// <summary>The skyline in one direction: how far above (or below) horizontal
 /// the highest ground in that direction sits, and which ground that is.
 ///
@@ -8,11 +17,18 @@ namespace MeshRF.Map;
 /// defines the skyline from two hundred metres away can be beaten by raising
 /// the antenna a few metres; one at twenty kilometres cannot be beaten at all.
 /// </summary>
+/// <param name="Crests">Every crest along this bearing, nearest first and so
+/// in rising order of angle. The last is the skyline this point reports; the
+/// ones before it are the ridges standing in front of it, each hiding the
+/// ground behind it. That is what gives the panorama its depth: one skyline
+/// says how high the ground stands, a stack of crests says how many ridges
+/// deep the country is.</param>
 public readonly record struct HorizonPoint(
     double BearingDegrees,
     double ElevationAngleDeg,
     double DistanceM,
-    double GroundM);
+    double GroundM,
+    IReadOnlyList<HorizonCrest> Crests);
 
 /// <summary>A full turn of skyline as seen from one antenna.</summary>
 public sealed record HorizonProfile(
@@ -115,6 +131,14 @@ public static class HorizonPanorama
             double bestDistance = options.RadiusM;
             double bestGround = centreGround;
 
+            // Every ridge that stood as the skyline for a while and was then
+            // overtopped by something further out. Walking outwards, the
+            // running maximum is the skyline so far; the moment lower ground
+            // follows it, whatever raised it last is an edge seen against the
+            // country beyond, and worth keeping.
+            var crests = new List<HorizonCrest>();
+            bool standing = false;
+
             for (int k = 1; k <= options.SamplesPerBearing; k++)
             {
                 double distance = k * spacing;
@@ -122,17 +146,33 @@ public static class HorizonPanorama
                 if (terrain.ElevationAt(at.Lat, at.Lon) is not double ground) break;
 
                 double angle = ElevationAngleDeg(observerM, ground, distance, effectiveRadius);
-                if (angle <= bestAngle) continue;
+                if (angle <= bestAngle)
+                {
+                    if (standing)
+                    {
+                        crests.Add(new HorizonCrest(bestAngle, bestDistance, bestGround));
+                        standing = false;
+                    }
+                    continue;
+                }
 
                 bestAngle = angle;
                 bestDistance = distance;
                 bestGround = ground;
+                standing = true;
             }
 
             if (double.IsNegativeInfinity(bestAngle))
                 bestAngle = ElevationAngleDeg(observerM, centreGround, options.RadiusM, effectiveRadius);
 
-            points[bearingIndex] = new HorizonPoint(bearing, bestAngle, bestDistance, bestGround);
+            // The sweep ended on rising ground, or on the edge of the data, so
+            // the skyline itself is not in the list yet. Every bearing ends on
+            // a crest, and it is always the skyline.
+            if (standing || crests.Count == 0)
+                crests.Add(new HorizonCrest(bestAngle, bestDistance, bestGround));
+
+            points[bearingIndex] = new HorizonPoint(
+                bearing, bestAngle, bestDistance, bestGround, crests);
         });
 
         return new HorizonProfile(options.Centre, observerM, options.RadiusM, spacing, points);

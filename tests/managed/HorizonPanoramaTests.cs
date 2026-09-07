@@ -154,6 +154,69 @@ public class HorizonPanoramaTests
             HorizonPanorama.Build(new FlatGround(200), Options() with { RadiusM = 0 }));
     }
 
+    // -- Depth --------------------------------------------------------------
+
+    /// <summary>A low bank close in with a taller ridge five kilometres behind
+    /// it, both across the eastern quadrant: the same direction at two
+    /// distances.</summary>
+    private sealed class RidgeBehindRidge : IElevationSource
+    {
+        public double? ElevationAt(double lat, double lon)
+        {
+            var here = new GeoPoint(lat, lon);
+            double bearing = HorizonPanorama.BearingDeg(Centre, here);
+            if (bearing is < 60 or > 120) return 200;
+
+            double range = Geodesy.DistanceM(Centre, here);
+            if (Math.Abs(range - 1000) < 150) return 260;
+            if (Math.Abs(range - 5000) < 300) return 600;
+            return 200;
+        }
+    }
+
+    [Fact]
+    public void ARidgeInFrontOfTheSkylineIsKeptAsACrestOfItsOwn()
+    {
+        // What gives the drawn panorama its depth. The near bank is not the
+        // skyline — the ridge behind it is — but it is what the station
+        // actually looks over, and a profile that only kept the skyline would
+        // put the whole eastern quadrant five kilometres away.
+        var profile = HorizonPanorama.Build(new RidgeBehindRidge(), Options())!;
+        var east = profile.Points.First(p => p.BearingDegrees is > 85 and < 95);
+
+        Assert.Equal(2, east.Crests.Count);
+        Assert.InRange(east.Crests[0].DistanceM, 800, 1200);
+        Assert.InRange(east.Crests[1].DistanceM, 4500, 5400);
+        Assert.True(east.Crests[0].ElevationAngleDeg < east.Crests[1].ElevationAngleDeg,
+            $"the near bank {east.Crests[0].ElevationAngleDeg:F2}° should stand under " +
+            $"the ridge behind it {east.Crests[1].ElevationAngleDeg:F2}°");
+    }
+
+    [Fact]
+    public void TheSkylineIsTheLastCrestOnEveryBearing()
+    {
+        var profile = HorizonPanorama.Build(new RidgeBehindRidge(), Options())!;
+
+        Assert.All(profile.Points, p =>
+        {
+            Assert.NotEmpty(p.Crests);
+            Assert.Equal(p.ElevationAngleDeg, p.Crests[^1].ElevationAngleDeg, 9);
+            Assert.Equal(p.DistanceM, p.Crests[^1].DistanceM, 6);
+            Assert.Equal(p.GroundM, p.Crests[^1].GroundM, 6);
+        });
+    }
+
+    [Fact]
+    public void OpenGroundStandsInOneCrestOnly()
+    {
+        // Nothing stands in front of anything, so there is one edge to draw:
+        // the station's own horizon. A sweep that reported more would be
+        // reading noise as ridges.
+        var profile = HorizonPanorama.Build(new FlatGround(200), Options())!;
+
+        Assert.All(profile.Points, p => Assert.Single(p.Crests));
+    }
+
     // -- Placing nodes against the skyline ----------------------------------
 
     private static GeoPoint At(double bearing, double metres) =>

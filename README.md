@@ -330,10 +330,11 @@ and building-attenuation figures are all its work.
   decoding — which also shows the coverage islands past an obstruction that a
   single ring edge will not claim. Bounded by the range the calibration has
   evidence for, rather than extrapolated past it.
-- **Horizon panorama**: the 360° skyline from the antenna, shaded by how far
-  away the ground defining it is, with every positioned node plotted where it
-  would appear against it. Geometry only, and the answer to how much mast a
-  hidden neighbour would take.
+- **Horizon panorama**: the 360° skyline from the antenna, drawn ridge behind
+  ridge and shaded by how far away the ground making each one is, with every
+  positioned node plotted where it would appear against it. Drag it to turn and
+  scroll to zoom in on one part of the sky. Geometry only, and the answer to how
+  much mast a hidden neighbour would take.
 - **Survey recording** writes every directly-heard packet to a CSV with the
   station's position at the time, which turns a client with a GPS into the
   survey instrument the fit needs. Readings are binned per peer per range and

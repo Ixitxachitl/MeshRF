@@ -2,20 +2,28 @@
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using MeshRF.Map;
 
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
-/// The skyline as it would look from the antenna: a full turn of compass across
-/// the width, elevation angle up the side, with the nodes plotted where they
-/// would appear against it.
+/// The skyline as it would look from the antenna: compass across the width,
+/// elevation angle up the side, with the nodes plotted where they would appear
+/// against it.
 ///
-/// The silhouette is shaded by how far away the ground defining it is — near
-/// ground light and warm, distant ground dark and cool, the way haze does it in
-/// a photograph. That is the difference between a ridge worth raising a mast
-/// over and a mountain range twenty kilometres off that no mast will beat.
+/// Drawn in depth. Each bearing carries not just the skyline but every ridge
+/// standing in front of it, and each of those is painted as its own band,
+/// shaded by how far away the ground defining it is — near ground light and
+/// warm, distant ground dark and cool, the way haze does it in a photograph.
+/// So the country reads as ridge behind ridge rather than as one cut-out, and
+/// a glance says whether the thing on the skyline is a bank at the end of the
+/// street or a mountain range twenty kilometres off that no mast will beat.
+///
+/// The view turns by dragging and narrows with the wheel, because a whole turn
+/// across one chart is two thirds of a degree per pixel: enough to see that a
+/// ridge is there, not enough to see which node it hides.
 /// </summary>
 public sealed class HorizonChart : Control
 {
@@ -33,15 +41,46 @@ public sealed class HorizonChart : Control
     private static readonly IBrush LabelBackground = new SolidColorBrush(Color.Parse("#B0202020"));
 
     private static readonly Typeface LabelTypeface = new(FontFamily.Default);
+    private static readonly Cursor TurnCursor = new(StandardCursorType.SizeWestEast);
+
+    private static readonly string[] CompassPoints =
+        ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+         "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
     private const double LeftPad = 46;
     private const double RightPad = 12;
     private const double TopPad = 10;
     private const double BottomPad = 26;
 
+    /// <summary>The narrowest view on offer: about what an eye takes in at
+    /// once. Closer than this the sweep's own bearings are further apart than
+    /// the pixels between them, and the panorama would be drawing detail it
+    /// never measured.</summary>
+    private const double MinSpanDeg = 45;
+
     private HorizonProfile? _profile;
     private IReadOnlyList<HorizonTarget> _targets = [];
     private UnitSystem _units = UnitSystem.Metric;
+
+    private double _centreBearing = 180;
+    private double _spanDeg = 360;
+    private bool _turned;
+    private bool _dragging;
+    private double _lastX;
+
+    public HorizonChart()
+    {
+        Focusable = true;
+        ClipToBounds = true;
+        Cursor = TurnCursor;
+    }
+
+    /// <summary>Which bearing sits in the middle of the view, and how much of
+    /// the turn is across it. Read by the tests, which have no other way to say
+    /// that a drag turned the panorama.</summary>
+    public double CentreBearing => _centreBearing;
+
+    public double SpanDegrees => _spanDeg;
 
     public void Show(HorizonProfile? profile, IReadOnlyList<HorizonTarget> targets, UnitSystem units)
     {
@@ -51,18 +90,36 @@ public sealed class HorizonChart : Control
         InvalidateVisual();
     }
 
+    /// <summary>Back to the whole turn, north at both edges.</summary>
+    public void ResetView()
+    {
+        _centreBearing = 180;
+        _spanDeg = 360;
+        _turned = false;
+        InvalidateVisual();
+    }
+
     public override void Render(DrawingContext context)
     {
+        // A control is only under the pointer where it has drawn something, and
+        // most of this one is sky. Without a fill over the whole of it, a drag
+        // starting anywhere above the skyline lands on nothing and the panorama
+        // refuses to turn.
+        context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
+
         if (_profile is not { Points.Count: > 2 } profile) return;
 
-        double w = Bounds.Width, h = Bounds.Height;
-        double plotW = w - LeftPad - RightPad;
-        double plotH = h - TopPad - BottomPad;
+        double plotW = Bounds.Width - LeftPad - RightPad;
+        double plotH = Bounds.Height - TopPad - BottomPad;
         if (plotW <= 4 || plotH <= 4) return;
 
         // Horizontal is always on the chart: it is the line everything is read
         // against, and a skyline entirely below it still has to show how far
         // below.
+        //
+        // The angle range comes from the whole turn rather than from what is on
+        // screen, so turning slides the picture sideways instead of rescaling it
+        // under the pointer.
         double minAngle = 0, maxAngle = 0;
         foreach (var p in profile.Points)
         {
@@ -79,37 +136,78 @@ public sealed class HorizonChart : Control
         minAngle -= pad;
         maxAngle += pad;
 
-        double X(double bearing) => LeftPad + bearing / 360.0 * plotW;
+        double X(double offset) => LeftPad + (offset / _spanDeg + 0.5) * plotW;
         double Y(double angle) => TopPad + (1.0 - (angle - minAngle) / (maxAngle - minAngle)) * plotH;
 
-        DrawGrid(context, minAngle, maxAngle, plotW, plotH, X, Y);
-        DrawSkyline(context, profile, plotW, plotH, X, Y);
+        DrawGrid(context, minAngle, maxAngle, plotW, plotH, Y);
 
-        double horizontal = Y(0);
-        context.DrawLine(HorizontalPen, new Point(LeftPad, horizontal), new Point(LeftPad + plotW, horizontal));
+        // Half a column of slack past each edge, so a column straddling an edge
+        // is painted rather than dropped and left as a gutter of background.
+        double half = _spanDeg / 2 + 360.0 / profile.Points.Count;
+        var visible = profile.Points
+            .Select(p => (Point: p, Offset: Offset(p.BearingDegrees)))
+            .Where(p => Math.Abs(p.Offset) <= half)
+            .OrderBy(p => p.Offset)
+            .ToList();
 
-        DrawTargets(context, X, Y);
+        using (context.PushClip(new Rect(LeftPad, TopPad, plotW, plotH)))
+        {
+            DrawSkyline(context, profile, visible, plotW, plotH, X, Y);
+
+            double horizontal = Y(0);
+            context.DrawLine(HorizontalPen, new Point(LeftPad, horizontal),
+                             new Point(LeftPad + plotW, horizontal));
+
+            DrawTargets(context, X, Y);
+            DrawDepthKey(context, profile, plotW);
+            DrawViewNote(context);
+        }
     }
 
-    /// <summary>The silhouette, as one filled column per bearing so each can
-    /// carry the colour of the ground that made it. A polygon could not: the
-    /// distance changes from bearing to bearing, and that is the information
-    /// worth showing.</summary>
+    /// <summary>The silhouette, as one column per bearing built out of the
+    /// crests along it: the band under the nearest crest carries the colour of
+    /// the ground that made it, the band above it the colour of whatever stands
+    /// behind that, and so on up to the skyline. A single polygon could say none
+    /// of it — it would flatten a garden wall and the range behind it into one
+    /// shape at one distance.</summary>
     private void DrawSkyline(
-        DrawingContext context, HorizonProfile profile, double plotW, double plotH,
-        Func<double, double> x, Func<double, double> y)
+        DrawingContext context, HorizonProfile profile,
+        List<(HorizonPoint Point, double Offset)> visible,
+        double plotW, double plotH, Func<double, double> x, Func<double, double> y)
     {
+        if (visible.Count == 0) return;
+
         double floor = TopPad + plotH;
-        double columnWidth = plotW / profile.Points.Count + 0.75; // overlap, so no seams show
+        double columnWidth = 360.0 / profile.Points.Count / _spanDeg * plotW + 0.75; // overlap, so no seams show
 
-        foreach (var point in profile.Points)
+        foreach (var (point, offset) in visible)
         {
-            double left = x(point.BearingDegrees);
-            double top = Math.Clamp(y(point.ElevationAngleDeg), TopPad, floor);
+            double left = x(offset) - columnWidth / 2;
+            double bottom = floor;
 
-            context.FillRectangle(
-                new SolidColorBrush(GroundColour(point.DistanceM, profile.RadiusM)),
-                new Rect(left, top, columnWidth, floor - top));
+            var crests = point.Crests;
+            for (int i = 0; i < crests.Count; i++)
+            {
+                bool skyline = i == crests.Count - 1;
+                double top = Math.Clamp(y(crests[i].ElevationAngleDeg), TopPad, floor);
+
+                // A band too thin to read is left to the one above it: drawn, it
+                // is a stripe of the wrong colour rather than a ridge.
+                if (top >= bottom || (!skyline && bottom - top < 1.5)) continue;
+
+                var colour = GroundColour(crests[i].DistanceM, profile.RadiusM);
+                context.FillRectangle(new SolidColorBrush(colour),
+                                      new Rect(left, top, columnWidth, bottom - top));
+
+                // The near ridge's own edge, catching the light. Without it a
+                // band reads as the shading changing its mind rather than as
+                // ground ending and further ground standing behind it.
+                if (!skyline)
+                    context.FillRectangle(new SolidColorBrush(Rim(colour)),
+                                          new Rect(left, top, columnWidth, 1));
+
+                bottom = top;
+            }
         }
 
         // The skyline itself over the top of the shading, so the profile reads
@@ -117,10 +215,10 @@ public sealed class HorizonChart : Control
         var edge = new StreamGeometry();
         using (var ctx = edge.Open())
         {
-            ctx.BeginFigure(new Point(x(0), y(profile.Points[0].ElevationAngleDeg)), isFilled: false);
-            foreach (var point in profile.Points)
-                ctx.LineTo(new Point(x(point.BearingDegrees), y(point.ElevationAngleDeg)));
-            ctx.LineTo(new Point(x(360), y(profile.Points[0].ElevationAngleDeg)));
+            ctx.BeginFigure(
+                new Point(x(visible[0].Offset), y(visible[0].Point.ElevationAngleDeg)), isFilled: false);
+            foreach (var (point, offset) in visible)
+                ctx.LineTo(new Point(x(offset), y(point.ElevationAngleDeg)));
             ctx.EndFigure(false);
         }
         context.DrawGeometry(null, SkylinePen, edge);
@@ -142,6 +240,13 @@ public sealed class HorizonChart : Control
             (byte)(NearGround.B + (FarGround.B - NearGround.B) * t));
     }
 
+    /// <summary>A crest lit against the ground behind it: its own colour, a
+    /// shade brighter.</summary>
+    private static Color Rim(Color ground) => Color.FromRgb(
+        (byte)Math.Min(255, ground.R + 30),
+        (byte)Math.Min(255, ground.G + 30),
+        (byte)Math.Min(255, ground.B + 27));
+
     /// <summary>Nodes where they would appear against the skyline. Labels are
     /// dropped rather than overlapped: a stack of unreadable names says less
     /// than a few readable ones over a row of dots.</summary>
@@ -149,9 +254,14 @@ public sealed class HorizonChart : Control
     {
         double lastLabelRight = double.NegativeInfinity;
 
-        foreach (var target in _targets.OrderBy(t => t.BearingDegrees))
+        var onScreen = _targets
+            .Select(t => (Target: t, Offset: Offset(t.BearingDegrees)))
+            .Where(t => Math.Abs(t.Offset) <= _spanDeg / 2)
+            .OrderBy(t => t.Offset);
+
+        foreach (var (target, offset) in onScreen)
         {
-            double px = x(target.BearingDegrees);
+            double px = x(offset);
             double py = y(target.ElevationAngleDeg);
             var fill = target.IsVisible ? VisibleFill : HiddenFill;
 
@@ -170,9 +280,62 @@ public sealed class HorizonChart : Control
         }
     }
 
+    /// <summary>What the shading means, in the units the app is set to. The
+    /// depth is the whole point of the drawing, and nothing else on the chart
+    /// says that the dark ground is the far ground.</summary>
+    private void DrawDepthKey(DrawingContext context, HorizonProfile profile, double plotW)
+    {
+        const double barW = 76, barH = 6;
+        if (plotW < 340) return;
+
+        var near = new FormattedText("near", CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                                     LabelTypeface, 10, AxisText);
+        var far = new FormattedText(DisplayUnits.FormatShortDistance(profile.RadiusM, _units),
+                                    CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                                    LabelTypeface, 10, AxisText);
+
+        double width = near.Width + 5 + barW + 5 + far.Width;
+        double left = LeftPad + plotW - 8 - width;
+        double top = TopPad + 5;
+
+        context.FillRectangle(LabelBackground,
+                              new Rect(left - 5, top - 3, width + 10, near.Height + 6));
+        context.DrawText(near, new Point(left, top));
+        context.FillRectangle(
+            new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+                GradientStops =
+                {
+                    new GradientStop(NearGround, 0),
+                    new GradientStop(FarGround, 1),
+                },
+            },
+            new Rect(left + near.Width + 5, top + (near.Height - barH) / 2, barW, barH));
+        context.DrawText(far, new Point(left + near.Width + 5 + barW + 5, top));
+    }
+
+    /// <summary>How to turn the panorama, until someone has — and once they
+    /// have, where it is pointing, which the compass alone no longer says at a
+    /// glance when the view is a narrow slice of the turn.</summary>
+    private void DrawViewNote(DrawingContext context)
+    {
+        string note = _turned
+            ? $"looking {CompassName(_centreBearing)} · {_spanDeg:0}° across · double-click to reset"
+            : "drag to turn · scroll to zoom";
+
+        var text = new FormattedText(note, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                                     LabelTypeface, 10, AxisText);
+
+        context.FillRectangle(LabelBackground,
+                              new Rect(LeftPad + 3, TopPad + 2, text.Width + 10, text.Height + 6));
+        context.DrawText(text, new Point(LeftPad + 8, TopPad + 5));
+    }
+
     private void DrawGrid(
         DrawingContext context, double minAngle, double maxAngle, double plotW, double plotH,
-        Func<double, double> x, Func<double, double> y)
+        Func<double, double> y)
     {
         double floor = TopPad + plotH;
         context.DrawLine(AxisPen, new Point(LeftPad, TopPad), new Point(LeftPad, floor));
@@ -189,20 +352,125 @@ public sealed class HorizonChart : Control
             context.DrawText(text, new Point(LeftPad - 5 - text.Width, py - text.Height / 2));
         }
 
-        // The compass, in the points a person would actually say.
-        (double Bearing, string Name)[] compass =
-        [
-            (0, "N"), (45, "NE"), (90, "E"), (135, "SE"),
-            (180, "S"), (225, "SW"), (270, "W"), (315, "NW"), (360, "N"),
-        ];
+        // The compass, as finely as the view is worth marking: the eight points
+        // a person would say across the whole turn, degrees between them once it
+        // is narrow enough for the difference to be visible.
+        double step = _spanDeg switch { <= 30 => 5, <= 60 => 10, <= 120 => 15, <= 240 => 30, _ => 45 };
+        double leftEdge = _centreBearing - _spanDeg / 2;
 
-        foreach (var (bearing, name) in compass)
+        for (double b = Math.Ceiling(leftEdge / step) * step; b <= leftEdge + _spanDeg + 1e-9; b += step)
         {
-            double px = x(bearing);
+            double px = LeftPad + ((b - _centreBearing) / _spanDeg + 0.5) * plotW;
+            double bearing = Normalise(b);
+            bool named = Math.Abs(bearing % 45) < 1e-6;
+
             context.DrawLine(GridPen, new Point(px, TopPad), new Point(px, floor));
-            var text = new FormattedText(name, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                                         LabelTypeface, 11, AxisText);
+            var text = new FormattedText(
+                named ? CompassPoints[(int)Math.Round(bearing / 22.5) % CompassPoints.Length]
+                      : $"{bearing:0}°",
+                CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                LabelTypeface, named ? 11 : 9.5, AxisText);
             context.DrawText(text, new Point(px - text.Width / 2, floor + 4));
         }
+    }
+
+    // -- Turning the view ---------------------------------------------------
+
+    /// <summary>Where a bearing falls relative to the middle of the view, in
+    /// degrees either side of it. Wrapped, so the seam of the turn is wherever
+    /// the view has put it rather than always at north.</summary>
+    private double Offset(double bearing) => ((bearing - _centreBearing + 540) % 360) - 180;
+
+    private static double Normalise(double bearing) => ((bearing % 360) + 360) % 360;
+
+    private static string CompassName(double bearing) =>
+        $"{CompassPoints[(int)Math.Round(Normalise(bearing) / 22.5) % CompassPoints.Length]} " +
+        $"{Normalise(bearing):0}°";
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        Focus();
+
+        // A double-click is the way back to the whole turn from wherever the
+        // view has been dragged and zoomed to.
+        if (e.ClickCount == 2)
+        {
+            ResetView();
+            e.Handled = true;
+            return;
+        }
+
+        _dragging = true;
+        _lastX = e.GetPosition(this).X;
+        e.Pointer.Capture(this);
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (!_dragging) return;
+
+        double plotW = Bounds.Width - LeftPad - RightPad;
+        double x = e.GetPosition(this).X;
+        double dx = x - _lastX;
+        if (plotW <= 4 || dx == 0) return;
+        _lastX = x;
+
+        // The country follows the pointer, as if the drag had hold of it.
+        Turn(-dx / plotW * _spanDeg);
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (!_dragging) return;
+        _dragging = false;
+        e.Pointer.Capture(null);
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+
+        double plotW = Bounds.Width - LeftPad - RightPad;
+        if (plotW <= 4 || e.Delta.Y == 0) return;
+
+        // Zoom about the pointer: the bearing under it is the one being looked
+        // at, and it should stay where it is rather than slide out of the view.
+        double fraction = (e.GetPosition(this).X - LeftPad) / plotW - 0.5;
+        double under = _centreBearing + fraction * _spanDeg;
+
+        // Clamped notches: a trackpad can report a whole screenful of scroll in
+        // one event, which would go from the turn to the narrowest view and back
+        // faster than anyone could follow.
+        _spanDeg = Math.Clamp(
+            _spanDeg * Math.Pow(1 / 1.3, Math.Clamp(e.Delta.Y, -3, 3)), MinSpanDeg, 360);
+        _centreBearing = Normalise(under - fraction * _spanDeg);
+        _turned = true;
+        InvalidateVisual();
+        e.Handled = true;
+    }
+
+    /// <summary>Arrow keys turn the view a twelfth of what is on screen, which
+    /// is a step at any zoom. Home puts it back.</summary>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        switch (e.Key)
+        {
+            case Key.Left: Turn(-_spanDeg / 12); break;
+            case Key.Right: Turn(_spanDeg / 12); break;
+            case Key.Home: ResetView(); break;
+            default: return;
+        }
+        e.Handled = true;
+    }
+
+    private void Turn(double degrees)
+    {
+        _centreBearing = Normalise(_centreBearing + degrees);
+        _turned = true;
+        InvalidateVisual();
     }
 }

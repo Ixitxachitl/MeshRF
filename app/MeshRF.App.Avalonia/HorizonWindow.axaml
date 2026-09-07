@@ -103,7 +103,7 @@
                 <TextBlock Grid.Row="6" Grid.ColumnSpan="2" FontSize="10" TextWrapping="Wrap"
                            VerticalAlignment="Top"
                            Foreground="{DynamicResource BrushSubtle}"
-                           Text="The silhouette is the ground standing around you, shaded light where it is close and dark where it is distant — a pale ridge is one a taller mast can beat. The dashed line is horizontal. Dots are nodes: green where the ground leaves a clear sight of them, red where a ridge is in the way.&#10;&#10;Geometry only. A node in plain sight can still be out of radio range, and one just under the skyline may still be heard by diffraction." />
+                           Text="The silhouette is the ground standing around you, ridge behind ridge. Each band is shaded by how far off the ground that made it is — light and warm close by, dark and cool in the distance — so a pale ridge is one a taller mast can beat, and a dark one is a range no mast will. The dashed line is horizontal. Dots are nodes: green where the ground leaves a clear sight of them, red where a ridge is in the way.&#10;&#10;Drag the panorama to turn it and scroll to zoom in on one part of the sky; double-click to go back to the whole turn.&#10;&#10;Geometry only. A node in plain sight can still be out of radio range, and one just under the skyline may still be heard by diffraction." />
 
                 <TextBlock Grid.Row="7" Grid.ColumnSpan="2" x:Name="AttributionText"
                            FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"

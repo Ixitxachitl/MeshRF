@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia;
+using Avalonia.Headless;
+using Avalonia.Input;
 using MeshRF.AvaloniaApp;
 using MeshRF.Map;
 using MeshRF.Mesh;
@@ -222,5 +224,143 @@ public class ChartRenderTests(HeadlessAvalonia ui) : RenderTest(ui)
 
         int horizontal = Rendered.Draw(chart, W, H).CountNear("#4FC3F7", tolerance: 40, within: Plot);
         Assert.True(horizontal > 100, $"no horizontal reference line ({horizontal} px)");
+    });
+
+    // -- Horizon: depth, and turning the view -------------------------------
+
+    /// <summary>A low bank a few hundred metres out with a taller ridge five
+    /// kilometres behind it, both across the east: one direction at two
+    /// distances, which is the whole of what depth has to show.</summary>
+    private sealed class RidgeBehindRidge(GeoPoint centre) : IElevationSource
+    {
+        public double? ElevationAt(double lat, double lon)
+        {
+            var here = new GeoPoint(lat, lon);
+            double bearing = HorizonPanorama.BearingDeg(centre, here);
+            if (Math.Abs(((bearing - 90 + 540) % 360) - 180) > 40) return 240;
+
+            double range = Geodesy.DistanceM(centre, here);
+            if (Math.Abs(range - 700) < 120) return 300;
+            if (Math.Abs(range - 5000) < 400) return 700;
+            return 240;
+        }
+    }
+
+    private static HorizonProfile EastwardRidges()
+    {
+        var centre = new GeoPoint(44.9778, -93.2650);
+        return HorizonPanorama.Build(
+            new RidgeBehindRidge(centre),
+            new HorizonOptions(centre, 10, 8000, Bearings: 360, SamplesPerBearing: 200))!;
+    }
+
+    private static int Ink((byte R, byte G, byte B) p) => p.R + p.G + p.B;
+
+    [Fact]
+    public void ANearBankAndTheRidgeBehindItAreShadedApart() => Ui(() =>
+    {
+        // Both are in the same direction, so a chart that kept only the skyline
+        // draws one shape at one distance and says the eastern quadrant is five
+        // kilometres off. The bank is what the station actually looks over.
+        var chart = new HorizonChart();
+        chart.Show(EastwardRidges(), [], UnitSystem.Metric);
+
+        var image = Rendered.Draw(chart, W, H);
+
+        // Due east: a quarter of the way across a whole turn drawn with north
+        // at both edges.
+        int x = 46 + (int)(0.25 * (W - 46 - 12));
+        int floor = H - 26;
+
+        int skyline = -1;
+        for (int y = 40; y < floor && skyline < 0; y++)
+            if (Ink(image.At(x, y)) > 140) skyline = y;
+        Assert.True(skyline > 0, "nothing drawn in the eastern column");
+
+        var far = image.At(x, skyline + 5);
+        var near = image.At(x, floor - 8);
+
+        Assert.True(far.B > far.R + 4,
+            $"ground five kilometres out should be drawn cool, got {far}");
+        Assert.True(near.R > near.B + 10,
+            $"the bank down the road should be drawn warm, got {near}");
+    });
+
+    /// <summary>Where the mass of high ground sits across the picture. The
+    /// eastern ridges are the only thing drawn this far up, so their mean
+    /// column says which way the panorama is facing — and the corner captions
+    /// sit above the band, out of the reading.</summary>
+    private static double RidgeCentreX(Rendered image)
+    {
+        double sum = 0;
+        int count = 0;
+
+        for (int y = 60; y < 200; y++)
+            for (int x = 47; x < W - 12; x++)
+                if (Ink(image.At(x, y)) > 140) { sum += x; count++; }
+
+        Assert.True(count > 200, $"no high ground to take a bearing from ({count} px)");
+        return sum / count;
+    }
+
+    [Fact]
+    public void DraggingTurnsThePanoramaWithThePointer() => Ui(() =>
+    {
+        var profile = EastwardRidges();
+
+        var still = new HorizonChart();
+        still.Show(profile, [], UnitSystem.Metric);
+        double before = RidgeCentreX(Rendered.Draw(still, W, H));
+
+        var turned = new HorizonChart();
+        turned.Show(profile, [], UnitSystem.Metric);
+        double after = RidgeCentreX(Rendered.Draw(turned, W, H, window =>
+        {
+            window.MouseMove(new Point(500, 300));
+            window.MouseDown(new Point(500, 300), MouseButton.Left);
+            window.MouseMove(new Point(450, 300), RawInputModifiers.LeftMouseButton);
+            window.MouseMove(new Point(400, 300), RawInputModifiers.LeftMouseButton);
+            window.MouseUp(new Point(400, 300), MouseButton.Left);
+        }));
+
+        // A hundred pixels of drag across a plot holding the whole turn is some
+        // forty degrees of it, and the country goes with the pointer rather
+        // than against it.
+        Assert.InRange(turned.CentreBearing, 208, 238);
+        Assert.InRange(before - after, 70, 130);
+    });
+
+    [Fact]
+    public void TheWheelNarrowsTheViewAroundThePointer() => Ui(() =>
+    {
+        var chart = new HorizonChart();
+        chart.Show(EastwardRidges(), [], UnitSystem.Metric);
+
+        // On the middle of the plot, which is the one bearing a zoom must leave
+        // where it is.
+        Rendered.Draw(chart, W, H, window =>
+            window.MouseWheel(new Point(46 + (W - 46 - 12) / 2.0, 300), new Vector(0, 3)));
+
+        Assert.True(chart.SpanDegrees < 200, $"the wheel did not zoom in ({chart.SpanDegrees:F0}°)");
+        Assert.Equal(180, chart.CentreBearing, 1);
+    });
+
+    [Fact]
+    public void ADoubleClickPutsTheWholeTurnBack() => Ui(() =>
+    {
+        var chart = new HorizonChart();
+        chart.Show(EastwardRidges(), [], UnitSystem.Metric);
+
+        Rendered.Draw(chart, W, H, window =>
+        {
+            window.MouseWheel(new Point(300, 300), new Vector(0, 3));
+            window.MouseDown(new Point(300, 300), MouseButton.Left);
+            window.MouseUp(new Point(300, 300), MouseButton.Left);
+            window.MouseDown(new Point(300, 300), MouseButton.Left);
+            window.MouseUp(new Point(300, 300), MouseButton.Left);
+        });
+
+        Assert.Equal(360, chart.SpanDegrees, 1);
+        Assert.Equal(180, chart.CentreBearing, 1);
     });
 }
