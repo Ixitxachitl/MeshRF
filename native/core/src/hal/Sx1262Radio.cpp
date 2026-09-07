@@ -158,7 +158,7 @@ std::unique_ptr<IPacketRadio> open_packet_radio(Sx126xBoard board,
     // armed under a power model nobody chose, and the sticks cannot be
     // distinguished at runtime to choose one safely.
     if (board == Sx126xBoard::Unspecified) {
-        set_status("select which SX1262 board this is â the USB sticks "
+        set_status("select which SX1262 board this is — the USB sticks "
                    "share USB IDs and cannot be told apart, and the wrong one "
                    "misreports transmit power");
         return nullptr;
@@ -192,7 +192,7 @@ std::unique_ptr<IPacketRadio> open_packet_radio(Sx126xBoard board,
     // end at all — and a wrong answer is silent in the worst direction: a
     // MeshToad driven as a MeshStick radiates ~8 dB more than the UI says.
     // Stating the arithmetic on every open is what makes that visible.
-    std::string power = " â up to " + std::to_string(profile.max_out_dbm) + " dBm";
+    std::string power = " — up to " + std::to_string(profile.max_out_dbm) + " dBm";
     if (profile.pa_gain_db != 0)
         power += " (chip " + std::to_string(profile.max_chip_dbm) + " dBm + " +
                  std::to_string(profile.pa_gain_db) + " dB PA)";

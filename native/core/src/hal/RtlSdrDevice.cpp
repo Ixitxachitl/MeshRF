@@ -54,7 +54,7 @@ public:
         const int rc = api_.rtlsdr_open(&dev_, 0);
         if (rc != rtlsdr_dyn::RTLSDR_SUCCESS || !dev_)
             throw std::runtime_error("rtlsdr_open rc=" + std::to_string(rc) +
-                                     " (device busy or WinUSB driver not bound \u2014 run Zadig?)");
+                                     " (device busy or WinUSB driver not bound — run Zadig?)");
         if (const char* ppm = std::getenv("MRF_RTLSDR_PPM");
             ppm && *ppm && api_.rtlsdr_set_freq_correction) {
             api_.rtlsdr_set_freq_correction(dev_, std::atoi(ppm));
@@ -257,7 +257,7 @@ std::unique_ptr<IRadioDevice> open_rtlsdr_device(std::string& status) {
     }
     try {
         auto dev = std::make_unique<RtlSdrDevice>(api, name);
-        status = std::string("RTL-SDR open OK \u2014 ") + rtlsdr_dyn::last_status();
+        status = std::string("RTL-SDR open OK — ") + rtlsdr_dyn::last_status();
         return dev;
     } catch (const std::exception& e) {
         status = std::string("RTL-SDR detected but open failed: ") + e.what() +
