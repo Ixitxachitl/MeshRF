@@ -150,6 +150,14 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         // the primary mesh rather than a mesh of its own.
         Assert.Equal(string.Empty, onPrimary.TabGroup);
         Assert.Equal(nameof(LoraPreset.LongFast), onLongFast.TabGroup);
+
+        // Opening the second one took the strip to its mesh, so it is the
+        // conversation on show and the primary's is the one put away.
+        Assert.Equal(nameof(LoraPreset.LongFast), vm.SelectedTabGroupOption!.Group);
+        Assert.True(onLongFast.IsTabListed);
+        Assert.False(onPrimary.IsTabListed);
+
+        Show(vm, string.Empty);
         Assert.True(onPrimary.IsTabListed);
         Assert.False(onLongFast.IsTabListed);
 
@@ -157,6 +165,37 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Show(vm, nameof(LoraPreset.LongFast));
         Assert.True(onLongFast.IsTabListed);
         Assert.True(vm.Tabs.IndexOf(onLongFast) > vm.Tabs.IndexOf(ChannelsOn(vm, nameof(LoraPreset.LongFast))));
+    }));
+
+    /// <summary>
+    /// Opening a conversation is choosing its mesh. The peer decides which mesh
+    /// it is held over, so opening one from the node list while another mesh is
+    /// on show used to add a tab nobody could see — the click looked like it
+    /// had done nothing at all.
+    /// </summary>
+    [Fact]
+    public void OpeningAConversationOnAnotherMeshTakesTheStripToIt() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+
+        var store = new NodeStore();
+        store.RecordSighting(0x6666u, heardOnPreset: nameof(LoraPreset.LongFast), heardOnFreqMHz: 906.875);
+        store.Dispose();
+
+        Assert.Equal(string.Empty, vm.SelectedTabGroupOption!.Group);
+
+        vm.MessageNodeCommand.Execute(new NodeRecord { NodeNum = 0x6666u });
+
+        var convo = Assert.IsType<ConversationTabViewModel>(vm.SelectedTab);
+        Assert.Equal(0x6666u, convo.NodeNum);
+        Assert.True(convo.IsTabListed);
+        // The mesh tab moves with it, so the row still names the set below it.
+        Assert.Equal(nameof(LoraPreset.LongFast), vm.SelectedTabGroupOption!.Group);
+        Assert.Equal(nameof(LoraPreset.LongFast),
+                     Assert.Single(vm.TabGroupOptions, o => o.IsSelected).Group);
     }));
 
     /// <summary>

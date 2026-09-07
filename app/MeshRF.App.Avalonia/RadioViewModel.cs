@@ -2783,6 +2783,15 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     partial void OnMessageTextChanged(string value) => NotifyComposeBudgetChanged();
     partial void OnSelectedTabChanged(ITabItem? value)
     {
+        // Selecting a tab is choosing its mesh. A conversation is opened by
+        // picking the peer — from the node list, from a message, or restored
+        // from last time — and the peer decides which mesh it is held over, so
+        // the picker follows the tab rather than leaving it hidden behind a
+        // mesh the user would have to go and find. Traffic arriving on another
+        // mesh does not select anything, so it still only lights that mesh up.
+        if (value is not null && _rxHost.ShowGroup(value.TabGroup))
+            RefreshTabGroupOptions();
+
         // Looking at the tab is what marks its activity seen; without this the
         // header would keep pulsing forever once anything arrived.
         if (value is not null) value.TabNeedsAttention = false;
