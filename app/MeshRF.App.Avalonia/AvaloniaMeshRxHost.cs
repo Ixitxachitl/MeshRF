@@ -707,7 +707,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         if (m.PortNum == MessageStore.BeaconPort)
         {
             var beacon = MeshDecoder.ParseBeacon(TryParseHex(m.PayloadHex)) ?? new MeshBeacon();
-            return BuildBeaconMessage(m, beacon, m.Preset, NodeDisplayName(m.FromNode));
+            // Ours or somebody else's, told apart the same way a replayed text
+            // message is: a beacon we sent is one of our own messages and has
+            // to come back looking like one.
+            return BuildBeaconMessage(m, beacon, m.Preset, NodeDisplayName(m.FromNode),
+                                      outgoing: MyNodeNum != 0 && m.FromNode == MyNodeNum);
         }
         return m.ReplyId != 0 ? BuildReplyLinkedMessage(m, existing) : ToChannelMessage(m);
     }
@@ -737,7 +741,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Persist a message we transmitted, so it survives a
     /// restart.</summary>
-    public void PersistOutgoingText(uint to, uint packetId, string text, string channel, uint replyId = 0)
+    /// <param name="preset">The mesh it went out on, so a restart files it
+    /// back onto the tab it was sent from. Without it every outgoing message
+    /// was stored as belonging to no mesh, which put the ones sent on another
+    /// preset's channel onto the primary's tab — or nowhere, when the primary
+    /// had no channel of that name.</param>
+    public void PersistOutgoingText(uint to, uint packetId, string text, string channel, uint replyId = 0,
+                                    string preset = "")
     {
         if (MyNodeNum == 0) return;
         try
@@ -748,6 +758,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 FromNode = MyNodeNum,
                 ToNode = to,
                 Channel = channel ?? string.Empty,
+                Preset = preset ?? string.Empty,
                 PortNum = (int)PortNum.TextMessage,
                 Text = text ?? string.Empty,
                 ReplyId = replyId,
@@ -2149,11 +2160,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         MarkTabNeedsAttention(tab);
     }
 
-    /// <summary>The bubble one beacon becomes, live or replayed.</summary>
+    /// <summary>The bubble one beacon becomes, live, replayed, or our own.</summary>
     private ChannelMessage BuildBeaconMessage(MessageRecord record, MeshBeacon beacon, string heardOnList,
-                                              string senderName) =>
+                                              string senderName, bool outgoing = false) =>
         new()
         {
+            IsOutgoing = outgoing,
             Timestamp = record.RxTime,
             FromId = senderName,
             SenderNodeNum = record.FromNode,
@@ -2166,6 +2178,47 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             IsIgnoredSender = IsNodeIgnored(record.FromNode),
             Offer = beacon.HasOffer ? BuildBeaconOffer(beacon, heardOnList) : null,
         };
+
+    /// <summary>
+    /// Files a beacon this station sent into the channel it went out on, and
+    /// stores it so it replays with the rest of that channel's history.
+    /// </summary>
+    /// <remarks>
+    /// Echoed locally for the same reason an outgoing text message is: the
+    /// router treats hearing our own transmission as isFromUs and drops it, so
+    /// nothing would ever show what we put on the air. A beacon went out
+    /// without a trace anywhere but the log until this existed.
+    /// </remarks>
+    public void ShowOutgoingBeacon(ChannelConfig channel, byte[] payload, uint packetId)
+    {
+        if (MyNodeNum == 0) return;
+        var beacon = MeshDecoder.ParseBeacon(payload);
+        if (beacon is null) return;
+
+        var record = new MessageRecord
+        {
+            PacketId = packetId,
+            FromNode = MyNodeNum,
+            ToNode = 0xFFFFFFFFu,
+            Channel = channel.Name,
+            // The mesh it went out on, so a restart files it back onto the
+            // same tab rather than the first list that shares the name.
+            Preset = channel.Preset,
+            PortNum = (int)PortNum.MeshBeacon,
+            PayloadHex = Convert.ToHexString(payload),
+            Decrypted = true,
+            RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+        };
+        try { _messageStore.Add(record); }
+        catch (Exception ex) { Log($"beacon store failed: {ex.Message}"); }
+
+        var tab = ResolveChannelTabIn(channel.Preset, channel.Name);
+        if (tab is null) return;
+
+        tab.Messages.Add(BuildBeaconMessage(record, beacon, channel.Preset,
+                                            NodeDisplayName(MyNodeNum), outgoing: true));
+        while (tab.Messages.Count > MaxMessagesPerTab) tab.Messages.RemoveAt(0);
+    }
 
     /// <summary>
     /// Resolves an advertised mesh against the channels this station holds.

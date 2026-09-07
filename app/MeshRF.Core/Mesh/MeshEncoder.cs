@@ -597,6 +597,25 @@ public static class MeshEncoder
                                       byte[]? xeddsaPrivateKey = null,
                                       byte[]? xeddsaPublicKey = null)
     {
+        return Encode(channel, from, 0xFFFFFFFFu, packetId, PortNum.MeshBeacon,
+                      BuildBeaconPayload(message, offerChannel, offerPreset, offerRegion),
+                      hopLimit, wantAck: false,
+                      wantResponse: false, okToMqtt: okToMqtt,
+                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
+    }
+
+    /// <summary>
+    /// The MeshBeacon protobuf on its own, without the Data wrapper or the
+    /// encryption. Separate because a beacon this station sends is also filed
+    /// into its channel's history, and history replays a beacon by re-reading
+    /// its stored payload — so the same bytes that went on the air are the
+    /// ones that get stored.
+    /// </summary>
+    public static byte[] BuildBeaconPayload(string? message,
+                                            ChannelConfig? offerChannel = null,
+                                            LoraPreset? offerPreset = null,
+                                            Region offerRegion = Region.UNSET)
+    {
         var beacon = new ProtoWriter();
         // The cap is firmware's, counted in bytes rather than characters, and
         // it is applied here so no path can put an over-long one on the air.
@@ -619,10 +638,7 @@ public static class MeshEncoder
         if (offerPreset is { } preset && TryModemPresetValue(preset, out var presetValue))
             beacon.WriteVarintField(4, presetValue);
 
-        return Encode(channel, from, 0xFFFFFFFFu, packetId, PortNum.MeshBeacon,
-                      beacon.ToArray(), hopLimit, wantAck: false,
-                      wantResponse: false, okToMqtt: okToMqtt,
-                      xeddsaPrivateKey: xeddsaPrivateKey, xeddsaPublicKey: xeddsaPublicKey);
+        return beacon.ToArray();
     }
 
     /// <summary>

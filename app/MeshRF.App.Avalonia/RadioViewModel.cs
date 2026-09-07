@@ -2620,6 +2620,12 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private uint NextPacketId() => (uint)Random.Shared.NextInt64(1, uint.MaxValue);
 
+    /// <summary>Stores an outgoing message the way sending one does. The send
+    /// path itself needs a running receiver, and what it files afterwards is
+    /// worth pinning down without one.</summary>
+    public void PersistOutgoingTextForTest(uint to, uint packetId, string text, string channel, string preset) =>
+        _rxHost.PersistOutgoingText(to, packetId, text, channel, replyId: 0, preset: preset);
+
     /// <summary>Appends a log line from whichever thread the caller is on.
     /// LogLines is bound to the UI, so background callers must be marshalled.</summary>
     private void LogFromAnyThread(string line)
@@ -2867,7 +2873,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // "PKC" is the channel name the router reports for PKC traffic, so
         // history reloads classify these the same way received ones are.
         _rxHost.PersistOutgoingText(to, packetId, text,
-                                    usePkc ? "PKC" : channel!.Name, replyId);
+                                    usePkc ? "PKC" : channel!.Name, replyId,
+                                    preset: channel?.Preset ?? string.Empty);
         return true;
     }
 

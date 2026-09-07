@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
 using System.Globalization;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MeshRF.Channels;
@@ -364,11 +365,13 @@ public partial class RadioViewModel
                 continue;
             }
 
-            var frame = MeshEncoder.EncodeBeacon(channel, _rxHost.MyNodeNum, NextPacketId(),
+            var region = offered is null ? Region.UNSET : SelectedRegion;
+            var packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeBeacon(channel, _rxHost.MyNodeNum, packetId,
                 settings.Message,
                 offerChannel: offered,
                 offerPreset: offerPreset,
-                offerRegion: offered is null ? Region.UNSET : SelectedRegion,
+                offerRegion: region,
                 okToMqtt: OkToMqtt,
                 xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
 
@@ -376,6 +379,10 @@ public partial class RadioViewModel
             {
                 sent++;
                 LogFromAnyThread($"  beacon sent on {ChannelLabel(channel)} ({tx.MeshTag})");
+                // The router drops our own transmission as isFromUs, so what
+                // went on the air is shown here or nowhere.
+                var payload = MeshEncoder.BuildBeaconPayload(settings.Message, offered, offerPreset, region);
+                ShowOutgoingBeaconFromAnyThread(channel, payload, packetId);
             }
             else
             {
@@ -383,6 +390,22 @@ public partial class RadioViewModel
             }
         }
         return sent;
+    }
+
+    /// <summary>Files a beacon this station sent onto the channel it went out
+    /// on. Public because the transmit path is only reachable with a running
+    /// receiver, and what it does afterwards is worth pinning down without
+    /// one.</summary>
+    public void ShowOutgoingBeacon(ChannelConfig channel, byte[] payload, uint packetId) =>
+        _rxHost.ShowOutgoingBeacon(channel, payload, packetId);
+
+    /// <summary>Files the sent beacon onto its channel from whichever thread
+    /// the transmit finished on. The tab's message list is bound to the UI,
+    /// like the log lines beside it.</summary>
+    private void ShowOutgoingBeaconFromAnyThread(ChannelConfig channel, byte[] payload, uint packetId)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) _rxHost.ShowOutgoingBeacon(channel, payload, packetId);
+        else Dispatcher.UIThread.Post(() => _rxHost.ShowOutgoingBeacon(channel, payload, packetId));
     }
 
     /// <summary>The preset a channel list is named for, or null for a list

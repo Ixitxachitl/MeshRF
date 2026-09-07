@@ -158,6 +158,48 @@ public class BeaconSettingsTests(HeadlessAvalonia avalonia)
         owner.Close();
     }));
 
+    /// <summary>
+    /// A beacon this station sends shows up on the channel it went out on, and
+    /// comes back with that channel's history.
+    /// </summary>
+    /// <remarks>
+    /// The router drops our own transmission as isFromUs, exactly as it does
+    /// an outgoing text message, so what went on the air is echoed here or
+    /// appears nowhere. It went out with no trace but a log line until this
+    /// existed.
+    /// </remarks>
+    [Fact]
+    public void ABeaconWeSendShowsOnItsChannelAndSurvivesARestart() =>
+        avalonia.Run(() => TempDataDirectory.With(() =>
+    {
+        string channelName;
+        {
+            var (owner, vm) = Station();
+            vm.RefreshBeaconChannelOptions();
+
+            var channel = vm.Tabs.OfType<ChannelTabViewModel>()
+                .First(t => t.Config.Preset == vm.PrimaryListName).Config;
+            channelName = channel.Name;
+
+            var payload = MeshRF.Mesh.MeshEncoder.BuildBeaconPayload("Ranger net, Tuesdays 19:00");
+            vm.ShowOutgoingBeacon(channel, payload, packetId: 0x1234u);
+            Settle();
+
+            var tab = vm.Tabs.OfType<ChannelTabViewModel>().First(t => t.Config.Name == channelName);
+            var bubble = Assert.Single(tab.Messages, m => m.Text == "Ranger net, Tuesdays 19:00");
+            Assert.True(bubble.IsOutgoing);
+
+            owner.Close();
+        }
+        AppSettings.FlushPendingWrites(TimeSpan.FromSeconds(5));
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        using var reopened = new RadioViewModel();
+        var replayed = reopened.Tabs.OfType<ChannelTabViewModel>().First(t => t.Config.Name == channelName);
+        var restored = Assert.Single(replayed.Messages, m => m.Text == "Ranger net, Tuesdays 19:00");
+        Assert.True(restored.IsOutgoing);
+    }));
+
     /// <summary>Turning it on with no destination transmits nothing, and the
     /// summary says that rather than leaving it to be discovered.</summary>
     [Fact]

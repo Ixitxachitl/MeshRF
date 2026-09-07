@@ -438,6 +438,39 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Assert.DoesNotContain(vm.TabGroupOptions, o => o.Group == nameof(LoraPreset.LongFast));
     }));
 
+    /// <summary>
+    /// A message this station sent comes back on the mesh it was sent from.
+    /// It used to be stored as belonging to no mesh at all, which filed it
+    /// onto the primary's tab — or nowhere, when the primary had no channel of
+    /// that name.
+    /// </summary>
+    [Fact]
+    public void AnOutgoingMessageComesBackOnTheMeshItWasSentFrom() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using (var vm = Station())
+        {
+            vm.MultiPresetEnabled = true;
+            vm.RefreshMonitors();
+
+            var elsewhere = ChannelsOn(vm, nameof(LoraPreset.LongFast)).Config;
+            vm.PersistOutgoingTextForTest(to: 0xFFFFFFFFu, packetId: 77, text: "ours, over there",
+                                          channel: elsewhere.Name, preset: elsewhere.Preset);
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        using var reopened = Station();
+        reopened.MultiPresetEnabled = true;
+        reopened.RefreshMonitors();
+
+        var onLongFast = ChannelsOn(reopened, nameof(LoraPreset.LongFast));
+        Assert.Contains(onLongFast.Messages, m => m.Text == "ours, over there");
+
+        var onPrimary = reopened.Tabs.OfType<ChannelTabViewModel>()
+            .First(t => t.Config.Preset == reopened.PrimaryListName);
+        Assert.DoesNotContain(onPrimary.Messages, m => m.Text == "ours, over there");
+    }));
+
     private static MessageRecord Broadcast(uint packetId, string preset, string text) => new()
     {
         PacketId = packetId,
