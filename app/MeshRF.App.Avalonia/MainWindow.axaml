@@ -1234,13 +1234,16 @@
                                             Classes.selected="{Binding IsSelected}"
                                             PointerPressed="OnMeshTabPressed"
                                             ToolTip.Tip="Show this mesh's channels and conversations">
-                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                            <TextBlock Text="{Binding Label}" FontSize="11"
-                                                       VerticalAlignment="Center" />
-                                            <Ellipse Width="6" Height="6" VerticalAlignment="Center"
-                                                     IsVisible="{Binding NeedsAttention}"
-                                                     Fill="{DynamicResource BrushOverridden}" />
-                                        </StackPanel>
+                                        <!-- Classes.attention drives the same pulse the
+                                             channel and conversation tabs below use, so a
+                                             mesh with something unread reads the way its
+                                             children do rather than growing a dot of its
+                                             own. It runs until the tab inside it that has
+                                             the activity has been looked at, not until the
+                                             mesh is brought on show. -->
+                                        <TextBlock Text="{Binding Label}" FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Classes.attention="{Binding NeedsAttention}" />
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

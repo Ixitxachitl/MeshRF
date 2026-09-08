@@ -12,8 +12,18 @@ public sealed partial class TabGroupOption : ObservableObject
 
     public required string Label { get; init; }
 
-    /// <summary>Something on this mesh is unread while another is on show.
-    /// Hiding a mesh must not hide the fact that it is talking.</summary>
+    /// <summary>
+    /// Something on this mesh has unseen activity. Drives the same pulse the
+    /// channel and conversation tabs use, so a mesh reads the way its children
+    /// do.
+    /// </summary>
+    /// <remarks>
+    /// Not cleared by bringing the mesh on show. Showing a mesh is not reading
+    /// what arrived on it — the tab that has the activity is still sitting
+    /// there unopened — and a mark that goes out on the way to the thing it
+    /// was pointing at has stopped pointing at anything. It goes out when that
+    /// tab is looked at, which is what clears the tab's own pulse.
+    /// </remarks>
     [ObservableProperty] private bool _needsAttention;
 
     /// <summary>Whether this is the mesh on show, which is what paints its
@@ -88,15 +98,14 @@ public partial class RadioViewModel
         RefreshTabGroupAttention();
     }
 
-    /// <summary>Marks the mesh on show, and those that are not but have
-    /// something unread.</summary>
+    /// <summary>Marks the mesh on show, and every mesh holding a tab with
+    /// unseen activity — the one on show included.</summary>
     private void RefreshTabGroupAttention()
     {
         foreach (var option in TabGroupOptions)
         {
             option.IsSelected = option.Group == _rxHost.ShownGroup;
-            option.NeedsAttention = !option.IsSelected
-                                    && _rxHost.GroupNeedsAttention(option.Group);
+            option.NeedsAttention = _rxHost.GroupNeedsAttention(option.Group);
         }
     }
 }

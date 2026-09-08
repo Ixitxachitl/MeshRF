@@ -156,13 +156,15 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         .ThenBy(g => g, StringComparer.Ordinal)
         .ToList();
 
-    /// <summary>True when a mesh that is not on show has something unread.
-    /// Hiding a mesh must not hide the fact that it is talking.</summary>
+    /// <summary>True when any tab on this mesh has unseen activity, whether or
+    /// not the mesh is the one on show. Hiding a mesh must not hide the fact
+    /// that it is talking, and showing it is not the same as reading it.
+    /// </summary>
     public bool GroupNeedsAttention(string group) =>
         Tabs.Any(t => t.TabGroup == group && t.TabNeedsAttention);
 
-    /// <summary>Raised when a tab is marked unread, so the mesh dropdown can
-    /// show that a hidden one has traffic.</summary>
+    /// <summary>Raised when a tab is marked unread, so the mesh strip can show
+    /// that one of its meshes has traffic.</summary>
     public event Action? TabAttentionChanged;
 
     /// <summary>

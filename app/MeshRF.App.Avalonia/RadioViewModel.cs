@@ -2997,8 +2997,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             RefreshTabGroupOptions();
 
         // Looking at the tab is what marks its activity seen; without this the
-        // header would keep pulsing forever once anything arrived.
-        if (value is not null) value.TabNeedsAttention = false;
+        // header would keep pulsing forever once anything arrived. The mesh
+        // above it is pulsing for the same activity, so it has to be asked
+        // again — nothing else will, when the tab was already on this mesh.
+        if (value is not null)
+        {
+            value.TabNeedsAttention = false;
+            RefreshTabGroupAttention();
+        }
         if (value is not null)
         {
             _tabHistory.Remove(value);
