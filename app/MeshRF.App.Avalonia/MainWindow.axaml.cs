@@ -689,7 +689,7 @@ public partial class MainWindow : Window
         if (!_viewModel.CanRequestLocation(node)) return;
 
         var channel = await ChannelPickerWindow.PickChannelAsync(
-            this, _viewModel, "Request location on which channel?");
+            this, _viewModel, "Request location on which channel?", _viewModel.MeshForNode(node.NodeNum));
         if (channel is null) return;
         await _viewModel.RequestLocationOnChannelAsync(node, channel);
     }
@@ -700,7 +700,7 @@ public partial class MainWindow : Window
         if (!_viewModel.CanRequestLocation(node)) return;
 
         var channel = await ChannelPickerWindow.PickChannelAsync(
-            this, _viewModel, "Exchange location on which channel?");
+            this, _viewModel, "Exchange location on which channel?", _viewModel.MeshForNode(node.NodeNum));
         if (channel is null) return;
         await _viewModel.ExchangeLocationOnChannelAsync(node, channel);
     }

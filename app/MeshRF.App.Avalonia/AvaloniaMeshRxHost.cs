@@ -373,6 +373,32 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         return Tabs.OfType<ChannelTabViewModel>().Any(t => t.Config.Preset == heardOn) ? heardOn : PrimaryListName;
     }
 
+    /// <summary>
+    /// Whether this station is on the mesh a node was last heard on, and so
+    /// could put a frame somewhere that node would hear it.
+    /// </summary>
+    /// <remarks>
+    /// A node's mesh is a preset the receiver is not necessarily on any more.
+    /// Turn a listener off and every node heard through it is still in the
+    /// list, still named, still on the map — and completely out of reach.
+    /// Sending to one anyway falls back to the primary's channel and the
+    /// primary's frequency, which is not where the addressee is: nothing
+    /// arrives, nothing answers, and nothing says why. So the sends are
+    /// refused instead, and the menu greys them out.
+    ///
+    /// A node nobody has ever heard over the air — one that came in over MQTT,
+    /// or was typed in — says nothing about where it lives, so it is not ruled
+    /// out. The primary is the only guess available, and it is the same guess
+    /// every send to it has always made.
+    /// </remarks>
+    public bool CanReachNode(uint nodeNum)
+    {
+        var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
+        if (string.IsNullOrEmpty(heardOn) || heardOn == HeardOn.Custom) return true;
+        if (heardOn == PrimaryListName) return true;
+        return IsPresetListening?.Invoke(heardOn) == true;
+    }
+
     /// <summary>The channel to send on in one list: the one named, else the
     /// list's Primary-role channel, else its first usable one. Falls back to
     /// the primary's list when the named list is empty.</summary>

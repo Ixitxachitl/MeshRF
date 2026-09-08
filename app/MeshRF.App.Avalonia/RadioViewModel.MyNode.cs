@@ -511,7 +511,7 @@ public partial class RadioViewModel
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
         if (string.IsNullOrWhiteSpace(MyNodeStatus)) { StatusText = "Set a status text first."; return; }
-        channel ??= PrimaryChannel();
+        channel ??= to is { } dest && dest != 0xFFFFFFFFu ? _rxHost.ChannelForNode(dest, null) : PrimaryChannel();
         if (channel is null) return;
         var frame = MeshEncoder.EncodeNodeStatus(channel, _rxHost.MyNodeNum, NextPacketId(),
             MyNodeStatus.Trim(), to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
@@ -526,7 +526,7 @@ public partial class RadioViewModel
     public async Task SendEnvironmentMetricsOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        channel ??= PrimaryChannel();
+        channel ??= to is { } dest && dest != 0xFFFFFFFFu ? _rxHost.ChannelForNode(dest, null) : PrimaryChannel();
         if (channel is null) return;
         if (!TryGetHomeLocation(out double lat, out double lon))
         {
@@ -562,7 +562,7 @@ public partial class RadioViewModel
     public async Task SendAirQualityMetricsOnChannelAsync(ChannelConfig? channel, uint? to)
     {
         if (!CanTransmit) { StatusText = "Set your node ID and a TX-capable device first."; return; }
-        channel ??= PrimaryChannel();
+        channel ??= to is { } dest && dest != 0xFFFFFFFFu ? _rxHost.ChannelForNode(dest, null) : PrimaryChannel();
         if (channel is null) return;
         if (!TryGetHomeLocation(out double lat, out double lon))
         {

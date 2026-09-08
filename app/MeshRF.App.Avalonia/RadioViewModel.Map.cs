@@ -396,20 +396,24 @@ public partial class RadioViewModel
             StatusText = "Set your node ID and a TX-capable device before sending waypoints.";
             return;
         }
+        if (to is { } addressee && RefuseUnreachable(addressee)) return;
+        if (to is null && RefuseUnreachableMesh(
+                (channel ?? (SelectedTab as ChannelTabViewModel)?.Config)?.Preset)) return;
 
-        // An addressed marker takes the primary by role, the same choice a
-        // script's waypoint: makes. Without this it fell through to whichever
-        // channel tab happened to be first, since the picker names no channel
-        // for a DM and a conversation tab is not a channel tab — so the same
-        // marker rode a different key depending on how it was sent.
+        // An addressed marker takes the primary by role of the addressee's own
+        // mesh, the same choice a script's waypoint: makes. Without this it
+        // fell through to whichever channel tab happened to be first, since the
+        // picker names no channel for a DM and a conversation tab is not a
+        // channel tab — so the same marker rode a different key depending on
+        // how it was sent.
         var selectedChannel = channel
-            ?? (to is not null
-                ? DirectedWaypointChannel()
+            ?? (to is { } waypointTo
+                ? DirectedWaypointChannel(waypointTo)
                 : _rxHost.FindChannelByName((SelectedTab as ChannelTabViewModel)?.Config.Name));
         if (selectedChannel is null)
         {
             StatusText = to is not null
-                ? "The primary channel is disabled, so an addressed waypoint has no key to travel under."
+                ? "That mesh's primary channel is disabled, so an addressed waypoint has no key to travel under."
                 : "No enabled channel to send waypoint on.";
             return;
         }

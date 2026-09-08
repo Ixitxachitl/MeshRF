@@ -585,13 +585,18 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         // A literal id, guaranteed by the parser: a feed places its markers
         // unprompted, so there is no message for a placeholder to come from.
         var to = ScriptEngine.TryParseNodeId(sync.Waypoint.To);
+        if (to != 0 && !_rxHost.CanReachNode(to))
+        {
+            _rxHost.Log($"sync: nothing sent — nothing is listening for the mesh {_rxHost.NodeDisplayName(to)} was heard on");
+            return;
+        }
         var channel = to != 0
-            ? DirectedWaypointChannel()
+            ? DirectedWaypointChannel(to)
             : ResolveScriptChannel(sync.Waypoint.Channel, "sync")?.Config;
         if (channel is null)
         {
             _rxHost.Log(to != 0
-                ? "sync: nothing sent — the primary channel is disabled, so an addressed marker has no key to travel under"
+                ? "sync: nothing sent — that mesh's primary channel is disabled, so an addressed marker has no key to travel under"
                 : "sync: nothing sent — no channel to send on");
             return;
         }
@@ -960,15 +965,20 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
 
         // A marker addressed to one node still travels under a channel's key —
         // the address only says who it is for, so it saves everyone else
-        // drawing it rather than keeping it from them. The primary is what
-        // carries it, the same channel a scripted DM falls back to.
+        // drawing it rather than keeping it from them. Its own mesh's primary
+        // is what carries it, the same channel a scripted DM falls back to.
+        if (action.ToNode != 0 && !_rxHost.CanReachNode(action.ToNode))
+        {
+            _rxHost.Log($"scripts: waypoint skipped — nothing is listening for the mesh {_rxHost.NodeDisplayName(action.ToNode)} was heard on");
+            return;
+        }
         var channel = action.ToNode != 0
-            ? DirectedWaypointChannel()
+            ? DirectedWaypointChannel(action.ToNode)
             : ResolveScriptChannel(waypoint.Channel, "scripts")?.Config;
         if (channel is null)
         {
             _rxHost.Log(action.ToNode != 0
-                ? "scripts: waypoint skipped — the primary channel is disabled, so an addressed marker has no key to travel under"
+                ? "scripts: waypoint skipped — that mesh's primary channel is disabled, so an addressed marker has no key to travel under"
                 : "scripts: waypoint skipped — no channel to send it on");
             return;
         }
@@ -1092,14 +1102,15 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         if (action.ToNode != 0)
         {
             // A DM. The channel is only the legacy fallback when PKC isn't
-            // available; SendTextAsync decides which is used.
+            // available; SendTextAsync decides which is used. It comes from
+            // the node's own mesh, since that is where the frame is going out.
             //
             // Only an already-open tab is reported here, deliberately: this
             // runs before the guards that can call the send off, and opening
             // one is the caller's to do once it knows the message is going.
             var conversation = Tabs.OfType<ConversationTabViewModel>()
                                    .FirstOrDefault(t => t.NodeNum == action.ToNode);
-            return (PrimaryChannel(), action.ToNode, conversation?.Messages);
+            return (_rxHost.ChannelForNode(action.ToNode, null), action.ToNode, conversation?.Messages);
         }
 
         var tab = ResolveScriptChannel(action.ChannelName, "scripts");

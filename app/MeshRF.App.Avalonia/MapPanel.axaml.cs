@@ -119,7 +119,8 @@ public partial class MapPanel : UserControl
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
         if (!_viewModel.CanRequestLocation(node)) return;
 
-        var channel = await ChannelPickerWindow.PickChannelAsync(owner, _viewModel, prompt);
+        var channel = await ChannelPickerWindow.PickChannelAsync(
+            owner, _viewModel, prompt, _viewModel.MeshForNode(node.NodeNum));
         if (channel is null) return;
         await send(node, channel);
     }

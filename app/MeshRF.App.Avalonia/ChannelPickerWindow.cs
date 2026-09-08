@@ -89,27 +89,44 @@ public sealed class ChannelPickerWindow : Window
     /// <remarks>For a payload whose destination is already settled and where
     /// only the channel to reach it on is in question: an open DM names a node,
     /// which is not an answer to that.</remarks>
+    /// <param name="mesh">The channel list to keep the offer to, or null for
+    /// every mesh. A request to a node is sent on the settings that node was
+    /// heard on, so only that mesh's keys can reach it; offering the others
+    /// asks the operator to pick something that cannot work.</param>
     public static async Task<ChannelConfig?> PickChannelAsync(
-        Window owner, RadioViewModel vm, string prompt) =>
-        (await PickAsync(owner, vm, prompt, includeOpenDms: false))?.Channel;
+        Window owner, RadioViewModel vm, string prompt, string? mesh = null) =>
+        (await PickAsync(owner, vm, prompt, includeOpenDms: false, mesh))?.Channel;
 
     private static async Task<(ChannelConfig? Channel, uint? DmNodeNum)?> PickAsync(
-        Window owner, RadioViewModel vm, string prompt, bool includeOpenDms)
+        Window owner, RadioViewModel vm, string prompt, bool includeOpenDms, string? mesh = null)
     {
         // A disabled channel has no key and no hash on the air, so it isn't a
         // place anything can be sent.
-        var channels = vm.Tabs.OfType<ChannelTabViewModel>().Where(c => !c.Config.IsDisabled).ToList();
+        var channels = vm.Tabs.OfType<ChannelTabViewModel>()
+            .Where(c => !c.Config.IsDisabled)
+            .Where(c => mesh is null || c.Config.Preset == mesh)
+            .ToList();
         var openDms = includeOpenDms
             ? vm.Tabs.OfType<ConversationTabViewModel>().ToList()
             : [];
         if (channels.Count == 0 && openDms.Count == 0)
         {
-            vm.StatusText = "No channel to send on.";
+            vm.StatusText = mesh is null
+                ? "No channel to send on."
+                : $"No enabled channel on {mesh} to send on.";
             return null;
         }
 
+        // Two meshes can each hold a channel of the same name, so an offer
+        // spanning more than one says which mesh each entry is on. Scoped to
+        // one, the mesh is not in question and the name stands alone.
+        bool nameTheMesh = channels.Select(c => c.Config.Preset).Distinct().Count() > 1;
         var entries = channels
-            .Select(c => new PickerEntry { DisplayName = c.DisplayName, Channel = c.Config })
+            .Select(c => new PickerEntry
+            {
+                DisplayName = nameTheMesh ? $"{c.Config.Preset}: {c.DisplayName}" : c.DisplayName,
+                Channel = c.Config,
+            })
             .Concat(openDms.Select(d => new PickerEntry
             {
                 DisplayName = $"DM: {d.TabHeader}",
@@ -117,14 +134,16 @@ public sealed class ChannelPickerWindow : Window
             }))
             .ToList();
 
-        // Prefer the channel tab the user is looking at, else the primary.
-        var selectedChannel = vm.SelectedTab as ChannelTabViewModel;
-        int preferredIndex = selectedChannel?.Config.Index
-            ?? channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config.Index
-            ?? channels.FirstOrDefault()?.Config.Index
-            ?? -1;
+        // Prefer the channel tab the user is looking at, else the primary of
+        // what is on offer. Matched by mesh as well as index: every list
+        // numbers its channels from zero, so an index alone names one channel
+        // per mesh rather than one channel.
+        var selectedConfig = (vm.SelectedTab as ChannelTabViewModel)?.Config;
+        var preferredConfig = channels.FirstOrDefault(c => c.Config == selectedConfig)?.Config
+            ?? channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config
+            ?? channels.FirstOrDefault()?.Config;
 
-        var preferred = entries.FirstOrDefault(e => e.Channel?.Index == preferredIndex)
+        var preferred = entries.FirstOrDefault(e => e.Channel == preferredConfig)
                         ?? entries.FirstOrDefault();
 
         var w = new ChannelPickerWindow(entries, preferred, prompt);
@@ -133,11 +152,9 @@ public sealed class ChannelPickerWindow : Window
 
         // DMs still ride a channel's PSK even though they're unicast, so
         // resolve one when the user picked a DM entry (which has no config).
+        // It comes from the peer's own mesh, which is where the frame goes out.
         var channel = picked.Channel
-            ?? (picked.DmNodeNum is not null
-                ? channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config
-                  ?? channels.FirstOrDefault()?.Config
-                : null);
+            ?? (picked.DmNodeNum is { } dm ? vm.ChannelForNode(dm) : null);
 
         return (channel, picked.DmNodeNum);
     }

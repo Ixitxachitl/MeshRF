@@ -1674,6 +1674,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         {
             _core.Stop();
             _rxSources = [];
+            RefreshNodeCommandAvailability();
             RefreshPlannedSpectrumCenter();
         }
         else
@@ -1744,6 +1745,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
 
         _rxSources = sources.ToArray();
+        // Which nodes can be reached is settled by which meshes are being
+        // listened for, and that has just changed.
+        RefreshNodeCommandAvailability();
         lock (_rxBusyLock) _rxBusyUntilUtc.Clear();
         _lastPreamblePeakDb.Clear();
         SpectrumCenterHz = plan.DeviceCenterMHz * 1_000_000.0;
@@ -2081,6 +2085,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // preset changes which list is in front of the operator. Done first:
         // the primary channel rename below acts on that list.
         _rxHost.SetPrimaryList(value.ToString());
+        // The station has moved mesh, so a different set of nodes is in reach.
+        RefreshNodeCommandAvailability();
         RefreshTabGroupOptions();
         // Autofill SF/BW/CR from the new preset — preset is the anchor, so
         // overwriting any prior manual override here is the right UX.
@@ -2811,6 +2817,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (_core is null || text.Length == 0) return false;
 
+        // A message to a node whose mesh nothing is tuned to would be sealed
+        // and transmitted on the primary's settings, which is not where the
+        // addressee is. PKC does not change that: the sealing is different,
+        // the frequency it goes out on is the same.
+        if (to != 0xFFFFFFFFu && RefuseUnreachable(to)) return false;
+        if (to == 0xFFFFFFFFu && RefuseUnreachableMesh(channel?.Preset)) return false;
+
         bool usePkc = TryPkcKeysFor(to, out var myPriv, out var peerPub);
         if (!usePkc && channel is null) return false;
 
@@ -3002,9 +3015,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         uint to = 0xFFFFFFFFu;
         switch (SelectedTab)
         {
-            case ChannelTabViewModel chanTab: channel = chanTab.Config; break;
+            case ChannelTabViewModel chanTab:
+                if (RefuseUnreachableMesh(chanTab.Config.Preset)) return;
+                channel = chanTab.Config;
+                break;
             case ConversationTabViewModel convoTab:
                 to = convoTab.NodeNum;
+                if (RefuseUnreachable(to)) return;
                 if (_rxHost.ChannelForNode(to, null) is not { } peerChannel) return;
                 channel = peerChannel;
                 break;
@@ -3114,19 +3131,38 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// The channel a marker addressed to one node travels under: the primary,
-    /// named by role, and only when it can actually carry something.
+    /// named by role, of that node's own mesh, and only when it can actually
+    /// carry something.
     /// </summary>
     /// <remarks>
     /// The address says who draws a marker, not which channel carries it, so
     /// something has to choose — and every path that sends one has to choose
     /// the same way, or the same marker rides a different key depending on
-    /// whether a script or the map sent it. A disabled channel is no answer:
-    /// it has neither key nor hash, so this reports none rather than handing
-    /// back something that cannot be encoded, and the caller says so in its
-    /// own words.
+    /// whether a script or the map sent it. It is the addressee's mesh that
+    /// decides, because that is the mesh the frame goes out on; this station's
+    /// own primary would seal it with a key nobody there holds. A disabled
+    /// channel is no answer: it has neither key nor hash, so this reports none
+    /// rather than handing back something that cannot be encoded, and the
+    /// caller says so in its own words.
     /// </remarks>
-    private ChannelConfig? DirectedWaypointChannel() =>
-        PrimaryChannel() is { IsDisabled: false } primary ? primary : null;
+    private ChannelConfig? DirectedWaypointChannel(uint to)
+    {
+        var mesh = _rxHost.ListNameForNode(to);
+        var onMesh = Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == mesh).ToList();
+        var primary = (onMesh.FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
+                       ?? onMesh.FirstOrDefault())?.Config;
+        return primary is { IsDisabled: false } ? primary : null;
+    }
+
+    /// <summary>The mesh a node is spoken to on — the preset's channel list
+    /// when it was heard on a secondary listener, the primary's otherwise.
+    /// Windows outside the view model use it to keep a channel picker to keys
+    /// the node can actually read.</summary>
+    public string MeshForNode(uint nodeNum) => _rxHost.ListNameForNode(nodeNum);
+
+    /// <summary>The channel a packet to a node goes out on, for callers
+    /// outside the view model.</summary>
+    public ChannelConfig? ChannelForNode(uint nodeNum) => _rxHost.ChannelForNode(nodeNum, null);
 
     private ChannelConfig? PrimaryChannel() =>
         (Tabs.OfType<ChannelTabViewModel>().FirstOrDefault(t => t.Config.Role == ChannelRole.Primary)
@@ -3171,10 +3207,79 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     private bool IsSelf(NodeRecord? node) => node is null || (_rxHost.MyNodeNum != 0 && node.NodeNum == _rxHost.MyNodeNum);
 
-    [RelayCommand]
+    /// <summary>
+    /// Whether anything can be sent to this node: it is somebody else, and its
+    /// mesh is one this station is on right now. The CanExecute of every
+    /// node-directed command, so a node whose listener has been turned off
+    /// greys its actions out rather than swallowing them.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="CanTransmit"/> as well. Whether a device can
+    /// transmit at all is about the station, changes with every start and stop,
+    /// and already says so on the status line; this is about one node, and is
+    /// settled by what the operator chose to listen for.
+    /// </remarks>
+    public bool CanReachNode(NodeRecord? node) =>
+        node is not null && !IsSelf(node) && _rxHost.CanReachNode(node.NodeNum);
+
+    /// <summary>
+    /// Whether a mesh's own settings are being transmitted on: it is the
+    /// primary's own, or a listener is up for it.
+    /// </summary>
+    /// <remarks>
+    /// A channel list outlives its listener. A preset ticked in Listeners but
+    /// sitting outside the capture at the current sample rate keeps its tabs
+    /// and its keys — deliberately, so the operator does not lose them over a
+    /// sample rate — so a message can still be typed into one. Sent, it would
+    /// be sealed with that mesh's key and put on the air with the primary's
+    /// settings, which is noise to everyone who hears it. Mirrors what
+    /// <see cref="TargetForList"/> would actually do with the frame.
+    /// </remarks>
+    public bool CanReachMesh(string? listName) =>
+        string.IsNullOrEmpty(listName)
+        || listName == _rxHost.PrimaryListName
+        || _rxSources.Any(s => !s.IsPrimary && s.PresetName == listName);
+
+    /// <summary>Turns a broadcast down because its mesh has no listener, and
+    /// so no settings of its own to go out on.</summary>
+    private bool RefuseUnreachableMesh(string? listName)
+    {
+        if (CanReachMesh(listName)) return false;
+        StatusText = $"Nothing sent — nothing is listening for {listName}, "
+                   + "so its channels have no settings to go out on.";
+        return true;
+    }
+
+    /// <summary>Turns a send down because the node's mesh is not being
+    /// listened for, saying so on the status line. For the paths that reach a
+    /// send by some route other than a greyed-out menu item — a script, the
+    /// compose box, a resent waypoint.</summary>
+    private bool RefuseUnreachable(uint nodeNum)
+    {
+        if (_rxHost.CanReachNode(nodeNum)) return false;
+        var mesh = _nodeStore.Get(nodeNum)?.HeardOnPreset ?? string.Empty;
+        StatusText = $"Nothing sent — {_rxHost.NodeDisplayName(nodeNum)} was last heard on {mesh}, "
+                   + "which nothing is listening for.";
+        return true;
+    }
+
+    /// <summary>Re-asks every node-directed command whether it can run. The
+    /// answer changes when the set of listeners does, which is not something
+    /// the commands themselves can see.</summary>
+    private void RefreshNodeCommandAvailability()
+    {
+        RequestNodeInfoCommand.NotifyCanExecuteChanged();
+        ExchangeNodeInfoCommand.NotifyCanExecuteChanged();
+        RequestTelemetryCommand.NotifyCanExecuteChanged();
+        TracerouteCommand.NotifyCanExecuteChanged();
+        RequestNewKeysCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanReachNode))]
     private async Task RequestNodeInfo(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
+        if (RefuseUnreachable(node.NodeNum)) return;
         var channel = _rxHost.ChannelForNode(node.NodeNum, null);
         if (channel is null) return;
         var packetId = NextPacketId();
@@ -3186,10 +3291,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "nodeinfo", $"Requested NodeInfo from {name}…");
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanReachNode))]
     private async Task ExchangeNodeInfo(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
+        if (RefuseUnreachable(node.NodeNum)) return;
         var channel = _rxHost.ChannelForNode(node.NodeNum, null);
         if (channel is null) return;
         var packetId = NextPacketId();
@@ -3213,6 +3319,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public bool CanRequestLocation(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return false;
+        // Before the cooldown, so a node that cannot be reached at all says
+        // that rather than being turned down for a wait that would not help.
+        if (RefuseUnreachable(node.NodeNum)) return false;
         var remaining = PositionRequestCooldown - (DateTime.UtcNow - _lastPositionRequestUtc);
         if (remaining > TimeSpan.Zero)
         {
@@ -3266,10 +3375,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         catch { /* precision 0 or similar — best-effort */ }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanReachNode))]
     private async Task RequestTelemetry(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
+        if (RefuseUnreachable(node.NodeNum)) return;
         var channel = _rxHost.ChannelForNode(node.NodeNum, null);
         if (channel is null) return;
         var packetId = NextPacketId();
@@ -3281,18 +3391,25 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "telemetry", $"Requested telemetry from {name}…");
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanReachNode))]
     private async Task Traceroute(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
+        if (RefuseUnreachable(node.NodeNum)) return;
         var remaining = TracerouteCooldown - (DateTime.UtcNow - _lastTracerouteUtc);
         if (remaining > TimeSpan.Zero) { StatusText = $"Traceroute on cooldown — wait {Math.Ceiling(remaining.TotalSeconds):F0}s."; return; }
-        var primary = PrimaryChannel();
-        if (primary is null) return;
+        // Sealed on the mesh the node lives on rather than this station's own.
+        // The frame goes out on the settings the node was last heard on, so a
+        // key from another mesh puts a hash on the air that nobody there
+        // matches. A traceroute asks every relay along the way to answer, so
+        // getting this wrong buys silence from the whole path, not just the
+        // far end — and no NAK either, since the request wants no ack.
+        var channel = _rxHost.ChannelForNode(node.NodeNum, null);
+        if (channel is null) return;
         var packetId = NextPacketId();
-        var frame = MeshEncoder.EncodeTraceroute(primary, _rxHost.MyNodeNum, node.NodeNum, packetId,
+        var frame = MeshEncoder.EncodeTraceroute(channel, _rxHost.MyNodeNum, node.NodeNum, packetId,
             hopLimit: (byte)HopLimit);
-        if (!await TransmitFrameAsync(frame, TargetForChannel(primary, node.NodeNum)))
+        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, node.NodeNum)))
         { StatusText = "Transmit failed."; return; }
         _lastTracerouteUtc = DateTime.UtcNow;
         _rxHost.RegisterOutgoingTraceroute(packetId, node.NodeNum);
@@ -3301,10 +3418,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.AddNote(node.NodeNum, outgoing: true, packetId, "traceroute", $"Traceroute requested to {name}…");
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanReachNode))]
     private async Task RequestNewKeys(NodeRecord? node)
     {
         if (node is null || IsSelf(node) || !CanTransmit) return;
+        if (RefuseUnreachable(node.NodeNum)) return;
         // Forgetting the key clears the mismatch flag with it, so whatever key
         // the reply carries is accepted as the node's new one.
         _nodeStore.ClearPublicKey(node.NodeNum);
@@ -3483,6 +3601,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private async Task ResendWaypoint(WaypointRecord? wp)
     {
         if (wp is null || !CanTransmit) return;
+        if (RefuseUnreachableMesh(wp.Preset)) return;
         var channel = _rxHost.ChannelIn(wp.Preset, wp.Channel);
         if (channel is null) { StatusText = "No enabled channel to resend waypoint on."; return; }
         var packetId = NextPacketId();
