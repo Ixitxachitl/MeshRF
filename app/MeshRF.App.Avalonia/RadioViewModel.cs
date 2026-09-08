@@ -1523,7 +1523,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 if (!IsRunning) return;
                 var target = TargetForSource(source);
                 try { _core.Transmit(target.Preset, target.FreqHz, frame, TxGainDb, TxAmpEnable); }
-                catch { /* best-effort auto-reply */ }
+                catch { return; /* best-effort auto-reply */ }
+                // An answer we sent on our own initiative is the one kind of
+                // outgoing frame the operator never asked for, so it is the one
+                // most worth seeing. Logging only — routing it through
+                // TransmitFrameAsync would put it behind the duty-cycle gate,
+                // which is not what the gate is for.
+                LogFrameSent(frame, target);
             };
         }
         catch (Exception ex)
@@ -2719,10 +2725,55 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         //
         // Posted rather than called inline: the ConfigureAwait(false) above
         // drops the UI context, and TransmitBackground enters this from a
-        // thread-pool thread anyway, so the uplink would otherwise read the
-        // channel tabs and append log lines off the UI thread.
-        if (sent) Dispatcher.UIThread.Post(() => UplinkSelfOriginatedIfEligible(frame));
+        // thread-pool thread anyway, so these would otherwise read the channel
+        // tabs and append log lines off the UI thread.
+        if (sent) Dispatcher.UIThread.Post(() =>
+        {
+            LogFrameSent(frame, target);
+            UplinkSelfOriginatedIfEligible(frame);
+        });
         return sent;
+    }
+
+    /// <summary>
+    /// Says in the log what a frame this station just sent actually was.
+    /// </summary>
+    /// <remarks>
+    /// Only frames we originated. A relay carries somebody else's packet, and
+    /// the relay scheduler already logs one as a relay — decoding it again here
+    /// would put every rebroadcast in the log twice.
+    /// </remarks>
+    private void LogFrameSent(byte[] frame, TxTarget target)
+    {
+        if (!MeshHeader.TryParse(frame, out var header)) return;
+        if (_rxHost.MyNodeNum == 0 || header.From != _rxHost.MyNodeNum) return;
+        _rxHost.LogTransmitted(header, DecodeOwnFrame(frame, header),
+                               target.Listener == 0 ? string.Empty : target.MeshTag);
+    }
+
+    /// <summary>
+    /// Opens a frame we sealed ourselves, so the log can say what was in it.
+    /// </summary>
+    /// <remarks>
+    /// A channel-sealed frame opens with the key that sealed it. A PKC one
+    /// needs the shared secret, and X25519 gives the same secret from either
+    /// end — so our private key and the recipient's public key open what our
+    /// private key and their public key closed. Deliberately not shared with
+    /// the MQTT uplink, which decodes channel keys only: a direct message is
+    /// nobody's business but ours and the recipient's, and it stays that way
+    /// however readable it is to us.
+    /// </remarks>
+    private MeshDecodeResult? DecodeOwnFrame(byte[] frame, MeshHeader header)
+    {
+        var configs = Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
+        if (MeshDecoder.Decode(frame, configs) is { } sealedWithAChannel) return sealedWithAChannel;
+        if (header.IsBroadcast) return null;
+
+        var myPrivateKey = TryParseKeyBase64(MyPrivateKey);
+        var peerPublicKey = TryParseHex(_rxHost.PublicKeyHexFor(header.To));
+        return myPrivateKey.Length == 32 && peerPublicKey.Length == 32
+            ? MeshDecoder.DecodePkc(frame, myPrivateKey, peerPublicKey)
+            : null;
     }
 
     [RelayCommand(CanExecute = nameof(CanSendMessage))]

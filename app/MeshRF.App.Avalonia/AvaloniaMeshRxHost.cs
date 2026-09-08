@@ -2044,9 +2044,48 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     /// <summary>One-line log summary of a decoded packet.</summary>
-    private string BuildDecodedPortSummary(MeshHeader header, MeshDecodeResult result, string senderName)
+    private string BuildDecodedPortSummary(MeshHeader header, MeshDecodeResult result, string senderName) =>
+        BuildPortSummary($"  [{result.ChannelName}] {senderName} {result.Port}", header, result);
+
+    /// <summary>
+    /// Logs a frame this station just put on the air, saying what it was
+    /// rather than only that it went.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <see cref="OnOwnPacketHeard"/>, which says only that
+    /// the transmitter keyed up and the receiver heard it back. What was in the
+    /// frame was visible nowhere: a send that went out on the wrong mesh, or
+    /// carried the wrong channel, or asked for no response, looked exactly like
+    /// one that did the right thing. The packet id is in the line so it can be
+    /// read together with the "tx confirmed" one that follows.
+    ///
+    /// Shaped like the line a received packet gets, so the log reads as one
+    /// conversation: mesh tag, channel, who it is for, port, contents, size.
+    /// </remarks>
+    /// <param name="meshTag">The mesh it went out on, or empty for the
+    /// primary's — whose lines carry no tag, exactly as on receive.</param>
+    public void LogTransmitted(MeshHeader header, MeshDecodeResult? result, string meshTag)
     {
-        string prefix = $"  [{result.ChannelName}] {senderName} {result.Port}";
+        string tag = meshTag.Length > 0 ? $"[{meshTag}] " : string.Empty;
+        string who = header.IsBroadcast ? "broadcast" : $"to {NodeDisplayName(header.To)}";
+
+        // Nothing we hold opens it. Our own frames normally decode with the key
+        // that sealed them, so this is a DM to a peer whose public key we have
+        // since forgotten — the addressing is still in the clear.
+        if (result is null)
+        {
+            Log($"{tag}  tx {header.PacketId:x8} {who} — sealed, not readable here");
+            return;
+        }
+
+        Log(tag + BuildPortSummary(
+            $"  tx {header.PacketId:x8} [{result.ChannelName}] {who} {result.Port}", header, result));
+    }
+
+    /// <summary>The port-by-port half of a packet's log line, shared by the
+    /// received and the transmitted forms so the two never drift.</summary>
+    private string BuildPortSummary(string prefix, MeshHeader header, MeshDecodeResult result)
+    {
         string size = $" ({result.AppPayload.Length} B)";
 
         return result.Port switch

@@ -106,6 +106,30 @@ public class PkcCryptoTests
         Assert.Equal(message, result.Text);
     }
 
+    /// <summary>
+    /// The sender can reopen what they sealed. X25519 gives the same shared
+    /// secret from either end, so Alice's own private key and Bob's public key
+    /// open exactly what they closed — which is what lets the log say what a
+    /// direct message this station just sent actually said, rather than only
+    /// that something went out.
+    /// </summary>
+    [Fact]
+    public void TheSenderCanReopenTheirOwnPkcFrame()
+    {
+        var alicePriv = Curve25519.GeneratePrivateKey();
+        var bobPub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
+        const string message = "what did I just send?";
+
+        var frame = MeshEncoder.EncodePkcTextMessage(
+            0xA11CE000, 0xB0B00000, 0x0BADF00D, message, alicePriv, bobPub);
+
+        var result = MeshDecoder.DecodePkc(frame, alicePriv, bobPub);
+
+        Assert.NotNull(result);
+        Assert.Equal(PortNum.TextMessage, result!.Port);
+        Assert.Equal(message, result.Text);
+    }
+
     [Fact]
     public void DecodePkc_WrongRecipient_ReturnsNull()
     {
