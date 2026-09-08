@@ -12,6 +12,12 @@ void SignalStats::process(std::span<const sample_t> samples) noexcept {
     double sum_re  = 0.0;
     double sum_im  = 0.0;
     float peak_mag = 0.0f;
+    std::size_t clipped = 0;
+
+    // A sample this close to the rail did not come back from the converter
+    // intact whatever the wave was doing. Counted per component, since either
+    // one railing distorts the sample.
+    constexpr float kRail = 0.98f;
 
     for (auto s : samples) {
         const float re = s.real();
@@ -21,6 +27,7 @@ void SignalStats::process(std::span<const sample_t> samples) noexcept {
         sum_re  += re;
         sum_im  += im;
         if (p > peak_mag) peak_mag = p;
+        if (std::fabs(re) >= kRail || std::fabs(im) >= kRail) ++clipped;
     }
 
     const std::size_t n = samples.size();
@@ -36,6 +43,8 @@ void SignalStats::process(std::span<const sample_t> samples) noexcept {
     last_peak_.store(safe_db10(peak_mag), std::memory_order_relaxed);
     last_dc_re_.store(dc_re, std::memory_order_relaxed);
     last_dc_im_.store(dc_im, std::memory_order_relaxed);
+    last_clipped_.store(static_cast<float>(clipped) / static_cast<float>(n),
+                        std::memory_order_relaxed);
     total_.fetch_add(n, std::memory_order_relaxed);
 }
 
@@ -45,6 +54,7 @@ SignalStats::Snapshot SignalStats::snapshot() const noexcept {
         last_peak_.load(std::memory_order_relaxed),
         last_dc_re_.load(std::memory_order_relaxed),
         last_dc_im_.load(std::memory_order_relaxed),
+        last_clipped_.load(std::memory_order_relaxed),
         total_.load(std::memory_order_relaxed),
     };
 }
@@ -54,6 +64,7 @@ void SignalStats::reset() noexcept {
     last_peak_.store(-120.0f, std::memory_order_relaxed);
     last_dc_re_.store(0.0f, std::memory_order_relaxed);
     last_dc_im_.store(0.0f, std::memory_order_relaxed);
+    last_clipped_.store(0.0f, std::memory_order_relaxed);
     total_.store(0, std::memory_order_relaxed);
 }
 

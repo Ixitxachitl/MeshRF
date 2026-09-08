@@ -286,6 +286,12 @@
                 </Button>
                 <TextBlock Text="{Binding RssiDbfs, StringFormat='RSSI: {0:F1} dBFS'}" FontSize="11"
                            IsVisible="{Binding IsRunning}" VerticalAlignment="Center" Margin="0,0,0,2" />
+                <!-- Beside the level it explains: a clipped reading is what the
+                     level looks like when it has stopped meaning anything. -->
+                <TextBlock Text="⚠ clipping" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource BrushOverridden}"
+                           IsVisible="{Binding IsClipping}" VerticalAlignment="Center"
+                           Margin="8,0,0,2" ToolTip.Tip="{Binding ClippingNote}" />
             </WrapPanel>
           </DockPanel>
         </Border>

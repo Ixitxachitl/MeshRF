@@ -581,6 +581,21 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private float _rssiDbfs;
 
+    /// <summary>
+    /// The front end is being driven past what the converter can represent.
+    /// </summary>
+    /// <remarks>
+    /// Worth its own warning rather than leaving the operator to infer it from
+    /// a level. Clipping does not look like a loud signal, it looks like a
+    /// broken receiver: every reading pins against the rail so nothing can be
+    /// told apart, and the chirps come apart enough to fail header FEC while
+    /// still looking clean on a waterfall. Turning gain down is the fix, and
+    /// nothing says so unless this does.
+    /// </remarks>
+    [ObservableProperty] private bool _isClipping;
+
+    [ObservableProperty] private string _clippingNote = string.Empty;
+
     [ObservableProperty]
     private string _messageText = string.Empty;
 
@@ -1600,10 +1615,25 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         DeviceStatus = $"RX: {_core.DeviceName}  TX: {_core.TxDeviceName} — {_core.DeviceStatus}";
         if (!IsRunning) return;
 
-        RssiDbfs = _core.GetSignalStats().RssiDbfs;
+        var stats = _core.GetSignalStats();
+        RssiDbfs = stats.RssiDbfs;
         _rxHost.CurrentRssiDbfs = RssiDbfs;
+        UpdateClipping(stats);
 
         DrainDemodEvents();
+    }
+
+    /// <summary>Says how hard the front end is being overdriven, and what to
+    /// do about it. The advice names the amplifier first: it is the least
+    /// useful gain in the chain and the most likely to be the cause.</summary>
+    private void UpdateClipping(SignalStatsSnapshot stats)
+    {
+        IsClipping = stats.IsClipping;
+        ClippingNote = IsClipping
+            ? $"Clipping: {stats.Clipped * 100:0.#}% of samples at full scale. "
+              + "Turn the RX amp off, then the LNA down — an overdriven front end "
+              + "reads the same level for every packet and fails header FEC."
+            : string.Empty;
     }
 
     private void DecodePayloadIfPossible(string ev, int listener)

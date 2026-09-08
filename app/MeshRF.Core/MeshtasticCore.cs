@@ -29,12 +29,26 @@ public enum LoraPreset
 }
 
 /// <summary>Immutable snapshot of receiver signal statistics.</summary>
+/// <param name="Clipped">Fraction of the last block riding at the converter's
+/// rail, 0 to 1. An overdriven front end is not a loud signal: the samples
+/// stop following the wave, every level reads the same because it is pinned
+/// against the rail, and LoRa header FEC starts failing on frames whose chirps
+/// still look clean in a spectrogram.</param>
 public readonly record struct SignalStatsSnapshot(
     float RssiDbfs,
     float PeakDbfs,
     float DcRe,
     float DcIm,
-    ulong TotalSamples);
+    float Clipped,
+    ulong TotalSamples)
+{
+    /// <summary>Enough of the block against the rail to be doing damage.
+    /// A stray sample on a peak is normal; a thousandth of them is a front
+    /// end being driven past what it can represent.</summary>
+    public const float ClippingThreshold = 0.001f;
+
+    public bool IsClipping => Clipped >= ClippingThreshold;
+}
 
 /// <summary>
 /// Selectable radio backend. Mirrors <c>mrf::hal::DeviceKind</c> in
@@ -611,7 +625,7 @@ public sealed class MeshtasticCore : IDisposable
             ThrowIfDisposed();
             NativeMethods.CoreGetListenerSignalStats(_handle, (uint)Math.Max(0, index), out var s);
             return new SignalStatsSnapshot(
-                s.RssiDbfs, s.PeakDbfs, s.DcRe, s.DcIm, s.TotalSamples);
+                s.RssiDbfs, s.PeakDbfs, s.DcRe, s.DcIm, s.Clipped, s.TotalSamples);
         }
         finally { _lock.ExitReadLock(); }
     }
@@ -764,7 +778,7 @@ public sealed class MeshtasticCore : IDisposable
             ThrowIfDisposed();
             NativeMethods.CoreGetSignalStats(_handle, out var s);
             return new SignalStatsSnapshot(
-                s.RssiDbfs, s.PeakDbfs, s.DcRe, s.DcIm, s.TotalSamples);
+                s.RssiDbfs, s.PeakDbfs, s.DcRe, s.DcIm, s.Clipped, s.TotalSamples);
         }
         finally { _lock.ExitReadLock(); }
     }

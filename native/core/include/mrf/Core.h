@@ -24,6 +24,10 @@ struct CoreSignalStats {
     float peak_dbfs;
     float dc_re;
     float dc_im;
+    // Fraction of the last block at the converter's rail, 0 to 1. An
+    // overdriven front end pins every reading and corrupts header FEC, so it
+    // is worth saying out loud rather than leaving to be inferred.
+    float clipped;
     std::uint64_t total_samples;
 };
 

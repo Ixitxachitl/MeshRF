@@ -980,7 +980,7 @@ CoreSignalStats Core::listener_signal_stats(std::size_t index) const noexcept {
     for (const auto& w : impl_->chains) {
         if (!w->chain->has_listener(static_cast<int>(index))) continue;
         const auto s = w->chain->stats();
-        return CoreSignalStats{s.rssi_dbfs, s.peak_dbfs, s.dc_re, s.dc_im, s.total_samples};
+        return CoreSignalStats{s.rssi_dbfs, s.peak_dbfs, s.dc_re, s.dc_im, s.clipped, s.total_samples};
     }
     return CoreSignalStats{-120.0f, -120.0f, 0.0f, 0.0f, 0u};
 }
@@ -1641,7 +1641,7 @@ CoreSignalStats Core::signal_stats() const noexcept {
     // a packet's signal strength.
     if (impl_->have_packet_rssi.load(std::memory_order_relaxed)) {
         const float rssi = impl_->packet_rssi_dbm.load(std::memory_order_relaxed);
-        return CoreSignalStats{rssi, rssi, 0.0f, 0.0f, 0};
+        return CoreSignalStats{rssi, rssi, 0.0f, 0.0f, 0.0f, 0};
     }
     const auto s = impl_->stats.snapshot();
     return CoreSignalStats{
@@ -1649,6 +1649,7 @@ CoreSignalStats Core::signal_stats() const noexcept {
         s.peak_dbfs,
         s.dc_re,
         s.dc_im,
+        s.clipped,
         s.total_samples,
     };
 }

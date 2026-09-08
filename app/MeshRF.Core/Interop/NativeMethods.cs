@@ -130,6 +130,9 @@ internal static partial class NativeMethods
         public float PeakDbfs;
         public float DcRe;
         public float DcIm;
+        /// <summary>Fraction of the last block at the converter's rail, 0 to 1.
+        /// Must stay in step with CoreSignalStats in native/core.</summary>
+        public float Clipped;
         public ulong TotalSamples;
     }
 

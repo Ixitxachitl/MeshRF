@@ -22,6 +22,11 @@ public:
         float peak_dbfs;   // 20*log10(max |s|)
         float dc_re;
         float dc_im;
+        // Fraction of the last block riding at the converter's rail, 0 to 1.
+        // An overdriven front end is not a loud signal: the samples stop
+        // following the wave and the chirps come apart, which corrupts header
+        // FEC while a spectrogram still looks clean.
+        float clipped;
         std::uint64_t total_samples;
     };
 
@@ -35,6 +40,7 @@ private:
     std::atomic<float> last_peak_{-120.0f};
     std::atomic<float> last_dc_re_{0.0f};
     std::atomic<float> last_dc_im_{0.0f};
+    std::atomic<float> last_clipped_{0.0f};
     std::atomic<std::uint64_t> total_{0};
 };
 

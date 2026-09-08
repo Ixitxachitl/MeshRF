@@ -18,6 +18,10 @@
 namespace mrf::modem {
 namespace {
 
+// Below any level a converter could produce: what a modem driven with no
+// chain in front of it is left holding, and the signal for "say nothing".
+constexpr float kNoLevelDbfs = -1000.0f;
+
 // Samples per chip fed to the receiver. Oversampling >= 2 is required so the
 // fractional-STO sample shift has resolution and integer CFO can be realigned
 // during sync; at OS = 1 timing never locks. OS = 4 matches gr-lora_sdr.
@@ -45,14 +49,39 @@ public:
             // locked, which is worth seeing when a frame fails to follow one.
             const float spreading_gain_db =
                 10.0f * std::log10(static_cast<float>(1u << params_.spreading_factor));
-            char msg[160];
+            const float snr_db = ev.peak_db - spreading_gain_db;
+
+            // The level of the signal alone, out of the level of everything in
+            // the channel.
+            //
+            // What the chain measured is the whole block: signal and noise
+            // together, S + N. The ratio between them is the SNR just worked
+            // out, so S = (S + N) * snr / (1 + snr) recovers one from the
+            // other. It matters because LoRa is decodable well below the noise
+            // floor: for a distant node the block is almost entirely noise,
+            // and reporting the block would report the noise floor and call it
+            // that node's signal strength. Every weak node would then read the
+            // same, which is exactly what a broken measurement looks like.
+            //
+            // At a strong signal the correction tends to nothing, which is the
+            // sanity check: a loud neighbour reads what the channel reads.
+            char level[32] = "";
+            if (channel_level_dbfs_ > kNoLevelDbfs) {
+                const float snr_linear = std::pow(10.0f, snr_db / 10.0f);
+                const float signal_dbfs = channel_level_dbfs_ +
+                    10.0f * std::log10(snr_linear / (1.0f + snr_linear));
+                std::snprintf(level, sizeof(level), " rssi=%.1fdBFS", signal_dbfs);
+            }
+
+            char msg[192];
             std::snprintf(msg, sizeof(msg),
-                "preamble: SF%u BW%uk cfo=%+.1fk peak=%.1fdB snr=%.1fdB",
+                "preamble: SF%u BW%uk cfo=%+.1fk peak=%.1fdB snr=%.1fdB%s",
                 static_cast<unsigned>(params_.spreading_factor),
                 static_cast<unsigned>(params_.bandwidth_hz / 1000u),
                 ev.cfo_hz / 1000.0f,
                 ev.peak_db,
-                ev.peak_db - spreading_gain_db);
+                snr_db,
+                level);
             event_cb_(std::string(msg));
         });
         // Per-symbol logging is diagnostic-only; leave the callback unset to
@@ -199,6 +228,8 @@ public:
         rx_.process(samples);
     }
 
+    void set_channel_level_dbfs(float dbfs) override { channel_level_dbfs_ = dbfs; }
+
     std::vector<Sample> encode(std::span<const std::uint8_t> payload) const override {
         // Modulate the on-air bytes (16-byte L1 header + encrypted payload)
         // into a complete IQ frame at the modem's working sample rate. The
@@ -240,6 +271,7 @@ private:
     MeshtasticRx  rx_;
     FrameCallback frame_cb_;
     EventCallback event_cb_;
+    float         channel_level_dbfs_{kNoLevelDbfs};
 };
 
 } // namespace

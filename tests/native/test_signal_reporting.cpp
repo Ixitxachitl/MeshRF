@@ -36,9 +36,11 @@ std::vector<std::uint8_t> payload_of(std::size_t n) {
     return d;
 }
 
-// One frame at the chip rate, scaled, over a noise floor proportional to the
-// signal so the SNR is the same however loud the pair is played.
-std::vector<cf> frame_at(const LoraParams& params, float amplitude) {
+// One frame at the chip rate over a noise floor of its own. With 
+// left at zero the floor follows the signal, so the pair can be played louder
+// or softer at one SNR; given a value it stands still while the signal moves,
+// which is a link getting weaker rather than the volume changing.
+std::vector<cf> frame_at(const LoraParams& params, float amplitude, float noise) {
     auto modem = make_modem(params);
     auto iq = modem->encode(std::span<const std::uint8_t>(payload_of(24).data(), 24));
 
@@ -49,7 +51,7 @@ std::vector<cf> frame_at(const LoraParams& params, float amplitude) {
         lcg = lcg * 1664525u + 1013904223u;
         return (static_cast<double>(lcg >> 8) + 0.5) / 16777216.0;
     };
-    const float noise = 0.01f * amplitude;
+    if (noise <= 0.0f) noise = 0.01f * amplitude;
     for (auto s : iq) {
         const double r = std::sqrt(-2.0 * std::log(uniform()));
         const double t = kTwoPi * uniform();
@@ -69,7 +71,8 @@ std::optional<double> field(const std::string& line, const std::string& name) {
 }
 
 // The first preamble line a chain reports for one frame played at `amplitude`.
-std::optional<std::string> preamble_for(const LoraParams& params, float amplitude) {
+std::optional<std::string> preamble_for(const LoraParams& params, float amplitude,
+                                        float noise = 0.0f) {
     const RxListenerChain::Member m{0, params};
     RxListenerChain chain(params.bandwidth_hz * 4u, 0, params.bandwidth_hz,
                           std::span<const RxListenerChain::Member>(&m, 1));
@@ -79,7 +82,7 @@ std::optional<std::string> preamble_for(const LoraParams& params, float amplitud
         if (!first && msg.find("preamble") != std::string::npos) first = msg;
     });
 
-    const auto capture = frame_at(params, amplitude);
+    const auto capture = frame_at(params, amplitude, noise);
     constexpr std::size_t kBlock = 4096;
     for (std::size_t i = 0; i < capture.size(); i += kBlock) {
         const std::size_t n = std::min(kBlock, capture.size() - i);
@@ -158,4 +161,37 @@ TEST(SignalReporting, TheSnrDoesNotFollowTheVolume) {
     const auto quiet_snr = field(*quiet, "snr");
     ASSERT_TRUE(loud_snr.has_value() && quiet_snr.has_value());
     EXPECT_NEAR(*loud_snr, *quiet_snr, 3.0) << *loud << " / " << *quiet;
+}
+
+// The one that matters for a real mesh.
+//
+// LoRa is decodable well below the noise floor, so for a distant node almost
+// everything in the channel is noise. Reporting the channel's level reports
+// that noise and calls it the node's signal strength -- and every weak node
+// then reads the same number, which is what a broken measurement looks like
+// from the outside. Holding the noise still and moving the signal is the test
+// that tells the two apart: the level has to follow the signal, not the floor
+// it is sitting on.
+TEST(SignalReporting, AWeakSignalIsToldApartFromTheNoiseItSitsIn) {
+    const auto params = params_for(Preset::LongFast);
+    constexpr float kNoise = 0.05f;
+
+    const auto stronger = preamble_for(params, 0.20f, kNoise);
+    const auto weaker   = preamble_for(params, 0.02f, kNoise);
+    ASSERT_TRUE(stronger.has_value()) << "no preamble for the stronger signal";
+    ASSERT_TRUE(weaker.has_value()) << "no preamble for the weaker signal";
+
+    const auto strong_rssi = field(*stronger, "rssi");
+    const auto weak_rssi   = field(*weaker, "rssi");
+    ASSERT_TRUE(strong_rssi.has_value() && weak_rssi.has_value());
+
+    // A tenth of the amplitude is 20 dB less signal. The channel these were
+    // heard in barely moved -- the noise in it is the same and dominates both
+    // blocks -- so anything reporting the channel would report them alike.
+    EXPECT_NEAR(*strong_rssi - *weak_rssi, 20.0, 5.0)
+        << *stronger << " / " << *weaker;
+
+    // And both sit below full scale, as any real level must.
+    EXPECT_LT(*strong_rssi, 0.0) << *stronger;
+    EXPECT_LT(*weak_rssi, *strong_rssi) << *weaker;
 }

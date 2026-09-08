@@ -51,6 +51,12 @@ public:
 
     virtual void set_frame_callback(FrameCallback cb) = 0;
     virtual void set_event_callback(EventCallback cb) = 0;
+
+    // The level of the channel about to be fed in, in dBFS, so a preamble
+    // found in it can report what the signal alone was worth. The chain
+    // measures this after its channel filter and sets it before each block;
+    // a modem driven directly is left with no level to report.
+    virtual void set_channel_level_dbfs(float dbfs) = 0;
     [[nodiscard]] virtual const LoraParams& params() const = 0;
     [[nodiscard]] virtual std::uint32_t working_sample_rate_hz() const = 0;
 };
