@@ -348,17 +348,21 @@ public partial class RadioViewModel
     /// </summary>
     private const double MaxRxDrainMsPerTick = 4.0;
 
-    private static readonly Regex PreamblePeakRegex = new(
-        @"peak=(?<peak>-?\d+(?:\.\d+)?)dB", RegexOptions.Compiled);
+    /// <summary>
+    /// What the last preamble on each listener measured, for the payload that
+    /// follows it there.
+    /// </summary>
+    /// <remarks>
+    /// Per listener, because the lines of several listeners' frames interleave
+    /// in the queue. Taken from the preamble rather than asked of the receiver
+    /// when the payload is handled: by then the frame is over, and what the
+    /// channel carries is whatever came next — which for a quiet mesh is the
+    /// noise floor. That is what this used to report as a packet's strength.
+    /// </remarks>
+    private readonly Dictionary<int, SignalReading> _lastPreambleReading = new();
 
-    /// <summary>Peak-above-noise from the last preamble on each listener,
-    /// used as the SNR for the payload that follows it there. Per listener,
-    /// because the lines of several listeners' frames interleave in the
-    /// queue.</summary>
-    private readonly Dictionary<int, float?> _lastPreamblePeakDb = new();
-
-    private float? TakePreamblePeak(int listener) =>
-        _lastPreamblePeakDb.Remove(listener, out var peak) ? peak : null;
+    private SignalReading TakePreambleReading(int listener) =>
+        _lastPreambleReading.Remove(listener, out var reading) ? reading : SignalReading.None;
 
     // -- Listeners and where a transmission goes ------------------------------
 
@@ -531,12 +535,9 @@ public partial class RadioViewModel
             if (kind.StartsWith("preamble", StringComparison.Ordinal))
             {
                 // A preamble marks the start of a frame: hold off transmitting,
-                // and keep its peak-above-noise as the SNR for the payload.
+                // and keep what it measured for the payload that follows.
                 MarkRxBusy(listener, nowUtc, RxBusyDefaultHold);
-                var pm = PreamblePeakRegex.Match(kind);
-                if (pm.Success && float.TryParse(pm.Groups["peak"].Value,
-                        NumberStyles.Float, CultureInfo.InvariantCulture, out var peak))
-                    _lastPreamblePeakDb[listener] = peak;
+                _lastPreambleReading[listener] = SignalReading.FromPreambleLine(kind);
             }
             else if (kind.StartsWith("payload", StringComparison.Ordinal))
             {

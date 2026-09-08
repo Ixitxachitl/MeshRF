@@ -9,6 +9,7 @@
 #include "mrf/modem/LoraEncoder.h"
 #include "mrf/modem/ChirpChatTx.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -30,13 +31,28 @@ public:
               static_cast<int>(kOversampling), p.sync_word) {
         rx_.set_event_callback([this](const PreambleEvent& ev) {
             if (!event_cb_) return;
+            // peak_db is the dechirped FFT's peak over the mean of its other
+            // bins: the SNR *after* despreading, which carries the spreading
+            // gain of 10*log10(2^SF) with it. Everything downstream — the app,
+            // the link budget, anyone comparing against firmware — means LoRa
+            // SNR, which is the chip-level figure before that gain, and is
+            // normally negative because LoRa decodes below the noise. Taking
+            // the gain back off is what makes the two the same quantity, and
+            // what stops one preset reading 15 dB better than another for no
+            // reason but its spreading factor.
+            //
+            // Both are reported: peak is what says how firmly the preamble
+            // locked, which is worth seeing when a frame fails to follow one.
+            const float spreading_gain_db =
+                10.0f * std::log10(static_cast<float>(1u << params_.spreading_factor));
             char msg[160];
             std::snprintf(msg, sizeof(msg),
-                "preamble: SF%u BW%uk cfo=%+.1fk peak=%.1fdB",
+                "preamble: SF%u BW%uk cfo=%+.1fk peak=%.1fdB snr=%.1fdB",
                 static_cast<unsigned>(params_.spreading_factor),
                 static_cast<unsigned>(params_.bandwidth_hz / 1000u),
                 ev.cfo_hz / 1000.0f,
-                ev.peak_db);
+                ev.peak_db,
+                ev.peak_db - spreading_gain_db);
             event_cb_(std::string(msg));
         });
         // Per-symbol logging is diagnostic-only; leave the callback unset to

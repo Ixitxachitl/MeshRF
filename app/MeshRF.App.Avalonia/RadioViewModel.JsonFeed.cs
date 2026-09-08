@@ -63,7 +63,7 @@ public partial class RadioViewModel
     /// <summary>Serialises one decoded packet into the feed. Called for every
     /// decode, so it stays cheap and bounded.</summary>
     public void AppendDecodedPacketJson(MeshHeader header, MeshDecodeResult result,
-                                        long rxEpoch, float? snrDb, float? packetRssiDbm,
+                                        long rxEpoch, SignalReading signal,
                                         byte hopsAway, string summary, RxSource source)
     {
         try
@@ -88,8 +88,12 @@ public partial class RadioViewModel
                     packet_id = header.PacketId,
                     via_mqtt = header.ViaMqtt,
                     hops_away = hopsAway,
-                    rssi_dbm = packetRssiDbm,
-                    snr_db = snrDb,
+                    // Not rssi_dbm any more: an SDR measures dBFS, and the
+                    // field said dBm whatever it held. The unit is beside the
+                    // number so a consumer can tell the two apart.
+                    rssi = signal.Rssi,
+                    rssi_unit = signal.Rssi is null ? null : signal.RssiUnit,
+                    snr_db = signal.SnrDb,
                 },
                 decoded = new
                 {

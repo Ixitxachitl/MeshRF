@@ -12,7 +12,7 @@ public readonly record struct DirectSighting(
     byte HopsAway,
     DateTimeOffset When,
     float? SnrDb,
-    float? RssiDbm,
+    float? Rssi,
     GeoPoint Mine,
     GeoPoint Theirs);
 

@@ -41,7 +41,8 @@ public sealed class NodeRecord : INotifyPropertyChanged
         FirstHeardEpoch = source.FirstHeardEpoch;
         SeenViaMqtt     = source.SeenViaMqtt;
         SnrDb           = source.SnrDb;
-        RssiDbm         = source.RssiDbm;
+        Rssi            = source.Rssi;
+        RssiIsDbm       = source.RssiIsDbm;
         HopsAway        = source.HopsAway;
         Latitude        = source.Latitude;
         Longitude       = source.Longitude;
@@ -134,8 +135,25 @@ public sealed class NodeRecord : INotifyPropertyChanged
     /// <summary>Convenience flag for UI visibility bindings.</summary>
     public bool IsSeenViaMqtt => SeenViaMqtt == true;
 
+    /// <summary>Chip-level SNR of the last packet heard from this node — the
+    /// figure firmware reports, normally negative.</summary>
     public float? SnrDb       { get; set; }
-    public float? RssiDbm     { get; set; }
+
+    /// <summary>Level of the last packet heard from this node, in the unit
+    /// <see cref="RssiIsDbm"/> names. See <see cref="Mesh.SignalReading"/> for
+    /// why the unit has to travel with it.</summary>
+    public float? Rssi        { get; set; }
+
+    /// <summary>True when <see cref="Rssi"/> is dBm from a packet radio, false
+    /// when it is dBFS off an SDR, which has no absolute reference.</summary>
+    public bool RssiIsDbm     { get; set; }
+
+    /// <summary>The level with the unit it is actually in, for a cell that
+    /// must not print dBm over a reading that is dBFS. Empty when nothing
+    /// measured one. Formatted through <see cref="Mesh.SignalReading"/> so
+    /// every place that shows a level agrees on how.</summary>
+    public string RssiText =>
+        new Mesh.SignalReading(SnrDb, Rssi, RssiIsDbm).RssiText ?? string.Empty;
 
     /// <summary>Hops the most recent packet took, as the protocol reports it.
     /// </summary>
@@ -163,7 +181,7 @@ public sealed class NodeRecord : INotifyPropertyChanged
     public byte?   BestHops        { get; set; }
     public long?   BestHopsEpoch   { get; set; }
     public float?  BestHopsSnrDb   { get; set; }
-    public float?  BestHopsRssiDbm { get; set; }
+    public float?  BestHopsRssi { get; set; }
     public double? BestHopsMyLat   { get; set; }
     public double? BestHopsMyLon   { get; set; }
     public double? BestHopsPeerLat { get; set; }
@@ -177,7 +195,7 @@ public sealed class NodeRecord : INotifyPropertyChanged
             && BestHopsPeerLat is { } peerLat && BestHopsPeerLon is { } peerLon
             ? new Mesh.DirectSighting(
                 hops, DateTimeOffset.FromUnixTimeSeconds(epoch),
-                BestHopsSnrDb, BestHopsRssiDbm,
+                BestHopsSnrDb, BestHopsRssi,
                 new Map.GeoPoint(myLat, myLon), new Map.GeoPoint(peerLat, peerLon))
             : null;
 

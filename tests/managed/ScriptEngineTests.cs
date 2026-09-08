@@ -41,7 +41,7 @@ public class ScriptEngineTests
             Channel = channel,
             IsDirect = direct,
             SnrDb = snr,
-            RssiDbm = -104,
+            Rssi = -104,
             Hops = hops,
             PacketId = 0xdeadbeef,
             Self = Self,

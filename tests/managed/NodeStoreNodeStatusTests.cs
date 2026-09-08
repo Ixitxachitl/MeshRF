@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using MeshRF.Mesh;
 using MeshRF.Nodes;
 using Xunit;
 
@@ -54,7 +55,7 @@ public class NodeStoreNodeStatusTests
         store.SetNodeStatus(1, "On the trail");
 
         store.Upsert(new NodeRecord { NodeNum = 1, LongName = "Node One" });
-        store.RecordSighting(1, rssiDbm: -80);
+        store.RecordSighting(1, new SignalReading(null, -80, true));
 
         Assert.Equal("On the trail", store.Get(1)!.NodeStatus);
     }

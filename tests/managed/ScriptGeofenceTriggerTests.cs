@@ -51,7 +51,7 @@ public class ScriptGeofenceTriggerTests
             Channel = channel,
             FromPacket = true,
             SnrDb = 5,
-            RssiDbm = -104,
+            Rssi = -104,
             Hops = 2,
             Self = Self,
             At = at ?? Noon,
@@ -67,7 +67,7 @@ public class ScriptGeofenceTriggerTests
             FromLong = "My Node",
             FromPacket = false,
             SnrDb = null,
-            RssiDbm = null,
+            Rssi = null,
             Hops = 0,
         };
 

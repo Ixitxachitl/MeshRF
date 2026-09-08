@@ -349,13 +349,13 @@ public class NodeMergeTests : IDisposable
         store.Upsert(Node(id.NodeNum, "Ridge", "90:70:69:83:22:34", id.Hex));
         store.MergeDuplicates();
 
-        store.RecordSighting(0x69832234, rssiDbm: -101, snrDb: -7.5f, hopsAway: 3);
+        store.RecordSighting(0x69832234, new SignalReading(-7.5f, -101, true), hopsAway: 3);
         store.AddLocationHistory(0x69832234, new DateTime(2026, 9, 5, 8, 0, 0, DateTimeKind.Utc),
                                  39.05, -121.07, altitudeM: 400);
 
         Assert.Equal(1, store.Count());
         var kept = store.Get(id.NodeNum)!;
-        Assert.Equal(-101, kept.RssiDbm);
+        Assert.Equal(-101, kept.Rssi);
         Assert.Single(store.LocationHistory(id.NodeNum));
     }
 
@@ -385,7 +385,7 @@ public class NodeMergeTests : IDisposable
 
         using var reopened = new NodeStore(_db);
         Assert.Equal(id.NodeNum, reopened.Resolve(0x69832234));
-        reopened.RecordSighting(0x69832234, rssiDbm: -99);
+        reopened.RecordSighting(0x69832234, new SignalReading(null, -99, true));
         Assert.Equal(1, reopened.Count());
     }
 

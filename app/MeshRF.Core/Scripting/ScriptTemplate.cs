@@ -142,7 +142,12 @@ public static class ScriptTemplate
                     : string.Empty;
 
             case "snr": return Number(evt.SnrDb, "0.#");
-            case "rssi": return Number(evt.RssiDbm, "0");
+            case "rssi": return Number(evt.Rssi, "0");
+            // The unit is its own placeholder rather than part of {rssi}: a
+            // script comparing the number should not have to strip a suffix,
+            // and a script printing it should not have to guess which receiver
+            // measured it.
+            case "rssi_unit": return evt.Rssi is null ? string.Empty : (evt.RssiIsDbm ? "dBm" : "dBFS");
             case "hops": return evt.Hops.ToString(CultureInfo.InvariantCulture);
 
             case "time": return evt.At.ToString("HH:mm", CultureInfo.InvariantCulture);

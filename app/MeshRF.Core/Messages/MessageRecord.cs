@@ -52,7 +52,19 @@ public sealed class MessageRecord
     public bool ViaMqtt { get; set; }
 
     public long RxEpoch { get; set; }
-    public float? RssiDbfs { get; set; }
+
+    /// <summary>What this packet's own preamble measured, in the unit
+    /// <see cref="RssiIsDbm"/> names. Null when nothing measured it — an MQTT
+    /// downlink, or a reading cleared because it predates the fix that made
+    /// these mean anything. See <see cref="Mesh.SignalReading"/>.</summary>
+    public float? Rssi { get; set; }
+
+    /// <summary>True when <see cref="Rssi"/> is dBm from a packet radio, false
+    /// when it is dBFS off an SDR.</summary>
+    public bool RssiIsDbm { get; set; }
+
+    /// <summary>Chip-level SNR, the figure firmware reports — normally
+    /// negative.</summary>
     public float? SnrDb { get; set; }
 
     /// <summary>Delivery state for messages we sent, mirroring the UI's

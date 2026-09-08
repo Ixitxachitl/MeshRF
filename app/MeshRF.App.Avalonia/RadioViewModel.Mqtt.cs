@@ -297,7 +297,8 @@ public partial class RadioViewModel
         // No log line: the router already logs every packet it handles,
         // whatever its origin, and duplicating that here buries real RF
         // activity under MQTT volume.
-        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null,
+        // Nothing measured anything: this reached us over a wire.
+        _rxRouter.ProcessReceivedFrame(frame, header, SignalReading.None,
                                        PrimarySource() with { FromDownlink = true });
     }
 
@@ -378,8 +379,9 @@ public partial class RadioViewModel
     /// Called by <see cref="AvaloniaMeshRxHost"/> from the shared router.
     /// </summary>
     private void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result,
-                                  bool isFromUs, float? snrDb, float? rssiDbm)
+                                  bool isFromUs, SignalReading signal)
     {
+        var snrDb = signal.SnrDb;
         if (!MqttEnabled) return;
         if (header.ViaMqtt) return; // never re-publish what came from MQTT
         if (_rxHost.MyNodeNum == 0) return;
@@ -474,7 +476,12 @@ public partial class RadioViewModel
             var json = MqttJsonSerializer.Serialize(result, header, envelope.GatewayId,
                 channelIndex: (uint)(matchedChannel?.Index ?? 0),
                 rxTimeEpoch: (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                rssi: rssiDbm.HasValue ? (int)Math.Round(rssiDbm.Value) : null,
+                // Only a real dBm goes on the broker. The Meshtastic schema's
+                // rssi is absolute received power, and an SDR's dBFS is a level
+                // relative to a converter's full scale — a different quantity
+                // that happens to share a shape. Publishing one as the other
+                // puts a number on somebody else's map that means nothing.
+                rssi: signal is { RssiIsDbm: true, Rssi: float dbm } ? (int)Math.Round(dbm) : null,
                 snrDb: snrDb);
             _mqttBridge.Publish(
                 MqttPolicy.JsonUplinkTopic(MqttRootTopic, channelId, envelope.GatewayId),
@@ -498,7 +505,7 @@ public partial class RadioViewModel
 
         var channelConfigs = Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config).ToList();
         var result = MeshDecoder.Decode(frame, channelConfigs);
-        UplinkIfEligible(frame, header, result, isFromUs: true, snrDb: null, rssiDbm: null);
+        UplinkIfEligible(frame, header, result, isFromUs: true, SignalReading.None);
     }
 
     // -- Map reporting ------------------------------------------------------

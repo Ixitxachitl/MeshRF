@@ -42,7 +42,7 @@ public class NodeStoreXeddsaTests
 
         // A routine sighting/telemetry upsert (HasXeddsaSigned left null/default)
         // must not silently un-verify the node.
-        store.Upsert(new NodeRecord { NodeNum = 1, RssiDbm = -80 });
+        store.Upsert(new NodeRecord { NodeNum = 1, Rssi = -80 });
 
         var node = store.Get(1);
         Assert.True(node!.IsXeddsaVerified);

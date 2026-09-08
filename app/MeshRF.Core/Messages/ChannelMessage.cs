@@ -28,7 +28,12 @@ public partial class ChannelMessage : ObservableObject
     /// has no glyph and a font lacking one draws a placeholder box. The bell
     /// emoji a sender may have paired with it is ordinary text and stays.</summary>
     public string DisplayText => HasAlertBell ? AlertBell.StripFrom(Text) : Text;
-    public float? RssiDbm { get; init; }
+    public float? Rssi { get; init; }
+
+    /// <summary>True when <see cref="Rssi"/> is dBm off a packet radio, false
+    /// when it is dBFS off an SDR. Carried so a bubble's detail line can name
+    /// the unit it actually has.</summary>
+    public bool RssiIsDbm { get; init; }
     public float? SnrDb   { get; init; }
 
     /// <summary>Packet id of this message (for matching ACKs). 0 = unknown.</summary>

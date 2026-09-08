@@ -68,7 +68,8 @@ public sealed class MessageStore : IDisposable
                 decrypted   INTEGER NOT NULL DEFAULT 0,
                 via_mqtt    INTEGER NOT NULL DEFAULT 0,
                 rx_epoch    INTEGER NOT NULL DEFAULT 0,
-                rssi_dbfs   REAL,
+                rssi        REAL,
+                rssi_is_dbm INTEGER,
                 snr_db      REAL
             );
             CREATE INDEX IF NOT EXISTS idx_messages_rx ON messages(rx_epoch DESC);
@@ -85,6 +86,7 @@ public sealed class MessageStore : IDisposable
         AddColumnIfMissing("is_reaction", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("via_mqtt", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("preset", "TEXT NOT NULL DEFAULT ''");
+        MigrateSignalColumns();
 
         // Backfill obvious historical reaction rows for older DBs that predate
         // the explicit is_reaction flag.
@@ -102,17 +104,54 @@ public sealed class MessageStore : IDisposable
         }
     }
 
-    private void AddColumnIfMissing(string name, string sqlType)
+    /// <summary>Adds a column to an older database. Says whether it actually
+    /// added one, which is how a migration that has to run exactly once knows
+    /// this is that once.</summary>
+    private bool AddColumnIfMissing(string name, string sqlType)
     {
-        using (var check = _conn.CreateCommand())
-        {
-            check.CommandText = "SELECT 1 FROM pragma_table_info('messages') WHERE name = $n";
-            check.Parameters.AddWithValue("$n", name);
-            if (check.ExecuteScalar() is not null) return;
-        }
+        if (HasColumn(name)) return false;
         using var alter = _conn.CreateCommand();
         alter.CommandText = $"ALTER TABLE messages ADD COLUMN {name} {sqlType}";
         alter.ExecuteNonQuery();
+        return true;
+    }
+
+    private bool HasColumn(string name)
+    {
+        using var check = _conn.CreateCommand();
+        check.CommandText = "SELECT 1 FROM pragma_table_info('messages') WHERE name = $n";
+        check.Parameters.AddWithValue("$n", name);
+        return check.ExecuteScalar() is not null;
+    }
+
+    /// <summary>
+    /// Brings the signal columns to what they now mean, and throws away every
+    /// reading taken before they meant it.
+    /// </summary>
+    /// <remarks>
+    /// Stored RSSI used to be the receiver's level at the moment the app got
+    /// round to the packet, which for a frame already over is the noise that
+    /// followed it; stored SNR carried the spreading gain, so it read tens of
+    /// dB high by an amount that depended on the preset and was not recorded.
+    /// Neither can be corrected after the fact, and both are read by the path
+    /// loss fit. Mixed with readings that do mean something they are worse
+    /// than nothing, so they go — once, when the database is first opened by a
+    /// version that measures properly. Everything else about the message
+    /// stays.
+    /// </remarks>
+    private void MigrateSignalColumns()
+    {
+        if (HasColumn("rssi_dbfs") && !HasColumn("rssi"))
+        {
+            using var rename = _conn.CreateCommand();
+            rename.CommandText = "ALTER TABLE messages RENAME COLUMN rssi_dbfs TO rssi";
+            rename.ExecuteNonQuery();
+        }
+        if (!AddColumnIfMissing("rssi_is_dbm", "INTEGER")) return;
+
+        using var clear = _conn.CreateCommand();
+        clear.CommandText = "UPDATE messages SET rssi = NULL, snr_db = NULL";
+        clear.ExecuteNonQuery();
     }
 
     /// <summary>Insert a received message. Duplicate (packet_id, from, port)
@@ -127,9 +166,9 @@ public sealed class MessageStore : IDisposable
                 INSERT OR IGNORE INTO messages
                     (packet_id, from_node, to_node, channel, portnum, reply_id,
                      emoji, is_reaction, text,
-                     payload_hex, decrypted, via_mqtt, rx_epoch, rssi_dbfs, snr_db, delivery, preset)
+                     payload_hex, decrypted, via_mqtt, rx_epoch, rssi, rssi_is_dbm, snr_db, delivery, preset)
                     VALUES ($pid, $from, $to, $chan, $port, $reply, $emoji, $isReaction, $text,
-                        $hex, $dec, $mqtt, $rx, $rssi, $snr, $del, $preset);
+                        $hex, $dec, $mqtt, $rx, $rssi, $rssidbm, $snr, $del, $preset);
                 """;
             cmd.Parameters.AddWithValue("$pid",  m.PacketId);
             cmd.Parameters.AddWithValue("$from", m.FromNode);
@@ -144,7 +183,8 @@ public sealed class MessageStore : IDisposable
             cmd.Parameters.AddWithValue("$dec",  m.Decrypted ? 1 : 0);
             cmd.Parameters.AddWithValue("$mqtt", m.ViaMqtt ? 1 : 0);
             cmd.Parameters.AddWithValue("$rx",   m.RxEpoch);
-            cmd.Parameters.AddWithValue("$rssi", (object?)m.RssiDbfs ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$rssi", (object?)m.Rssi ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$rssidbm", m.RssiIsDbm ? 1 : 0);
             cmd.Parameters.AddWithValue("$snr",  (object?)m.SnrDb ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$del",  m.Delivery);
             cmd.Parameters.AddWithValue("$preset", m.Preset ?? string.Empty);
@@ -405,6 +445,11 @@ public sealed class MessageStore : IDisposable
             var i = r.GetOrdinal(col);
             return r.IsDBNull(i) ? null : (float)r.GetDouble(i);
         }
+        bool Flag(string col)
+        {
+            var i = r.GetOrdinal(col);
+            return !r.IsDBNull(i) && r.GetInt64(i) != 0;
+        }
         return new MessageRecord
         {
             Id         = r.GetInt64(r.GetOrdinal("id")),
@@ -422,7 +467,8 @@ public sealed class MessageStore : IDisposable
             Decrypted  = r.GetInt64(r.GetOrdinal("decrypted")) != 0,
             ViaMqtt    = r.GetInt64(r.GetOrdinal("via_mqtt")) != 0,
             RxEpoch    = r.GetInt64(r.GetOrdinal("rx_epoch")),
-            RssiDbfs   = NullableF("rssi_dbfs"),
+            Rssi       = NullableF("rssi"),
+            RssiIsDbm  = Flag("rssi_is_dbm"),
             SnrDb      = NullableF("snr_db"),
             Delivery   = r.GetInt32(r.GetOrdinal("delivery")),
         };

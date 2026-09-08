@@ -80,6 +80,10 @@ public:
 private:
     void mix_(std::span<const Sample> in);
 
+    // Appends this channel's current level to a preamble line. See the
+    // definition for why the level is taken here and why it is in dBFS.
+    [[nodiscard]] std::string with_level_(std::string msg) const;
+
     std::uint32_t device_rate_hz_;
     std::int64_t  offset_hz_;
     std::uint32_t bandwidth_hz_;

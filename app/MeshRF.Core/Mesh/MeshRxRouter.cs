@@ -60,7 +60,7 @@ public sealed class MeshRxRouter : IDisposable
     /// <param name="source">Which listener heard the frame. Every host call
     /// receives it, so replies go back out on the same settings; MQTT uplink
     /// is offered for the primary's packets alone.</param>
-    public void ProcessReceivedFrame(byte[] frame, MeshHeader header, float? snrDb, float? packetRssiDbm,
+    public void ProcessReceivedFrame(byte[] frame, MeshHeader header, SignalReading signal,
                                      RxSource source)
     {
         // Own packet heard back (Meshtastic isFromUs): a neighbour rebroadcast
@@ -99,17 +99,17 @@ public sealed class MeshRxRouter : IDisposable
             header.To == _host.MyNodeNum && !header.IsBroadcast &&
             header.ChannelHash == 0x00)
         {
-            if (TryQueuePkcDecode(frame, header, rxEpoch, snrDb, packetRssiDbm, hopsAway, source))
+            if (TryQueuePkcDecode(frame, header, rxEpoch, signal, hopsAway, source))
                 return;
 
             result = TryDecodePkc(frame, header);
         }
 
-        ApplyDecodedPayloadResult(frame, header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, source);
+        ApplyDecodedPayloadResult(frame, header, result, rxEpoch, signal, hopsAway, source);
     }
 
     private bool TryQueuePkcDecode(byte[] frame, MeshHeader header, long rxEpoch,
-        float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source)
+        SignalReading signal, byte hopsAway, RxSource source)
     {
         if (_pkcCts.IsCancellationRequested) return false;
         var myKey = _host.MyPrivateKeyBytes;
@@ -119,7 +119,7 @@ public sealed class MeshRxRouter : IDisposable
         if (senderPub.Length != 32) return false;
 
         return _pkcQueue.Writer.TryWrite(new PkcWorkItem(
-            frame, header, rxEpoch, snrDb, packetRssiDbm, hopsAway,
+            frame, header, rxEpoch, signal, hopsAway,
             (byte[])myKey.Clone(), senderPub, source));
     }
 
@@ -139,7 +139,7 @@ public sealed class MeshRxRouter : IDisposable
                     if (_pkcCts.IsCancellationRequested) return;
 
                     await _dispatcher.InvokeAsync(() => ApplyDecodedPayloadResult(
-                        item.Frame, item.Header, result, item.RxEpoch, item.SnrDb, item.PacketRssiDbm, item.HopsAway,
+                        item.Frame, item.Header, result, item.RxEpoch, item.Signal, item.HopsAway,
                         item.Source));
                 }
             }
@@ -192,20 +192,20 @@ public sealed class MeshRxRouter : IDisposable
     }
 
     private void ApplyDecodedPayloadResult(byte[] frame, MeshHeader header, MeshDecodeResult? result,
-        long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source)
+        long rxEpoch, SignalReading signal, byte hopsAway, RxSource source)
     {
         bool nodeInfoRecord = result is { Port: PortNum.NodeInfo, User: not null } && result.AppPayload.Length != 0;
 
         // Always record the sender sighting (RSSI/last-heard), decoded or
         // not. NodeInfo records fold these fields into their own upsert.
         if (!nodeInfoRecord)
-            _host.RecordSighting(header.From, rxEpoch, packetRssiDbm, snrDb, hopsAway, header.ViaMqtt, source);
+            _host.RecordSighting(header.From, rxEpoch, signal, hopsAway, header.ViaMqtt, source);
 
         if (result is null)
         {
             if (!_host.RememberUndecodedPacket(header))
             {
-                _host.HandleDuplicateForRelay(frame, header, result, snrDb, source);
+                _host.HandleDuplicateForRelay(frame, header, result, signal.SnrDb, source);
                 // Repeats get answered too: the sender only retransmits because
                 // it never heard our first reply.
                 _host.OnUndecodedPacket(header, source);
@@ -214,11 +214,11 @@ public sealed class MeshRxRouter : IDisposable
                 return;
             }
 
-            _host.RelayIfEligible(frame, header, result, snrDb, source);
+            _host.RelayIfEligible(frame, header, result, signal.SnrDb, source);
             // The broker is the primary's alone: a packet from another
             // preset's mesh is not this gateway's to publish.
             if (source.IsPrimary)
-                _host.UplinkIfEligible(frame, header, result, isFromUs: false, snrDb: snrDb, rssiDbm: packetRssiDbm);
+                _host.UplinkIfEligible(frame, header, result, isFromUs: false, signal);
             _host.OnUndecodedPacket(header, source);
             _host.Log($"  rx undecoded from {header.FromId} (chan hash {header.ChannelHash:X2})");
             _host.MarkNodeDirty(header.From);
@@ -244,8 +244,12 @@ public sealed class MeshRxRouter : IDisposable
             Decrypted = true,
             ViaMqtt = header.ViaMqtt,
             RxEpoch = rxEpoch,
-            RssiDbfs = float.IsNegativeInfinity(_host.CurrentRssiDbfs) ? null : _host.CurrentRssiDbfs,
-            SnrDb = snrDb,
+            // What this packet's own preamble measured, not what the
+            // receiver happens to see now. The two were the same field once,
+            // and a stored message carried the noise floor that followed it.
+            Rssi = signal.Rssi,
+            RssiIsDbm = signal.RssiIsDbm,
+            SnrDb = signal.SnrDb,
         };
         record.PayloadHex = BytesToHex(result.AppPayload);
         if (result.Port == PortNum.TextMessage)
@@ -266,7 +270,7 @@ public sealed class MeshRxRouter : IDisposable
 
         if (!isNew)
         {
-            _host.HandleDuplicateForRelay(frame, header, result, snrDb, source);
+            _host.HandleDuplicateForRelay(frame, header, result, signal.SnrDb, source);
             _host.MarkNodeDirty(header.From);
             // Acked on the same terms either way: a want_ack packet we could
             // not file is still one the sender is waiting on, and a broken
@@ -276,19 +280,19 @@ public sealed class MeshRxRouter : IDisposable
             // conservative path on air, but calling the failure a duplicate
             // reports a packet never seen before as one already handled.
             if (stored) _host.Log($"  (dup) {header.FromId} pkt {header.PacketId:x8}");
-            else _host.OnDecodeNotStored(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, source);
+            else _host.OnDecodeNotStored(header, result, rxEpoch, signal, hopsAway, source);
             return;
         }
 
-        _host.RelayIfEligible(frame, header, result, snrDb, source);
+        _host.RelayIfEligible(frame, header, result, signal.SnrDb, source);
         // Matches the original inline call exactly: unlike the undecoded
-        // branch above, snr/rssi are intentionally NOT forwarded here. And
-        // only for the primary's packets: the broker is not told about the
-        // other presets' meshes.
+        // branch above, what the reception measured is intentionally NOT
+        // forwarded here. And only for the primary's packets: the broker is
+        // not told about the other presets' meshes.
         if (source.IsPrimary)
-            _host.UplinkIfEligible(frame, header, result, isFromUs: false, snrDb: null, rssiDbm: null);
+            _host.UplinkIfEligible(frame, header, result, isFromUs: false, SignalReading.None);
 
-        _host.OnMessageDecoded(frame, header, record, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, source);
+        _host.OnMessageDecoded(frame, header, record, result, rxEpoch, signal, hopsAway, source);
         _host.MarkNodeDirty(header.From);
     }
 
@@ -319,8 +323,7 @@ public sealed class MeshRxRouter : IDisposable
         byte[] Frame,
         MeshHeader Header,
         long RxEpoch,
-        float? SnrDb,
-        float? PacketRssiDbm,
+        SignalReading Signal,
         byte HopsAway,
         byte[] MyPrivateKey,
         byte[] SenderPublicKey,

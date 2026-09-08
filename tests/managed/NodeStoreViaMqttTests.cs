@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using MeshRF.Mesh;
 using MeshRF.Nodes;
 using Xunit;
 
@@ -40,7 +41,7 @@ public class NodeStoreViaMqttTests
 
         // Hearing the same node over the air must move it back to local, exactly
         // as firmware's nodeInfoLiteSetBit(..., mp.via_mqtt) does.
-        store.RecordSighting(1, rssiDbm: -80, seenViaMqtt: false);
+        store.RecordSighting(1, new SignalReading(null, -80, true), seenViaMqtt: false);
 
         Assert.False(store.Get(1)!.SeenViaMqtt);
     }
@@ -49,7 +50,7 @@ public class NodeStoreViaMqttTests
     public void MqttSighting_AfterLocal_SetsFlag()
     {
         using var store = NewStore();
-        store.RecordSighting(1, rssiDbm: -80, seenViaMqtt: false);
+        store.RecordSighting(1, new SignalReading(null, -80, true), seenViaMqtt: false);
         store.RecordSighting(1, seenViaMqtt: true);
 
         Assert.True(store.Get(1)!.SeenViaMqtt);

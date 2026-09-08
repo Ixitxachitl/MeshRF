@@ -28,6 +28,7 @@ add_executable(mrf_core_tests
     test_meshtastic_rx_frame.cpp
     test_lora_tx.cpp
     test_rx_listener_chain.cpp
+    test_signal_reporting.cpp
     test_rx_chain_throughput.cpp
     test_sx126x.cpp
 )

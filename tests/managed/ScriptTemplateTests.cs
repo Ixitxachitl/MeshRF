@@ -16,7 +16,7 @@ public class ScriptTemplateTests
         Channel = "LongFast",
         IsDirect = true,
         SnrDb = -7.25,
-        RssiDbm = -104.6,
+        Rssi = -104.6,
         Hops = 2,
         Self = new ScriptSelf(0x11111111, "ME", "My Node", 101),
         At = new DateTimeOffset(2026, 8, 14, 9, 5, 0, TimeSpan.Zero),
@@ -273,7 +273,7 @@ public class ScriptTemplateTests
     public void A_Missing_Measurement_Reads_As_A_Question_Mark()
     {
         // An empty gap in a sentence reads like a bug; "?" reads like missing data.
-        var noSignal = Sample with { SnrDb = null, RssiDbm = null };
+        var noSignal = Sample with { SnrDb = null, Rssi = null };
         Assert.Equal("? dB / ? dBm", ScriptTemplate.Expand("{snr} dB / {rssi} dBm", noSignal));
     }
 

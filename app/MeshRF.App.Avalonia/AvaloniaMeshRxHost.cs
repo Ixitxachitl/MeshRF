@@ -513,7 +513,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Raised for every decoded packet so the owner can serialise it
     /// into the raw JSON feed.</summary>
-    public Action<MeshHeader, MeshDecodeResult, long, float?, float?, byte, string, RxSource>? DecodedPacketForFeed { get; set; }
+    public Action<MeshHeader, MeshDecodeResult, long, SignalReading, byte, string, RxSource>? DecodedPacketForFeed { get; set; }
 
     /// <summary>Raised when a node's stored public key is replaced by a
     /// different one. The router caches parsed sender keys for PKC decode, so
@@ -564,7 +564,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                                FindChannelByName(result.ChannelName) is { Index: 0 },
             IsDirect = isDirect,
             SnrDb = record.SnrDb,
-            RssiDbm = record.RssiDbfs,
+            Rssi = record.Rssi,
+            RssiIsDbm = record.RssiIsDbm,
             Hops = hopsAway,
             SenderIsFavorite = node?.Favorite == true,
             SenderHasKey = !string.IsNullOrEmpty(node?.PublicKey),
@@ -834,7 +835,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             FromId = m.FromNode == 0 ? "note" : NodeDisplayName(m.FromNode),
             SenderNodeNum = m.FromNode,
             Text = m.Text,
-            RssiDbm = m.RssiDbfs,
+            Rssi = m.Rssi,
+            RssiIsDbm = m.RssiIsDbm,
             SnrDb = m.SnrDb,
             PacketId = m.PacketId,
             IsOutgoing = outgoing,
@@ -1163,7 +1165,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 Text = text,
                 Decrypted = true,
                 RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                RssiDbfs = rssi,
+                Rssi = rssi,
                 SnrDb = snr,
                 Delivery = (int)MessageDelivery.None,
             });
@@ -1386,10 +1388,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
     /// <summary>Publishes eligible traffic to the MQTT bridge. Null until the
     /// owner wires it up, which leaves uplink off.</summary>
-    public Action<byte[], MeshHeader, MeshDecodeResult?, bool, float?, float?>? UplinkHandler { get; set; }
+    public Action<byte[], MeshHeader, MeshDecodeResult?, bool, SignalReading>? UplinkHandler { get; set; }
 
-    public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm) =>
-        UplinkHandler?.Invoke(frame, header, result, isFromUs, snrDb, rssiDbm);
+    public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, SignalReading signal) =>
+        UplinkHandler?.Invoke(frame, header, result, isFromUs, signal);
 
     // -- ACK / NAK tracking ---------------------------------------------------
 
@@ -1583,9 +1585,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         _ => delivery.ToString(),
     };
 
-    public void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt,
+    public void RecordSighting(uint fromNode, long rxEpoch, SignalReading signal, byte hopsAway, bool viaMqtt,
                                RxSource source)
     {
+        var snrDb = signal.SnrDb;
+        var rssi = signal.Rssi;
         // Checked before the upsert, since the upsert is what creates the row:
         // no record yet means this node number has never been heard on this
         // install. Nothing else in the app distinguishes a first sighting, and
@@ -1595,7 +1599,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
         // A frame that arrived from the broker was heard on no radio at all,
         // so it says nothing about what the node is tuned to.
-        _nodeStore.RecordSighting(fromNode, rssiDbm: rssiDbm, snrDb: snrDb, hopsAway: hopsAway, seenViaMqtt: viaMqtt,
+        _nodeStore.RecordSighting(fromNode, signal: signal, hopsAway: hopsAway, seenViaMqtt: viaMqtt,
                                   heardOnPreset: source.FromDownlink ? null : source.PresetName,
                                   heardOnFreqMHz: source.FromDownlink ? null : source.FreqMHz);
         MarkNodeDirty(fromNode);
@@ -1604,7 +1608,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // packet just carried rather than what it had a moment ago.
         SurveySighting?.Invoke(fromNode, hopsAway, viaMqtt, snrDb);
 
-        if (firstSighting) RaiseNewNode(fromNode, snrDb, rssiDbm, hopsAway, source);
+        if (firstSighting) RaiseNewNode(fromNode, snrDb, rssi, hopsAway, source);
     }
 
     /// <summary>Every sighting, for the survey log to write down if it is
@@ -1635,7 +1639,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// {from.long} falls back to the id, which is why a greeting script wants a
     /// delay: in front of it. The help window says so.
     /// </remarks>
-    private void RaiseNewNode(uint nodeNum, float? snrDb, float? rssiDbm, byte hopsAway, RxSource source)
+    private void RaiseNewNode(uint nodeNum, float? snrDb, float? rssi, byte hopsAway, RxSource source)
     {
         // Scripts act for the primary alone.
         if (!source.IsPrimary) return;
@@ -1647,7 +1651,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             FromShort = node?.ShortName ?? string.Empty,
             FromLong = string.IsNullOrEmpty(node?.LongName) ? NodeDisplayName(nodeNum) : node!.LongName,
             SnrDb = snrDb,
-            RssiDbm = rssiDbm,
+            Rssi = rssi,
             Hops = hopsAway,
             SenderIsFavorite = node?.Favorite == true,
             SenderHasKey = !string.IsNullOrEmpty(node?.PublicKey),
@@ -1657,15 +1661,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     public void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
-        long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source)
+        long rxEpoch, SignalReading signal, byte hopsAway, RxSource source)
     {
+        var snrDb = signal.SnrDb;
+        var packetRssi = signal.Rssi;
         // Log every successful decode.
         // Without this the log only ever shows MeshRxRouter's "(dup)" and
         // "rx undecoded" lines, making normal flood retransmissions look like
         // every packet was being rejected as a duplicate.
         var summary = TagForLog(source) + BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
         Log(summary);
-        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary, source);
+        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, signal, hopsAway, summary, source);
 
         // First sight of this packet, so this is the full-strength ack. A
         // retransmission of it lands in OnDuplicateDecoded instead and gets the
@@ -1755,7 +1761,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     IsLicensed = result.User.IsLicensed ?? false,
                     LastHeardEpoch = rxEpoch,
                     SeenViaMqtt = header.ViaMqtt,
-                    RssiDbm = packetRssiDbm,
+                    Rssi = packetRssi,
                     SnrDb = snrDb,
                     HopsAway = hopsAway,
                 });
@@ -1770,7 +1776,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 MarkNodeDirty(MergeNodeDuplicates(header.From));
                 // Raised after the upsert, so a greeting script sees the name
                 // and key this packet carried rather than a bare node id.
-                if (firstNodeInfo) RaiseNewNode(header.From, snrDb, packetRssiDbm, hopsAway, source);
+                if (firstNodeInfo) RaiseNewNode(header.From, snrDb, packetRssi, hopsAway, source);
                 // An advertisement may still ask us to reply with ours.
                 if (IsDirectedRequest(header, result))
                     AutoReplyRequested?.Invoke(PortNum.NodeInfo, header.From, result.ChannelName,
@@ -1817,7 +1823,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 // arrival rather than as state we happened to be missing.
                 EvaluateGeofenceCrossing(header.From, lat, lon,
                                          previous?.Latitude, previous?.Longitude,
-                                         snrDb, packetRssiDbm, hopsAway);
+                                         snrDb, packetRssi, hopsAway);
                 MarkNodeDirty(header.From);
                 break;
 
@@ -1971,11 +1977,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     }
 
     public void OnDecodeNotStored(MeshHeader header, MeshDecodeResult result,
-                                  long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source)
+                                  long rxEpoch, SignalReading signal, byte hopsAway, RxSource source)
     {
+        var snrDb = signal.SnrDb;
+        var packetRssi = signal.Rssi;
         var summary = TagForLog(source) + BuildDecodedPortSummary(header, result, NodeDisplayName(header.From));
         Log($"{summary} (not stored)");
-        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, snrDb, packetRssiDbm, hopsAway, summary, source);
+        DecodedPacketForFeed?.Invoke(header, result, rxEpoch, signal, hopsAway, summary, source);
     }
 
     /// <summary>Prefix for a log line about a packet heard on a secondary
@@ -2167,7 +2175,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     FromId = NodeDisplayName(header.From),
                     SenderNodeNum = header.From,
                     Text = record.Text,
-                    RssiDbm = record.RssiDbfs,
+                    Rssi = record.Rssi,
+            RssiIsDbm = record.RssiIsDbm,
                     SnrDb = record.SnrDb,
                     PacketId = header.PacketId,
                     IsIgnoredSender = IsNodeIgnored(header.From),
@@ -2248,7 +2257,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             // A beacon may carry an offer and no words at all, and then the
             // invitation is the whole bubble.
             Text = beacon.Message,
-            RssiDbm = record.RssiDbfs,
+            Rssi = record.Rssi,
+            RssiIsDbm = record.RssiIsDbm,
             SnrDb = record.SnrDb,
             PacketId = record.PacketId,
             IsIgnoredSender = IsNodeIgnored(record.FromNode),
@@ -2331,7 +2341,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // The words are the half a reply or a reaction can target, so its
         // packet id is the one worth keeping.
         PacketId = words.PacketId,
-        RssiDbm = words.RssiDbm ?? offer.RssiDbm,
+        Rssi = words.Rssi ?? offer.Rssi,
         SnrDb = words.SnrDb ?? offer.SnrDb,
         IsOutgoing = words.IsOutgoing,
         IsIgnoredSender = words.IsIgnoredSender,
@@ -2485,7 +2495,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void EvaluateGeofenceCrossing(
         uint nodeNum, double lat, double lon,
         double? lastKnownLat = null, double? lastKnownLon = null,
-        float? snrDb = null, float? rssiDbm = null, byte? hopsAway = null)
+        float? snrDb = null, float? rssi = null, byte? hopsAway = null)
     {
         if (nodeNum == 0 || Waypoints.Count == 0) return;
 
@@ -2508,7 +2518,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             else if (!entered && wp.NotifyOnExit) RaiseGeofenceAlert(wp, nodeNum, entered: false);
 
             if (watched)
-                RaiseGeofenceCrossing(wp, nodeNum, entered, lat, lon, snrDb, rssiDbm, hopsAway);
+                RaiseGeofenceCrossing(wp, nodeNum, entered, lat, lon, snrDb, rssi, hopsAway);
         }
     }
 
@@ -2534,7 +2544,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// </remarks>
     private void RaiseGeofenceCrossing(
         WaypointRecord wp, uint nodeNum, bool entered, double lat, double lon,
-        float? snrDb, float? rssiDbm, byte? hopsAway)
+        float? snrDb, float? rssi, byte? hopsAway)
     {
         if (ScriptEventObserved is not { } observer || IsNodeIgnored(nodeNum)) return;
 
@@ -2554,7 +2564,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                                FindChannelByName(wp.Channel) is { Index: 0 },
             FromPacket = hopsAway is not null,
             SnrDb = snrDb,
-            RssiDbm = rssiDbm,
+            Rssi = rssi,
             Hops = hopsAway ?? 0,
             SenderIsFavorite = node?.Favorite == true,
             SenderHasKey = !string.IsNullOrEmpty(node?.PublicKey),
@@ -2867,7 +2877,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             FromId = NodeDisplayName(reaction.FromNode),
             SenderNodeNum = reaction.FromNode,
             Text = $"reacted {glyph} (original message {targetText} not found)",
-            RssiDbm = reaction.RssiDbfs,
+            Rssi = reaction.Rssi,
+            RssiIsDbm = reaction.RssiIsDbm,
             SnrDb = reaction.SnrDb,
             PacketId = reaction.PacketId,
             IsOutgoing = outgoing,
@@ -2899,7 +2910,8 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             FromId = NodeDisplayName(reply.FromNode),
             SenderNodeNum = reply.FromNode,
             Text = $"{context}\n{body}",
-            RssiDbm = reply.RssiDbfs,
+            Rssi = reply.Rssi,
+            RssiIsDbm = reply.RssiIsDbm,
             SnrDb = reply.SnrDb,
             PacketId = reply.PacketId,
             IsOutgoing = outgoing,

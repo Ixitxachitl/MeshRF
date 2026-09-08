@@ -424,12 +424,17 @@ void Core::start_rx(std::span<const modem::RxListener> listeners,
                 // structured callback. The preamble line carries the SNR the
                 // payload is attributed to; here it is the radio's own
                 // measurement instead of a peak-above-noise estimate.
+                // Named the same way the software demodulator names them, since
+                // the app reads one stream. Here both are the radio's own
+                // measurements: a real chip-level SNR needing no correction,
+                // and a real RSSI in dBm, which is the one path where this
+                // figure has an absolute reference.
                 char head[128];
                 std::snprintf(head, sizeof(head),
-                              "preamble: SF%u BW%uk hardware peak=%.1fdB",
+                              "preamble: SF%u BW%uk hardware snr=%.1fdB rssi=%.1fdBm",
                               static_cast<unsigned>(impl_->listeners.front().params.spreading_factor),
                               static_cast<unsigned>(impl_->listeners.front().params.bandwidth_hz / 1000u),
-                              p.snr_db);
+                              p.snr_db, p.rssi_dbm);
                 impl_->push_event(0, head);
 
                 std::string hex;

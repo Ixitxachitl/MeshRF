@@ -128,7 +128,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // arrived over MQTT is excluded — none of it crossed the air to us, so
         // its hop count says nothing about an RF path.
         if (!viaMqtt)
-            _nodeStore.RecordDirectness(nodeNum, hopsAway, snrDb, peer.RssiDbm, mine, theirs);
+            _nodeStore.RecordDirectness(nodeNum, hopsAway, snrDb, peer.Rssi, mine, theirs);
 
         if (!SurveyRecording) return;
 
@@ -1638,17 +1638,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // With one listener the capture is the channel, and the wideband
-        // figure is the one the app has always shown. With several, a
-        // listener's channel is a sliver of the capture, so its level is
-        // taken after its channel filter.
-        float rssi = _rxSources.Length > 1 && _core is not null
-            ? _core.GetListenerSignalStats(listener).RssiDbfs
-            : RssiDbfs;
-        float? packetRssiDbm = float.IsNegativeInfinity(rssi) ? null : rssi;
-        // SNR comes from the preamble that opened this frame on this listener.
-        _rxRouter.ProcessReceivedFrame(frame, header, snrDb: TakePreamblePeak(listener),
-                                       packetRssiDbm: packetRssiDbm, SourceFor(listener));
+        // Both figures come from the preamble that opened this frame on this
+        // listener, measured through that listener's own channel filter while
+        // the signal was on the air. Asking the receiver here instead — which
+        // is what this did — measures the channel as it is now, and by now the
+        // frame has ended: on a quiet mesh that is the noise floor, reported
+        // as the sender's signal strength.
+        _rxRouter.ProcessReceivedFrame(frame, header, TakePreambleReading(listener),
+                                       SourceFor(listener));
     }
 
     /// <summary>Reports a frame the demodulator delivered that never reaches
@@ -1755,7 +1752,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // listened for, and that has just changed.
         RefreshNodeCommandAvailability();
         lock (_rxBusyLock) _rxBusyUntilUtc.Clear();
-        _lastPreamblePeakDb.Clear();
+        _lastPreambleReading.Clear();
         SpectrumCenterHz = plan.DeviceCenterMHz * 1_000_000.0;
         // The bands now mark what is actually being received.
         RefreshMonitors();

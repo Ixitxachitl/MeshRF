@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <numbers>
 #include <stdexcept>
 
@@ -68,9 +69,35 @@ void RxListenerChain::set_event_callback(EventCallback cb) {
     for (std::size_t i = 0; i < modems_.size(); ++i) {
         const int index = members_[i].index;
         modems_[i]->set_event_callback([this, index](std::string msg) {
-            if (event_cb_) event_cb_(index, std::move(msg));
+            if (!event_cb_) return;
+            event_cb_(index, msg.starts_with("preamble") ? with_level_(std::move(msg))
+                                                         : std::move(msg));
         });
     }
+}
+
+// The level of the channel a preamble was just found in.
+//
+// Measured here rather than read off the receiver when the app gets round to
+// the event: process() takes these statistics from the very block it then
+// hands the demodulators, so at the moment a preamble is announced they
+// describe the air the preamble arrived on. Asking afterwards measures
+// whatever is on the channel by then, which for a frame that ended a moment
+// ago is the noise floor.
+//
+// The preamble is also the right part of a frame to measure. It is a plain
+// chirp with constant envelope and no data on it, so its level is the
+// signal's, where a payload's varies with what it happens to be carrying.
+//
+// dBFS, not dBm: this is a level relative to the converter's full scale, and
+// nothing in an SDR chain says what that is in absolute terms. The unit is in
+// the text so the app cannot lose track of which it has — a packet radio
+// reports real dBm on the same line.
+std::string RxListenerChain::with_level_(std::string msg) const {
+    char tail[32];
+    std::snprintf(tail, sizeof(tail), " rssi=%.1fdBFS", stats_.snapshot().rssi_dbfs);
+    msg += tail;
+    return msg;
 }
 
 bool RxListenerChain::has_listener(int index) const noexcept {

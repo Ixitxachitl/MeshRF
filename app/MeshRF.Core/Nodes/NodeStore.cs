@@ -115,7 +115,8 @@ public sealed class NodeStore : IDisposable
                 last_heard_epoch INTEGER NOT NULL DEFAULT 0,
                 seen_via_mqtt    INTEGER NOT NULL DEFAULT 0,
                 snr_db           REAL,
-                rssi_dbm         REAL,
+                rssi             REAL,
+                rssi_is_dbm      INTEGER,
                 hops_away        INTEGER,
                 latitude         REAL,
                 longitude        REAL,
@@ -180,6 +181,8 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("best_hops_my_lon", "REAL");
         AddColumnIfMissing("best_hops_pr_lat", "REAL");
         AddColumnIfMissing("best_hops_pr_lon", "REAL");
+
+        MigrateSignalColumns();
 
         using var history = _conn.CreateCommand();
         history.CommandText = """
@@ -250,17 +253,57 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("ch3_current_ma", "REAL", hist);
     }
 
-    private void AddColumnIfMissing(string name, string sqlType, string table = "nodes")
+    /// <summary>Adds a column to an older database. Says whether it actually
+    /// added one, which is how a migration that has to run exactly once knows
+    /// this is that once.</summary>
+    private bool AddColumnIfMissing(string name, string sqlType, string table = "nodes")
     {
-        using (var check = _conn.CreateCommand())
-        {
-            check.CommandText = $"SELECT 1 FROM pragma_table_info('{table}') WHERE name = $n";
-            check.Parameters.AddWithValue("$n", name);
-            if (check.ExecuteScalar() is not null) return;
-        }
+        if (HasColumn(name, table)) return false;
         using var alter = _conn.CreateCommand();
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {name} {sqlType}";
         alter.ExecuteNonQuery();
+        return true;
+    }
+
+    private bool HasColumn(string name, string table = "nodes")
+    {
+        using var check = _conn.CreateCommand();
+        check.CommandText = $"SELECT 1 FROM pragma_table_info('{table}') WHERE name = $n";
+        check.Parameters.AddWithValue("$n", name);
+        return check.ExecuteScalar() is not null;
+    }
+
+    /// <summary>
+    /// Brings the signal columns to what they now mean, and throws away every
+    /// reading taken before they meant it.
+    /// </summary>
+    /// <remarks>
+    /// Stored RSSI used to be the receiver's level at the moment the app got
+    /// round to the packet, which for a frame already over is the noise that
+    /// followed it; stored SNR carried the spreading gain, so it read tens of
+    /// dB high by an amount that depended on the preset and was never
+    /// recorded. Neither can be corrected after the fact, and the path loss
+    /// fit reads both. Mixed with readings that do mean something they are
+    /// worse than nothing, so they go — once, when the database is first
+    /// opened by a version that measures properly. Who was heard, when, and
+    /// over how many hops all stay.
+    /// </remarks>
+    private void MigrateSignalColumns()
+    {
+        if (HasColumn("rssi_dbm") && !HasColumn("rssi"))
+        {
+            using var rename = _conn.CreateCommand();
+            rename.CommandText = "ALTER TABLE nodes RENAME COLUMN rssi_dbm TO rssi";
+            rename.ExecuteNonQuery();
+        }
+        if (!AddColumnIfMissing("rssi_is_dbm", "INTEGER")) return;
+
+        using var clear = _conn.CreateCommand();
+        clear.CommandText = """
+            UPDATE nodes SET rssi = NULL, snr_db = NULL,
+                             best_hops_rssi = NULL, best_hops_snr = NULL
+            """;
+        clear.ExecuteNonQuery();
     }
 
     /// <summary>Insert or merge a node record. Non-null fields overwrite.</summary>
@@ -273,7 +316,7 @@ public sealed class NodeStore : IDisposable
             cmd.CommandText = """
                 INSERT INTO nodes (node_num, user_id, long_name, short_name,
                                    hw_model, role, last_heard_epoch, seen_via_mqtt,
-                                   snr_db, rssi_dbm, hops_away,
+                                   snr_db, rssi, rssi_is_dbm, hops_away,
                                    latitude, longitude, altitude_m,
                                    battery_pct, voltage_v,
                                    channel_util_pct, air_util_tx_pct,
@@ -291,7 +334,7 @@ public sealed class NodeStore : IDisposable
                                        heard_on_preset, heard_on_freq_mhz)
                 VALUES ($node_num, $user_id, $long_name, $short_name,
                         $hw_model, $role, $last_heard, MAX($seen_via_mqtt, 0),
-                        $snr, $rssi, $hops,
+                        $snr, $rssi, $rssi_is_dbm, $hops,
                         $lat, $lon, $alt,
                         $batt, $volt,
                         $chan, $airx,
@@ -314,7 +357,8 @@ public sealed class NodeStore : IDisposable
                     last_heard_epoch = MAX(excluded.last_heard_epoch, last_heard_epoch),
                     seen_via_mqtt    = COALESCE(NULLIF($seen_via_mqtt, -1), seen_via_mqtt),
                     snr_db           = COALESCE(excluded.snr_db, snr_db),
-                    rssi_dbm         = COALESCE(excluded.rssi_dbm, rssi_dbm),
+                    rssi             = COALESCE(excluded.rssi, rssi),
+                    rssi_is_dbm      = COALESCE(excluded.rssi_is_dbm, rssi_is_dbm),
                     hops_away        = COALESCE(excluded.hops_away, hops_away),
                     latitude         = COALESCE(excluded.latitude, latitude),
                     longitude        = COALESCE(excluded.longitude, longitude),
@@ -368,7 +412,12 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$seen_via_mqtt",
                 rec.SeenViaMqtt is bool via ? (via ? 1 : 0) : -1);
             cmd.Parameters.AddWithValue("$snr",  (object?)rec.SnrDb       ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$rssi", (object?)rec.RssiDbm     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$rssi", (object?)rec.Rssi ?? DBNull.Value);
+            // Null rather than 0 when there is no reading, so COALESCE in the
+            // upsert leaves the stored unit alone instead of overwriting a
+            // real dBm with the default of a row that measured nothing.
+            cmd.Parameters.AddWithValue("$rssi_is_dbm",
+                rec.Rssi is null ? DBNull.Value : (rec.RssiIsDbm ? 1 : 0));
             cmd.Parameters.AddWithValue("$hops", (object?)rec.HopsAway    ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$lat",  (object?)rec.Latitude    ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$lon",  (object?)rec.Longitude   ?? DBNull.Value);
@@ -498,8 +547,8 @@ public sealed class NodeStore : IDisposable
     /// <param name="heardOnPreset">What the node was heard on, a preset name
     /// or <see cref="Mesh.HeardOn.Custom"/>; null or empty leaves the stored
     /// value alone, for a sighting that did not come over the air.</param>
-    public void RecordSighting(uint nodeNum, float? rssiDbm = null,
-                               float? snrDb = null, byte? hopsAway = null,
+    public void RecordSighting(uint nodeNum, Mesh.SignalReading signal = default,
+                               byte? hopsAway = null,
                                DateTimeOffset? when = null,
                                bool seenViaMqtt = false,
                                string? heardOnPreset = null,
@@ -511,8 +560,9 @@ public sealed class NodeStore : IDisposable
             NodeNum = nodeNum,
             LastHeardEpoch = ts,
             SeenViaMqtt = seenViaMqtt,
-            RssiDbm = rssiDbm,
-            SnrDb = snrDb,
+            Rssi = signal.Rssi,
+            RssiIsDbm = signal.RssiIsDbm,
+            SnrDb = signal.SnrDb,
             HopsAway = hopsAway,
             HeardOnPreset = heardOnPreset ?? string.Empty,
             HeardOnFreqMHz = heardOnFreqMHz,
@@ -532,7 +582,7 @@ public sealed class NodeStore : IDisposable
     /// answer it must not overwrite one that could.</para>
     /// </remarks>
     public void RecordDirectness(
-        uint nodeNum, byte hopsAway, float? snrDb, float? rssiDbm,
+        uint nodeNum, byte hopsAway, float? snrDb, float? rssi,
         GeoPoint? mine, GeoPoint? theirs, DateTimeOffset? when = null)
     {
         ThrowIfDisposed();
@@ -540,7 +590,7 @@ public sealed class NodeStore : IDisposable
         if (mine is not { } myPos || theirs is not { } peerPos) return;
 
         var fresh = new DirectSighting(
-            hopsAway, when ?? DateTimeOffset.UtcNow, snrDb, rssiDbm, myPos, peerPos);
+            hopsAway, when ?? DateTimeOffset.UtcNow, snrDb, rssi, myPos, peerPos);
 
         lock (_gate)
         {
@@ -564,7 +614,7 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$hops", keep.HopsAway);
             cmd.Parameters.AddWithValue("$epoch", keep.When.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$snr", (object?)keep.SnrDb ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$rssi", (object?)keep.RssiDbm ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$rssi", (object?)keep.Rssi ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$mylat", keep.Mine.Lat);
             cmd.Parameters.AddWithValue("$mylon", keep.Mine.Lon);
             cmd.Parameters.AddWithValue("$prlat", keep.Theirs.Lat);
@@ -1348,12 +1398,13 @@ public sealed class NodeStore : IDisposable
             LastHeardEpoch = r.GetInt64(r.GetOrdinal("last_heard_epoch")),
             SeenViaMqtt    = Nullable<bool>("seen_via_mqtt"),
             SnrDb          = Nullable<float>("snr_db"),
-            RssiDbm        = Nullable<float>("rssi_dbm"),
+            Rssi           = Nullable<float>("rssi"),
+            RssiIsDbm      = Nullable<bool>("rssi_is_dbm") ?? false,
             HopsAway       = Nullable<byte>("hops_away"),
             BestHops        = Nullable<byte>("best_hops"),
             BestHopsEpoch   = Nullable<long>("best_hops_epoch"),
             BestHopsSnrDb   = Nullable<float>("best_hops_snr"),
-            BestHopsRssiDbm = Nullable<float>("best_hops_rssi"),
+            BestHopsRssi = Nullable<float>("best_hops_rssi"),
             BestHopsMyLat   = Nullable<double>("best_hops_my_lat"),
             BestHopsMyLon   = Nullable<double>("best_hops_my_lon"),
             BestHopsPeerLat = Nullable<double>("best_hops_pr_lat"),

@@ -176,7 +176,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
             if (n.Ch3VoltageV is float c3v) Add("CH3 voltage", $"{c3v:0.000} V");
             if (n.Ch3CurrentMa is float c3i) Add("CH3 current", $"{c3i:0.0} mA");
             if (n.SnrDb is float snr) Add("SNR", $"{snr:0.0} dB");
-            if (n.RssiDbm is float rssi) Add("RSSI", $"{rssi:0} dBm");
+            if (n.RssiText is { Length: > 0 } rssi) Add("RSSI", rssi);
             if (n.HopsAway is byte hops) Add("Hops away", hops.ToString());
             if (n.Latitude is double lat && n.Longitude is double lon)
                 Add("Position", $"{lat:0.#####}, {lon:0.#####}");

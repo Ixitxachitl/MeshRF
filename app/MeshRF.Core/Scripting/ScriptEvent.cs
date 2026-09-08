@@ -144,7 +144,15 @@ public sealed record ScriptEvent
     public bool IsDirect { get; init; }
 
     public double? SnrDb { get; init; }
-    public double? RssiDbm { get; init; }
+
+    /// <summary>Level of the packet behind this event, in the unit
+    /// <see cref="RssiIsDbm"/> names — bare, so <c>{rssi}</c> stays a number a
+    /// script can compare.</summary>
+    public double? Rssi { get; init; }
+
+    /// <summary>True when <see cref="Rssi"/> is dBm off a packet radio, false
+    /// when it is dBFS off an SDR. What <c>{rssi_unit}</c> prints.</summary>
+    public bool RssiIsDbm { get; init; }
     public int Hops { get; init; }
 
     public bool SenderIsFavorite { get; init; }

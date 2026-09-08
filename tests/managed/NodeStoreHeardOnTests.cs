@@ -43,7 +43,7 @@ public sealed class NodeStoreHeardOnTests : IDisposable
         Assert.Equal(913.125, store.Get(7)!.HeardOnFreqMHz!.Value, 6);
 
         // A sighting with no radio behind it, like one from the broker.
-        store.RecordSighting(7, rssiDbm: -90);
+        store.RecordSighting(7, new SignalReading(null, -90, true));
         Assert.Equal("MediumFast", store.Get(7)!.HeardOnPreset);
         Assert.Equal(913.125, store.Get(7)!.HeardOnFreqMHz!.Value, 6);
 

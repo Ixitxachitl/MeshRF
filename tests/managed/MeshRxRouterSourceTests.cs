@@ -52,7 +52,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
 
         public string? GetStoredPublicKeyHex(uint nodeNum) => null;
         public void Log(string message) { }
-        public void RecordSighting(uint fromNode, long rxEpoch, float? rssiDbm, float? snrDb, byte hopsAway, bool viaMqtt, RxSource source)
+        public void RecordSighting(uint fromNode, long rxEpoch, SignalReading signal, byte hopsAway, bool viaMqtt, RxSource source)
             => Calls.Add(("RecordSighting", source));
         public void MarkNodeDirty(uint nodeNum) { }
         public void OnOwnPacketHeard(MeshHeader header, MeshDecodeResult? ownDecode) { }
@@ -61,10 +61,10 @@ public sealed class MeshRxRouterSourceTests : IDisposable
             => Calls.Add(("HandleDuplicateForRelay", source));
         public void RelayIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, float? snrDb, RxSource source)
             => Calls.Add(("RelayIfEligible", source));
-        public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, float? snrDb, float? rssiDbm)
+        public void UplinkIfEligible(byte[] frame, MeshHeader header, MeshDecodeResult? result, bool isFromUs, SignalReading signal)
             => Calls.Add(("UplinkIfEligible", null!));
         public void OnMessageDecoded(byte[] frame, MeshHeader header, MessageRecord record, MeshDecodeResult result,
-                                     long rxEpoch, float? snrDb, float? packetRssiDbm, byte hopsAway, RxSource source)
+                                     long rxEpoch, SignalReading signal, byte hopsAway, RxSource source)
             => Calls.Add(("OnMessageDecoded", source));
         public void OnDuplicateDecoded(MeshHeader header, MeshDecodeResult result, RxSource source)
             => Calls.Add(("OnDuplicateDecoded", source));
@@ -91,7 +91,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
 
         var source = new RxSource(1, LoraPreset.LongFast, false, 906.875);
         var (frame, header) = TextFrame(host.Lists["LongFast"][0], 1001);
-        router.ProcessReceivedFrame(frame, header, snrDb: 5f, packetRssiDbm: -80f, source);
+        router.ProcessReceivedFrame(frame, header, new SignalReading(5f, -80f, false), source);
 
         Assert.Contains(host.Calls, c => c.Call == "RecordSighting" && c.Source == source);
         Assert.Contains(host.Calls, c => c.Call == "RelayIfEligible" && c.Source == source);
@@ -99,7 +99,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
         Assert.DoesNotContain(host.Calls, c => c.Call == "UplinkIfEligible");
 
         // Its retransmission is a duplicate, still on the same source.
-        router.ProcessReceivedFrame(frame, header, snrDb: 5f, packetRssiDbm: -80f, source);
+        router.ProcessReceivedFrame(frame, header, new SignalReading(5f, -80f, false), source);
         Assert.Contains(host.Calls, c => c.Call == "OnDuplicateDecoded" && c.Source == source);
         Assert.Contains(host.Calls, c => c.Call == "HandleDuplicateForRelay" && c.Source == source);
         Assert.DoesNotContain(host.Calls, c => c.Call == "UplinkIfEligible");
@@ -114,7 +114,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
 
         var source = RxSource.Primary(LoraPreset.MediumFast, false, 913.125);
         var (frame, header) = TextFrame(host.Lists[""][0], 1002);
-        router.ProcessReceivedFrame(frame, header, snrDb: 5f, packetRssiDbm: -80f, source);
+        router.ProcessReceivedFrame(frame, header, new SignalReading(5f, -80f, false), source);
 
         Assert.Contains(host.Calls, c => c.Call == "OnMessageDecoded" && c.Source == source);
         Assert.Contains(host.Calls, c => c.Call == "UplinkIfEligible");
@@ -132,7 +132,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
         var (frame, header) = TextFrame(host.Lists["LongFast"][0], 1003);
 
         var primary = RxSource.Primary(LoraPreset.MediumFast, false, 913.125);
-        router.ProcessReceivedFrame(frame, header, snrDb: null, packetRssiDbm: null, primary);
+        router.ProcessReceivedFrame(frame, header, SignalReading.None, primary);
         Assert.Contains(host.Calls, c => c.Call == "OnUndecodedPacket" && c.Source == primary);
         Assert.DoesNotContain(host.Calls, c => c.Call == "OnMessageDecoded");
         // Undecoded on the primary: still offered for uplink, as before.
@@ -141,7 +141,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
         host.Calls.Clear();
         var longFast = new RxSource(1, LoraPreset.LongFast, false, 906.875);
         var (frame2, header2) = TextFrame(host.Lists["LongFast"][0], 1004);
-        router.ProcessReceivedFrame(frame2, header2, snrDb: null, packetRssiDbm: null, longFast);
+        router.ProcessReceivedFrame(frame2, header2, SignalReading.None, longFast);
         Assert.Contains(host.Calls, c => c.Call == "OnMessageDecoded" && c.Source == longFast);
         Assert.DoesNotContain(host.Calls, c => c.Call == "UplinkIfEligible");
     }

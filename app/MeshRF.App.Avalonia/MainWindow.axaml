@@ -946,10 +946,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="RSSI" Width="Auto" SortMemberPath="RssiDbm">
+                            <DataGridTemplateColumn Header="RSSI" Width="Auto" SortMemberPath="Rssi">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
-                                        <TextBlock Text="{Binding RssiDbm, StringFormat='{}{0:F0} dBm'}"
+                                        <TextBlock Text="{Binding RssiText}"
                                                    Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>

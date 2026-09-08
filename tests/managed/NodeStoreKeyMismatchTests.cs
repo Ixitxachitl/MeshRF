@@ -41,7 +41,7 @@ public class NodeStoreKeyMismatchTests
         store.Upsert(new NodeRecord { NodeNum = 1, PublicKey = string.Empty, KeyMismatch = true });
 
         // A routine sighting says nothing about keys and must not clear the flag.
-        store.Upsert(new NodeRecord { NodeNum = 1, RssiDbm = -80 });
+        store.Upsert(new NodeRecord { NodeNum = 1, Rssi = -80 });
 
         Assert.True(store.Get(1)!.HasKeyMismatch);
     }
