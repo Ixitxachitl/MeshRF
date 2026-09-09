@@ -129,6 +129,74 @@ public class CustomListenerPlanTests
                      Build(MediumFast45("Home net"), 2_400_000).Listeners[0].Name);
     }
 
+    /// <summary>
+    /// Auto puts the capture in the middle of what it takes in.
+    /// </summary>
+    /// <remarks>
+    /// Noah's own setup: MediumFast on 913.125 with LongFast and LongTurbo
+    /// beside it, at 10 MS/s. Every position from 909.200 to 910.800 receives
+    /// all three, and the search used to stop at the one nearest the primary —
+    /// 910.800, which puts LongFast's lower edge exactly on the capture's own
+    /// edge, where the front end is already rolling off. The midpoint of the
+    /// three leaves the same room on both sides.
+    /// </remarks>
+    [Fact]
+    public void AutoPutsTheCaptureInTheMiddleOfWhatItTakesIn()
+    {
+        string[] excluded = Enum.GetNames<LoraPreset>()
+            .Where(n => n is not (nameof(LoraPreset.LongFast) or nameof(LoraPreset.LongTurbo)))
+            .ToArray();
+        var plan = Build(MediumFast45(), 10_000_000, custom: null, excluded: excluded);
+
+        Assert.Equal(3, plan.Listeners.Count);
+
+        double lowest = plan.Listeners.Min(l => l.LowEdgeMHz);
+        double highest = plan.Listeners.Max(l => l.HighEdgeMHz);
+        Assert.Equal((lowest + highest) / 2.0, plan.DeviceCenterMHz, 3);
+
+        // Which is to say: the same room below the lowest as above the highest.
+        double below = lowest - (plan.DeviceCenterMHz - plan.UsableHalfSpanMHz);
+        double above = (plan.DeviceCenterMHz + plan.UsableHalfSpanMHz) - highest;
+        Assert.Equal(below, above, 3);
+        Assert.True(below > 0, "centring should leave room on both sides, not sit on an edge");
+    }
+
+    /// <summary>Centring never costs a listener: the capture is held inside
+    /// the range over which the whole set still fits.</summary>
+    [Fact]
+    public void CentringDoesNotDropAnyone()
+    {
+        string[] excluded = Enum.GetNames<LoraPreset>()
+            .Where(n => n is not (nameof(LoraPreset.LongFast) or nameof(LoraPreset.LongTurbo)))
+            .ToArray();
+
+        foreach (var rate in new uint[] { 4_000_000, 8_000_000, 10_000_000, 16_000_000 })
+        {
+            var plan = Build(MediumFast45(), rate, custom: null, excluded: excluded);
+            foreach (var l in plan.Listeners)
+            {
+                Assert.True(l.LowEdgeMHz >= plan.DeviceCenterMHz - plan.UsableHalfSpanMHz - 1e-6,
+                            $"{l.Name} fell off the bottom at {rate}");
+                Assert.True(l.HighEdgeMHz <= plan.DeviceCenterMHz + plan.UsableHalfSpanMHz + 1e-6,
+                            $"{l.Name} fell off the top at {rate}");
+            }
+        }
+    }
+
+    /// <summary>And a hand-made listener is centred with the rest — the
+    /// capture is placed around everything it receives.</summary>
+    [Fact]
+    public void AHandMadeListenerIsCentredWithTheRest()
+    {
+        var mine = new MonitorPlan.CustomListener("Wide net", 11, 500_000, 8, 911.500, Enabled: true);
+        var plan = Build(MediumFast45(), 10_000_000, [mine], EveryPreset());
+
+        Assert.Equal(2, plan.Listeners.Count);
+        double lowest = plan.Listeners.Min(l => l.LowEdgeMHz);
+        double highest = plan.Listeners.Max(l => l.HighEdgeMHz);
+        Assert.Equal((lowest + highest) / 2.0, plan.DeviceCenterMHz, 3);
+    }
+
     /// <summary>Several at once, each its own mesh. This is the case a single
     /// "Custom" name could never have served.</summary>
     [Fact]

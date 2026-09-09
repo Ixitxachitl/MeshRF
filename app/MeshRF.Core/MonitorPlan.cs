@@ -242,7 +242,21 @@ public static class MonitorPlan
                     bestOffset = off;
                 }
             }
-            offsetMHz = bestOffset;
+
+            // Now put those listeners in the middle of the capture rather than
+            // wherever the search happened to find them.
+            //
+            // Any of the positions taking in the same set will receive them,
+            // but not equally well: the one nearest the primary tends to leave
+            // the outermost channel sitting on the capture's edge, which is
+            // where the front end's filter is already rolling off. Centring the
+            // set shares the room out, so every channel has as much margin as
+            // the set allows.
+            //
+            // Only the position moves. The set is the one the search settled
+            // on, and the centre is held inside the range that keeps all of it
+            // — so nothing is traded away for the sake of symmetry.
+            offsetMHz = CentredOffset(primary, primaryListener, candidates, bestOffset, half, reach);
         }
 
         // Rounded to the kilohertz, which is what the radio is asked to tune
@@ -269,6 +283,41 @@ public static class MonitorPlan
 
         return new Result(centreMHz, Math.Round((centreMHz - primary.FreqMHz) * 1000.0, 3),
                           listeners, leftOut, half);
+    }
+
+    /// <summary>
+    /// Where to put the capture so the listeners it takes in sit in the middle
+    /// of it.
+    /// </summary>
+    /// <remarks>
+    /// The set is whatever <paramref name="witnessOffset"/> receives — this
+    /// only chooses where to stand to receive it. The midpoint of everything
+    /// from the lowest edge to the highest is the position with the most room
+    /// on both sides; it is then held inside the range over which that same
+    /// set still fits, and inside the reach that keeps the primary in its own
+    /// capture. Both of those contain the witness, so the range is never empty.
+    /// </remarks>
+    private static double CentredOffset(Primary primary, Listener primaryListener,
+                                        IReadOnlyList<Listener> candidates,
+                                        double witnessOffset, double half, double reach)
+    {
+        double witnessCentre = primary.FreqMHz + witnessOffset;
+
+        double lo = primaryListener.LowEdgeMHz;
+        double hi = primaryListener.HighEdgeMHz;
+        foreach (var c in candidates)
+        {
+            if (!Fits(c, witnessCentre, half)) continue;
+            lo = Math.Min(lo, c.LowEdgeMHz);
+            hi = Math.Max(hi, c.HighEdgeMHz);
+        }
+
+        double lowestCentre = Math.Max(hi - half, primary.FreqMHz - reach);
+        double highestCentre = Math.Min(lo + half, primary.FreqMHz + reach);
+        if (lowestCentre > highestCentre) return witnessOffset;
+
+        double centred = Math.Clamp((lo + hi) / 2.0, lowestCentre, highestCentre);
+        return centred - primary.FreqMHz;
     }
 
     private static bool Fits(Listener c, double centreMHz, double halfMHz) =>
