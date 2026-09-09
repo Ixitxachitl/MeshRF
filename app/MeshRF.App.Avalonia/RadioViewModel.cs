@@ -2494,6 +2494,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Scripts and feed mirrors only run while the receiver does, so the
         // Scripts window's status line changes meaning with it.
         RaiseScriptsStatusChanged();
+        // What the Listeners window offers turns on this: the set being
+        // demodulated is fixed while the receiver runs, so every tick greys
+        // out and a note says why. Rebuilt here rather than at the start and
+        // stop themselves, because the receiver can also stop on its own —
+        // a device unplugged mid-session leaves a window offering choices
+        // that would silently do nothing. The rows carry their own editability,
+        // so they have to be rebuilt rather than merely re-notified.
+        RefreshMonitors();
     }
 
     private void SaveSettings()
