@@ -434,7 +434,7 @@ public partial class RadioViewModel
         // be clear; without one the busy check falls back to the primary's.
         int listener = -1;
         foreach (var source in _rxSources)
-            if (!source.IsPrimary && source.PresetName == listName) { listener = source.Listener; break; }
+            if (!source.IsPrimary && source.MeshName == listName) { listener = source.Listener; break; }
 
         return TxTarget.ForPreset(preset, freqHz, listener);
     }

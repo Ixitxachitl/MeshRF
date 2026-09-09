@@ -237,7 +237,7 @@ public sealed class MeshRxRouter : IDisposable
             Channel = result.ChannelName,
             // Which mesh, so a restart files it back on the tab it came from
             // rather than the first one that happens to share the name.
-            Preset = source.IsPrimary ? string.Empty : source.PresetName,
+            Preset = source.IsPrimary ? string.Empty : source.MeshName,
             ReplyId = normalizedReplyId,
             Emoji = result.Emoji,
             IsReaction = isReactionRecord,

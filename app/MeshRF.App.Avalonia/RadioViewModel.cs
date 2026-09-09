@@ -253,17 +253,43 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     /// <summary>What the receiver would be started with right now.</summary>
     /// <summary>The mesh this station is on: the list the primary's channels
-    /// live in, named after the preset the toolbar is set to.</summary>
+    /// live in, named after the preset the toolbar is set to, or by whatever
+    /// the operator has called it.</summary>
     public string PrimaryListName => _rxHost.PrimaryListName;
+
+    /// <summary>The receive side of the station — its channels, nodes, tabs
+    /// and stored history. The view model is a facade over it and proxies what
+    /// the main window needs; this is for the parts that work on the model
+    /// itself rather than on the screen.</summary>
+    public AvaloniaMeshRxHost Host => _rxHost;
 
     public MonitorPlan.Result BuildMonitorPlan()
     {
         var primary = new MonitorPlan.Primary(SelectedPreset, IsCustomLoraParams, OverrideSf,
-            (uint)Math.Round(OverrideBwKhz * 1000.0), OverrideCr, CenterFreqMHz);
+            (uint)Math.Round(OverrideBwKhz * 1000.0), OverrideCr, CenterFreqMHz, PrimaryMeshName());
         uint rate = SelectedRxSampleRate?.Hz ?? 0;
         var rates = SampleRateOptions.Select(o => o.Hz).ToList();
         return MonitorPlan.Build(SelectedRegion, primary, SelectedDevice, rate, rates,
-                                 MultiPresetEnabled, MonitorExcludedPresets, MonitorCenterOffsetKHz);
+                                 MultiPresetEnabled, MonitorExcludedPresets, MonitorCenterOffsetKHz,
+                                 CustomListenerPlan());
+    }
+
+    /// <summary>
+    /// What this station's own mesh is called: the name the operator gave it,
+    /// or the preset the toolbar is set to.
+    /// </summary>
+    /// <remarks>
+    /// Empty when nothing has been typed, which keeps the name a station has
+    /// always had. A name stands whatever the settings amount to: a mesh is a
+    /// place, and what the operator calls their own place is theirs to say,
+    /// whether or not a preset happens to describe how they reach it. One
+    /// already spoken for is refused rather than applied — two meshes of one
+    /// name would share one channel list.
+    /// </remarks>
+    public string PrimaryMeshName()
+    {
+        var name = CustomPrimaryName.Trim();
+        return name.Length > 0 && IsMeshNameFree(name) ? name : string.Empty;
     }
 
     /// <summary>
@@ -1120,6 +1146,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         var savedCenterFreqMHz = _settings.CenterFreqMHz;
         var savedMultiPresetEnabled = _settings.MultiPresetEnabled;
         var savedMonitorExcluded = _settings.MonitorExcludedPresets.ToList();
+        var savedCustomListeners = _settings.CustomListeners.Select(CustomListenerEdit.From).ToList();
+        var savedPrimaryMeshName = _settings.PrimaryMeshName;
         var savedMonitorCenterOffsetKHz = _settings.MonitorCenterOffsetKHz;
         var savedLnaGainDb = _settings.LnaGainDb;
         var savedVgaGainDb = _settings.VgaGainDb;
@@ -1275,7 +1303,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // What can be replied on is what is running; what has tabs is what is
         // planned, so turning a preset on shows its channels before the
         // receiver is started and stopping it does not take them away.
-        _rxHost.IsPresetListening = name => _rxSources.Any(s => !s.IsPrimary && s.PresetName == name);
+        _rxHost.IsPresetListening = name => _rxSources.Any(s => !s.IsPrimary && s.MeshName == name);
         _rxHost.MeshForPreset = MeshForPreset;
         _rxHost.IsPresetShown = name => _shownPresets.Contains(name);
         // The picker follows the tabs that exist; it only reads the host, so
@@ -1356,6 +1384,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             CenterFreqMHz = savedCenterFreqMHz;
         MultiPresetEnabled = savedMultiPresetEnabled;
         MonitorExcludedPresets = savedMonitorExcluded;
+        CustomListeners.Clear();
+        foreach (var c in savedCustomListeners) CustomListeners.Add(c);
+        CustomPrimaryName = savedPrimaryMeshName;
         MonitorCenterOffsetKHz = savedMonitorCenterOffsetKHz;
 
         LnaGainDb = savedLnaGainDb;
@@ -1742,7 +1773,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (_core is null) return;
         var sources = new List<RxSource>();
         foreach (var l in plan.Listeners)
-            sources.Add(new RxSource(sources.Count, l.Preset, l.IsCustom, l.FreqMHz));
+            sources.Add(new RxSource(sources.Count, l.Name, l.Preset, l.IsCustom, l.FreqMHz, l.BwHz));
 
         if (plan.Listeners.Count == 1)
         {
@@ -1762,7 +1793,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             // Each secondary preset decodes and sends with a list of its own.
             // Normally already seeded when the preset was chosen; done again
             // here for a set that came straight from settings.
-            foreach (var s in sources.Skip(1)) _rxHost.EnsureChannelList(s.PresetName);
+            foreach (var s in sources.Skip(1)) _rxHost.EnsureChannelList(s.MeshName);
             var specs = new List<RxListenerSpec>();
             foreach (var l in plan.Listeners)
             {
@@ -2117,7 +2148,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // The primary's channels are the chosen preset's mesh, so changing the
         // preset changes which list is in front of the operator. Done first:
         // the primary channel rename below acts on that list.
-        _rxHost.SetPrimaryList(value.ToString());
+        // Through the shared path, so a primary the operator has named keeps
+        // that name instead of being pushed back onto the preset's.
+        ApplyPrimaryListName();
+        // Which names are free moves with the preset: the toolbar's own is
+        // the primary's mesh and so is always available to it.
+        OnPropertyChanged(nameof(PrimaryNameProblem));
+        OnPropertyChanged(nameof(HasPrimaryNameProblem));
         // The station has moved mesh, so a different set of nodes is in reach.
         RefreshNodeCommandAvailability();
         RefreshTabGroupOptions();
@@ -2194,9 +2231,26 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
-    partial void OnOverrideSfChanged(byte value)      { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
-    partial void OnOverrideBwKhzChanged(double value) { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
-    partial void OnOverrideCrChanged(byte value)      { if (!_suppressLoraParamSync) { OnPropertyChanged(nameof(IsCustomLoraParams)); SaveSettings(); } }
+    partial void OnOverrideSfChanged(byte value)      { OnLoraParamOverridden(); }
+    partial void OnOverrideBwKhzChanged(double value) { OnLoraParamOverridden(); }
+    partial void OnOverrideCrChanged(byte value)      { OnLoraParamOverridden(); }
+
+    /// <summary>Hand-set parameters changed. They may have stopped amounting
+    /// to a preset, which is what makes the primary a mesh with no name of its
+    /// own — and what decides whether the name it has been given applies.
+    /// </summary>
+    private void OnLoraParamOverridden()
+    {
+        if (_suppressLoraParamSync) return;
+        OnPropertyChanged(nameof(IsCustomLoraParams));
+        // Which names are free moves with the preset: the toolbar's own is
+        // the primary's mesh and so is always available to it.
+        OnPropertyChanged(nameof(PrimaryNameProblem));
+        OnPropertyChanged(nameof(HasPrimaryNameProblem));
+        ApplyPrimaryListName();
+        SaveSettings();
+        RefreshMonitors();
+    }
 
     partial void OnCenterFreqMHzChanged(double value)
     {
@@ -2552,6 +2606,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.Slot = SelectedSlot;
         _settings.MultiPresetEnabled = MultiPresetEnabled;
         _settings.MonitorExcludedPresets = MonitorExcludedPresets.ToList();
+        _settings.CustomListeners = CustomListeners.Select(c => c.ToSettings()).ToList();
+        _settings.PrimaryMeshName = CustomPrimaryName.Trim();
         // Takes the target, like every other line here: writing the field
         // would land in memory and never on disk, which is the trap this
         // method's shadow exists to make visible.
@@ -3330,7 +3386,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     public bool CanReachMesh(string? listName) =>
         string.IsNullOrEmpty(listName)
         || listName == _rxHost.PrimaryListName
-        || _rxSources.Any(s => !s.IsPrimary && s.PresetName == listName);
+        || _rxSources.Any(s => !s.IsPrimary && s.MeshName == listName);
 
     /// <summary>Turns a broadcast down because its mesh has no listener, and
     /// so no settings of its own to go out on.</summary>

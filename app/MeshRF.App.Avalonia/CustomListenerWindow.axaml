@@ -1,0 +1,76 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:MeshRF.AvaloniaApp"
+        xmlns:local="clr-namespace:MeshRF.AvaloniaApp"
+        x:Class="MeshRF.AvaloniaApp.CustomListenerWindow"
+        x:DataType="app:CustomListenerEditor"
+        Title="Custom listener"
+        Width="480" SizeToContent="Height"
+        MinWidth="440"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BrushAppBackground}">
+    <Grid Margin="12" ColumnDefinitions="Auto,*"
+          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Foreground="{DynamicResource BrushSubtle}" FontSize="11"
+                   Text="A mesh of your own: any spreading factor, bandwidth and coding rate, on any frequency. Its name is what its channels, its tab and its nodes belong to, so give it one you will recognise and keep it — renaming a listener leaves its channels behind under the old name." />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Name" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4,0,4"
+                 Text="{Binding Draft.Name, Mode=TwoWay}"
+                 PlaceholderText="Backyard net" />
+
+        <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Margin="0,0,0,6" TextWrapping="Wrap"
+                   FontSize="11" Foreground="{DynamicResource BrushOverridden}"
+                   IsVisible="{Binding HasNameProblem}"
+                   Text="{Binding NameProblem}" />
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Start from" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4" Spacing="8">
+            <ComboBox Width="150" ItemsSource="{Binding Presets}"
+                      SelectedItem="{Binding SelectedPreset, Mode=TwoWay}" />
+            <Button Content="Fill in" Click="OnUsePreset"
+                    ToolTip.Tip="Takes that preset's spreading factor, bandwidth, coding rate and default-slot frequency. Everything stays editable afterwards." />
+        </StackPanel>
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="Spreading factor" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Row="4" Grid.Column="1" Margin="0,4,0,4" Minimum="5" Maximum="12"
+                       ShowButtonSpinner="False" FormatString="0" Value="{Binding Sf, Mode=TwoWay}" />
+
+        <TextBlock Grid.Row="5" Grid.Column="0" Text="Bandwidth" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Row="5" Grid.Column="1" Margin="0,4,0,4" Minimum="7.8" Maximum="500"
+                       ShowButtonSpinner="False" FormatString="0.###" Value="{Binding BwKhz, Mode=TwoWay}" />
+
+        <TextBlock Grid.Row="6" Grid.Column="0" Text="Coding rate" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Row="6" Grid.Column="1" Margin="0,4,0,4" Minimum="5" Maximum="8"
+                       ShowButtonSpinner="False" FormatString="0" Value="{Binding Cr, Mode=TwoWay}"
+                       ToolTip.Tip="The 4/x denominator: 5 is 4/5." />
+
+        <TextBlock Grid.Row="7" Grid.Column="0" Text="Slot" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4" Spacing="8">
+            <ComboBox Width="120" ItemsSource="{Binding Regions}"
+                      SelectedItem="{Binding SelectedRegion, Mode=TwoWay}" />
+            <ComboBox Width="200" ItemsSource="{Binding SlotOptions}"
+                      SelectedItem="{Binding SelectedSlot, Mode=TwoWay}"
+                      ToolTip.Tip="Writes the frequency below from that region's slot grid at this bandwidth. Auto is the slot firmware would pick for a channel of this name. The frequency is what is kept." />
+        </StackPanel>
+
+        <TextBlock Grid.Row="8" Grid.Column="0" Text="Frequency" Margin="0,4,8,4" VerticalAlignment="Center" />
+        <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4" Spacing="8">
+            <NumericUpDown Width="150" Minimum="1" Maximum="6000"
+                           ShowButtonSpinner="False" FormatString="0.000"
+                           Value="{Binding FreqMHz, Mode=TwoWay}" />
+            <TextBlock Text="MHz" VerticalAlignment="Center"
+                       FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="9" Grid.ColumnSpan="2" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,14,0,0" Spacing="8">
+            <Button Content="Cancel" Click="OnCancel" MinWidth="88" IsCancel="True" />
+            <Button Content="Save" Click="OnSave" MinWidth="88" IsDefault="True"
+                    IsEnabled="{Binding !HasNameProblem}" />
+        </StackPanel>
+    </Grid>
+</Window>

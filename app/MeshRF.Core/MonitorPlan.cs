@@ -17,10 +17,31 @@ namespace MeshRF;
 /// </remarks>
 public static class MonitorPlan
 {
+    /// <summary>
+    /// A channel the operator described by hand rather than picked off the
+    /// preset list: any spreading factor, bandwidth and coding rate, on any
+    /// frequency.
+    /// </summary>
+    /// <remarks>
+    /// Named, because a mesh is known by its name everywhere else in the app —
+    /// its channel list, its tab, and what a node records as where it was
+    /// heard all key off it. Two hand-made listeners with no names of their own
+    /// would be one mesh sharing one channel list, and neither could be spoken
+    /// to correctly.
+    /// </remarks>
+    /// <param name="FreqMHz">Channel centre. The frequency is what is kept,
+    /// not the region and slot it may have been worked out from: a slot is a
+    /// way of naming a frequency, and only one of the two can be the truth.
+    /// </param>
+    public sealed record CustomListener(string Name, byte Sf, uint BwHz, byte Cr,
+                                        double FreqMHz, bool Enabled);
+
     /// <summary>One channel to demodulate.</summary>
+    /// <param name="Name">The mesh this listener is: a preset's name, or the
+    /// one the operator gave a hand-made listener.</param>
     /// <param name="Preset">What these settings amount to, or null when they
     /// amount to no preset at all.</param>
-    public sealed record Listener(LoraPreset? Preset, bool IsCustom, byte Sf, uint BwHz, byte Cr,
+    public sealed record Listener(string Name, LoraPreset? Preset, bool IsCustom, byte Sf, uint BwHz, byte Cr,
                                   double FreqMHz, bool IsPrimary)
     {
         public double BandwidthMHz => BwHz / 1e6;
@@ -41,10 +62,12 @@ public static class MonitorPlan
         IsPrimary,
     }
 
-    /// <summary>A preset not listened for, and why. <paramref name="FitsAtRateHz"/>
+    /// <summary>A mesh not listened for, and why. <paramref name="FitsAtRateHz"/>
     /// names the lowest offered rate whose capture could hold it beside the
-    /// primary, when there is one.</summary>
-    public sealed record LeftOut(LoraPreset Preset, double FreqMHz, LeftOutReason Reason, uint? FitsAtRateHz);
+    /// primary, when there is one. <paramref name="Preset"/> is null for a
+    /// hand-made listener, which names no preset.</summary>
+    public sealed record LeftOut(string Name, LoraPreset? Preset, double FreqMHz,
+                                 LeftOutReason Reason, uint? FitsAtRateHz);
 
     /// <summary>What the receiver should be started with.</summary>
     /// <param name="DeviceCenterMHz">Where the radio is tuned.</param>
@@ -57,7 +80,12 @@ public static class MonitorPlan
                                 double UsableHalfSpanMHz);
 
     /// <summary>The toolbar configuration.</summary>
-    public sealed record Primary(LoraPreset Preset, bool IsCustom, byte Sf, uint BwHz, byte Cr, double FreqMHz);
+    /// <param name="Name">What this mesh is called. The preset's name when the
+    /// settings amount to one, and otherwise whatever the operator called it —
+    /// a station on hand-set parameters is still on a mesh, and "Custom" names
+    /// it no better than it names any other.</param>
+    public sealed record Primary(LoraPreset Preset, bool IsCustom,
+                                 byte Sf, uint BwHz, byte Cr, double FreqMHz, string Name = "");
 
     // The MAX2837 baseband filter widths libhackrf can select. The HackRF
     // backend asks for the widest one below the sample rate, so at 2.4 MS/s
@@ -105,7 +133,8 @@ public static class MonitorPlan
     /// most channels; a value is clamped so the primary stays inside.</param>
     public static Result Build(Region region, Primary primary, RadioDeviceKind kind, uint rateHz,
                                IReadOnlyList<uint> availableRatesHz, bool enabled,
-                               IReadOnlyCollection<string> excludedPresets, double? centerOffsetKHz)
+                               IReadOnlyCollection<string> excludedPresets, double? centerOffsetKHz,
+                               IReadOnlyList<CustomListener>? customListeners = null)
     {
         bool wideLora = ChannelPlan.IsWideLora(region);
         // Hand-set parameters that amount to a preset are named for it: they
@@ -115,7 +144,9 @@ public static class MonitorPlan
             ? LoraParamsHelper.TryPresetFor(primary.Sf, primary.BwHz / 1000.0, wideLora, out var matched)
                 ? matched : null
             : primary.Preset;
-        var primaryListener = new Listener(primaryPreset, primary.IsCustom,
+        var primaryListener = new Listener(
+            string.IsNullOrEmpty(primary.Name) ? Mesh.HeardOn.Name(primaryPreset) : primary.Name,
+            primaryPreset, primary.IsCustom,
                                            primary.Sf, primary.BwHz, primary.Cr, primary.FreqMHz, IsPrimary: true);
         double half = UsableHalfSpanMHz(kind, rateHz);
 
@@ -129,7 +160,7 @@ public static class MonitorPlan
         {
             if (!ChannelPlan.Supports(region, preset))
             {
-                leftOut.Add(new LeftOut(preset, 0, LeftOutReason.Unsupported, null));
+                leftOut.Add(new LeftOut(preset.ToString(), preset, 0, LeftOutReason.Unsupported, null));
                 continue;
             }
             double f = DefaultSlotFrequencyMHz(region, preset);
@@ -145,15 +176,38 @@ public static class MonitorPlan
             // different mesh and is still a candidate.
             if (Math.Abs(f - primary.FreqMHz) < 1e-6 && p.Sf == primary.Sf && bw == primary.BwHz)
             {
-                leftOut.Add(new LeftOut(preset, f, LeftOutReason.IsPrimary, null));
+                leftOut.Add(new LeftOut(preset.ToString(), preset, f, LeftOutReason.IsPrimary, null));
                 continue;
             }
             if (excludedPresets.Contains(preset.ToString()))
             {
-                leftOut.Add(new LeftOut(preset, f, LeftOutReason.Excluded, null));
+                leftOut.Add(new LeftOut(preset.ToString(), preset, f, LeftOutReason.Excluded, null));
                 continue;
             }
-            candidates.Add(new Listener(preset, false, p.Sf, bw, p.Cr, f, IsPrimary: false));
+            candidates.Add(new Listener(preset.ToString(), preset, false, p.Sf, bw, p.Cr, f, IsPrimary: false));
+        }
+
+        // Hand-made listeners, after the presets so a preset keeps the name it
+        // has always had if one is given the same. They are candidates on the
+        // same terms as everything else: the capture has to reach them, and
+        // the primary's own channel is not a second mesh.
+        foreach (var c in customListeners ?? Array.Empty<CustomListener>())
+        {
+            if (!c.Enabled)
+            {
+                leftOut.Add(new LeftOut(c.Name, null, c.FreqMHz, LeftOutReason.Excluded, null));
+                continue;
+            }
+            if (Math.Abs(c.FreqMHz - primary.FreqMHz) < 1e-6 && c.Sf == primary.Sf && c.BwHz == primary.BwHz)
+            {
+                leftOut.Add(new LeftOut(c.Name, null, c.FreqMHz, LeftOutReason.IsPrimary, null));
+                continue;
+            }
+            // What it amounts to, so a hand-made listener that lands exactly on
+            // a preset's settings is reported as being on that mesh rather than
+            // as nothing in particular.
+            LoraPreset? amounts = LoraParamsHelper.TryPresetFor(c.Sf, c.BwHz / 1000.0, wide, out var m) ? m : null;
+            candidates.Add(new Listener(c.Name, amounts, true, c.Sf, c.BwHz, c.Cr, c.FreqMHz, IsPrimary: false));
         }
 
         // The window may slide only as far as keeps the primary inside it.
@@ -209,7 +263,7 @@ public static class MonitorPlan
                 listeners.Add(c);
                 continue;
             }
-            leftOut.Add(new LeftOut(c.Preset!.Value, c.FreqMHz, LeftOutReason.OutOfRange,
+            leftOut.Add(new LeftOut(c.Name, c.Preset, c.FreqMHz, LeftOutReason.OutOfRange,
                                     RateThatFits(kind, availableRatesHz, primaryListener, c)));
         }
 

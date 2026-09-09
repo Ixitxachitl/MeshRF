@@ -59,6 +59,25 @@ public sealed class AppSettings
     /// region supports and the capture reaches is listened for.</summary>
     public List<string> MonitorExcludedPresets { get; set; } = new();
 
+    /// <summary>Listeners described by hand rather than picked off the preset
+    /// list. Each is a mesh of its own, known by its name.</summary>
+    public List<CustomListenerSettings> CustomListeners { get; set; } = new();
+
+    /// <summary>
+    /// What the primary's mesh is called when its settings amount to no preset
+    /// at all.
+    /// </summary>
+    /// <remarks>
+    /// Empty keeps the behaviour a station has always had: hand-set parameters
+    /// leave the channels under the name of the preset the toolbar was set to,
+    /// and a node heard on them records "Custom". Naming it moves both onto the
+    /// name — which is the point of naming it, since a channel list belongs to
+    /// a mesh and two different hand-set configurations are not one mesh. The
+    /// channels set up under the old name stay where they are, and come back
+    /// if the name is cleared.
+    /// </remarks>
+    public string PrimaryMeshName { get; set; } = string.Empty;
+
     /// <summary>What this station advertises to strangers, and where. Off by
     /// default: a beacon is unsolicited traffic, so it is something the
     /// operator turns on rather than something they inherit.</summary>
@@ -783,6 +802,19 @@ public sealed class AppSettings
 /// is out in. Geometry is kept even while the panel is docked, so popping it
 /// out again puts the window back where it was last left.
 /// </summary>
+/// <summary>One hand-made listener as it is stored. Mirrors
+/// <see cref="MonitorPlan.CustomListener"/>, kept as a mutable class because
+/// that is what the settings serialiser reads and writes.</summary>
+public sealed class CustomListenerSettings
+{
+    public string Name { get; set; } = string.Empty;
+    public byte Sf { get; set; }
+    public uint BwHz { get; set; }
+    public byte Cr { get; set; }
+    public double FreqMHz { get; set; }
+    public bool Enabled { get; set; } = true;
+}
+
 public sealed class PanelWindowSettings
 {
     public bool PoppedOut { get; set; }

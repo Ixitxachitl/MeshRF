@@ -556,7 +556,7 @@ public class TabGroupingTests(HeadlessAvalonia ui) : RenderTest(ui)
         Assert.Contains(onPrimary, c => c.Name == "club");
 
         // A secondary reads its own list alone.
-        var other = new RxSource(1, LoraPreset.MediumFast, false, 913.125);
+        var other = RxSource.ForPreset(1, LoraPreset.MediumFast, 913.125);
         Assert.All(((IMeshRxHost)host).ChannelsFor(other),
                    c => Assert.Equal(nameof(LoraPreset.MediumFast), c.Preset));
     }));

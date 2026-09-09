@@ -76,7 +76,7 @@ public partial class RadioViewModel
                 listener = new
                 {
                     index = source.Listener,
-                    preset = source.PresetName,
+                    preset = source.MeshName,
                     freq_mhz = source.FreqMHz,
                 },
                 packet = new

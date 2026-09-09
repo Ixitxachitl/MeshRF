@@ -623,6 +623,31 @@ public sealed class NodeStore : IDisposable
         }
     }
 
+
+    /// <summary>
+    /// Follows a mesh that has been renamed: every node heard on it is now
+    /// heard on the new name.
+    /// </summary>
+    /// <remarks>
+    /// A mesh is known by its name, so renaming one without bringing its nodes
+    /// along would leave them pointing at a mesh that no longer exists — out
+    /// of reach, and answered on the primary instead of where they actually
+    /// live. Returns how many moved.
+    /// </remarks>
+    public int RenameMesh(string from, string to)
+    {
+        ThrowIfDisposed();
+        if (string.Equals(from, to, StringComparison.Ordinal) || from.Length == 0) return 0;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE nodes SET heard_on_preset = $to WHERE heard_on_preset = $from";
+            cmd.Parameters.AddWithValue("$to", to);
+            cmd.Parameters.AddWithValue("$from", from);
+            return cmd.ExecuteNonQuery();
+        }
+    }
+
     /// <summary>One node, by any number it has answered to: a number retired by
     /// a merge finds the row it was folded into.</summary>
     public NodeRecord? Get(uint nodeNum)

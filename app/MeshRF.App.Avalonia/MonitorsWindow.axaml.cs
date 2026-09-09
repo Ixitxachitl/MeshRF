@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 
 namespace MeshRF.AvaloniaApp;
@@ -27,5 +28,35 @@ public partial class MonitorsWindow : Window
         viewModel.RefreshMonitors();
         var w = new MonitorsWindow { DataContext = viewModel };
         w.Show(owner);
+    }
+
+    private RadioViewModel? Vm => DataContext as RadioViewModel;
+
+    /// <summary>The listener a row stands for. Rows are rebuilt from the plan
+    /// every time it changes, so they carry a name rather than the object.
+    /// </summary>
+    private CustomListenerEdit? ListenerFor(object? sender) =>
+        sender is Control { DataContext: MonitorPresetRow row } && Vm is { } vm
+            ? vm.CustomListenerNamed(row.Name)
+            : null;
+
+    private async void OnAddListener(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        if (await CustomListenerWindow.ShowAsync(this, vm, null) is { } made)
+            vm.SaveCustomListener(made, null);
+    }
+
+    private async void OnEditListener(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm || ListenerFor(sender) is not { } existing) return;
+        if (await CustomListenerWindow.ShowAsync(this, vm, existing) is { } edited)
+            vm.SaveCustomListener(edited, existing);
+    }
+
+    private void OnRemoveListener(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm || ListenerFor(sender) is not { } existing) return;
+        vm.RemoveCustomListenerCommand.Execute(existing);
     }
 }

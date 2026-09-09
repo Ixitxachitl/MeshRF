@@ -299,6 +299,27 @@ public sealed class WaypointStore : IDisposable
         };
     }
 
+
+    /// <summary>Follows a mesh that has been renamed: both the list a marker's
+    /// channel belongs to and the mesh it was heard on. Returns how many
+    /// rows changed.</summary>
+    public int RenameMesh(string from, string to)
+    {
+        ThrowIfDisposed();
+        if (string.Equals(from, to, StringComparison.Ordinal) || from.Length == 0) return 0;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE waypoints SET preset = $to WHERE preset = $from;
+                UPDATE waypoints SET heard_on_preset = $to WHERE heard_on_preset = $from;
+                """;
+            cmd.Parameters.AddWithValue("$to", to);
+            cmd.Parameters.AddWithValue("$from", from);
+            return cmd.ExecuteNonQuery();
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)

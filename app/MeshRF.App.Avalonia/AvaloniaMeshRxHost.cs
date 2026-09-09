@@ -338,7 +338,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// <summary>The list a listener decodes and sends with: the primary's for
     /// the primary (custom parameters included), the preset's own for a
     /// secondary.</summary>
-    public string ListNameFor(RxSource source) => source.IsPrimary ? PrimaryListName : source.PresetName;
+    public string ListNameFor(RxSource source) => source.IsPrimary ? PrimaryListName : source.MeshName;
 
     /// <summary>Every channel in one list, in tab order.</summary>
     public IReadOnlyList<ChannelConfig> ChannelsIn(string listName) =>
@@ -453,6 +453,62 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// on: the one named, in the list the node is spoken to on.</summary>
     public ChannelConfig? ChannelForNode(uint nodeNum, string? channelName) =>
         ChannelIn(ListNameForNode(nodeNum), channelName);
+
+
+    /// <summary>
+    /// Renames a mesh, and brings everything that belongs to it along.
+    /// </summary>
+    /// <remarks>
+    /// <para>A mesh is known by its name and nothing else: its channel list,
+    /// its tab, its stored messages, its markers and what every node records
+    /// as where it was heard all key off it. Renaming one without moving those
+    /// would not rename a mesh, it would abandon one and start another —
+    /// leaving the channels the operator set up under a name nothing answers
+    /// to, and its nodes out of reach.</para>
+    /// <para>Refused when the destination already holds channels. Two meshes
+    /// pouring into one is a merge, not a rename, and there is no undoing it;
+    /// nothing is lost by declining, since the old name still holds everything
+    /// and can be used again.</para>
+    /// </remarks>
+    /// <returns>True when the rename happened.</returns>
+    public bool RenameMesh(string from, string to)
+    {
+        from = from.Trim();
+        to = to.Trim();
+        if (from.Length == 0 || to.Length == 0 || string.Equals(from, to, StringComparison.Ordinal))
+            return false;
+        if (ChannelsIn(to).Count > 0) return false;
+
+        _channelStore.MoveList(from, to);
+        _nodeStore.RenameMesh(from, to);
+        _messageStore.RenameMesh(from, to);
+        _waypointStore.RenameMesh(from, to);
+
+        // The tabs first: what follows asks them which lists exist, and a list
+        // still answering to the old name would be seeded a second time under
+        // the new one.
+        foreach (var tab in Tabs.OfType<ChannelTabViewModel>())
+            if (string.Equals(tab.Config.Preset, from, StringComparison.Ordinal))
+                tab.Config.Preset = to;
+
+        foreach (var node in Nodes)
+            if (string.Equals(node.HeardOnPreset, from, StringComparison.Ordinal))
+            {
+                node.HeardOnPreset = to;
+                node.NotifyChanged();
+            }
+
+        foreach (var wp in Waypoints)
+        {
+            if (string.Equals(wp.Preset, from, StringComparison.Ordinal)) wp.Preset = to;
+            if (string.Equals(wp.HeardOnPreset, from, StringComparison.Ordinal)) wp.HeardOnPreset = to;
+        }
+
+        if (string.Equals(PrimaryListName, from, StringComparison.Ordinal)) SetPrimaryList(to);
+        if (string.Equals(ShownGroup, from, StringComparison.Ordinal)) ShowGroup(to);
+        RefreshTabGroups();
+        return true;
+    }
 
     /// <summary>
     /// Gives a preset's listener a channel list if it has none: the preset's
@@ -1625,7 +1681,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // A frame that arrived from the broker was heard on no radio at all,
         // so it says nothing about what the node is tuned to.
         _nodeStore.RecordSighting(fromNode, signal: signal, hopsAway: hopsAway, seenViaMqtt: viaMqtt,
-                                  heardOnPreset: source.FromDownlink ? null : source.PresetName,
+                                  heardOnPreset: source.FromDownlink ? null : source.MeshName,
                                   heardOnFreqMHz: source.FromDownlink ? null : source.FreqMHz);
         MarkNodeDirty(fromNode);
 
@@ -1762,7 +1818,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
-                    HeardOnPreset = source.FromDownlink ? string.Empty : source.PresetName,
+                    HeardOnPreset = source.FromDownlink ? string.Empty : source.MeshName,
                     HeardOnFreqMHz = source.FromDownlink ? null : source.FreqMHz,
                     UserId = string.IsNullOrEmpty(result.User.Id) ? header.FromId : result.User.Id,
                     LongName = result.User.LongName,
@@ -2746,7 +2802,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             Preset = ListNameFor(source),
             // A marker the broker handed in was heard on no radio, so it says
             // nothing about which mesh it came off.
-            HeardOnPreset = source.FromDownlink ? string.Empty : source.PresetName,
+            HeardOnPreset = source.FromDownlink ? string.Empty : source.MeshName,
             // Broadcast is the absence of an address, not an address of its own.
             ToNode = header.IsBroadcast ? 0 : header.To,
             Name = wp.Name,

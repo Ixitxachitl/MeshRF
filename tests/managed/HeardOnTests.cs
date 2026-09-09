@@ -42,8 +42,8 @@ public class HeardOnTests
         Assert.False(LoraParamsHelper.TryPresetFor(12, 250.0, wideLora: false, out _));
         Assert.False(LoraParamsHelper.TryPresetFor(11, 200.0, wideLora: false, out _));
 
-        Assert.Equal("LongFast", RxSource.Primary(longFast, isCustom: true, 906.875).PresetName);
-        Assert.Equal(HeardOn.Custom, RxSource.Primary(null, isCustom: true, 906.875).PresetName);
+        Assert.Equal("LongFast", RxSource.Primary(longFast, isCustom: true, 906.875).MeshName);
+        Assert.Equal(HeardOn.Custom, RxSource.Primary(null, isCustom: true, 906.875).MeshName);
     }
 
     [Fact]
@@ -58,19 +58,19 @@ public class HeardOnTests
     {
         var s = RxSource.Primary(LoraPreset.MediumFast, isCustom: false, 913.125);
         Assert.True(s.IsPrimary);
-        Assert.Equal("MediumFast", s.PresetName);
+        Assert.Equal("MediumFast", s.MeshName);
         Assert.Equal("MediumFast 913.125", s.Tag);
         Assert.False(s.FromDownlink);
 
         var custom = RxSource.Primary(null, isCustom: true, 913.125);
         Assert.Null(custom.Preset);
-        Assert.Equal(HeardOn.Custom, custom.PresetName);
+        Assert.Equal(HeardOn.Custom, custom.MeshName);
     }
 
     [Fact]
     public void ASecondaryNamesItsPresetAndKeepsItsIndex()
     {
-        var s = new RxSource(3, LoraPreset.LongFast, false, 906.875);
+        var s = RxSource.ForPreset(3, LoraPreset.LongFast, 906.875);
         Assert.False(s.IsPrimary);
         Assert.Equal(3, s.Listener);
         Assert.Equal("LongFast 906.875", s.Tag);

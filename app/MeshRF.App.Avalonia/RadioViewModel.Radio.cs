@@ -371,7 +371,7 @@ public partial class RadioViewModel
     private RxSource[] _rxSources = [];
 
     private RxSource PrimarySource() =>
-        RxSource.Primary(PrimaryPreset(), IsCustomLoraParams, CenterFreqMHz);
+        RxSource.Primary(PrimaryPreset(), IsCustomLoraParams, CenterFreqMHz, PrimaryMeshName());
 
     /// <summary>What the primary's settings amount to: the chosen preset, or
     /// the one hand-set parameters match, or none.</summary>
@@ -415,7 +415,7 @@ public partial class RadioViewModel
         if (string.IsNullOrEmpty(heardOn)) heardOn = _rxHost.MeshForConversation(nodeNum);
         if (string.IsNullOrEmpty(heardOn)) return PrimaryTarget();
         foreach (var s in _rxSources)
-            if (!s.IsPrimary && s.PresetName == heardOn) return TargetForSource(s);
+            if (!s.IsPrimary && s.MeshName == heardOn) return TargetForSource(s);
         return PrimaryTarget();
     }
 
@@ -439,14 +439,14 @@ public partial class RadioViewModel
         var heardOn = _nodeStore.Get(nodeNum)?.HeardOnPreset;
         if (string.IsNullOrEmpty(heardOn)) return PrimarySource();
         foreach (var s in _rxSources)
-            if (!s.IsPrimary && s.PresetName == heardOn) return s;
+            if (!s.IsPrimary && s.MeshName == heardOn) return s;
         return PrimarySource();
     }
 
     /// <summary>What the mesh behind a channel list is called: the preset
     /// that owns it, or whatever the primary is running for its own.</summary>
     private string MeshNameForList(string? listName) =>
-        string.IsNullOrEmpty(listName) ? PrimarySource().PresetName : listName;
+        string.IsNullOrEmpty(listName) ? PrimarySource().MeshName : listName;
 
     /// <summary>The target of a list of channels: the listener whose preset
     /// owns it, or the primary for its own list.</summary>
@@ -456,14 +456,26 @@ public partial class RadioViewModel
         // A list the primary has come to occupy is the primary's own mesh.
         if (listName == _rxHost.PrimaryListName) return PrimaryTarget();
         foreach (var s in _rxSources)
-            if (!s.IsPrimary && s.PresetName == listName) return TargetForSource(s);
+            if (!s.IsPrimary && s.MeshName == listName) return TargetForSource(s);
         return PrimaryTarget();
     }
 
     /// <summary>Bandwidth of a listener's channel, for the overlap test.</summary>
-    private uint BandwidthHz(RxSource s) => s.IsCustom || s.Preset is null
-        ? (uint)Math.Round(OverrideBwKhz * 1000.0)
-        : (uint)Math.Round(LoraParamsHelper.FromPreset(s.Preset.Value, ChannelPlan.IsWideLora(SelectedRegion)).BwKhz * 1000.0);
+    /// <summary>How wide a listener's channel is.
+    ///
+    /// Its own width, which it was started with. Asking the toolbar instead —
+    /// which is what this did — answers for the primary however many listeners
+    /// are up, so a hand-made one was drawn and tested for overlap at whatever
+    /// width the primary happened to be on.</summary>
+    private uint BandwidthHz(RxSource s)
+    {
+        if (s.BwHz != 0) return s.BwHz;
+        // A source from before the width travelled with it, or the primary's
+        // own, which the toolbar does answer for.
+        return s.IsCustom || s.Preset is null
+            ? (uint)Math.Round(OverrideBwKhz * 1000.0)
+            : (uint)Math.Round(LoraParamsHelper.FromPreset(s.Preset.Value, ChannelPlan.IsWideLora(SelectedRegion)).BwKhz * 1000.0);
+    }
 
     private bool ChannelsOverlap(int a, int b)
     {

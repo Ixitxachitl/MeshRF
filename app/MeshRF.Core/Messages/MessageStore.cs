@@ -427,6 +427,24 @@ public sealed class MessageStore : IDisposable
         }
     }
 
+
+    /// <summary>Follows a mesh that has been renamed, so its history stays on
+    /// the tab it was filed under rather than splitting across the old name
+    /// and the new one. Returns how many moved.</summary>
+    public int RenameMesh(string from, string to)
+    {
+        ThrowIfDisposed();
+        if (string.Equals(from, to, StringComparison.Ordinal) || from.Length == 0) return 0;
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE messages SET preset = $to WHERE preset = $from";
+            cmd.Parameters.AddWithValue("$to", to);
+            cmd.Parameters.AddWithValue("$from", from);
+            return cmd.ExecuteNonQuery();
+        }
+    }
+
     public void Clear()
     {
         ThrowIfDisposed();

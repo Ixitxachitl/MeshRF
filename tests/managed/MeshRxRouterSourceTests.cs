@@ -48,7 +48,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
         public float CurrentRssiDbfs => -60f;
 
         public IReadOnlyList<ChannelConfig> ChannelsFor(RxSource source) =>
-            Lists.TryGetValue(source.IsPrimary ? "" : source.PresetName, out var list) ? list : Array.Empty<ChannelConfig>();
+            Lists.TryGetValue(source.IsPrimary ? "" : source.MeshName, out var list) ? list : Array.Empty<ChannelConfig>();
 
         public string? GetStoredPublicKeyHex(uint nodeNum) => null;
         public void Log(string message) { }
@@ -89,7 +89,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
         host.Lists["LongFast"] = new() { DefaultChannel("LongFast", "LongFast") };
         using var router = new MeshRxRouter(host, _messages, new InlineDispatcher());
 
-        var source = new RxSource(1, LoraPreset.LongFast, false, 906.875);
+        var source = RxSource.ForPreset(1, LoraPreset.LongFast, 906.875);
         var (frame, header) = TextFrame(host.Lists["LongFast"][0], 1001);
         router.ProcessReceivedFrame(frame, header, new SignalReading(5f, -80f, false), source);
 
@@ -139,7 +139,7 @@ public sealed class MeshRxRouterSourceTests : IDisposable
         Assert.Contains(host.Calls, c => c.Call == "UplinkIfEligible");
 
         host.Calls.Clear();
-        var longFast = new RxSource(1, LoraPreset.LongFast, false, 906.875);
+        var longFast = RxSource.ForPreset(1, LoraPreset.LongFast, 906.875);
         var (frame2, header2) = TextFrame(host.Lists["LongFast"][0], 1004);
         router.ProcessReceivedFrame(frame2, header2, SignalReading.None, longFast);
         Assert.Contains(host.Calls, c => c.Call == "OnMessageDecoded" && c.Source == longFast);

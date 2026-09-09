@@ -27,6 +27,10 @@ public sealed partial class MonitorPresetRow : ObservableObject
     /// </summary>
     public required bool CanChoose { get; init; }
 
+    /// <summary>A listener the operator made rather than a preset the region
+    /// offers. Only these can be edited or taken away.</summary>
+    public bool IsCustomListener { get; init; }
+
     /// <summary>Raised when the tick changes, so the view model can rewrite
     /// the exclusion list and rebuild the rows.</summary>
     public Action<MonitorPresetRow>? Toggled { get; init; }
@@ -120,11 +124,11 @@ public partial class RadioViewModel
         // history and their keys away over a sample rate. Unticked and
         // unsupported presets stay hidden: those are not chosen at all.
         _shownPresets = plan.Listeners
-                            .Where(l => !l.IsPrimary && l.Preset is not null)
-                            .Select(l => l.Preset!.Value.ToString())
+                            .Where(l => !l.IsPrimary)
+                            .Select(l => l.Name)
                             .Concat(plan.LeftOut
                                         .Where(x => x.Reason == MonitorPlan.LeftOutReason.OutOfRange)
-                                        .Select(x => x.Preset.ToString()))
+                                        .Select(x => x.Name))
                             .ToHashSet(StringComparer.Ordinal);
         // A mesh gets its channel list when it is chosen, not when the
         // receiver is started: the point of choosing it is to set its
@@ -170,11 +174,11 @@ public partial class RadioViewModel
 
         foreach (var l in plan.Listeners)
         {
-            string name = MeshRF.Mesh.HeardOn.Name(l.Preset);
             rows.Add((l.FreqMHz, new MonitorPresetRow
             {
                 Preset = l.Preset ?? SelectedPreset,
-                Name = name,
+                IsCustomListener = l.IsCustom && !l.IsPrimary,
+                Name = l.Name,
                 SlotText = SlotTextFor(l.Preset, l.FreqMHz),
                 FreqText = $"{l.FreqMHz:0.000} MHz",
                 StatusText = l.IsPrimary ? "primary" : "listening",
@@ -207,8 +211,9 @@ public partial class RadioViewModel
             bool unsupported = x.Reason == MonitorPlan.LeftOutReason.Unsupported;
             rows.Add((unsupported ? double.MaxValue : x.FreqMHz, new MonitorPresetRow
             {
-                Preset = x.Preset,
-                Name = x.Preset.ToString(),
+                Preset = x.Preset ?? SelectedPreset,
+                IsCustomListener = x.Preset is null,
+                Name = x.Name,
                 SlotText = unsupported ? string.Empty : SlotTextFor(x.Preset, x.FreqMHz),
                 FreqText = unsupported ? string.Empty : $"{x.FreqMHz:0.000} MHz",
                 StatusText = status,
@@ -238,6 +243,19 @@ public partial class RadioViewModel
     {
         if (_rebuildingMonitorRows) return;
 
+        if (row.IsCustomListener)
+        {
+            // Its own switch. The exclusion list holds preset names and would
+            // not be read for one of these, so ticking the row did nothing.
+            if (CustomListenerNamed(row.Name) is { } listener)
+            {
+                listener.Enabled = row.Included;
+                SaveSettings();
+                RefreshMonitors();
+            }
+            return;
+        }
+
         var name = row.Preset.ToString();
         if (row.Included) MonitorExcludedPresets.Remove(name);
         else if (!MonitorExcludedPresets.Contains(name)) MonitorExcludedPresets.Add(name);
@@ -254,25 +272,25 @@ public partial class RadioViewModel
         if (IsRunning && _rxSources.Length > 0)
         {
             foreach (var s in _rxSources)
-            {
-                double bwHz = BandwidthHz(s);
-                ChannelBands.Add(new ChannelBand(BandLabel(s.Preset, s.FreqMHz),
-                                                 s.FreqMHz * 1e6, bwHz, s.IsPrimary));
-            }
+                ChannelBands.Add(new ChannelBand(BandLabel(s.MeshName, s.IsCustom, s.Preset, s.FreqMHz),
+                                                 s.FreqMHz * 1e6, BandwidthHz(s), s.IsPrimary));
             return;
         }
 
         foreach (var l in plan.Listeners)
-            ChannelBands.Add(new ChannelBand(BandLabel(l.Preset, l.FreqMHz),
+            ChannelBands.Add(new ChannelBand(BandLabel(l.Name, l.IsCustom && !l.IsPrimary, l.Preset, l.FreqMHz),
                                              l.FreqMHz * 1e6, l.BwHz, l.IsPrimary));
     }
 
     /// <summary>What a band is called on the waterfall: the preset, and the
     /// slot when it is not that preset's default, which is what tells two
-    /// meshes on one preset apart.</summary>
-    private string BandLabel(LoraPreset? preset, double freqMHz)
+    /// meshes on one preset apart. A hand-made listener is called what its
+    /// operator called it — that is the whole point of its having a name.
+    /// </summary>
+    private string BandLabel(string meshName, bool isCustom, LoraPreset? preset, double freqMHz)
     {
-        if (preset is not { } p) return MeshRF.Mesh.HeardOn.Custom;
+        if (isCustom && meshName.Length > 0) return meshName;
+        if (preset is not { } p) return meshName.Length > 0 ? meshName : MeshRF.Mesh.HeardOn.Custom;
         double defaultFreq = MonitorPlan.DefaultSlotFrequencyMHz(SelectedRegion, p);
         if (Math.Abs(defaultFreq - freqMHz) < 1e-6) return p.ToString();
         var slot = SlotTextFor(p, freqMHz);
