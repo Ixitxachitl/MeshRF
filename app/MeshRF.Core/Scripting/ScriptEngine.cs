@@ -242,6 +242,11 @@ public sealed class ScriptEngine
         for (int i = 0; i < loaded.Script.Triggers.Count; i++)
         {
             var trigger = loaded.Script.Triggers[i];
+            // Before the kind, because it applies to every kind that arrives
+            // this way and because it is the cheapest test there is. A trigger
+            // that names no mesh answers the primary alone, which is the only
+            // mesh a script could be triggered by before mesh: existed.
+            if (!ScriptMeshes.Names(trigger.Meshes, evt)) continue;
             switch (trigger.Kind)
             {
                 case ScriptTriggerKind.Text when evt.Kind == ScriptEventKind.Text:
@@ -498,7 +503,8 @@ public sealed class ScriptEngine
             loaded.Script.Mode,
             evt.FromNode,
             actions,
-            expansion);
+            expansion,
+            evt.Mesh);
     }
 
     /// <remarks>
@@ -540,7 +546,7 @@ public sealed class ScriptEngine
                     return new ResolvedAction(
                         ScriptActionKind.Send, action.Text,
                         replyTo, replyChannel, 0, TimeSpan.Zero,
-                        Hops: action.Hops, RequireKey: action.RequireKey);
+                        Hops: action.Hops, RequireKey: action.RequireKey, Meshes: action.Meshes);
                 }
 
                 uint to = 0;
@@ -559,7 +565,8 @@ public sealed class ScriptEngine
                     ScriptActionKind.Send, action.Text,
                     to, action.Channel,
                     action.ReplyLink && evt.Kind != ScriptEventKind.Timer ? evt.PacketId : 0,
-                    TimeSpan.Zero, Hops: action.Hops, RequireKey: action.RequireKey);
+                    TimeSpan.Zero, Hops: action.Hops, RequireKey: action.RequireKey,
+                    Meshes: action.Meshes);
             }
 
             case ScriptActionKind.Http:
@@ -586,7 +593,8 @@ public sealed class ScriptEngine
                 }
                 return new ResolvedAction(
                     ScriptActionKind.Waypoint, waypoint.Name,
-                    marked, waypoint.Channel, 0, TimeSpan.Zero, Waypoint: waypoint);
+                    marked, waypoint.Channel, 0, TimeSpan.Zero, Waypoint: waypoint,
+                    Meshes: action.Meshes);
             }
 
             case ScriptActionKind.Require:

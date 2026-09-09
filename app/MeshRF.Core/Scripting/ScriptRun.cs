@@ -26,6 +26,10 @@ namespace MeshRF.Scripting;
 /// <param name="RequireKey">Skip this send: unless the message can be
 /// PKC-sealed. Checked by the sender, where the peer's key is already read —
 /// see <see cref="ScriptAction.RequireKey"/> for why it is not a preference.</param>
+/// <param name="Meshes">Meshes to put this on, one copy each, or null for the
+/// one the run fired on. Kept as the names the script wrote rather than
+/// resolved here: which meshes are actually live is the app's to know, and it
+/// changes between a script matching and its sequence reaching this action.</param>
 public sealed record ResolvedAction(
     ScriptActionKind Kind,
     string Text,
@@ -39,7 +43,8 @@ public sealed record ResolvedAction(
     ScriptRequirement? When = null,
     ScriptRingtone? Ringtone = null,
     byte? Hops = null,
-    bool RequireKey = false)
+    bool RequireKey = false,
+    IReadOnlyList<string>? Meshes = null)
 {
     /// <summary>Whether this action puts a frame on the air. http: makes a
     /// network request, require: only decides, and ring: is a noise on this
@@ -57,7 +62,8 @@ public sealed record ResolvedAction(
     {
         ScriptActionKind.Reply or ScriptActionKind.Send =>
             $"{(Kind == ScriptActionKind.Reply ? "reply" : "send")} to " +
-            $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}: \"{expandedText}\"" +
+            $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}" +
+            DescribeMeshes(Meshes) + $": \"{expandedText}\"" +
             DescribeHops(Hops) + (RequireKey ? ", sealed only" : ""),
         ScriptActionKind.React => $"react {expandedText} to packet {ReplyId:x8}",
         ScriptActionKind.Position => $"send position to {nameOf(ToNode)}",
@@ -68,6 +74,7 @@ public sealed record ResolvedAction(
         ScriptActionKind.Waypoint =>
             $"waypoint \"{expandedText}\" to " +
             $"{(ToNode == 0 ? $"#{(ChannelName.Length == 0 ? "primary" : ChannelName)}" : nameOf(ToNode))}" +
+            DescribeMeshes(Meshes) +
             (Waypoint is { RadiusM: > 0 } fenced ? $" with a {fenced.RadiusM} m fence" : "") +
             DescribeHops(Waypoint?.Hops),
         ScriptActionKind.Require => $"require {Require?.Describe()}",
@@ -81,6 +88,12 @@ public sealed record ResolvedAction(
     /// the app-wide setting on every send.</summary>
     private static string DescribeHops(byte? hops) =>
         hops is { } n ? $" at {n} hop{(n == 1 ? "" : "s")}" : string.Empty;
+
+    /// <summary>Names the meshes only when the script asked for particular
+    /// ones, so an ordinary line stays about the message rather than repeating
+    /// the mesh the run is already on.</summary>
+    private static string DescribeMeshes(IReadOnlyList<string>? meshes) =>
+        meshes is { Count: > 0 } ? $" on {string.Join(", ", meshes)}" : string.Empty;
 }
 
 /// <summary>A script that matched, and the actions it wants to run.</summary>
@@ -88,6 +101,9 @@ public sealed record ResolvedAction(
 /// <param name="Alias">Display name, for the log.</param>
 /// <param name="Mode">What a re-trigger does while this run is mid-delay.</param>
 /// <param name="TriggerNode">Node that set it off, or 0 for a timer.</param>
+/// <param name="Mesh">Mesh the trigger was heard on, which is where an action
+/// that names no mesh of its own goes. Empty for a schedule, which was heard on
+/// none and answers on the primary.</param>
 /// <param name="Actions">The sequence to run, in order.</param>
 /// <param name="Expansion">Fills in placeholders as the sequence runs, and
 /// accumulates any http: results along the way.</param>
@@ -97,7 +113,8 @@ public sealed record ScriptRun(
     ScriptMode Mode,
     uint TriggerNode,
     IReadOnlyList<ResolvedAction> Actions,
-    ScriptExpansion Expansion)
+    ScriptExpansion Expansion,
+    string Mesh = "")
 {
     /// <summary>Whether this run would put anything on the air. A run that is
     /// only logs and delays never consumes airtime.</summary>

@@ -26,13 +26,16 @@ public readonly record struct ScriptSuggestion(
 /// <param name="Credentials">Names of the stored API credentials.</param>
 /// <param name="Geofences">Names of the waypoints that carry a fence, which are
 /// the only ones a <c>geofence:</c> trigger could ever fire on.</param>
+/// <param name="Meshes">Meshes this station is on right now, primary first —
+/// the only ones a <c>mesh:</c> could hear or speak on.</param>
 public sealed record ScriptCompletionSource(
     IReadOnlyList<ScriptSuggestion> Channels,
     IReadOnlyList<ScriptSuggestion> Nodes,
     IReadOnlyList<string> Credentials,
-    IReadOnlyList<ScriptSuggestion> Geofences)
+    IReadOnlyList<ScriptSuggestion> Geofences,
+    IReadOnlyList<ScriptSuggestion> Meshes)
 {
-    public static readonly ScriptCompletionSource Empty = new([], [], [], []);
+    public static readonly ScriptCompletionSource Empty = new([], [], [], [], []);
 }
 
 /// <summary>An offer: what to show, and what part of the file it replaces.</summary>
@@ -218,6 +221,17 @@ public static class ScriptCompletion
         [
             new ScriptSuggestion("any", "any fence, whichever is crossed"),
             .. source.Geofences,
+        ],
+
+        // The two role words lead for the same reason {primary} leads the
+        // channels: they are the answers that outlive whatever this station
+        // happens to be tuned to, and the list below them is a snapshot of
+        // what it is listening to right now.
+        "mesh" =>
+        [
+            new ScriptSuggestion(ScriptMeshes.PrimaryToken, "this station's own mesh, whatever preset it is on"),
+            new ScriptSuggestion(ScriptMeshes.AnyToken, "every mesh this station is listening to"),
+            .. source.Meshes,
         ],
 
         _ => null,

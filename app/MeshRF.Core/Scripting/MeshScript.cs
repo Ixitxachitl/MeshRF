@@ -115,6 +115,22 @@ public sealed class ScriptTrigger
     /// <summary>Case-insensitive matching, default on. Text triggers only.</summary>
     public bool IgnoreCase { get; init; } = true;
 
+    /// <summary>
+    /// Meshes this trigger answers, from its <c>mesh:</c> key. Empty is the
+    /// primary alone.
+    /// </summary>
+    /// <remarks>
+    /// The default is what every script meant before the key existed, and it
+    /// is the conservative one: a station listening to half a band should not
+    /// start answering meshes its scripts were never written for.
+    /// <see cref="ScriptMeshes.AnyToken"/> is how a script opts into all of
+    /// them. Meaningless on <see cref="ScriptTriggerKind.Every"/> and
+    /// <see cref="ScriptTriggerKind.At"/>, which the parser refuses: a
+    /// schedule is heard on no mesh, and where it speaks is its action's to
+    /// say.
+    /// </remarks>
+    public IReadOnlyList<string> Meshes { get; init; } = Array.Empty<string>();
+
     /// <summary><see cref="ScriptTriggerKind.Every"/> interval.</summary>
     public TimeSpan Interval { get; init; }
 
@@ -233,6 +249,19 @@ public sealed record ScriptAction
 
     /// <summary>Destination channel for <c>send:</c>. Empty means the primary.</summary>
     public string Channel { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Meshes a <c>send:</c> or <c>waypoint:</c> goes out on, from its
+    /// <c>mesh:</c> key. Empty is the mesh the run fired on.
+    /// </summary>
+    /// <remarks>
+    /// One message per mesh named, each sealed with that mesh's own key and
+    /// put on the air with its own settings — so <see cref="Channel"/> has to
+    /// name a channel every one of them has. The default keeps an answer where
+    /// its trigger came from, which for a schedule and for every script
+    /// written before the key is the primary.
+    /// </remarks>
+    public IReadOnlyList<string> Meshes { get; init; } = Array.Empty<string>();
 
     /// <summary>Set reply_id on the outgoing message so clients thread it under
     /// the triggering one. Always on for <c>reply:</c>.</summary>

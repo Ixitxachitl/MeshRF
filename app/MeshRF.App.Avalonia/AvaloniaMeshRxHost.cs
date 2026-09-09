@@ -345,6 +345,30 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == listName).Select(t => t.Config).ToList();
 
     /// <summary>
+    /// The channel of that name in one mesh's list, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// No fallback of any kind, which is what separates it from
+    /// <see cref="ChannelIn"/>: this answers "does this mesh have that
+    /// channel", and a fallback would answer yes for every mesh. Disabled
+    /// channels do not count — one has no key, so a frame sealed for it could
+    /// not be read.
+    /// </remarks>
+    /// <summary>The list a record names, or the primary's when it names none —
+    /// a row from before the lists were named, or one this station has no
+    /// listener for.</summary>
+    public string ListOrPrimary(string? listName) =>
+        string.IsNullOrEmpty(listName) ? PrimaryListName : listName;
+
+    public ChannelConfig? ChannelNamedIn(string listName, string? channelName) =>
+        string.IsNullOrEmpty(channelName)
+            ? null
+            : Tabs.OfType<ChannelTabViewModel>()
+                  .FirstOrDefault(t => t.Config.Preset == listName && !t.Config.IsDisabled
+                      && string.Equals(t.Config.Name, channelName, StringComparison.OrdinalIgnoreCase))
+                  ?.Config;
+
+    /// <summary>
     /// Where a preset's mesh sits at this station: the channel list it owns,
     /// and what stands between the station and hearing it — empty when
     /// nothing does. Owned by the view model, which holds the region, the
@@ -542,11 +566,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// never reaches back into the stores.</summary>
     private ScriptEvent BuildScriptEvent(
         ScriptEventKind kind, MeshHeader header, MessageRecord record, MeshDecodeResult result,
-        bool isDirect, byte hopsAway, string emoji = "")
+        bool isDirect, byte hopsAway, RxSource source, string emoji = "")
     {
         var node = _nodeStore.Get(header.From);
         return new ScriptEvent
         {
+            Mesh = ListNameFor(source),
+            IsPrimaryMesh = source.IsPrimary,
             Kind = kind,
             Text = record.Text,
             FromNode = header.From,
@@ -557,11 +583,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             FromLatitude = node?.Latitude,
             FromLongitude = node?.Longitude,
             Channel = result.ChannelName ?? string.Empty,
-            // Only for a packet that actually named a channel: FindChannelByName
-            // falls back to the first tab when given nothing, which would make
-            // a direct message look like it arrived on the primary.
-            IsPrimaryChannel = !string.IsNullOrEmpty(result.ChannelName) &&
-                               FindChannelByName(result.ChannelName) is { Index: 0 },
+            // Only for a packet that actually named a channel: a direct message
+            // names none, and reading a missing name as the first tab would
+            // make one look like it arrived on the primary.
+            IsPrimaryChannel = ChannelNamedIn(ListNameFor(source), result.ChannelName) is { Index: 0 },
             IsDirect = isDirect,
             SnrDb = record.SnrDb,
             Rssi = record.Rssi,
@@ -1641,12 +1666,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// </remarks>
     private void RaiseNewNode(uint nodeNum, float? snrDb, float? rssi, byte hopsAway, RxSource source)
     {
-        // Scripts act for the primary alone.
-        if (!source.IsPrimary) return;
         var node = _nodeStore.Get(nodeNum);
         ScriptEventObserved?.Invoke(new ScriptEvent
         {
             Kind = ScriptEventKind.NewNode,
+            Mesh = ListNameFor(source),
+            IsPrimaryMesh = source.IsPrimary,
             FromNode = nodeNum,
             FromShort = node?.ShortName ?? string.Empty,
             FromLong = string.IsNullOrEmpty(node?.LongName) ? NodeDisplayName(nodeNum) : node!.LongName,
@@ -2209,13 +2234,13 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // Last, so a script can never delay the message appearing or the alert
         // sounding. An ignored sender is ignored here too: muting somebody
         // should not leave the app still answering them automatically.
-        // Scripts act for the primary alone: a message on another preset's
-        // mesh is not theirs to answer.
-        if (ScriptEventObserved is { } observer && !IsNodeIgnored(header.From) && source.IsPrimary)
+        // Every mesh is offered; which of them a script answers is its own
+        // mesh: to say, and the default is the primary alone.
+        if (ScriptEventObserved is { } observer && !IsNodeIgnored(header.From))
         {
             observer(BuildScriptEvent(
                 isReaction ? ScriptEventKind.Reaction : ScriptEventKind.Text,
-                header, record, result, isDirectToUs, hopsAway,
+                header, record, result, isDirectToUs, hopsAway, source,
                 emoji: isReaction ? ResolveReactionGlyph(result.Text, result.Emoji) : string.Empty));
         }
     }
@@ -2559,9 +2584,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             FromLong = string.IsNullOrEmpty(node?.LongName) ? NodeDisplayName(nodeNum) : node!.LongName,
             FromLatitude = lat,
             FromLongitude = lon,
+            // The mesh the marker itself is filed under: a fence lives on one
+            // mesh's channel, and a crossing of it belongs there too.
+            Mesh = ListOrPrimary(wp.Preset),
+            IsPrimaryMesh = string.IsNullOrEmpty(wp.Preset) || wp.Preset == PrimaryListName,
             Channel = wp.Channel,
-            IsPrimaryChannel = !string.IsNullOrEmpty(wp.Channel) &&
-                               FindChannelByName(wp.Channel) is { Index: 0 },
+            IsPrimaryChannel = ChannelNamedIn(ListOrPrimary(wp.Preset), wp.Channel) is { Index: 0 },
             FromPacket = hopsAway is not null,
             SnrDb = snrDb,
             Rssi = rssi,

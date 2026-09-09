@@ -28,6 +28,11 @@ public class ScriptCompletionTests
         [
             new ScriptSuggestion("North Gate", "North Gate", "circle, 500 m"),
             new ScriptSuggestion("Yes", "\"Yes\"", "box"),
+        ],
+        Meshes:
+        [
+            new ScriptSuggestion("MediumFast", "this station's own mesh"),
+            new ScriptSuggestion("LongFast", "listening"),
         ]);
 
     /// <summary>Completes at the end of the text, which is where a caret sits
@@ -193,6 +198,31 @@ public class ScriptCompletionTests
 
         Assert.NotNull(result);
         Assert.Equal(["any", "North Gate", "Yes"], result!.Suggestions.Select(s => s.Label));
+    }
+
+    /// <summary>The two role words lead, because they outlive whatever this
+    /// station happens to be tuned to; the meshes behind them are a snapshot of
+    /// what it is listening to right now.</summary>
+    [Fact]
+    public void A_Mesh_Offers_The_Role_Words_And_The_Meshes_This_Station_Is_On()
+    {
+        var result = At("trigger:\n  - command: ping\n    mesh: ");
+
+        Assert.NotNull(result);
+        Assert.Equal(["{primary}", "any", "MediumFast", "LongFast"],
+                     result!.Suggestions.Select(s => s.Label));
+    }
+
+    /// <summary>A mesh: takes a list, so the offer has to reappear after the
+    /// comma rather than trying to complete everything typed so far.</summary>
+    [Fact]
+    public void A_Mesh_List_Completes_The_Entry_After_The_Comma()
+    {
+        var result = At("    mesh: [\"{primary}\", Long");
+
+        Assert.NotNull(result);
+        Assert.Equal(["LongFast"], result!.Suggestions.Select(s => s.Label));
+        Assert.Equal(4, result.Length);
     }
 
     [Fact]

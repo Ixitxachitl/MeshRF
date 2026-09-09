@@ -95,9 +95,9 @@ once after you change one.
 [sos.yaml](sos.yaml) is the sample that does all three at once.
 
 You do not have to look any of it up. Typing a `to:`, `from:`, `not_from:`,
-`channel:` or `credential:` value in the Scripts editor drops down what this
-node already knows — your configured channels, the nodes you have heard, and
-your stored credentials. Ctrl+Space asks for the list, Enter or Tab accepts it,
+`channel:`, `mesh:` or `credential:` value in the Scripts editor drops down what
+this node already knows — your configured channels, the meshes you are on, the
+nodes you have heard, and your stored credentials. Ctrl+Space asks for the list, Enter or Tab accepts it,
 Esc closes it. A node id is inserted quoted, and its name goes in after it as a
 comment, because `!a1b2c3d4` tells you nothing about whose radio it is when you
 come back to the script six months later.
@@ -143,6 +143,53 @@ it. The node that replies is one running `ping.yaml` — and that sample is
 button at that node to get an answer; point it at a channel and the message
 goes out and is simply read by people, which is still enough to see the button
 work.
+
+## Answering another mesh
+
+A wide capture can be listening to several presets at once, and each of those is
+a mesh of its own with its own channel list. Scripts stay on the primary unless
+you say otherwise, so nothing here changes until you write a `mesh:`.
+
+On a trigger it says which meshes the script answers:
+
+```yaml
+trigger:
+  - command: ping
+    mesh: any             # whichever mesh asked
+```
+
+```yaml
+trigger:
+  - command: ping
+    mesh: ["{primary}", LongFast]
+```
+
+A mesh is named for the preset that owns its channels, `{primary}` is this
+station's own whatever preset it happens to be on, and `any` is every mesh you
+are listening to. Leave it out and the trigger answers the primary alone, which
+is what every sample above does.
+
+`reply:` and `react:` answer where the trigger came from, so they need nothing
+more. On a `send:` or a `waypoint:`, `mesh:` says which meshes it speaks on —
+one copy each, sealed with that mesh's own key and put on the air with its own
+settings:
+
+```yaml
+- send:
+    channel: Alerts       # every mesh listed has to have this channel
+    mesh: any
+    text: "…"
+```
+
+That is the one thing to get right: `mesh:` goes with `channel:`, and the
+channel has to exist on every mesh named. One that does not have it is left out
+with a line in the log rather than answered on some other channel. So is one
+nothing is listening for — its channels have keys but no settings to go out on,
+and a frame sealed for one mesh and transmitted on another's is noise to
+everyone who hears it.
+
+`mesh:` never goes with `to:`. A message addressed to a node follows that node
+to the mesh it was last heard on, which is the only place it could be reached.
 
 ## How far a message travels
 

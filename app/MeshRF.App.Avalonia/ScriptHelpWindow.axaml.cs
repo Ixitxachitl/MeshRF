@@ -64,6 +64,7 @@ public partial class ScriptHelpWindow : Window
         new("  (what a crossing carries)", "Somebody else's crossing came out of their position packet, so {snr}, {rssi}, {hops} and snr_above:/hops_below: all work on it. Your own carries none of that, and those conditions fail closed rather than firing on a default. Nothing threads under a crossing either way: the packet behind one is a position, not a message, so reply_link: and react: skip themselves."),
         new("quick_send: Ping", "Puts a button labelled Ping on the Quick send bar; the script runs when you press it."),
         new("  to: ask", "Where that button sends: ask to be prompted like the built-in quick sends (the default), or name a channel or a node id to go straight there."),
+        new("  mesh: [LongFast]", "Option on any trigger that arrives over the air. Which meshes it answers, named for the preset that owns their channels. One name or a list; {primary} is this station's own mesh whatever preset it is on, and any is every mesh it is listening to. Leave it out and the trigger answers the primary alone, which is what a script with no mesh: has always meant. Not on every:/at: — a schedule arrives on no mesh, so where it speaks is its action's to say."),
     ];
 
     public IReadOnlyList<HelpRow> Conditions { get; } =
@@ -89,6 +90,7 @@ public partial class ScriptHelpWindow : Window
         new("  text: \"…\"", "The message body. Required."),
         new("  reply_link: true", "Thread the message under the one that triggered it."),
         new("  require_key: true", "Send only if the message can be PKC-sealed. Not a privacy preference: firmware rejects a text message addressed to it that decrypted with the channel key, so a DM to somebody whose public key you do not hold is transmitted and then binned at the far end. Pair it with nodeinfo: request: true and a delay: to ask for the key first. to: only — a channel message is not sealed to anyone."),
+        new("  mesh: [LongFast, MediumSlow]", "Meshes to broadcast on, one copy each, instead of the one the trigger arrived on. Goes with channel:, which has to name a channel every mesh listed actually has — one that does not is left out and says so in the log. {primary} is this station's own mesh, any is every mesh it is listening to. Not with to:, which follows its node to wherever that node was heard."),
         new("  hops: 0", "Hop limit for this one message, 0-7, instead of the app-wide setting. 0 reaches direct neighbours only and is never relayed — the right answer for something local, and the cheapest thing a script can transmit. Raise it only for a message that genuinely has to cross the mesh."),
         new("http:", "Call a REST endpoint and keep the answer for a later action. Takes the indented keys below."),
         new("  url: \"https://…\"", "The endpoint. Placeholders in it are percent-encoded, so a message containing & or a space cannot rewrite the request. Required, and must be https:// or http://."),
@@ -119,6 +121,7 @@ public partial class ScriptHelpWindow : Window
         new("  notify_on_enter: true", "Alert receivers crossing into the fence. Needs a radius. Also notify_on_exit."),
         new("  to: \"{from.id}\"", "Address the marker to one node instead of broadcasting it. It still travels under the primary's key — the address saves everyone else drawing it rather than keeping it from them."),
         new("  channel: LongFast", "Channel to broadcast on. Use one of to:/channel:, not both. Defaults to the primary, and channel: {primary} says so out loud."),
+        new("  mesh: [LongFast]", "Meshes to place the marker on, one per mesh, instead of the one the trigger arrived on. Same rules as send:'s — it goes with channel:, and not with to:."),
         new("  lock_to_me: false", "Let others edit the marker. On by default, so a script's markers cannot be rewritten."),
         new("  hops: 2", "Hop limit for the marker, 0-7, instead of the app-wide setting. A marker only means something to nodes near enough to act on it, so it is often worth fewer hops than the setting."),
         new("react: 👍", "Emoji tapback on the triggering message. Takes placeholders like reply: does, so react: \"{hops|keycap}\" tapbacks the hop count."),
@@ -276,7 +279,7 @@ public partial class ScriptHelpWindow : Window
     [
         new("Enter", "Keeps your indentation, indents after a 'key:', and starts the next '- ' in a list."),
         new("Tab / Shift+Tab", "Indents or outdents by two spaces. YAML forbids tab characters, so pasted tabs are converted."),
-        new("Suggestions", "A list of what this node already knows appears while you type a to:, from:, not_from:, channel: or credential: value — your configured channels, the nodes you have heard, and your stored credentials. Ctrl+Space asks for it, Enter or Tab accepts, Esc closes."),
+        new("Suggestions", "A list of what this node already knows appears while you type a to:, from:, not_from:, channel:, mesh: or credential: value — your configured channels, the meshes you are on, the nodes you have heard, and your stored credentials. Ctrl+Space asks for it, Enter or Tab accepts, Esc closes."),
         new("Node names", "A node id goes in quoted, since a bare !a1b2c3d4 opens a YAML tag, and the node's name is written in after it as a comment — eight hex digits say nothing about whose radio they are six months later."),
         new("Save", "Blocked while the script has errors — an unparseable file would be a script that silently never runs."),
         new("Click a problem", "Selects the line it came from."),

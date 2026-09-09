@@ -87,7 +87,8 @@ channelizer rather than a chain per channel.
 
 | | |
 | --- | --- |
-| Auto reports, scripts | Primary only |
+| Auto reports | Primary only |
+| Scripts | The primary, unless a script's `mesh:` says otherwise |
 | MQTT uplink and downlink | Primary only — traffic from another preset's mesh is not this gateway's to publish |
 | Spectrum, waterfall, packet snapshot | The capture, and the primary's channel |
 | Channel utilisation | The primary's channel, which is what device metrics report on |
@@ -415,6 +416,31 @@ limits:
   hop limit for one message. `hops: 0` is never repeated by any node, so it
   costs one airtime slot rather than one per relay in range — the right answer
   for anything that only means something to whoever can already hear you.
+- **Meshes**: a station listening to several presets at once can point a script
+  at any of them with `mesh:`. On a trigger it says which meshes the script
+  answers; on a `send:` or a `waypoint:` it says which it speaks on, one copy
+  per mesh. One name or a list, `{primary}` for this station's own mesh
+  whatever preset it is on, or `any` for every mesh it is listening to. Leaving
+  it out means the primary for a trigger and the mesh the trigger arrived on
+  for an action, so a script written before the key behaves exactly as it did.
+
+```yaml
+trigger:
+  - command: ping
+    mesh: any            # answer whichever mesh asked
+
+action:
+  - reply: "pong — {snr} dB over {hops} hops"
+  - send:
+      channel: Alerts    # every mesh listed has to have this channel
+      mesh: ["{primary}", LongFast]
+      text: "!ping from {from.long}"
+```
+
+A `mesh:` on a `send:` or `waypoint:` goes with `channel:`, never with `to:` —
+a message addressed to a node follows that node to the mesh it was last heard
+on. A named mesh nothing is listening to, or one without the channel named, is
+left out with a line in the log.
 
 A `waypoint:` action drops a marker, optionally with a geofence and enter/exit
 alerts. A `require:` action stops the sequence unless a value holds — which is

@@ -37,7 +37,7 @@ public static class ScriptParser
 
     private static readonly string[] WaypointKeys =
         ["lat", "lon", "name", "description", "icon", "radius", "expires",
-         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me", "hops"];
+         "notify_on_enter", "notify_on_exit", "to", "channel", "lock_to_me", "hops", "mesh"];
 
     /// <summary>Comparators a require: may use. Exactly one per entry.</summary>
     private static readonly string[] RequireComparisons =
@@ -48,7 +48,7 @@ public static class ScriptParser
         [.. RequireComparisons, "value", "ignore_case"];
 
     private static readonly string[] SendKeys =
-        ["to", "channel", "text", "reply_link", "hops", "require_key"];
+        ["to", "channel", "text", "reply_link", "hops", "require_key", "mesh"];
 
     private static readonly string[] NodeInfoKeys = ["request"];
 
@@ -675,11 +675,24 @@ public static class ScriptParser
         var value = map.Children[key];
         int line = (int)key.Start.Line, column = (int)key.Start.Column;
 
+        // A schedule is heard on no mesh, so narrowing it to one says nothing.
+        // Named rather than only refused, because where a scheduled message
+        // goes out is a real question and the answer is one key further down.
+        // "mesh" stays known to the checks below purely so they do not pile a
+        // second, vaguer error on top of this one.
+        if (kind is "every" or "at" && TryGet(map, "mesh", out var scheduleMesh, out _))
+        {
+            problems.Add(ScriptProblem.Error(scheduleMesh.Start.Line, scheduleMesh.Start.Column,
+                $"{kind}: takes no mesh: — a schedule arrives on no mesh. Put mesh: on the send: " +
+                "or waypoint: instead, to say which meshes it goes out on."));
+        }
+        var meshes = ReadMeshes(map, problems, kind);
+
         switch (kind)
         {
             case "text":
             {
-                RejectUnknownKeys(map, [.. kinds, "ignore_case"], "trigger option", problems);
+                RejectUnknownKeys(map, [.. kinds, "ignore_case", "mesh"], "trigger option", problems);
                 var pattern = AsScalar(value, problems, "text") ?? string.Empty;
                 bool ignoreCase = ReadBool(map, "ignore_case", problems) ?? true;
                 if (!ValidateRegex(pattern, line, column, problems)) return null;
@@ -688,13 +701,14 @@ public static class ScriptParser
                     Kind = ScriptTriggerKind.Text,
                     Pattern = pattern,
                     IgnoreCase = ignoreCase,
+                    Meshes = meshes,
                     Line = line,
                 };
             }
 
             case "command":
             {
-                RejectUnknownKeys(map, kinds, "trigger option", problems);
+                RejectUnknownKeys(map, [.. kinds, "mesh"], "trigger option", problems);
                 var name = (AsScalar(value, problems, "command") ?? string.Empty).Trim();
                 if (name.Length == 0)
                 {
@@ -714,16 +728,19 @@ public static class ScriptParser
                         $"command: '{name}' cannot contain spaces — the rest of the message becomes {{args}}"));
                     return null;
                 }
-                return new ScriptTrigger { Kind = ScriptTriggerKind.Command, Pattern = name, Line = line };
+                return new ScriptTrigger
+                {
+                    Kind = ScriptTriggerKind.Command, Pattern = name, Meshes = meshes, Line = line,
+                };
             }
 
             case "new_node":
-                RejectUnknownKeys(map, kinds, "trigger option", problems);
-                return new ScriptTrigger { Kind = ScriptTriggerKind.NewNode, Line = line };
+                RejectUnknownKeys(map, [.. kinds, "mesh"], "trigger option", problems);
+                return new ScriptTrigger { Kind = ScriptTriggerKind.NewNode, Meshes = meshes, Line = line };
 
             case "quick_send":
             {
-                RejectUnknownKeys(map, [.. kinds, "to"], "trigger option", problems);
+                RejectUnknownKeys(map, [.. kinds, "to", "mesh"], "trigger option", problems);
                 var label = (AsScalar(value, problems, "quick_send") ?? string.Empty).Trim();
                 if (label.Length == 0)
                 {
@@ -741,13 +758,14 @@ public static class ScriptParser
                     Kind = ScriptTriggerKind.QuickSend,
                     Pattern = label,
                     Destination = to,
+                    Meshes = meshes,
                     Line = line,
                 };
             }
 
             case "geofence":
             {
-                RejectUnknownKeys(map, [.. kinds, "on"], "trigger option", problems);
+                RejectUnknownKeys(map, [.. kinds, "on", "mesh"], "trigger option", problems);
                 // The fence is named, not identified: a waypoint expires and is
                 // dropped again as a new record with a new id, and a script
                 // that stopped working when its fence was refreshed would be
@@ -780,21 +798,25 @@ public static class ScriptParser
                     Kind = ScriptTriggerKind.Geofence,
                     Pattern = fence,
                     Crossing = crossing,
+                    Meshes = meshes,
                     Line = line,
                 };
             }
 
             case "reaction":
             {
-                RejectUnknownKeys(map, kinds, "trigger option", problems);
+                RejectUnknownKeys(map, [.. kinds, "mesh"], "trigger option", problems);
                 var emoji = (AsScalar(value, problems, "reaction") ?? string.Empty).Trim();
                 if (string.Equals(emoji, "any", StringComparison.OrdinalIgnoreCase)) emoji = string.Empty;
-                return new ScriptTrigger { Kind = ScriptTriggerKind.Reaction, Pattern = emoji, Line = line };
+                return new ScriptTrigger
+                {
+                    Kind = ScriptTriggerKind.Reaction, Pattern = emoji, Meshes = meshes, Line = line,
+                };
             }
 
             case "every":
             {
-                RejectUnknownKeys(map, kinds, "trigger option", problems);
+                RejectUnknownKeys(map, [.. kinds, "mesh"], "trigger option", problems);
                 var interval = ReadDuration(key, value, problems, "every");
                 if (interval is null) return null;
                 if (interval.Value < TimeSpan.FromMinutes(1))
@@ -808,7 +830,7 @@ public static class ScriptParser
 
             case "at":
             {
-                RejectUnknownKeys(map, kinds, "trigger option", problems);
+                RejectUnknownKeys(map, [.. kinds, "mesh"], "trigger option", problems);
                 var text = AsScalar(value, problems, "at");
                 if (text is null) return null;
                 var time = ParseTime(text);
@@ -1003,7 +1025,16 @@ public static class ScriptParser
                     $"{kind}: takes no hops: — a message with its own hop limit has to be a send:, " +
                     "which takes reply_link: true when it should still be threaded under the trigger"));
             }
-            RejectUnknownKeys(map, [.. kinds, "when", "hops"], "action option", problems);
+            // Same treatment, and the same reason for naming the way across:
+            // these actions all answer where their trigger came from or follow
+            // the node they are aimed at, so there is no mesh left to choose.
+            if (TryGet(map, "mesh", out var meshKey, out _))
+            {
+                problems.Add(ScriptProblem.Error(meshKey.Start.Line, meshKey.Start.Column,
+                    $"{kind}: takes no mesh: — it answers on the mesh its trigger arrived on. " +
+                    "To speak on another, use a send: or a waypoint:, which take mesh: beside channel:."));
+            }
+            RejectUnknownKeys(map, [.. kinds, "when", "hops", "mesh"], "action option", problems);
         }
 
         switch (kind)
@@ -1066,6 +1097,18 @@ public static class ScriptParser
                         $"send: to: '{to}' is not a node id — use the !a1b2c3d4 form, or a placeholder like {{from.id}}"));
                     return null;
                 }
+                var meshes = ReadMeshes(send, problems, "send");
+                // A DM follows its addressee, wherever they were last heard —
+                // that is the one mesh they can be reached on, and sending the
+                // same message to them on several would be several copies of it
+                // aimed at one node.
+                if (to.Length > 0 && meshes.Count > 0)
+                {
+                    problems.Add(ScriptProblem.Error(line, column,
+                        "send: has both to: and mesh: — a message to a node goes out on the mesh that " +
+                        "node was heard on. mesh: belongs with channel:."));
+                    return null;
+                }
                 bool requireKey = ReadBool(send, "require_key", problems) ?? false;
                 // Only a DM can be sealed at all — a channel message is
                 // encrypted with a key everyone on it already has.
@@ -1087,6 +1130,7 @@ public static class ScriptParser
                     ReplyLink = ReadBool(send, "reply_link", problems) ?? false,
                     RequireKey = requireKey,
                     Hops = ReadHops(send, problems, "send"),
+                    Meshes = meshes,
                     Line = line,
                 };
             }
@@ -1533,9 +1577,20 @@ public static class ScriptParser
                                 out var to, out var channel))
             return null;
 
+        var meshes = ReadMeshes(map, problems, "waypoint");
+        // An addressed marker follows its addressee, the same way a DM does.
+        if (to.Length > 0 && meshes.Count > 0)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                "waypoint: has both to: and mesh: — a marker addressed to a node goes out on the mesh " +
+                "that node was heard on. mesh: belongs with channel:."));
+            return null;
+        }
+
         return new ScriptAction
         {
             Kind = ScriptActionKind.Waypoint,
+            Meshes = meshes,
             Line = line,
             Waypoint = new ScriptWaypoint
             {
@@ -1964,6 +2019,69 @@ public static class ScriptParser
             return null;
         }
         return (byte)hops;
+    }
+
+    /// <summary>Preset names a <c>mesh:</c> may hold, which are the names every
+    /// channel list at this station is filed under.</summary>
+    private static readonly string[] MeshNames = [.. Enum.GetNames<LoraPreset>()];
+
+    /// <summary>
+    /// Reads a <c>mesh:</c> list — one name or several, plus the two words that
+    /// name meshes by role rather than by preset.
+    /// </summary>
+    /// <remarks>
+    /// Absent gives an empty list, which each caller reads its own way: the
+    /// primary alone for a trigger, the mesh the run fired on for an action.
+    /// Names are checked against the preset list because a mistyped one would
+    /// otherwise be a script that silently never fires — the same reason a
+    /// mistyped key is an error rather than a shrug.
+    /// </remarks>
+    private static IReadOnlyList<string> ReadMeshes(
+        YamlMappingNode map, List<ScriptProblem> problems, string what)
+    {
+        if (!TryGet(map, "mesh", out var key, out var value)) return Array.Empty<string>();
+
+        int line = (int)key.Start.Line, column = (int)key.Start.Column;
+        var written = AsStringList(value, problems, "mesh", line, column);
+        if (written.Count == 0)
+        {
+            problems.Add(ScriptProblem.Error(line, column,
+                $"{what}: mesh: needs at least one preset name, {ScriptMeshes.PrimaryToken} for this " +
+                $"station's own mesh, or {ScriptMeshes.AnyToken} for all of them"));
+            return Array.Empty<string>();
+        }
+
+        var meshes = new List<string>(written.Count);
+        foreach (var entry in written)
+        {
+            if (ScriptMeshes.IsAnyToken(entry) || ScriptChannels.IsPrimaryToken(entry))
+            {
+                meshes.Add(entry.Trim());
+                continue;
+            }
+            // Every other placeholder would be matched against a literal and
+            // never hit anything, the same trap from:/not_from: guards against.
+            if (entry.Contains('{'))
+            {
+                problems.Add(ScriptProblem.Error(line, column,
+                    $"{what}: mesh: '{entry}' — {ScriptMeshes.PrimaryToken} is the only placeholder a mesh: takes"));
+                return Array.Empty<string>();
+            }
+            var named = MeshNames.FirstOrDefault(
+                n => string.Equals(n, entry.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (named is null)
+            {
+                problems.Add(ScriptProblem.Error(line, column,
+                    $"{what}: mesh: '{entry}' is not a preset{Suggest(entry, MeshNames)}. " +
+                    $"A mesh is named for the preset that owns its channels, or {ScriptMeshes.PrimaryToken} " +
+                    $"for this station's own."));
+                return Array.Empty<string>();
+            }
+            // Stored as the preset spells itself, so the log line a script
+            // produces reads like every other mesh name in the app.
+            meshes.Add(named);
+        }
+        return meshes;
     }
 
     private static TimeSpan? ReadDuration(

@@ -150,7 +150,13 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             .GroupBy(w => w.DisplayName, StringComparer.OrdinalIgnoreCase)
             .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
             .Select(g => new ScriptSuggestion(
-                g.Key, ScriptCompletion.QuoteForYaml(g.Key), GeofenceNote(g.First())))]);
+                g.Key, ScriptCompletion.QuoteForYaml(g.Key), GeofenceNote(g.First())))],
+        // The meshes with tabs and a listener behind them, primary first —
+        // the same list the tab strip offers, because it is the same question:
+        // which meshes is this station on.
+        Meshes: [.. _rxHost.TabGroups()
+            .Select(g => new ScriptSuggestion(
+                g, g == _rxHost.PrimaryListName ? "this station's own mesh" : "listening"))]);
 
     /// <summary>
     /// Whether a direct message to this node can be PKC-sealed, which is the
@@ -357,12 +363,21 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         }
 
         bool isDirect = dmNodeNum is not null;
+        // The mesh the press is aimed at: the peer's own for a DM, the one that
+        // owns the channel otherwise. A button pointed at a mesh this station
+        // is not on falls back to the primary the same way every other send to
+        // it does.
+        var mesh = _rxHost.ListOrPrimary(isDirect
+            ? _rxHost.ListNameForNode(dmNodeNum!.Value)
+            : channel?.Preset);
         var evt = new ScriptEvent
         {
             Kind = ScriptEventKind.QuickSend,
             QuickSendName = label,
             ToNode = dmNodeNum ?? 0,
             IsDirect = isDirect,
+            Mesh = mesh,
+            IsPrimaryMesh = mesh == _rxHost.PrimaryListName,
             Channel = isDirect ? string.Empty : channel?.Name ?? string.Empty,
             IsPrimaryChannel = !isDirect && channel?.Role == ChannelRole.Primary,
             Self = BuildScriptSelf(),
@@ -592,12 +607,16 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         }
         var channel = to != 0
             ? DirectedWaypointChannel(to)
-            : ResolveScriptChannel(sync.Waypoint.Channel, "sync")?.Config;
+            // This station's own mesh: a feed sync names no mesh, and the
+            // markers it mirrors belong where its operator is reading them.
+            : ResolveScriptChannel(_rxHost.PrimaryListName, sync.Waypoint.Channel, "sync")?.Config;
         if (channel is null)
         {
-            _rxHost.Log(to != 0
-                ? "sync: nothing sent — that mesh's primary channel is disabled, so an addressed marker has no key to travel under"
-                : "sync: nothing sent — no channel to send on");
+            // Only the addressed form needs explaining here; the resolver has
+            // already said what the mesh was short of for the other.
+            if (to != 0)
+                _rxHost.Log("sync: nothing sent — that mesh's primary channel is disabled, " +
+                            "so an addressed marker has no key to travel under");
             return;
         }
 
@@ -834,59 +853,68 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             case ScriptActionKind.Reply:
             case ScriptActionKind.Send:
             {
-                var (channel, to, messages) = ResolveDestination(action);
-                if (channel is null && to == 0xFFFFFFFFu)
-                {
-                    _rxHost.Log("scripts: nothing sent — no channel to send on");
-                    return;
-                }
                 if (text.Length == 0)
                 {
                     _rxHost.Log("scripts: nothing sent — the message came out empty once filled in");
                     return;
                 }
-                // Asked to seal or say nothing. Firmware bins a text message
-                // addressed to it that decrypted with the channel key, so
-                // without their public key this would be transmitted and then
-                // thrown away at the far end — the airtime is spent either way,
-                // and only one of the two delivers anything.
-                if (action.RequireKey && !CanSealTo(to))
+                // One copy per mesh, each sealed with that mesh's own key and
+                // put on the air with its own settings. A message addressed to
+                // a node is one copy however many meshes are listed, since it
+                // follows that node — the parser refuses the pair, so reaching
+                // here with both is not possible.
+                foreach (var mesh in TargetMeshes(run, action, "scripts"))
                 {
-                    _rxHost.Log(
-                        $"scripts: nothing sent — no public key for {_rxHost.NodeDisplayName(to)}, " +
-                        "and require_key: is set");
-                    return;
-                }
-                // Open the conversation only now, with every guard passed: a
-                // tab for a message the script decided not to send would be an
-                // empty room nobody asked for. Find-or-create, so an already
-                // open one is reused with its history intact — and without
-                // this, a DM to somebody there was no tab for was transmitted
-                // and filed but shown nowhere until the tab was opened by hand.
-                if (to != 0xFFFFFFFFu) messages = _rxHost.OpenConversation(to).Messages;
+                    var (channel, to, messages) = ResolveDestination(action, mesh, NamesNoMesh(action));
+                    // Why is already in the log — the resolver says which mesh
+                    // was short of what.
+                    if (channel is null && to == 0xFFFFFFFFu) continue;
+                    // Asked to seal or say nothing. Firmware bins a text message
+                    // addressed to it that decrypted with the channel key, so
+                    // without their public key this would be transmitted and then
+                    // thrown away at the far end — the airtime is spent either way,
+                    // and only one of the two delivers anything.
+                    if (action.RequireKey && !CanSealTo(to))
+                    {
+                        _rxHost.Log(
+                            $"scripts: nothing sent — no public key for {_rxHost.NodeDisplayName(to)}, " +
+                            "and require_key: is set");
+                        return;
+                    }
+                    // Open the conversation only now, with every guard passed: a
+                    // tab for a message the script decided not to send would be an
+                    // empty room nobody asked for. Find-or-create, so an already
+                    // open one is reused with its history intact — and without
+                    // this, a DM to somebody there was no tab for was transmitted
+                    // and filed but shown nowhere until the tab was opened by hand.
+                    if (to != 0xFFFFFFFFu) messages = _rxHost.OpenConversation(to).Messages;
 
-                await SendTextAsync(channel, to, text, action.ReplyId,
-                                    ReplyContextFor(run, action.ReplyId), messages, action.Hops);
+                    await SendTextAsync(channel, to, text, action.ReplyId,
+                                        ReplyContextFor(run, action.ReplyId), messages, action.Hops);
+                }
                 break;
             }
 
             case ScriptActionKind.React:
             {
-                var (channel, to, messages) = ResolveDestination(action);
-                if (channel is null) return;
                 if (text.Length == 0)
                 {
                     _rxHost.Log("scripts: nothing sent — the tapback came out empty once filled in");
                     return;
                 }
+                // A tapback lands on one packet, which was heard on one mesh, so
+                // there is nothing here for a list to fan out over — react:
+                // takes no mesh: and this is always the run's own.
+                var (chan, target, bubbles) = ResolveDestination(action, _rxHost.ListOrPrimary(run.Mesh), true);
+                if (chan is null) return;
                 var packetId = NextPacketId();
-                var frame = MeshEncoder.EncodeTextMessage(channel, _rxHost.MyNodeNum, packetId, text,
-                    to: to, hopLimit: (byte)HopLimit, replyId: action.ReplyId, emoji: 1,
+                var frame = MeshEncoder.EncodeTextMessage(chan, _rxHost.MyNodeNum, packetId, text,
+                    to: target, hopLimit: (byte)HopLimit, replyId: action.ReplyId, emoji: 1,
                     xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-                if (await TransmitFrameAsync(frame, TargetForChannel(channel, to)))
+                if (await TransmitFrameAsync(frame, TargetForChannel(chan, target)))
                 {
-                    EchoReaction(messages, action.ReplyId, text);
-                    _rxHost.PersistOutgoingReaction(to, packetId, action.ReplyId, text, channel.Name);
+                    EchoReaction(bubbles, action.ReplyId, text);
+                    _rxHost.PersistOutgoingReaction(target, packetId, action.ReplyId, text, chan.Name);
                 }
                 break;
             }
@@ -972,18 +1000,6 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             _rxHost.Log($"scripts: waypoint skipped — nothing is listening for the mesh {_rxHost.NodeDisplayName(action.ToNode)} was heard on");
             return;
         }
-        var channel = action.ToNode != 0
-            ? DirectedWaypointChannel(action.ToNode)
-            : ResolveScriptChannel(waypoint.Channel, "scripts")?.Config;
-        if (channel is null)
-        {
-            _rxHost.Log(action.ToNode != 0
-                ? "scripts: waypoint skipped — that mesh's primary channel is disabled, so an addressed marker has no key to travel under"
-                : "scripts: waypoint skipped — no channel to send it on");
-            return;
-        }
-
-        var packetId = NextPacketId();
         // Expiry is relative in a script and absolute on the wire. "No expiry"
         // is NeverExpiresEpoch rather than 0: firmware's OLED only draws a
         // waypoint while expire > now, so a 0 reads as already-expired and the
@@ -997,49 +1013,71 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
         var description = ScriptTemplate.ClampToPayload(run.Expansion.Expand(waypoint.Description));
         var icon = waypoint.Icon.Length > 0 ? EmojiToCodePoint(waypoint.Icon) : null;
 
-        var frame = MeshEncoder.EncodeWaypoint(
-            channel, _rxHost.MyNodeNum, packetId, waypointId: packetId, lat, lon,
-            name: name,
-            description: description,
-            expireEpoch: expireEpoch,
-            lockedTo: waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
-            icon: icon,
-            geofenceRadiusM: waypoint.RadiusM,
-            notifyOnEnter: waypoint.NotifyOnEnter,
-            notifyOnExit: waypoint.NotifyOnExit,
-            to: action.ToNode != 0 ? action.ToNode : 0xFFFFFFFFu,
-            hopLimit: waypoint.Hops ?? (byte)HopLimit,
-            okToMqtt: OkToMqtt,
-            xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
-
-        if (!await TransmitFrameAsync(frame, TargetForChannel(channel, action.ToNode)))
+        // One marker per mesh, each with its own id: a waypoint is identified
+        // by the packet that placed it, and the same fence on two meshes is two
+        // markers as far as everyone receiving them is concerned.
+        bool placed = false;
+        foreach (var mesh in TargetMeshes(run, action, "scripts"))
         {
-            _rxHost.Log("scripts: waypoint transmit failed");
-            return;
+            var channel = action.ToNode != 0
+                ? DirectedWaypointChannel(action.ToNode)
+                : ResolveScriptChannel(mesh, waypoint.Channel, "scripts", NamesNoMesh(action))?.Config;
+            if (channel is null)
+            {
+                // Only the addressed form needs explaining here; the resolver
+                // has already said which mesh was short of what for the other.
+                if (action.ToNode != 0)
+                    _rxHost.Log("scripts: waypoint skipped — that mesh's primary channel is disabled, " +
+                                "so an addressed marker has no key to travel under");
+                continue;
+            }
+
+            var packetId = NextPacketId();
+            var frame = MeshEncoder.EncodeWaypoint(
+                channel, _rxHost.MyNodeNum, packetId, waypointId: packetId, lat, lon,
+                name: name,
+                description: description,
+                expireEpoch: expireEpoch,
+                lockedTo: waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
+                icon: icon,
+                geofenceRadiusM: waypoint.RadiusM,
+                notifyOnEnter: waypoint.NotifyOnEnter,
+                notifyOnExit: waypoint.NotifyOnExit,
+                to: action.ToNode != 0 ? action.ToNode : 0xFFFFFFFFu,
+                hopLimit: waypoint.Hops ?? (byte)HopLimit,
+                okToMqtt: OkToMqtt,
+                xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
+
+            if (!await TransmitFrameAsync(frame, TargetForChannel(channel, action.ToNode)))
+            {
+                _rxHost.Log("scripts: waypoint transmit failed");
+                continue;
+            }
+
+            _rxHost.RecordOutgoingWaypoint(new WaypointRecord
+            {
+                FromNode = _rxHost.MyNodeNum,
+                WaypointId = packetId,
+                PacketId = packetId,
+                Channel = channel.Name,
+                Preset = channel.Preset,
+                HeardOnPreset = MeshNameForList(channel.Preset),
+                ToNode = action.ToNode,
+                Name = name,
+                Description = description,
+                Icon = icon,
+                Latitude = lat,
+                Longitude = lon,
+                ExpireEpoch = expireEpoch,
+                LockedTo = waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
+                RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                GeofenceRadius = waypoint.RadiusM,
+                NotifyOnEnter = waypoint.NotifyOnEnter,
+                NotifyOnExit = waypoint.NotifyOnExit,
+            });
+            placed = true;
         }
-
-        _rxHost.RecordOutgoingWaypoint(new WaypointRecord
-        {
-            FromNode = _rxHost.MyNodeNum,
-            WaypointId = packetId,
-            PacketId = packetId,
-            Channel = channel.Name,
-            Preset = channel.Preset,
-            HeardOnPreset = MeshNameForList(channel.Preset),
-            ToNode = action.ToNode,
-            Name = name,
-            Description = description,
-            Icon = icon,
-            Latitude = lat,
-            Longitude = lon,
-            ExpireEpoch = expireEpoch,
-            LockedTo = waypoint.LockToMe ? _rxHost.MyNodeNum : 0,
-            RxEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            GeofenceRadius = waypoint.RadiusM,
-            NotifyOnEnter = waypoint.NotifyOnEnter,
-            NotifyOnExit = waypoint.NotifyOnExit,
-        });
-        RaiseMapDataChanged();
+        if (placed) RaiseMapDataChanged();
     }
 
     /// <summary>
@@ -1096,8 +1134,14 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     /// there is nowhere to echo — the message is still sent and still recorded
     /// in history, it simply has no bubble until that tab is opened.
     /// </remarks>
+    /// <param name="mesh">The mesh this copy of the message is going out on.
+    /// Ignored for a message addressed to a node, which follows that node to
+    /// wherever it was heard.</param>
+    /// <param name="fallBack">Passed through to
+    /// <see cref="ResolveScriptChannel"/>: whether a channel this mesh does not
+    /// have should settle for its primary.</param>
     private (ChannelConfig? Channel, uint To, ObservableCollection<ChannelMessage>? Messages) ResolveDestination(
-        ResolvedAction action)
+        ResolvedAction action, string mesh, bool fallBack)
     {
         if (action.ToNode != 0)
         {
@@ -1113,7 +1157,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             return (_rxHost.ChannelForNode(action.ToNode, null), action.ToNode, conversation?.Messages);
         }
 
-        var tab = ResolveScriptChannel(action.ChannelName, "scripts");
+        var tab = ResolveScriptChannel(mesh, action.ChannelName, "scripts", fallBack);
         return (tab?.Config, 0xFFFFFFFFu, tab?.Messages);
     }
 
@@ -1129,13 +1173,33 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     /// collide with a channel someone actually called "primary" — a bare word
     /// is always a name and nothing else.
     /// </remarks>
+    /// <param name="mesh">Which mesh's channel list to look in. A channel name
+    /// is only unique inside one — two meshes can each have an "Alerts", and
+    /// they are different channels with different keys.</param>
     /// <param name="context">Log prefix, so a sync's fallback doesn't read as a
     /// script's.</param>
-    private ChannelTabViewModel? ResolveScriptChannel(string name, string context)
+    /// <param name="fallBack">Whether an unmatched name should settle for the
+    /// primary. True where the script named one destination and getting it
+    /// slightly wrong beats saying nothing; false where it named several
+    /// meshes, and the ones that do have the channel are already carrying the
+    /// message.</param>
+    private ChannelTabViewModel? ResolveScriptChannel(
+        string mesh, string name, string context, bool fallBack = true)
     {
-        var tabs = Tabs.OfType<ChannelTabViewModel>().ToList();
+        var tabs = Tabs.OfType<ChannelTabViewModel>().Where(t => t.Config.Preset == mesh).ToList();
         var primary = tabs.FirstOrDefault(t => t.Config.Role == ChannelRole.Primary) ?? tabs.FirstOrDefault();
-        if (name.Length == 0 || ScriptChannels.IsPrimaryToken(name)) return primary;
+
+        // Everything that comes back empty says so here, so the callers can
+        // simply move on to the next mesh: an action that quietly sent nothing
+        // is otherwise unanswerable, and two of them saying it is noise.
+        ChannelTabViewModel? Missing(string why)
+        {
+            _rxHost.Log($"{context}: {why}");
+            return null;
+        }
+
+        if (name.Length == 0 || ScriptChannels.IsPrimaryToken(name))
+            return primary ?? Missing($"{mesh} has no channel to send on");
 
         // Disabled channels are skipped: one has no key to send with, so
         // matching its name would only produce a frame nobody can read.
@@ -1143,7 +1207,71 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
             t => !t.Config.IsDisabled && string.Equals(t.Config.Name, name, StringComparison.OrdinalIgnoreCase));
         if (named is not null) return named;
 
+        if (!fallBack) return Missing($"{mesh} has no channel named \"{name}\", so it was left out");
+
         _rxHost.Log($"{context}: no channel named \"{name}\" — falling back to the primary");
-        return primary;
+        return primary ?? Missing($"{mesh} has no channel to send on");
+    }
+
+    /// <summary>
+    /// Which meshes one action goes out on, in the order the script named them.
+    /// </summary>
+    /// <remarks>
+    /// <para>Naming none means the mesh the trigger arrived on, which for a
+    /// schedule — and for every script written before <c>mesh:</c> existed — is
+    /// this station's own. <c>any</c> is every mesh it is currently on.</para>
+    /// <para>A mesh nothing is listening to is dropped rather than sent to.
+    /// Its channels still have their keys, but there are no settings to put
+    /// them on the air with, so the frame would be sealed for one mesh and
+    /// transmitted on another's — noise to everyone who hears it.</para>
+    /// </remarks>
+    /// <summary>
+    /// Whether an action left the mesh to the run, which is also the question
+    /// "should a channel this mesh does not have settle for its primary".
+    /// </summary>
+    /// <remarks>
+    /// A script that named its meshes has said the channel is on all of them.
+    /// Where it is not, leaving that mesh out is the honest answer: the meshes
+    /// that do have the channel are already carrying the message, and putting
+    /// a copy on some other channel instead would be a second conversation
+    /// nobody asked for.
+    /// </remarks>
+    private static bool NamesNoMesh(ResolvedAction action) => action.Meshes is not { Count: > 0 };
+
+    private List<string> TargetMeshes(ScriptRun run, ResolvedAction action, string context)
+    {
+        var meshes = new List<string>();
+
+        // Named by the script, so a mesh it cannot reach is worth a line: the
+        // operator asked for that one by name and did not get it.
+        void Add(string mesh, bool named)
+        {
+            if (mesh.Length == 0 || meshes.Contains(mesh, StringComparer.OrdinalIgnoreCase)) return;
+            if (!CanReachMesh(mesh))
+            {
+                if (named) _rxHost.Log($"{context}: nothing is listening for {mesh}, so it was left out");
+                return;
+            }
+            meshes.Add(mesh);
+        }
+
+        if (action.Meshes is not { Count: > 0 } wanted)
+        {
+            Add(_rxHost.ListOrPrimary(run.Mesh), named: false);
+            return meshes;
+        }
+
+        foreach (var entry in wanted)
+        {
+            // "any" is whichever meshes this station is on, so one it is not on
+            // is not a disappointment — it is what the word already said.
+            if (ScriptMeshes.IsAnyToken(entry))
+                foreach (var group in _rxHost.TabGroups()) Add(group, named: false);
+            else if (ScriptChannels.IsPrimaryToken(entry))
+                Add(_rxHost.PrimaryListName, named: true);
+            else
+                Add(entry, named: true);
+        }
+        return meshes;
     }
 }

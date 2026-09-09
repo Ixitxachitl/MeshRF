@@ -135,6 +135,28 @@ public sealed record ScriptEvent
     /// <summary>Channel name, or "PKC" for an encrypted direct message.</summary>
     public string Channel { get; init; } = string.Empty;
 
+    /// <summary>
+    /// The mesh this was heard on, named the way its channel list is: the
+    /// preset that owns it.
+    /// </summary>
+    /// <remarks>
+    /// Empty on an event nobody transmitted — a schedule is on no mesh at all,
+    /// and reads as the primary's wherever one is needed.
+    /// </remarks>
+    public string Mesh { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Whether that mesh is the one this station is on.
+    /// </summary>
+    /// <remarks>
+    /// Carried as a flag rather than compared by name, for the reason
+    /// <see cref="IsPrimaryChannel"/> is: the preset the primary runs changes
+    /// with the toolbar. True by default, so an event built without naming a
+    /// mesh is the primary's — which is the only mesh there was before a
+    /// script could name one.
+    /// </remarks>
+    public bool IsPrimaryMesh { get; init; } = true;
+
     /// <summary>Whether that channel is the primary one. Carried as a flag
     /// rather than compared by name, since the primary's name differs from mesh
     /// to mesh and is empty on a default-preset channel.</summary>
