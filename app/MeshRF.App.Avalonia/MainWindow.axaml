@@ -1231,15 +1231,20 @@
                                       ItemsSource="{Binding TabGroupOptions}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="3" />
+                                    <!-- Flush, as the strip below is: an ordinary
+                                         TabItem carries no margin, so the boxes
+                                         there meet at their borders. -->
+                                    <StackPanel Orientation="Horizontal" Spacing="0" />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:TabGroupOption">
-                                    <Border Classes="meshTab" Cursor="Hand"
+                                    <!-- No cursor of its own and no tip: a channel
+                                         tab has neither, and these are the same
+                                         strip at another level. -->
+                                    <Border Classes="meshTab"
                                             Classes.selected="{Binding IsSelected}"
-                                            PointerPressed="OnMeshTabPressed"
-                                            ToolTip.Tip="Show this mesh's channels and conversations">
+                                            PointerPressed="OnMeshTabPressed">
                                         <!-- Classes.attention drives the same pulse the
                                              channel and conversation tabs below use, so a
                                              mesh with something unread reads the way its
