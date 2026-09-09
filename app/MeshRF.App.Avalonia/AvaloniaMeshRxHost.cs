@@ -1823,6 +1823,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     UserId = string.IsNullOrEmpty(result.User.Id) ? header.FromId : result.User.Id,
                     LongName = result.User.LongName,
                     ShortName = result.User.ShortName,
+                    // Stored by name, not by number, so a record outlives the
+                    // enum it was read through. Zero is UNSET, which is what a
+                    // node that does not say sends; empty preserves what is on
+                    // file rather than writing UNSET over a model an earlier
+                    // NodeInfo did name.
+                    HwModel = result.User.HwModel != 0
+                        ? HardwareModels.Name(result.User.HwModel)
+                        : string.Empty,
                     Role = string.IsNullOrEmpty(result.User.Role) ? "Client" : result.User.Role,
                     // Empty preserves what is on file, so a later NodeInfo sent
                     // from a reloaded NodeDB (which zero-fills the MAC) does not
