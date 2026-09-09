@@ -103,6 +103,12 @@ private:
     void decode_header_();
     void decode_payload_();
 
+    // The sync word the two sync chirps of the frame in hand encoded, or -1
+    // when either bin missed a nibble by more than rounding. Only meaningful
+    // once the SFD has been read, since the integer CFO it corrects for is
+    // not known until then.
+    [[nodiscard]] int observed_sync_word_() const noexcept;
+
     // --- Config --------------------------------------------------------
     std::uint8_t  sf_;
     std::uint32_t chip_rate_;

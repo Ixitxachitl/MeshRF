@@ -794,6 +794,9 @@ void ChirpChatRx::decode_payload_() {
     ev.length        = std::min<std::size_t>(payload_length_bytes_, raw_bytes.size());
     ev.has_crc       = payload_has_crc_;
     ev.sample_index  = payload_first_sample_;
+    // This path does not read the sync chirps back; MeshtasticRx is the
+    // receiver the app runs, and it does.
+    ev.sync_word     = -1;
 
     // Diagnostics: capture raw symbols and pre-dewhiten bytes BEFORE we
     // mutate raw_bytes. Truncate to the static-array capacity.

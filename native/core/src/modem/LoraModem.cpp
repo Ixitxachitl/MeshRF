@@ -166,19 +166,29 @@ public:
                 std::snprintf(byte_hex, sizeof(byte_hex), "%02X", ev.bytes[i]);
                 hex += byte_hex;
             }
+            // The sync word the frame arrived under, so a reader (and the
+            // app) can tell a Meshtastic frame from one that merely shares the
+            // channel. Omitted rather than faked when the sync chirps did not
+            // resolve, so an absent field means unknown and not 0x00.
+            char sync[16] = "";
+            if (ev.sync_word >= 0)
+                std::snprintf(sync, sizeof(sync), "sync=%02X ",
+                              static_cast<unsigned>(ev.sync_word));
+
             char head[96];
             std::string msg;
             if (ev.has_crc) {
                 std::snprintf(head, sizeof(head),
-                    "  payload[%s] len=%zu crc=%04X/%04X ",
+                    "  payload[%s] len=%zu crc=%04X/%04X %s",
                     ev.crc_ok ? "OK" : "BAD",
                     ev.length,
                     static_cast<unsigned>(ev.crc_received),
-                    static_cast<unsigned>(ev.crc_computed));
+                    static_cast<unsigned>(ev.crc_computed),
+                    sync);
                 msg = std::string(head) + hex;
             } else {
                 std::snprintf(head, sizeof(head),
-                    "  payload len=%zu ", ev.length);
+                    "  payload len=%zu %s", ev.length, sync);
                 msg = std::string(head) + hex;
             }
             event_cb_(msg);

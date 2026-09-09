@@ -35,11 +35,22 @@ public sealed record SampleRateOption(uint Hz, string Label)
 /// </summary>
 public partial class RadioViewModel : ObservableObject, IDisposable
 {
-    // Mirrors MainViewModel.PayloadLineRegex; matches lines like
-    // "  payload[OK] len=31 crc=E511/E511 FFFFFFFF594FA54F...".
+    // Matches lines like
+    // "  payload[OK] len=31 crc=E511/E511 sync=2B FFFFFFFF594FA54F...".
+    // The sync field is absent when the demodulator could not read a frame's
+    // sync chirps back as a pair of nibbles, so it stays optional.
     private static readonly Regex PayloadLineRegex = new(
-        @"payload(?:\[(?<status>OK|BAD)\])?\s+len=(?<len>\d+)(?:\s+crc=(?<rx>[0-9A-Fa-f]+)/(?<calc>[0-9A-Fa-f]+))?\s+(?<hex>[0-9A-Fa-f]+)",
+        @"payload(?:\[(?<status>OK|BAD)\])?\s+len=(?<len>\d+)(?:\s+crc=(?<rx>[0-9A-Fa-f]+)/(?<calc>[0-9A-Fa-f]+))?(?:\s+sync=(?<sync>[0-9A-Fa-f]{2}))?\s+(?<hex>[0-9A-Fa-f]+)",
         RegexOptions.Compiled);
+
+    /// <summary>The LoRa sync word Meshtastic transmits under. The demodulator
+    /// does not gate on it, so a frame carrying any other one is sharing this
+    /// channel from another network rather than speaking to this mesh.</summary>
+    private const byte MeshtasticSyncWord = 0x2B;
+
+    /// <summary>MeshCore's, which is RadioLib's private-network default passed
+    /// straight through on every radio it supports.</summary>
+    private const byte MeshCoreSyncWord = 0x12;
 
     private static readonly TimeSpan TracerouteCooldown = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PositionRequestCooldown = TimeSpan.FromSeconds(30);
@@ -1686,6 +1697,23 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // so a frame that turns out not to be for us still used the channel.
         // The primary's channel only: it is what device metrics report on.
         if (listener == 0) RecordAirtime(m.Groups["hex"].Value.Length / 2, isTx: false);
+
+        // A frame off another network that happens to share this channel. The
+        // demodulator reads back whatever sync word it hears, and nothing below
+        // here would notice: sixteen bytes of a MeshCore frame parse as a
+        // Meshtastic header just fine, which sights a node that does not exist
+        // and offers the frame up for relay and MQTT. Naming it and stopping is
+        // the whole of the support it gets — its payload is not ours to read.
+        if (m.Groups["sync"].Success &&
+            byte.TryParse(m.Groups["sync"].Value, NumberStyles.HexNumber,
+                          CultureInfo.InvariantCulture, out byte syncWord) &&
+            syncWord != MeshtasticSyncWord)
+        {
+            LogDroppedFrame(ev, syncWord == MeshCoreSyncWord
+                ? $"a MeshCore frame (sync word {syncWord:X2})"
+                : $"not Meshtastic (sync word {syncWord:X2})");
+            return;
+        }
 
         var frame = HexToBytes(m.Groups["hex"].Value);
         if (frame.Length < MeshHeader.Size)

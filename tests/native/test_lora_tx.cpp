@@ -30,11 +30,16 @@ struct LoopResult {
     bool has_crc = false;
     bool payload_fired = false;
     bool crc_ok = false;
+    int sync_word = -2;
     std::vector<std::uint8_t> bytes;
 };
 
+// rx_sync_word is what the receiver was configured for, which need not be
+// what the transmitter sent: the demodulator does not gate on it, and reading
+// the transmitted one back is how a frame from another network is recognised.
 LoopResult run_loopback(const LoraParams& params,
-                        const std::vector<std::uint8_t>& data) {
+                        const std::vector<std::uint8_t>& data,
+                        std::uint8_t rx_sync_word) {
     constexpr int kOs = 4; // must match LoraModem::kOversampling
 
     auto modem = make_modem(params);
@@ -53,7 +58,7 @@ LoopResult run_loopback(const LoraParams& params,
     for (int i = 0; i < sym_samples * 16; ++i) stream.emplace_back(0.0f, 0.0f);
 
     MeshtasticRx rx(params.spreading_factor, params.bandwidth_hz, kOs,
-                    params.sync_word);
+                    rx_sync_word);
     LoopResult res;
     rx.set_header_callback([&](const HeaderEvent& ev) {
         if (res.header_fired) return;
@@ -67,10 +72,16 @@ LoopResult run_loopback(const LoraParams& params,
         if (res.payload_fired) return;
         res.payload_fired = true;
         res.crc_ok = ev.crc_ok;
+        res.sync_word = ev.sync_word;
         res.bytes.assign(ev.bytes, ev.bytes + ev.length);
     });
     rx.process(std::span<const cf>(stream.data(), stream.size()));
     return res;
+}
+
+LoopResult run_loopback(const LoraParams& params,
+                        const std::vector<std::uint8_t>& data) {
+    return run_loopback(params, data, params.sync_word);
 }
 
 std::vector<std::uint8_t> make_payload(std::size_t n) {
@@ -83,6 +94,48 @@ std::vector<std::uint8_t> make_payload(std::size_t n) {
 }
 
 } // namespace
+
+// A Meshtastic frame reports the sync word it was sent under, so a listener
+// can say a frame is one of ours rather than assuming it.
+TEST(LoraTx, ReportsMeshtasticSyncWord) {
+    LoraParams p = params_for(Preset::MediumFast);
+    auto res = run_loopback(p, make_payload(32));
+    ASSERT_TRUE(res.payload_fired);
+    EXPECT_TRUE(res.crc_ok);
+    EXPECT_EQ(res.sync_word, 0x2B);
+}
+
+// MeshCore sends under RadioLib's private sync word rather than Meshtastic's.
+// Sharing a channel, its frames demodulate here in full — the receiver never
+// gated on the sync word — so the only thing that marks one as not ours is the
+// sync word read back off the air.
+TEST(LoraTx, ReportsForeignSyncWordOnAMeshtasticListener) {
+    LoraParams p = params_for(Preset::MediumFast);
+    p.sync_word = 0x12u; // RADIOLIB_SX126X_SYNC_WORD_PRIVATE, what MeshCore uses
+    auto data = make_payload(32);
+    auto res = run_loopback(p, data, /*rx_sync_word=*/0x2B);
+
+    ASSERT_TRUE(res.payload_fired);
+    EXPECT_TRUE(res.crc_ok);
+    EXPECT_EQ(res.bytes, data);
+    EXPECT_EQ(res.sync_word, 0x12);
+}
+
+// Nibbles resolve across the bin space, the low nibble including 0, whose
+// chirp sits at bin zero and so can be read either side of the wrap at the top.
+// A *high* nibble of 0 is left out: frame sync absorbs a first sync chirp at
+// bin 0 as another preamble chirp, since at that bin the two are the same
+// thing, so such a sync word cannot be received at all and no network uses one.
+TEST(LoraTx, ResolvesSyncWordsAcrossTheBinSpace) {
+    constexpr std::uint8_t kSyncWords[] = {0x12, 0x2B, 0x34, 0xF0, 0xFF};
+    for (const std::uint8_t sw : kSyncWords) {
+        LoraParams p = params_for(Preset::ShortFast);
+        p.sync_word = sw;
+        auto res = run_loopback(p, make_payload(24), /*rx_sync_word=*/0x2B);
+        ASSERT_TRUE(res.payload_fired) << "sync word " << static_cast<int>(sw);
+        EXPECT_EQ(res.sync_word, sw) << "sync word " << static_cast<int>(sw);
+    }
+}
 
 TEST(LoraTx, RoundTripShortFastSf7) {
     LoraParams p = params_for(Preset::ShortFast); // SF7 / 250k / 4-5

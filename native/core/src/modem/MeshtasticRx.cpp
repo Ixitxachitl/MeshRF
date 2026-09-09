@@ -124,6 +124,25 @@ int MeshtasticRx::lora_mod_(int a, int b) const noexcept {
     return (a % b + b) % b;
 }
 
+int MeshtasticRx::observed_sync_word_() const noexcept {
+    // ChirpChatTx places each sync nibble at bin (nibble << 3), so the inverse
+    // is a divide by eight. The bins were read before the SFD gave up the
+    // integer CFO, so take that off first; a nibble-0 chirp then sits just
+    // below the top of the bin space rather than at zero.
+    auto nibble = [this](int bin) -> int {
+        int b = lora_mod_(bin - cfo_int_, n_);
+        if (b > n_ - 4) b -= n_;
+        const int nib = (b + 4) / 8;
+        if (nib < 0 || nib > 15) return -1;
+        return (std::abs(b - nib * 8) <= 2) ? nib : -1;
+    };
+
+    const int hi = nibble(net_ids_[0]);
+    const int lo = nibble(net_ids_[1]);
+    if (hi < 0 || lo < 0) return -1;
+    return (hi << 4) | lo;
+}
+
 int MeshtasticRx::lora_round_(float x) const noexcept {
     return (x > 0.0f) ? static_cast<int>(x + 0.5f)
                       : static_cast<int>(std::ceil(x - 0.5f));
@@ -751,6 +770,10 @@ void MeshtasticRx::decode_payload_() {
             }
         }
     }
+
+    // Set outside decode_with_delta: the retries nudge payload symbols, which
+    // leaves the sync chirps read before them untouched.
+    ev.sync_word = observed_sync_word_();
 
     if (pay_cb_) pay_cb_(ev);
 }

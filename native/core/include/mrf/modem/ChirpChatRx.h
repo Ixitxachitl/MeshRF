@@ -115,6 +115,13 @@ struct PayloadEvent {
     std::size_t   raw_symbol_count;
     std::uint8_t  raw_bytes[260];
     std::size_t   raw_byte_count;
+
+    // The LoRa sync word the frame's two sync chirps encoded, or -1 when they
+    // did not land close enough to a pair of nibbles to say. The demodulator
+    // never gated on it, so a frame off a foreign network on the same channel
+    // decodes here as readily as one of ours; this is what tells them apart.
+    // Meshtastic sends 0x2B, MeshCore 0x12.
+    int           sync_word;
 };
 
 class ChirpChatRx {
