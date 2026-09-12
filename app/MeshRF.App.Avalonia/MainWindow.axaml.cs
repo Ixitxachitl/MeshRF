@@ -900,9 +900,9 @@ public partial class MainWindow : Window
                       ?? button.FindAncestorOfType<ListBoxItem>()?.DataContext as ChannelMessage;
         if (message is null) return;
 
-        // A tapback is per-person: reacting twice with the same emoji adds
+        // A tapback is per-node: reacting twice with the same emoji adds
         // nothing, so say that instead of silently doing nothing.
-        if (message.HasReactionFrom(reaction.Emoji, _viewModel.MyDisplayName))
+        if (message.HasReactionFrom(reaction.Emoji, _viewModel.MyNodeNum))
         {
             _viewModel.StatusText = $"You already reacted {reaction.Emoji} to that message.";
             return;

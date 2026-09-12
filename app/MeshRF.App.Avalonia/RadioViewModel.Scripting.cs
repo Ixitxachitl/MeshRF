@@ -890,7 +890,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
                     if (to != 0xFFFFFFFFu) messages = _rxHost.OpenConversation(to).Messages;
 
                     await SendTextAsync(channel, to, text, action.ReplyId,
-                                        ReplyContextFor(run, action.ReplyId), messages, action.Hops);
+                                        ReplyQuoteFor(run, action.ReplyId), messages, action.Hops);
                 }
                 break;
             }
@@ -1081,8 +1081,8 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     }
 
     /// <summary>
-    /// The quote line shown above a scripted reply's own bubble, built the same
-    /// way <c>ReplyToMessage</c> builds it for one the user sent.
+    /// What a scripted reply quotes, taken from the message it is answering —
+    /// the same pieces <c>ReplyToMessage</c> takes for one the user sent.
     /// </summary>
     /// <remarks>
     /// Without this a scripted reply echoed as reply-linked but with no quote,
@@ -1090,17 +1090,15 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     /// looked unlike every other reply in the conversation. Only the local echo
     /// is affected — the frame on the air carries reply_id either way.
     /// </remarks>
-    private string ReplyContextFor(ScriptRun run, uint replyId)
+    private ReplyQuote ReplyQuoteFor(ScriptRun run, uint replyId)
     {
-        if (replyId == 0) return string.Empty;
+        if (replyId == 0) return ReplyQuote.None;
 
         var evt = run.Expansion.Event;
-        if (evt.FromNode == 0) return string.Empty;
+        if (evt.FromNode == 0) return ReplyQuote.None;
 
-        var preview = evt.Text.Replace("\r", " ").Replace("\n", " ").Trim();
-        if (preview.Length > 80) preview = preview[..80] + "...";
-        if (preview.Length == 0) preview = "(empty)";
-        return $"replying to {_rxHost.NodeDisplayName(evt.FromNode)}: \"{preview}\"";
+        return new ReplyQuote(evt.FromNode, _rxHost.NodeDisplayName(evt.FromNode),
+                              ReplyQuote.PreviewOf(evt.Text));
     }
 
     /// <summary>
@@ -1118,7 +1116,7 @@ public partial class RadioViewModel : IScriptRuntime, IScriptCredentialSource
     {
         if (messages is null || replyId == 0) return;
         var target = messages.FirstOrDefault(m => m.PacketId == replyId);
-        target?.AddReaction(emoji, _rxHost.NodeDisplayName(_rxHost.MyNodeNum));
+        target?.AddReaction(emoji, _rxHost.MyNodeNum, _rxHost.NodeDisplayName(_rxHost.MyNodeNum));
     }
 
     private static bool TryCoordinate(string text, double limit, out double value) =>

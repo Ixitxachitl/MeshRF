@@ -843,6 +843,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _pendingReplyContext = string.Empty;
 
+    /// <summary>What the reply being written quotes. The banner above the
+    /// compose box shows it as a line; the bubble the send echoes keeps the
+    /// pieces, so the quote follows the quoted node's name.</summary>
+    private ReplyQuote _pendingReplyQuote = ReplyQuote.None;
+
     public bool HasPendingReply => PendingReplyPacketId != 0;
 
     /// <summary>Selectable RX backends. Deliberately not Enum.GetValues: the
@@ -2925,7 +2930,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // is non-printing, so carrying it in the text being typed shows the
         // writer a placeholder box beside their bell.
         if (await SendTextAsync(channel, to, AlertBell.ForTransmission(MessageText.Trim()),
-                                PendingReplyPacketId, PendingReplyContext, messages) is false)
+                                PendingReplyPacketId, _pendingReplyQuote, messages) is false)
             return;
 
         MessageText = string.Empty;
@@ -2970,7 +2975,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// legacy DM. May be null only when the message is PKC-sealed.</param>
     /// <param name="to">Destination node, or 0xFFFFFFFF to broadcast.</param>
     /// <param name="replyId">Packet to thread under, or 0.</param>
-    /// <param name="replyContext">Quote line shown above the echoed bubble.</param>
+    /// <param name="quote">Who and what is being quoted, for the line above the
+    /// echoed bubble.</param>
     /// <param name="messages">Bubble list to echo into, or null to send without
     /// a visible conversation (a script answering a channel it has no tab for).</param>
     /// <param name="hopLimit">Hop limit for this one message, or null for the
@@ -2981,7 +2987,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         uint to,
         string text,
         uint replyId,
-        string replyContext,
+        ReplyQuote quote,
         ObservableCollection<ChannelMessage>? messages,
         byte? hopLimit = null)
     {
@@ -3038,12 +3044,17 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             // history replay resolves to.
             FromId = _rxHost.NodeDisplayName(_rxHost.MyNodeNum),
             SenderNodeNum = _rxHost.MyNodeNum,
-            Text = replyId != 0 ? $"{replyContext}\n{text}" : text,
+            // The words alone; the quote above them is composed for drawing,
+            // so a rename of the node being quoted reaches it.
+            Text = text,
             PacketId = packetId,
             IsOutgoing = true,
             IsReplyLinked = replyId != 0,
-            ReplyTargetFound = replyId != 0,
+            ReplyTargetFound = replyId != 0 && quote.HasTarget,
             ReplyToPacketId = replyId,
+            ReplyToSenderNodeNum = quote.SenderNodeNum,
+            ReplyToSenderName = quote.SenderName,
+            ReplyToPreview = quote.Preview,
             Delivery = MessageDelivery.Sent,
         };
         messages?.Add(sent);
@@ -3165,11 +3176,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (target is null || target.PacketId == 0) return;
         PendingReplyPacketId = target.PacketId;
-        var from = string.IsNullOrWhiteSpace(target.FromId) ? "unknown" : target.FromId;
-        var preview = (target.Text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
-        if (preview.Length > 80) preview = preview[..80] + "...";
-        if (preview.Length == 0) preview = "(empty)";
-        PendingReplyContext = $"replying to {from}: \"{preview}\"";
+        _pendingReplyQuote = ReplyQuote.Of(target);
+        PendingReplyContext = _pendingReplyQuote.ContextLine;
     }
 
     [RelayCommand]
@@ -3177,6 +3185,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         PendingReplyPacketId = 0;
         PendingReplyContext = string.Empty;
+        _pendingReplyQuote = ReplyQuote.None;
     }
 
     /// <summary>Send an emoji tapback for <paramref name="target"/>. Rides the
@@ -3211,7 +3220,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
         if (await TransmitFrameAsync(frame, TargetForChannel(channel, to)))
         {
-            target.AddReaction(emoji, _rxHost.NodeDisplayName(_rxHost.MyNodeNum));
+            target.AddReaction(emoji, _rxHost.MyNodeNum, _rxHost.NodeDisplayName(_rxHost.MyNodeNum));
             _rxHost.PersistOutgoingReaction(to, packetId, target.PacketId, emoji, channel.Name);
         }
         else
@@ -3353,6 +3362,43 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     private IEnumerable<ChannelConfig> AllChannelConfigs() =>
         Tabs.OfType<ChannelTabViewModel>().Select(t => t.Config);
 
+    /// <summary>
+    /// The channels a picker offers to broadcast on: every enabled channel on
+    /// a mesh this station is actually on, the primary's own first. A disabled
+    /// channel has no key and no hash on the air, and a channel whose mesh
+    /// nothing is listening for has no settings of its own to go out on — both
+    /// are choices that cannot work, so neither is offered.
+    /// </summary>
+    /// <param name="mesh">One mesh to keep the offer to, or null for every
+    /// mesh in reach. A request to a node is sent on the settings that node
+    /// was heard on, so only that mesh's keys can reach it.</param>
+    /// <param name="keep">Channels to offer even when their mesh has no
+    /// listener: ones already chosen and saved, which are better shown as out
+    /// of reach than quietly dropped out from under the choice.</param>
+    public IReadOnlyList<ChannelOffer> ChannelOffers(
+        string? mesh = null, IReadOnlyCollection<ChannelConfig>? keep = null)
+    {
+        var tabs = Tabs.OfType<ChannelTabViewModel>()
+            .Where(t => !t.Config.IsDisabled)
+            .Where(t => mesh is null
+                ? CanReachMesh(t.Config.Preset) || keep?.Contains(t.Config) == true
+                : t.Config.Preset == mesh)
+            // Stable, so each mesh keeps its channels in tab order.
+            .OrderBy(t => t.Config.Preset == _rxHost.PrimaryListName ? 0 : 1)
+            .ToList();
+
+        // Two meshes can each hold a channel of the same name, so an offer
+        // spanning more than one says which mesh each entry is on. Scoped to
+        // one, the mesh is not in question and the name stands alone.
+        bool nameTheMesh = tabs.Select(t => t.Config.Preset).Distinct().Count() > 1;
+        return tabs.Select(t => new ChannelOffer
+        {
+            Channel = t.Config,
+            Label = (nameTheMesh ? $"{t.Config.Preset}: {t.DisplayName}" : t.DisplayName)
+                    + (CanReachMesh(t.Config.Preset) ? string.Empty : " — not listening"),
+        }).ToList();
+    }
+
     /// <summary>Channels that would still transmit ciphertext under ham rules.
     /// Ham mode deliberately doesn't clear anyone's keys, so this is how the
     /// conflict surfaces instead.</summary>
@@ -3439,11 +3485,13 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    /// <summary>Re-asks every node-directed command whether it can run. The
-    /// answer changes when the set of listeners does, which is not something
-    /// the commands themselves can see.</summary>
+    /// <summary>Re-asks every node-directed command whether it can run, and
+    /// re-offers the channels a report can be addressed to. Both answers
+    /// change when the set of listeners does, which is not something the
+    /// commands or an open dialog can see for themselves.</summary>
     private void RefreshNodeCommandAvailability()
     {
+        RefreshAutoReportChannelOptions();
         RequestNodeInfoCommand.NotifyCanExecuteChanged();
         ExchangeNodeInfoCommand.NotifyCanExecuteChanged();
         RequestTelemetryCommand.NotifyCanExecuteChanged();

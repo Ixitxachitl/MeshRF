@@ -56,8 +56,52 @@ public class NodeIdentityWindowLayoutTests
             Assert.True(right <= available,
                 $"{name} ends at {right:0.#} px in a {available:0.#} px dialog");
             Assert.True(offered > 0, "no channels were offered");
-            Assert.True(selected is string { Length: > 0 },
+            Assert.True(selected is ChannelOffer { Label.Length: > 0 },
                 $"{name} is on {selected ?? "nothing"}");
+        }));
+
+    /// <summary>
+    /// And it still fits once the offer has to say which mesh each channel is
+    /// on. That is the widest the picker ever gets: a mesh name, a channel
+    /// name, and — for a channel already chosen on a mesh that has gone quiet
+    /// — the note saying nothing is listening for it.
+    /// </summary>
+    [Fact]
+    public void TheChannelPickersFitWithTheMeshNamedOnEveryEntry() =>
+        _avalonia.Run(() => TempDataDirectory.With(() =>
+        {
+            using var vm = new RadioViewModel
+            {
+                SelectedDevice = RadioDeviceKind.HackRf,
+                SelectedRegion = Region.US,
+                SelectedPreset = LoraPreset.MediumFast,
+            };
+            vm.SelectedRxSampleRate = vm.SampleRateOptions.Single(o => o.Hz == 10_000_000u);
+            vm.MultiPresetEnabled = true;
+            vm.RefreshMonitors();
+
+            // Addressed to another mesh's channel, with no receiver running:
+            // the picker keeps it, names its mesh, and says it is out of reach.
+            var elsewhere = vm.Tabs.OfType<ChannelTabViewModel>()
+                .First(t => t.Config.Preset == nameof(LoraPreset.LongFast)).Config;
+            vm.AutoReportNodeStatusChannel.Restore(elsewhere.Preset, elsewhere.Name);
+            vm.RefreshAutoReportChannelOptions();
+
+            var window = new NodeIdentityWindow { DataContext = vm };
+            window.Show();
+            for (int i = 0; i < 8; i++) Dispatcher.UIThread.RunJobs();
+
+            var combo = window.FindControl<ComboBox>("AutoNodeStatusChannelCombo")!;
+            var topLeft = combo.TranslatePoint(default, window);
+            double right = topLeft!.Value.X + combo.Bounds.Width;
+            double available = window.ClientSize.Width;
+            var label = (combo.SelectedItem as ChannelOffer)?.Label ?? string.Empty;
+
+            window.Close();
+
+            Assert.Contains(nameof(LoraPreset.LongFast), label);
+            Assert.True(right <= available,
+                $"the picker ends at {right:0.#} px in a {available:0.#} px dialog, on \"{label}\"");
         }));
 
     /// <summary>The warning that the chosen channel shares no location is the
@@ -74,7 +118,8 @@ public class NodeIdentityWindowLayoutTests
 
             var channel = vm.Tabs.OfType<ChannelTabViewModel>().First().Config;
             channel.PositionPrecision = 0;
-            vm.AutoReportPositionChannel = channel.Name;
+            vm.AutoReportPositionChannel.Selected =
+                vm.AutoReportChannelOptions.First(o => o.Channel == channel);
 
             var window = new NodeIdentityWindow { DataContext = vm };
             window.Show();

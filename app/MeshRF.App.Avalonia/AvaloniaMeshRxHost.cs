@@ -1389,6 +1389,45 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             if (ReferenceEquals(convo.Node, rec)) convo.RefreshNodeSnapshot();
             else convo.Node = rec;
         }
+
+        RelabelWhatThisNodeSaid(nodeNum);
+    }
+
+    /// <summary>What each node's bubbles are labelled with right now, so a
+    /// rename is spotted without reading every message on every packet.</summary>
+    private readonly Dictionary<uint, string> _chatSenderNames = new();
+
+    /// <summary>
+    /// Puts a node's new name on everything it has already said. Bubbles are
+    /// labelled as the packets arrive, so without this a node that renames
+    /// itself — or one that arrives as <c>!a1b2c3d4</c> and introduces itself a
+    /// moment later — keeps the old label on every earlier line, and an open
+    /// chat shows one node under two names.
+    /// </summary>
+    private void RelabelWhatThisNodeSaid(uint nodeNum)
+    {
+        // Bubbles with no sender (the "note" lines) are nobody's to rename.
+        if (nodeNum == 0) return;
+
+        string name = NodeDisplayName(nodeNum);
+        // The common case by far: a packet from a node whose name has not
+        // moved, which is every packet but the first and a rename.
+        if (_chatSenderNames.TryGetValue(nodeNum, out var labelled) && labelled == name) return;
+        _chatSenderNames[nodeNum] = name;
+
+        // Every tab, not just the one on show: a name is the node's, and the
+        // operator will not think to go and look at the others.
+        foreach (var tab in Tabs)
+            foreach (var message in tab.Messages)
+            {
+                if (message.SenderNodeNum == nodeNum && message.FromId != name) message.FromId = name;
+                // A reply quotes whoever it answers by name, and that is
+                // somebody else's bubble being named on this one.
+                if (message.ReplyToSenderNodeNum == nodeNum) message.ReplyToSenderName = name;
+                // Its reactions to other people's messages carry the name too,
+                // and those are on bubbles it did not send.
+                message.RelabelReactor(nodeNum, name);
+            }
     }
 
     public bool RememberUndecodedPacket(MeshHeader header)
@@ -2943,7 +2982,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         {
             var msg = messages[i];
             if (msg.PacketId != replyId) continue;
-            msg.AddReaction(glyph, NodeDisplayName(fromNode));
+            msg.AddReaction(glyph, fromNode, NodeDisplayName(fromNode));
             return true;
         }
         return false;
@@ -2992,16 +3031,16 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             break;
         }
 
-        string context = target is not null
-            ? BuildReplyContextText(target)
-            : $"replying to {reply.ReplyId:x8} (original message not found)";
+        var quote = target is null ? ReplyQuote.None : ReplyQuote.Of(target);
 
         return new ChannelMessage
         {
             Timestamp = DateTimeOffset.FromUnixTimeSeconds(reply.RxEpoch).LocalDateTime,
             FromId = NodeDisplayName(reply.FromNode),
             SenderNodeNum = reply.FromNode,
-            Text = $"{context}\n{body}",
+            // The words alone: the quote above them is composed for drawing,
+            // so a rename of the node being quoted reaches it.
+            Text = body,
             Rssi = reply.Rssi,
             RssiIsDbm = reply.RssiIsDbm,
             SnrDb = reply.SnrDb,
@@ -3011,31 +3050,17 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             IsReplyLinked = true,
             ReplyTargetFound = target is not null,
             ReplyToPacketId = reply.ReplyId,
+            ReplyToSenderNodeNum = quote.SenderNodeNum,
+            ReplyToSenderName = quote.SenderName,
+            ReplyToPreview = quote.Preview,
             Delivery = RestoredDelivery(reply, outgoing),
         };
     }
 
-    private static string BuildReplyContextText(ChannelMessage message)
-    {
-        var from = string.IsNullOrWhiteSpace(message.FromId) ? "unknown" : message.FromId.Trim();
-        var original = TrimForReplyPreview(ExtractReplyLeafText(message.Text));
-        return $"replying to {from}: \"{original}\"";
-    }
-
-    private static string ExtractReplyLeafText(string? text)
-    {
-        var raw = text ?? string.Empty;
-        if (raw.Length == 0) return string.Empty;
-        var lines = raw.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        return lines.Length == 0 ? string.Empty : lines[^1].Trim();
-    }
-
-    private static string TrimForReplyPreview(string? text)
-    {
-        var normalized = (text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
-        if (normalized.Length == 0) return "(empty)";
-        return normalized.Length <= 80 ? normalized : normalized[..80] + "...";
-    }
+    /// <summary>A message as one readable line, for the log summaries. The
+    /// same rule a quoted reply is trimmed by, so a message reads the same
+    /// length whichever of the two is showing it.</summary>
+    private static string TrimForReplyPreview(string? text) => ReplyQuote.PreviewOf(text);
 
     private static uint ResolveReactionTargetId(MeshDecodeResult result)
     {

@@ -204,10 +204,10 @@
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeInfoSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
-                <ComboBox x:Name="AutoNodeInfoChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                <ComboBox x:Name="AutoNodeInfoChannelCombo" MinWidth="130" MaxWidth="240" VerticalAlignment="Center" FontSize="11"
                           ItemsSource="{Binding AutoReportChannelOptions}"
-                          SelectedItem="{Binding AutoReportNodeInfoChannel}"
-                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
+                          SelectedItem="{Binding AutoReportNodeInfoChannel.Selected}"
+                          ToolTip.Tip="Channel this report is broadcast on, offered the way the quick-send picker offers them: the channels of the primary mesh and of every mesh a listener is up for, each said to be on its mesh where more than one is in reach." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding NodeInfoSecondsNote}"
@@ -227,10 +227,10 @@
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportPositionSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
-                <ComboBox x:Name="AutoPositionChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                <ComboBox x:Name="AutoPositionChannelCombo" MinWidth="130" MaxWidth="240" VerticalAlignment="Center" FontSize="11"
                           ItemsSource="{Binding AutoReportChannelOptions}"
-                          SelectedItem="{Binding AutoReportPositionChannel}"
-                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
+                          SelectedItem="{Binding AutoReportPositionChannel.Selected}"
+                          ToolTip.Tip="Channel this report is broadcast on, offered the way the quick-send picker offers them: the channels of the primary mesh and of every mesh a listener is up for, each said to be on its mesh where more than one is in reach." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding PositionSecondsNote}"
@@ -301,10 +301,10 @@
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportDeviceMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
-                <ComboBox x:Name="AutoDeviceMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                <ComboBox x:Name="AutoDeviceMetricsChannelCombo" MinWidth="130" MaxWidth="240" VerticalAlignment="Center" FontSize="11"
                           ItemsSource="{Binding AutoReportChannelOptions}"
-                          SelectedItem="{Binding AutoReportDeviceMetricsChannel}"
-                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
+                          SelectedItem="{Binding AutoReportDeviceMetricsChannel.Selected}"
+                          ToolTip.Tip="Channel this report is broadcast on, offered the way the quick-send picker offers them: the channels of the primary mesh and of every mesh a listener is up for, each said to be on its mesh where more than one is in reach." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding DeviceMetricsSecondsNote}"
@@ -324,10 +324,10 @@
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportEnvironmentMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
-                <ComboBox x:Name="AutoEnvironmentMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                <ComboBox x:Name="AutoEnvironmentMetricsChannelCombo" MinWidth="130" MaxWidth="240" VerticalAlignment="Center" FontSize="11"
                           ItemsSource="{Binding AutoReportChannelOptions}"
-                          SelectedItem="{Binding AutoReportEnvironmentMetricsChannel}"
-                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
+                          SelectedItem="{Binding AutoReportEnvironmentMetricsChannel.Selected}"
+                          ToolTip.Tip="Channel this report is broadcast on, offered the way the quick-send picker offers them: the channels of the primary mesh and of every mesh a listener is up for, each said to be on its mesh where more than one is in reach." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding EnvironmentMetricsSecondsNote}"
@@ -347,10 +347,10 @@
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportAirQualityMetricsSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
-                <ComboBox x:Name="AutoAirQualityMetricsChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                <ComboBox x:Name="AutoAirQualityMetricsChannelCombo" MinWidth="130" MaxWidth="240" VerticalAlignment="Center" FontSize="11"
                           ItemsSource="{Binding AutoReportChannelOptions}"
-                          SelectedItem="{Binding AutoReportAirQualityMetricsChannel}"
-                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
+                          SelectedItem="{Binding AutoReportAirQualityMetricsChannel.Selected}"
+                          ToolTip.Tip="Channel this report is broadcast on, offered the way the quick-send picker offers them: the channels of the primary mesh and of every mesh a listener is up for, each said to be on its mesh where more than one is in reach." />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource BrushOverridden}"
                            Text="{Binding AirQualityMetricsSecondsNote}"
@@ -370,10 +370,10 @@
                 <TextBox local:RejectInvalidBehavior.IsEnabled="True" Width="60" FontFamily="Consolas" Text="{Binding AutoReportNodeStatusSeconds}" />
                 <TextBlock VerticalAlignment="Center" Text="sec" />
                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Text="Channel" />
-                <ComboBox x:Name="AutoNodeStatusChannelCombo" Width="130" VerticalAlignment="Center" FontSize="11"
+                <ComboBox x:Name="AutoNodeStatusChannelCombo" MinWidth="130" MaxWidth="240" VerticalAlignment="Center" FontSize="11"
                           ItemsSource="{Binding AutoReportChannelOptions}"
-                          SelectedItem="{Binding AutoReportNodeStatusChannel}"
-                          ToolTip.Tip="Channel this report is broadcast on. A report goes to whoever is listening on one channel, and which mesh that should be differs by report." />
+                          SelectedItem="{Binding AutoReportNodeStatusChannel.Selected}"
+                          ToolTip.Tip="Channel this report is broadcast on, offered the way the quick-send picker offers them: the channels of the primary mesh and of every mesh a listener is up for, each said to be on its mesh where more than one is in reach." />
             </StackPanel>
 
             <TextBlock Grid.Row="30" Grid.Column="1" Margin="0,2,0,6" FontFamily="Consolas" FontSize="11"

@@ -13,6 +13,52 @@ using MeshRF.Telemetry;
 namespace MeshRF.AvaloniaApp;
 
 /// <summary>
+/// The channel one auto report is addressed to.
+/// </summary>
+/// <remarks>
+/// The mesh and name are what is kept, not the picker's option object: the
+/// options are rebuilt whenever the channels or the listeners change, and a
+/// choice has to survive a rebuild that has not happened yet, or one that
+/// leaves this channel out.
+/// </remarks>
+public sealed partial class AutoReportChannelChoice : ObservableObject
+{
+    /// <summary>The mesh the chosen channel is on. Empty for a choice saved
+    /// before the mesh was recorded, which named a channel on the primary's
+    /// list because that is the only place a report could go then.</summary>
+    public string Preset { get; private set; } = string.Empty;
+
+    public string Name { get; private set; } = string.Empty;
+
+    /// <summary>The option the picker is on. Null while the offered options
+    /// hold nothing matching the stored reference, which every rebuild passes
+    /// through.</summary>
+    [ObservableProperty] private ChannelOffer? _selected;
+
+    /// <summary>Raised when the channel actually changes, for the view model
+    /// to persist it and re-read what it implies.</summary>
+    public event Action? Changed;
+
+    /// <summary>Puts a stored reference back without counting as a choice.</summary>
+    public void Restore(string preset, string name)
+    {
+        Preset = preset;
+        Name = name;
+    }
+
+    partial void OnSelectedChanged(ChannelOffer? value)
+    {
+        // A rebuild empties the combo before refilling it, and that null is
+        // not the operator deselecting anything.
+        if (value is null) return;
+        if (value.Preset == Preset && value.Name == Name) return;
+        Preset = value.Preset;
+        Name = value.Name;
+        Changed?.Invoke();
+    }
+}
+
+/// <summary>
 /// The rest of the "My Node — Identity &amp; Settings" panel: derived identity
 /// fields, the USB serial GPS, the six auto-report schedules, and the
 /// weather/air-quality sources that fill environment and AQ telemetry.
@@ -620,63 +666,102 @@ public partial class RadioViewModel
     [ObservableProperty] private bool _autoReportNodeStatusEnabled;
     [ObservableProperty] private int _autoReportNodeStatusSeconds = 3600;
 
-    /// <summary>The channel each report is broadcast on, by name.</summary>
+    /// <summary>The channel each report is broadcast on.</summary>
     /// <remarks>
     /// One channel per report rather than one for all of them: which mesh a
-    /// report belongs on differs by what it says. A name that matches no
-    /// channel - one renamed or deleted since - falls back to the primary at
-    /// send time rather than the report going quiet, and
-    /// <see cref="RefreshAutoReportChannelOptions"/> puts the picker back on
-    /// something real.
+    /// report belongs on differs by what it says. A channel renamed or deleted
+    /// since falls back to the primary at send time rather than the report
+    /// going quiet, and <see cref="RefreshAutoReportChannelOptions"/> puts the
+    /// picker back on something real.
     /// </remarks>
-    [ObservableProperty] private string _autoReportNodeInfoChannel = string.Empty;
-    [ObservableProperty] private string _autoReportPositionChannel = string.Empty;
-    [ObservableProperty] private string _autoReportDeviceMetricsChannel = string.Empty;
-    [ObservableProperty] private string _autoReportEnvironmentMetricsChannel = string.Empty;
-    [ObservableProperty] private string _autoReportAirQualityMetricsChannel = string.Empty;
-    [ObservableProperty] private string _autoReportNodeStatusChannel = string.Empty;
+    public AutoReportChannelChoice AutoReportNodeInfoChannel { get; } = new();
+    public AutoReportChannelChoice AutoReportPositionChannel { get; } = new();
+    public AutoReportChannelChoice AutoReportDeviceMetricsChannel { get; } = new();
+    public AutoReportChannelChoice AutoReportEnvironmentMetricsChannel { get; } = new();
+    public AutoReportChannelChoice AutoReportAirQualityMetricsChannel { get; } = new();
+    public AutoReportChannelChoice AutoReportNodeStatusChannel { get; } = new();
 
-    /// <summary>Names the pickers offer: every channel that can carry a
-    /// broadcast, in tab order.</summary>
-    public ObservableCollection<string> AutoReportChannelOptions { get; } = new();
+    private AutoReportChannelChoice[] AutoReportChannelChoices =>
+    [
+        AutoReportNodeInfoChannel, AutoReportPositionChannel, AutoReportDeviceMetricsChannel,
+        AutoReportEnvironmentMetricsChannel, AutoReportAirQualityMetricsChannel, AutoReportNodeStatusChannel,
+    ];
 
-    /// <summary>Rebuilds the offered names and moves any picker whose channel
-    /// has gone onto the primary, so what the dialog shows is where a report
-    /// would actually go.</summary>
+    /// <summary>What the six pickers offer, shared by all of them: the same
+    /// channels the quick-send picker offers, named the same way.</summary>
+    public ObservableCollection<ChannelOffer> AutoReportChannelOptions { get; } = new();
+
+    /// <summary>Wires each picker to persist what it is set to. Called once,
+    /// as the settings load.</summary>
+    private void WireAutoReportChannels()
+    {
+        // Every schedule's floors follow the channel it is addressed to, so
+        // the notes beside them are re-read whichever picker moved.
+        foreach (var choice in AutoReportChannelChoices)
+            choice.Changed += () => { SaveSettings(); RefreshEffectiveSettings(); };
+    }
+
+    /// <summary>Rebuilds the offered channels and moves any picker whose
+    /// channel has gone onto the primary, so what the dialog shows is where a
+    /// report would actually go.</summary>
     public void RefreshAutoReportChannelOptions()
     {
-        var names = Tabs.OfType<ChannelTabViewModel>()
-                                .Where(t => !t.Config.IsDisabled)
-                                .Select(t => t.Config.Name)
-                                .ToList();
+        // A channel already chosen stays on the list even while its mesh has
+        // no listener: a stopped receiver is no reason to rewrite what the
+        // operator set up, and the offer says which ones are out of reach.
+        var chosen = AutoReportChannelChoices.Select(ResolveAutoReportChannel).OfType<ChannelConfig>().ToList();
+        var options = ChannelOffers(keep: chosen);
 
         // No channels yet (this can be asked before they are loaded) means
         // nothing to offer and nothing to coerce against — leaving the saved
-        // names alone rather than resolving every one of them to "".
-        if (names.Count == 0) return;
+        // choices alone rather than resolving every one of them to nothing.
+        if (options.Count == 0) return;
 
-        if (!names.SequenceEqual(AutoReportChannelOptions))
+        AutoReportChannelOptions.Clear();
+        foreach (var option in options) AutoReportChannelOptions.Add(option);
+
+        var primary = PrimaryChannel();
+        var fallback = options.FirstOrDefault(o => o.Channel == primary) ?? options[0];
+        foreach (var choice in AutoReportChannelChoices)
         {
-            AutoReportChannelOptions.Clear();
-            foreach (var name in names) AutoReportChannelOptions.Add(name);
+            var channel = ResolveAutoReportChannel(choice);
+            choice.Selected = options.FirstOrDefault(o => o.Channel == channel) ?? fallback;
         }
-
-        string fallback = PrimaryChannel()?.Name ?? names.FirstOrDefault() ?? string.Empty;
-        string Offered(string chosen) => names.Contains(chosen) ? chosen : fallback;
-
-        AutoReportNodeInfoChannel = Offered(AutoReportNodeInfoChannel);
-        AutoReportPositionChannel = Offered(AutoReportPositionChannel);
-        AutoReportDeviceMetricsChannel = Offered(AutoReportDeviceMetricsChannel);
-        AutoReportEnvironmentMetricsChannel = Offered(AutoReportEnvironmentMetricsChannel);
-        AutoReportAirQualityMetricsChannel = Offered(AutoReportAirQualityMetricsChannel);
-        AutoReportNodeStatusChannel = Offered(AutoReportNodeStatusChannel);
     }
 
-    /// <summary>The channel a report goes out on. An unknown name resolves to
-    /// the primary, which is where every report went before they could be
-    /// sent separately.</summary>
-    private ChannelConfig? AutoReportChannel(string name) =>
-        _rxHost.FindChannelByName(name) ?? PrimaryChannel();
+    /// <summary>The channel a choice names, or null when nothing answers to it
+    /// any more.</summary>
+    private ChannelConfig? ResolveAutoReportChannel(AutoReportChannelChoice choice)
+    {
+        // A choice saved before the mesh was recorded has only a name to go
+        // on, and back then a report could only go out on the primary's list.
+        string preset = choice.Preset.Length > 0 ? choice.Preset : _rxHost.PrimaryListName;
+        return AllChannelConfigs().FirstOrDefault(c =>
+            !c.IsDisabled && c.Preset == preset &&
+            string.Equals(c.Name, choice.Name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The channel a report goes out on. A channel that is gone
+    /// resolves to the primary, which is where every report went before they
+    /// could be sent separately.</summary>
+    private ChannelConfig? AutoReportChannel(AutoReportChannelChoice choice) =>
+        ResolveAutoReportChannel(choice) ?? PrimaryChannel();
+
+    /// <summary>
+    /// The channel a due report goes out on, or null when it cannot go out at
+    /// all: nothing is listening for its mesh, so that mesh has no settings of
+    /// its own to transmit with. A frame sealed with one mesh's key and put on
+    /// the air with another's settings is noise to everyone who hears it, so
+    /// the report waits for the listener instead.
+    /// </summary>
+    private ChannelConfig? DueReportChannel(AutoReportChannelChoice choice, string what)
+    {
+        var channel = AutoReportChannel(choice);
+        if (channel is null || CanReachMesh(channel.Preset)) return channel;
+        LogFromAnyThread($"  {what} report skipped: nothing is listening for {channel.Preset}, " +
+                         "so its channels have no settings to go out on");
+        return null;
+    }
 
     [ObservableProperty]
     private string _autoReportLastSentSummary =
@@ -752,15 +837,15 @@ public partial class RadioViewModel
     /// but not its position one: on a hand-tuned frequency no other radio is
     /// listening, so there is no shared channel to be quiet on.
     /// </remarks>
-    private bool ReportsToDefaultChannel(string channelName) =>
+    private bool ReportsToDefaultChannel(AutoReportChannelChoice choice) =>
         OnDefaultFrequencySlot
-        && AutoReportChannel(channelName) is { } channel
+        && AutoReportChannel(choice) is { } channel
         && DefaultChannelMinimums.IsDefaultChannel(channel, SelectedPreset, !IsCustomLoraParams);
 
     /// <summary>Firmware's telemetry floor, in force only for a report actually
     /// addressed to a default channel.</summary>
-    private int TelemetryFloorSeconds(string channelName) =>
-        ReportsToDefaultChannel(channelName) ? DefaultChannelMinimums.TelemetrySeconds(MyRole) : 0;
+    private int TelemetryFloorSeconds(AutoReportChannelChoice choice) =>
+        ReportsToDefaultChannel(choice) ? DefaultChannelMinimums.TelemetrySeconds(MyRole) : 0;
 
     /// <summary>Whether the auto position report is addressed to a default
     /// channel — the one thing both position floors turn on. Sharing switched
@@ -830,16 +915,9 @@ public partial class RadioViewModel
     partial void OnAutoReportAirQualityMetricsSecondsChanged(int value) { _nextAirQualityMetricsUtc = Next(EffectiveAirQualityMetricsEnabled, EffectiveAirQualityMetricsSeconds); SaveSettings(); RefreshEffectiveSettings(); }
     partial void OnAutoReportNodeStatusSecondsChanged(int value) { _nextNodeStatusUtc = Next(EffectiveNodeStatusEnabled, AutoReportNodeStatusSeconds); SaveSettings(); RefreshEffectiveSettings(); }
 
-    // Where the next report goes, not when, so these are only written down.
-    partial void OnAutoReportNodeInfoChannelChanged(string value) => SaveSettings();
-    // The one whose channel changes more than where it goes: what the
-    // channel allows decides whether a position is sent at all, and how
-    // precise it may be.
-    partial void OnAutoReportPositionChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
-    partial void OnAutoReportDeviceMetricsChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
-    partial void OnAutoReportEnvironmentMetricsChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
-    partial void OnAutoReportAirQualityMetricsChannelChanged(string value) { SaveSettings(); RefreshEffectiveSettings(); }
-    partial void OnAutoReportNodeStatusChannelChanged(string value) => SaveSettings();
+    // The pickers have no handler of their own here: a channel is where the
+    // next report goes, not when, so none of them touch the clocks. They are
+    // wired in WireAutoReportChannels.
 
     /// <summary>
     /// Re-arms every schedule against the intervals now in force. Called when
@@ -882,12 +960,22 @@ public partial class RadioViewModel
         AutoReportNodeStatusEnabled = _settings.AutoReportNodeStatusEnabled;
         AutoReportNodeStatusSeconds = Clamp(_settings.AutoReportNodeStatusSeconds);
 
-        AutoReportNodeInfoChannel = _settings.AutoReportNodeInfoChannel;
-        AutoReportPositionChannel = _settings.AutoReportPositionChannel;
-        AutoReportDeviceMetricsChannel = _settings.AutoReportDeviceMetricsChannel;
-        AutoReportEnvironmentMetricsChannel = _settings.AutoReportEnvironmentMetricsChannel;
-        AutoReportAirQualityMetricsChannel = _settings.AutoReportAirQualityMetricsChannel;
-        AutoReportNodeStatusChannel = _settings.AutoReportNodeStatusChannel;
+        AutoReportNodeInfoChannel.Restore(
+            _settings.AutoReportNodeInfoChannelPreset, _settings.AutoReportNodeInfoChannel);
+        AutoReportPositionChannel.Restore(
+            _settings.AutoReportPositionChannelPreset, _settings.AutoReportPositionChannel);
+        AutoReportDeviceMetricsChannel.Restore(
+            _settings.AutoReportDeviceMetricsChannelPreset, _settings.AutoReportDeviceMetricsChannel);
+        AutoReportEnvironmentMetricsChannel.Restore(
+            _settings.AutoReportEnvironmentMetricsChannelPreset, _settings.AutoReportEnvironmentMetricsChannel);
+        AutoReportAirQualityMetricsChannel.Restore(
+            _settings.AutoReportAirQualityMetricsChannelPreset, _settings.AutoReportAirQualityMetricsChannel);
+        AutoReportNodeStatusChannel.Restore(
+            _settings.AutoReportNodeStatusChannelPreset, _settings.AutoReportNodeStatusChannel);
+
+        // After the restore, so nothing the load itself sets is written back
+        // over the settings still being read.
+        WireAutoReportChannels();
     }
 
     /// <summary>
@@ -915,12 +1003,19 @@ public partial class RadioViewModel
         s.AutoReportNodeStatusEnabled = AutoReportNodeStatusEnabled;
         s.AutoReportNodeStatusSeconds = Clamp(AutoReportNodeStatusSeconds);
 
-        s.AutoReportNodeInfoChannel = AutoReportNodeInfoChannel;
-        s.AutoReportPositionChannel = AutoReportPositionChannel;
-        s.AutoReportDeviceMetricsChannel = AutoReportDeviceMetricsChannel;
-        s.AutoReportEnvironmentMetricsChannel = AutoReportEnvironmentMetricsChannel;
-        s.AutoReportAirQualityMetricsChannel = AutoReportAirQualityMetricsChannel;
-        s.AutoReportNodeStatusChannel = AutoReportNodeStatusChannel;
+        s.AutoReportNodeInfoChannel = AutoReportNodeInfoChannel.Name;
+        s.AutoReportPositionChannel = AutoReportPositionChannel.Name;
+        s.AutoReportDeviceMetricsChannel = AutoReportDeviceMetricsChannel.Name;
+        s.AutoReportEnvironmentMetricsChannel = AutoReportEnvironmentMetricsChannel.Name;
+        s.AutoReportAirQualityMetricsChannel = AutoReportAirQualityMetricsChannel.Name;
+        s.AutoReportNodeStatusChannel = AutoReportNodeStatusChannel.Name;
+
+        s.AutoReportNodeInfoChannelPreset = AutoReportNodeInfoChannel.Preset;
+        s.AutoReportPositionChannelPreset = AutoReportPositionChannel.Preset;
+        s.AutoReportDeviceMetricsChannelPreset = AutoReportDeviceMetricsChannel.Preset;
+        s.AutoReportEnvironmentMetricsChannelPreset = AutoReportEnvironmentMetricsChannel.Preset;
+        s.AutoReportAirQualityMetricsChannelPreset = AutoReportAirQualityMetricsChannel.Preset;
+        s.AutoReportNodeStatusChannelPreset = AutoReportNodeStatusChannel.Preset;
     }
 
     /// <summary>Tracks the position we last put on the air, so movement can be
@@ -1003,19 +1098,21 @@ public partial class RadioViewModel
                 // introductions and the replies, as firmware's transmit history
                 // does, so a beacon that lands right behind one of those waits
                 // for the next slot.
-                var nodeInfoChannel = AutoReportChannel(AutoReportNodeInfoChannel);
-                var nodeInfoTarget = TargetForChannel(nodeInfoChannel, 0xFFFFFFFFu);
-                if (_nodeInfoThrottle.AllowsSend(nodeInfoTarget.MeshTag,
-                                                 NodeInfoSendWindowSeconds(nodeInfoTarget), out var sinceNodeInfo))
+                if (DueReportChannel(AutoReportNodeInfoChannel, "nodeinfo") is { } nodeInfoChannel)
                 {
-                    await SendNodeInfoOnChannelAsync(nodeInfoChannel, null);
-                    if (StatusText.StartsWith("Sent NodeInfo", StringComparison.OrdinalIgnoreCase))
-                    { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
-                }
-                else
-                {
-                    LogFromAnyThread($"  nodeinfo report skipped: one went out on {nodeInfoTarget.MeshTag} " +
-                                     $"{sinceNodeInfo.TotalSeconds:F0} s ago");
+                    var nodeInfoTarget = TargetForChannel(nodeInfoChannel, 0xFFFFFFFFu);
+                    if (_nodeInfoThrottle.AllowsSend(nodeInfoTarget.MeshTag,
+                                                     NodeInfoSendWindowSeconds(nodeInfoTarget), out var sinceNodeInfo))
+                    {
+                        await SendNodeInfoOnChannelAsync(nodeInfoChannel, null);
+                        if (StatusText.StartsWith("Sent NodeInfo", StringComparison.OrdinalIgnoreCase))
+                        { _lastNodeInfoUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                    }
+                    else
+                    {
+                        LogFromAnyThread($"  nodeinfo report skipped: one went out on {nodeInfoTarget.MeshTag} " +
+                                         $"{sinceNodeInfo.TotalSeconds:F0} s ago");
+                    }
                 }
             }
 
@@ -1028,41 +1125,56 @@ public partial class RadioViewModel
                 (DateTime.UtcNow >= _nextPositionUtc || SmartPositionBroadcastDue()))
             {
                 _nextPositionUtc = NextScheduled(EffectivePositionSeconds, "position");
-                await SendPositionOnChannelAsync(AutoReportChannel(AutoReportPositionChannel), null);
-                if (StatusText.StartsWith("Sent position", StringComparison.OrdinalIgnoreCase))
-                { _lastPositionUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                if (DueReportChannel(AutoReportPositionChannel, "position") is { } channel)
+                {
+                    await SendPositionOnChannelAsync(channel, null);
+                    if (StatusText.StartsWith("Sent position", StringComparison.OrdinalIgnoreCase))
+                    { _lastPositionUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                }
             }
 
             if (EffectiveDeviceMetricsEnabled && DateTime.UtcNow >= _nextDeviceMetricsUtc)
             {
                 _nextDeviceMetricsUtc = NextScheduled(EffectiveDeviceMetricsSeconds, "device metrics");
-                await SendDeviceMetricsOnChannelAsync(AutoReportChannel(AutoReportDeviceMetricsChannel), null);
-                if (StatusText.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
-                { _lastDeviceMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                if (DueReportChannel(AutoReportDeviceMetricsChannel, "device metrics") is { } channel)
+                {
+                    await SendDeviceMetricsOnChannelAsync(channel, null);
+                    if (StatusText.StartsWith("Sent device metrics", StringComparison.OrdinalIgnoreCase))
+                    { _lastDeviceMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                }
             }
 
             if (EffectiveEnvironmentMetricsEnabled && DateTime.UtcNow >= _nextEnvironmentMetricsUtc)
             {
                 _nextEnvironmentMetricsUtc = NextScheduled(EffectiveEnvironmentMetricsSeconds, "environment metrics");
-                await SendEnvironmentMetricsOnChannelAsync(AutoReportChannel(AutoReportEnvironmentMetricsChannel), null);
-                if (StatusText.StartsWith("Sent environment metrics", StringComparison.OrdinalIgnoreCase))
-                { _lastEnvironmentMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                if (DueReportChannel(AutoReportEnvironmentMetricsChannel, "environment metrics") is { } channel)
+                {
+                    await SendEnvironmentMetricsOnChannelAsync(channel, null);
+                    if (StatusText.StartsWith("Sent environment metrics", StringComparison.OrdinalIgnoreCase))
+                    { _lastEnvironmentMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                }
             }
 
             if (EffectiveAirQualityMetricsEnabled && DateTime.UtcNow >= _nextAirQualityMetricsUtc)
             {
                 _nextAirQualityMetricsUtc = NextScheduled(EffectiveAirQualityMetricsSeconds, "air quality metrics");
-                await SendAirQualityMetricsOnChannelAsync(AutoReportChannel(AutoReportAirQualityMetricsChannel), null);
-                if (StatusText.StartsWith("Sent air quality metrics", StringComparison.OrdinalIgnoreCase))
-                { _lastAirQualityMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                if (DueReportChannel(AutoReportAirQualityMetricsChannel, "air quality metrics") is { } channel)
+                {
+                    await SendAirQualityMetricsOnChannelAsync(channel, null);
+                    if (StatusText.StartsWith("Sent air quality metrics", StringComparison.OrdinalIgnoreCase))
+                    { _lastAirQualityMetricsUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                }
             }
 
             if (EffectiveNodeStatusEnabled && DateTime.UtcNow >= _nextNodeStatusUtc)
             {
                 _nextNodeStatusUtc = NextScheduled(AutoReportNodeStatusSeconds, "node status");
-                await SendNodeStatusOnChannelAsync(AutoReportChannel(AutoReportNodeStatusChannel), null);
-                if (StatusText.StartsWith("Sent node status", StringComparison.OrdinalIgnoreCase))
-                { _lastNodeStatusUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                if (DueReportChannel(AutoReportNodeStatusChannel, "node status") is { } channel)
+                {
+                    await SendNodeStatusOnChannelAsync(channel, null);
+                    if (StatusText.StartsWith("Sent node status", StringComparison.OrdinalIgnoreCase))
+                    { _lastNodeStatusUtc = DateTime.UtcNow; UpdateAutoReportSummary(); }
+                }
             }
         }
         catch (Exception ex)

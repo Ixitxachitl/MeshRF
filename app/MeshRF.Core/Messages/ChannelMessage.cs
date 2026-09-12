@@ -6,6 +6,39 @@ using MeshRF.Mesh;
 
 namespace MeshRF;
 
+/// <summary>
+/// Who and what a reply quotes: enough to draw the line above its own words,
+/// and — because the node is held by number — to redraw that line when the
+/// quoted node is renamed.
+/// </summary>
+public readonly record struct ReplyQuote(uint SenderNodeNum, string SenderName, string Preview)
+{
+    /// <summary>A reply whose target is not to hand: one answering a message
+    /// this station never had, or has since dropped.</summary>
+    public static readonly ReplyQuote None = new(0, string.Empty, string.Empty);
+
+    /// <summary>Whether there is a quoted message to name at all.</summary>
+    public bool HasTarget => SenderNodeNum != 0 || SenderName.Length > 0;
+
+    /// <summary>The quote as it is drawn, wherever a reply is shown: above the
+    /// bubble, and in the compose box while one is being written.</summary>
+    public string ContextLine =>
+        $"replying to {(SenderName.Length > 0 ? SenderName : "unknown")}: \"{Preview}\"";
+
+    /// <summary>The quote of a message already on screen.</summary>
+    public static ReplyQuote Of(ChannelMessage target) =>
+        new(target.SenderNodeNum, target.FromId ?? string.Empty, PreviewOf(target.Text));
+
+    /// <summary>A quoted message as one readable line. Long enough to
+    /// recognise which message is meant, short enough not to repeat it.</summary>
+    public static string PreviewOf(string? text)
+    {
+        var normalized = (text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+        if (normalized.Length == 0) return "(empty)";
+        return normalized.Length <= 80 ? normalized : normalized[..80] + "...";
+    }
+}
+
 /// <summary>One rendered chat bubble in a channel or DM conversation view.</summary>
 public partial class ChannelMessage : ObservableObject
 {
@@ -24,10 +57,22 @@ public partial class ChannelMessage : ObservableObject
     /// client that does not buzz.</summary>
     public bool HasAlertBell => AlertBell.IsIn(Text);
 
-    /// <summary>The message as it should be drawn: the bell taken out, since it
-    /// has no glyph and a font lacking one draws a placeholder box. The bell
-    /// emoji a sender may have paired with it is ordinary text and stays.</summary>
-    public string DisplayText => HasAlertBell ? AlertBell.StripFrom(Text) : Text;
+    /// <summary>The words themselves, drawn: the bell taken out, since it has
+    /// no glyph and a font lacking one draws a placeholder box. The bell emoji
+    /// a sender may have paired with it is ordinary text and stays.</summary>
+    private string Body => HasAlertBell ? AlertBell.StripFrom(Text) : Text;
+
+    /// <summary>The message as it should be drawn: a reply's quote line, then
+    /// what was actually said.</summary>
+    /// <remarks>
+    /// Composed here rather than folded into <see cref="Text"/> when the bubble
+    /// is built. The quote names a node, and a name changes — baked in, it kept
+    /// the name the node had when the reply arrived. Keeping the body separate
+    /// also means the clipboard, the alert-bell test and a reply quoting this
+    /// reply in turn all see the words and not the quotation above them.
+    /// </remarks>
+    public string DisplayText =>
+        ReplyContext.Length == 0 ? Body : $"{ReplyContext}\n{Body}";
     public float? Rssi { get; init; }
 
     /// <summary>True when <see cref="Rssi"/> is dBm off a packet radio, false
@@ -54,6 +99,30 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>Packet id this message replies to (0 when not reply-linked).</summary>
     public uint ReplyToPacketId { get; init; }
 
+    /// <summary>The node whose message this one quotes, and what that message
+    /// said. Held by number so a rename reaches a quote already on screen.</summary>
+    public uint ReplyToSenderNodeNum { get; init; }
+    public string ReplyToPreview { get; init; } = string.Empty;
+
+    /// <summary>What the quoted node is called now.</summary>
+    [ObservableProperty] private string _replyToSenderName = string.Empty;
+
+    partial void OnReplyToSenderNameChanged(string value)
+    {
+        OnPropertyChanged(nameof(ReplyContext));
+        OnPropertyChanged(nameof(DisplayText));
+        OnPropertyChanged(nameof(Display));
+    }
+
+    /// <summary>The line above a reply's own words, or nothing when this is not
+    /// a reply. A target this station never saw is named by its packet id,
+    /// which is all the reply itself carries.</summary>
+    public string ReplyContext =>
+        !IsReplyLinked ? string.Empty
+        : ReplyTargetFound
+            ? new ReplyQuote(ReplyToSenderNodeNum, ReplyToSenderName, ReplyToPreview).ContextLine
+            : $"replying to {ReplyToPacketId:x8} (original message not found)";
+
     /// <summary>The mesh a beacon advertised, when this bubble is one; null
     /// otherwise. Carries its own state, so the offer can go from addable to
     /// added without the bubble being rebuilt.</summary>
@@ -74,16 +143,26 @@ public partial class ChannelMessage : ObservableObject
     public ObservableCollection<MessageReaction> Reactions { get; } = new();
 
     private readonly Dictionary<string, MessageReaction> _reactionsByEmoji = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, HashSet<string>> _reactorsByEmoji = new(StringComparer.Ordinal);
+
+    /// <summary>Who has reacted with each emoji, by node number. A name is
+    /// neither unique nor fixed: keyed by name, two nodes called the same
+    /// thing counted as one reactor, and a node that renamed itself between
+    /// two reactions counted as two.</summary>
+    private readonly Dictionary<string, HashSet<uint>> _reactorsByEmoji = new(StringComparer.Ordinal);
+
+    /// <summary>What each reactor is called, for the tooltip. Kept beside the
+    /// numbers rather than in place of them, so a rename relabels what is
+    /// shown without disturbing who has reacted.</summary>
+    private readonly Dictionary<uint, string> _reactorNames = new();
 
     public bool HasReactions => Reactions.Count > 0;
 
-    /// <summary>True when <paramref name="fromId"/> has already reacted with
-    /// this emoji. A tapback is per-person, so reacting again is a no-op —
+    /// <summary>True when <paramref name="fromNode"/> has already reacted with
+    /// this emoji. A tapback is per-node, so reacting again is a no-op —
     /// callers use this to say so rather than appearing to do nothing.</summary>
-    public bool HasReactionFrom(string emoji, string fromId) =>
+    public bool HasReactionFrom(string emoji, uint fromNode) =>
         _reactorsByEmoji.TryGetValue((emoji ?? string.Empty).Trim(), out var reactors) &&
-        reactors.Contains(string.IsNullOrWhiteSpace(fromId) ? "unknown" : fromId.Trim());
+        reactors.Contains(fromNode);
 
     /// <summary>Delivery state for outgoing messages, updated when an ACK/NAK
     /// arrives. Always <see cref="MessageDelivery.None"/> for received messages.</summary>
@@ -146,21 +225,23 @@ public partial class ChannelMessage : ObservableObject
     public string Display =>
         $"[{UiFormats.Stamp(Timestamp)}] {FromId,-12}  {DisplayText}{DeliverySuffix}";
 
-    /// <summary>Add or update one reaction for this message. A sender only
-    /// counts once per emoji.</summary>
-    public void AddReaction(string emoji, string fromId)
+    /// <summary>Add or update one reaction for this message. A node only
+    /// counts once per emoji, however it is named at the time.</summary>
+    public void AddReaction(string emoji, uint fromNode, string fromName)
     {
         var emojiKey = (emoji ?? string.Empty).Trim();
         if (emojiKey.Length == 0) return;
 
-        var sender = string.IsNullOrWhiteSpace(fromId) ? "unknown" : fromId.Trim();
+        // The newest name wins: a reactor seen again under another name is the
+        // same node, and the tooltip should say what it is called now.
+        _reactorNames[fromNode] = string.IsNullOrWhiteSpace(fromName) ? "unknown" : fromName.Trim();
+
         if (!_reactorsByEmoji.TryGetValue(emojiKey, out var reactors))
         {
-            reactors = new HashSet<string>(StringComparer.Ordinal);
+            reactors = new HashSet<uint>();
             _reactorsByEmoji[emojiKey] = reactors;
         }
-
-        if (!reactors.Add(sender)) return;
+        reactors.Add(fromNode);
 
         if (!_reactionsByEmoji.TryGetValue(emojiKey, out var reaction))
         {
@@ -168,7 +249,7 @@ public partial class ChannelMessage : ObservableObject
             {
                 Emoji = emojiKey,
                 Count = reactors.Count,
-                Reactors = string.Join(", ", reactors.OrderBy(x => x, StringComparer.Ordinal)),
+                Reactors = NamesOf(reactors),
             };
             _reactionsByEmoji[emojiKey] = reaction;
             Reactions.Add(reaction);
@@ -177,8 +258,29 @@ public partial class ChannelMessage : ObservableObject
         }
 
         reaction.Count = reactors.Count;
-        reaction.Reactors = string.Join(", ", reactors.OrderBy(x => x, StringComparer.Ordinal));
+        reaction.Reactors = NamesOf(reactors);
     }
+
+    /// <summary>Puts a reactor's new name into every tooltip it appears in.
+    /// The count is untouched: who reacted has not changed, only what they are
+    /// called.</summary>
+    public void RelabelReactor(uint nodeNum, string name)
+    {
+        var reactor = string.IsNullOrWhiteSpace(name) ? "unknown" : name.Trim();
+        if (!_reactorNames.TryGetValue(nodeNum, out var labelled) || labelled == reactor) return;
+        _reactorNames[nodeNum] = reactor;
+
+        foreach (var (emojiKey, reactors) in _reactorsByEmoji)
+            if (reactors.Contains(nodeNum) && _reactionsByEmoji.TryGetValue(emojiKey, out var reaction))
+                reaction.Reactors = NamesOf(reactors);
+    }
+
+    /// <summary>The reactors as the tooltip lists them, in name order.</summary>
+    private string NamesOf(HashSet<uint> reactors) =>
+        string.Join(", ", reactors.Select(NameOf).OrderBy(x => x, StringComparer.Ordinal));
+
+    private string NameOf(uint nodeNum) =>
+        _reactorNames.TryGetValue(nodeNum, out var name) ? name : $"!{nodeNum:x8}";
 }
 
 public partial class MessageReaction : ObservableObject

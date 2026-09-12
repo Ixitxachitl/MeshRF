@@ -100,12 +100,7 @@ public sealed class ChannelPickerWindow : Window
     private static async Task<(ChannelConfig? Channel, uint? DmNodeNum)?> PickAsync(
         Window owner, RadioViewModel vm, string prompt, bool includeOpenDms, string? mesh = null)
     {
-        // A disabled channel has no key and no hash on the air, so it isn't a
-        // place anything can be sent.
-        var channels = vm.Tabs.OfType<ChannelTabViewModel>()
-            .Where(c => !c.Config.IsDisabled)
-            .Where(c => mesh is null || c.Config.Preset == mesh)
-            .ToList();
+        var channels = vm.ChannelOffers(mesh);
         var openDms = includeOpenDms
             ? vm.Tabs.OfType<ConversationTabViewModel>().ToList()
             : [];
@@ -117,16 +112,8 @@ public sealed class ChannelPickerWindow : Window
             return null;
         }
 
-        // Two meshes can each hold a channel of the same name, so an offer
-        // spanning more than one says which mesh each entry is on. Scoped to
-        // one, the mesh is not in question and the name stands alone.
-        bool nameTheMesh = channels.Select(c => c.Config.Preset).Distinct().Count() > 1;
         var entries = channels
-            .Select(c => new PickerEntry
-            {
-                DisplayName = nameTheMesh ? $"{c.Config.Preset}: {c.DisplayName}" : c.DisplayName,
-                Channel = c.Config,
-            })
+            .Select(c => new PickerEntry { DisplayName = c.Label, Channel = c.Channel })
             .Concat(openDms.Select(d => new PickerEntry
             {
                 DisplayName = $"DM: {d.TabHeader}",
@@ -139,9 +126,9 @@ public sealed class ChannelPickerWindow : Window
         // numbers its channels from zero, so an index alone names one channel
         // per mesh rather than one channel.
         var selectedConfig = (vm.SelectedTab as ChannelTabViewModel)?.Config;
-        var preferredConfig = channels.FirstOrDefault(c => c.Config == selectedConfig)?.Config
-            ?? channels.FirstOrDefault(c => c.Config.Role == ChannelRole.Primary)?.Config
-            ?? channels.FirstOrDefault()?.Config;
+        var preferredConfig = channels.FirstOrDefault(c => c.Channel == selectedConfig)?.Channel
+            ?? channels.FirstOrDefault(c => c.Channel.Role == ChannelRole.Primary)?.Channel
+            ?? channels.FirstOrDefault()?.Channel;
 
         var preferred = entries.FirstOrDefault(e => e.Channel == preferredConfig)
                         ?? entries.FirstOrDefault();

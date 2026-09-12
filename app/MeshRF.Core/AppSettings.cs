@@ -294,6 +294,17 @@ public sealed class AppSettings
     public string AutoReportAirQualityMetricsChannel { get; set; } = string.Empty;
     public string AutoReportNodeStatusChannel { get; set; } = string.Empty;
 
+    /// <summary>The mesh each of those channels is on. Two meshes can each
+    /// hold a channel of the same name, so the name alone does not say which
+    /// one a report was addressed to. Empty is a choice made before the mesh
+    /// was recorded, which could only have been the primary's list.</summary>
+    public string AutoReportNodeInfoChannelPreset { get; set; } = string.Empty;
+    public string AutoReportPositionChannelPreset { get; set; } = string.Empty;
+    public string AutoReportDeviceMetricsChannelPreset { get; set; } = string.Empty;
+    public string AutoReportEnvironmentMetricsChannelPreset { get; set; } = string.Empty;
+    public string AutoReportAirQualityMetricsChannelPreset { get; set; } = string.Empty;
+    public string AutoReportNodeStatusChannelPreset { get; set; } = string.Empty;
+
     // -- Automation scripts -------------------------------------------------
 
     /// <summary>Master switch for the script engine. Off by default: turning it
