@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using MeshRF.Mesh;
 
@@ -30,10 +31,13 @@ public readonly record struct ReplyQuote(uint SenderNodeNum, string SenderName, 
         new(target.SenderNodeNum, target.FromId ?? string.Empty, PreviewOf(target.Text));
 
     /// <summary>A quoted message as one readable line. Long enough to
-    /// recognise which message is meant, short enough not to repeat it.</summary>
+    /// recognise which message is meant, short enough not to repeat it. Quoted
+    /// as the bubble draws it, entities and all, so the quote reads like the
+    /// message it points at.</summary>
     public static string PreviewOf(string? text)
     {
-        var normalized = (text ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+        var decoded = string.IsNullOrEmpty(text) ? string.Empty : WebUtility.HtmlDecode(text) ?? text;
+        var normalized = decoded.Replace("\r", " ").Replace("\n", " ").Trim();
         if (normalized.Length == 0) return "(empty)";
         return normalized.Length <= 80 ? normalized : normalized[..80] + "...";
     }
@@ -60,7 +64,19 @@ public partial class ChannelMessage : ObservableObject
     /// <summary>The words themselves, drawn: the bell taken out, since it has
     /// no glyph and a font lacking one draws a placeholder box. The bell emoji
     /// a sender may have paired with it is ordinary text and stays.</summary>
-    private string Body => HasAlertBell ? AlertBell.StripFrom(Text) : Text;
+    /// <remarks>
+    /// HTML entities are resolved, because the senders that emit them are bots
+    /// relaying a web page and their readers are meant to see "40.224°N", not
+    /// "40.224&amp;deg;N". Whitespace is not touched: the blank lines a sender
+    /// laid a report out with are theirs. What arrived is kept verbatim in the
+    /// store either way — this is only how it is shown, and it is shown in a
+    /// text run, never parsed as markup, so a decoded angle bracket is only
+    /// ever a character.
+    /// </remarks>
+    private string Body => Decoded(HasAlertBell ? AlertBell.StripFrom(Text) : Text);
+
+    private static string Decoded(string? text) =>
+        string.IsNullOrEmpty(text) ? string.Empty : WebUtility.HtmlDecode(text) ?? text;
 
     /// <summary>The message as it should be drawn: a reply's quote line, then
     /// what was actually said.</summary>
