@@ -1009,7 +1009,7 @@
                                  been heard since the column existed. -->
                             <DataGridTemplateColumn Width="Auto" SortMemberPath="HeardOnPreset">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="Heard on" ToolTip.Tip="The mesh this node was last heard on, named the way this station names one: a preset, a listener you made and named, the name you gave the primary's own mesh, or Custom for a hand-tuned primary with no name of its own. Blank for a node not heard on a radio since this was recorded &#x2014; an MQTT sighting says nothing about what it is tuned to. A cell says which channel centre went with it." />
+                                    <TextBlock Text="Heard on" ToolTip.Tip="The mesh this node was last heard on, named the way this station names one: a preset, a listener you made and named, the name you gave the primary's own mesh, or Custom for a hand-tuned primary with no name of its own. A packet the MQTT bridge handed in counts: it came off the mesh whose channel sealed it, and a cell says so &#x2014; with the channel centre when a radio heard it, and without when MQTT carried it. Blank for a node not heard at all since this was recorded." />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
@@ -1088,9 +1088,11 @@
                                 <DataGridTextColumn Header="From" Width="96" Binding="{Binding FromId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Channel" Width="110" Binding="{Binding ChannelText}" />
                                 <!-- The mesh it came off, named the way the node
-                                     list names one. Blank for a marker that
-                                     never came over the air, and for those
-                                     stored before this was recorded. -->
+                                     list names one: whichever mesh's channel
+                                     sealed it, whether a radio or the broker
+                                     brought it in. Blank for a marker this
+                                     station made itself, and for those stored
+                                     before this was recorded. -->
                                 <DataGridTextColumn Header="Heard on" Width="96" Binding="{Binding HeardOnPreset}" />
                                 <DataGridTextColumn Header="To" Width="96" Binding="{Binding ToId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />
                                 <DataGridTextColumn Header="Lat" Width="88" Binding="{Binding Latitude, StringFormat='{}{0:F5}'}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji" />

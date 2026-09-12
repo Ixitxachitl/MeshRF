@@ -23,9 +23,11 @@ namespace MeshRF.Mesh;
 /// <param name="IsCustom">True when the parameters were typed in rather than
 /// chosen. Says how they were arrived at, not what they are.</param>
 /// <param name="FreqMHz">Channel centre in MHz.</param>
-/// <param name="FromDownlink">True for a frame the MQTT bridge handed in:
-/// it is handled as the primary's, but it was heard on no radio, so it says
-/// nothing about what its sender is tuned to.</param>
+/// <param name="FromDownlink">True for a frame the MQTT bridge handed in: it
+/// is routed as the primary's, and its <c>MeshName</c> is the mesh of the
+/// channel it arrived sealed with. What it does not have is a frequency worth
+/// recording — it was heard on no radio, so it says nothing about what its
+/// sender is tuned to.</param>
 public sealed record RxSource(int Listener, string MeshName, LoraPreset? Preset, bool IsCustom,
                               double FreqMHz, uint BwHz = 0, bool FromDownlink = false)
 {

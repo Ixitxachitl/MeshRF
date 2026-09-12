@@ -1717,10 +1717,12 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // what a user who forgot it would expect.
         bool firstSighting = IsFirstSighting(fromNode);
 
-        // A frame that arrived from the broker was heard on no radio at all,
-        // so it says nothing about what the node is tuned to.
+        // The mesh is recorded whichever way the frame arrived: a downlink came
+        // off the mesh whose channel sealed it. The frequency is not, because
+        // nothing tuned to anything to hear it, and a channel centre copied
+        // from the primary would claim this node was heard on the air there.
         _nodeStore.RecordSighting(fromNode, signal: signal, hopsAway: hopsAway, seenViaMqtt: viaMqtt,
-                                  heardOnPreset: source.FromDownlink ? null : source.MeshName,
+                                  heardOnPreset: MeshToRecord(fromNode, source),
                                   heardOnFreqMHz: source.FromDownlink ? null : source.FreqMHz);
         MarkNodeDirty(fromNode);
 
@@ -1730,6 +1732,24 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
         if (firstSighting) RaiseNewNode(fromNode, snrDb, rssi, hopsAway, source);
     }
+
+    /// <summary>
+    /// What a sighting from this source should record as the node's mesh, or
+    /// empty to leave the stored one alone.
+    /// </summary>
+    /// <remarks>
+    /// A downlink names the mesh whose channel sealed the packet, which is the
+    /// only evidence there is for a node no radio has ever heard — and weaker
+    /// than a radio's answer, which is why it does not overwrite one. The mesh
+    /// decides which settings a reply goes out on, and the broker's copy of a
+    /// packet says nothing about where its sender can actually be reached: a
+    /// node heard on a listener and then downlinked on the primary's channel
+    /// would otherwise be answered on the primary, where it is not.
+    /// </remarks>
+    private string MeshToRecord(uint nodeNum, RxSource source) =>
+        !source.FromDownlink || string.IsNullOrEmpty(_nodeStore.Get(nodeNum)?.HeardOnPreset)
+            ? source.MeshName
+            : string.Empty;
 
     /// <summary>Every sighting, for the survey log to write down if it is
     /// recording. Raised rather than written here: whether a packet is worth
@@ -1857,7 +1877,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                 _nodeStore.Upsert(new NodeRecord
                 {
                     NodeNum = header.From,
-                    HeardOnPreset = source.FromDownlink ? string.Empty : source.MeshName,
+                    HeardOnPreset = MeshToRecord(header.From, source),
                     HeardOnFreqMHz = source.FromDownlink ? null : source.FreqMHz,
                     UserId = string.IsNullOrEmpty(result.User.Id) ? header.FromId : result.User.Id,
                     LongName = result.User.LongName,
@@ -2847,9 +2867,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
             PacketId = header.PacketId,
             Channel = result.ChannelName,
             Preset = ListNameFor(source),
-            // A marker the broker handed in was heard on no radio, so it says
-            // nothing about which mesh it came off.
-            HeardOnPreset = source.FromDownlink ? string.Empty : source.MeshName,
+            // The mesh it came off, which a marker handed in by the broker has
+            // as much as one heard on the air: whichever mesh's channel sealed
+            // it.
+            HeardOnPreset = source.MeshName,
             // Broadcast is the absence of an address, not an address of its own.
             ToNode = header.IsBroadcast ? 0 : header.To,
             Name = wp.Name,

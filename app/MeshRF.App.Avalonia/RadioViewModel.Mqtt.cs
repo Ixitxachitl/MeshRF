@@ -297,9 +297,16 @@ public partial class RadioViewModel
         // No log line: the router already logs every packet it handles,
         // whatever its origin, and duplicating that here buries real RF
         // activity under MQTT volume.
-        // Nothing measured anything: this reached us over a wire.
+        //
+        // The mesh is the one whose channel the packet arrived sealed with,
+        // which is the only mesh it could have come off: a downlink is heard on
+        // no radio, but it is not heard on nothing. A PKI downlink names no
+        // channel, so it is taken as the primary's, which is whose broker
+        // connection carried it. Nothing measured anything: this reached us
+        // over a wire.
+        string mesh = matchedChannel is { Preset.Length: > 0 } ? matchedChannel.Preset : _rxHost.PrimaryListName;
         _rxRouter.ProcessReceivedFrame(frame, header, SignalReading.None,
-                                       PrimarySource() with { FromDownlink = true });
+                                       PrimarySource() with { MeshName = mesh, FromDownlink = true });
     }
 
     private void HandleMqttJsonMessageReceived(string topic, string json)
