@@ -164,16 +164,31 @@ public sealed class NodeRecord : INotifyPropertyChanged
     /// </remarks>
     public byte?  HopsAway    { get; set; }
 
-    /// <summary>What the node was last heard on: a preset name, or
-    /// <see cref="Mesh.HeardOn.Custom"/> for a custom-parameter primary.
-    /// Empty until it has been heard over the air since this was recorded.
-    /// Last sighting wins, like <see cref="HopsAway"/>: a node has one radio
-    /// configuration, and this is the most recent evidence of it.</summary>
+    /// <summary>What the node was last heard on, named the way this station
+    /// names a mesh: a preset, a hand-made listener's name, the name given to
+    /// the primary's own mesh, or <see cref="Mesh.HeardOn.Custom"/> for a
+    /// hand-tuned primary with no name of its own. Empty until it has been
+    /// heard over the air since this was recorded. Last sighting wins, like
+    /// <see cref="HopsAway"/>: a node has one radio configuration, and this is
+    /// the most recent evidence of it.</summary>
     public string HeardOnPreset { get; set; } = string.Empty;
 
     /// <summary>The channel centre it was heard on, in MHz, beside
     /// <see cref="HeardOnPreset"/>; the two together say which mesh.</summary>
     public double? HeardOnFreqMHz { get; set; }
+
+    /// <summary>Why the heard-on cell reads as it does: the channel centre
+    /// that goes with the mesh, or what an empty cell means. The frequency on
+    /// its own was shown here before, which put " MHz" over nothing on every
+    /// node that had never been heard on a radio.</summary>
+    public string HeardOnTip =>
+        HeardOnPreset.Length > 0
+            ? HeardOnFreqMHz is { } mhz
+                ? $"Heard on {HeardOnPreset}, {mhz:0.000} MHz"
+                : $"Heard on {HeardOnPreset}"
+            : IsSeenViaMqtt
+                ? "Last heard through MQTT, which says nothing about what this node is tuned to"
+                : "Not heard on a radio since this was recorded";
 
     // The best path this node has been heard over at the geometry it is at
     // now, kept beside the protocol's value rather than replacing it. Cleared

@@ -634,7 +634,7 @@
                                             <TextBlock Grid.Row="23" Grid.Column="0" Text="Heard on" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="23" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeHeardOnFilterOptions}" SelectedItem="{Binding NodeHeardOnFilter}"
-                                                      ToolTip.Tip="The preset a node was last heard on" />
+                                                      ToolTip.Tip="Keep the table to nodes last heard on one mesh, named the way the Heard on column names them: a preset, a listener you made, or the primary's own mesh." />
 
                                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Key status" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="1" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
@@ -904,7 +904,10 @@
                                  own TextBlock is the same mechanism already used by the icon
                                  columns above (HasPublicKey, IsXeddsaVerified, ...), so it is
                                  known to work. -->
-                            <DataGridTemplateColumn Header="Short" Width="Auto" SortMemberPath="ShortName">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="ShortName">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="Short" ToolTip.Tip="The node's short name, four characters at most, as it advertises it in a NodeInfo. Blank until one has arrived." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding ShortName}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
@@ -912,7 +915,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Node name" Width="*" SortMemberPath="LongName">
+                            <DataGridTemplateColumn Width="*" SortMemberPath="LongName">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="Node name" ToolTip.Tip="The node's long name, as it advertises it in a NodeInfo. Blank until one has arrived, which is why a node can sit here as an id and nothing else." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding LongName}"
@@ -920,7 +926,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Status" Width="*" SortMemberPath="NodeStatus">
+                            <DataGridTemplateColumn Width="*" SortMemberPath="NodeStatus">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="Status" ToolTip.Tip="The status line this node last broadcast about itself (NODE_STATUS_APP). Blank for a node that has never sent one." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding NodeStatus}"
@@ -928,7 +937,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Role" Width="Auto" SortMemberPath="Role">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="Role">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="Role" ToolTip.Tip="The role the node says it is configured as — CLIENT, ROUTER, REPEATER and so on. What it advertises, not what it is seen doing." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding Role}"
@@ -936,7 +948,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Node ID" Width="Auto" SortMemberPath="DisplayId">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="DisplayId">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="Node ID" ToolTip.Tip="The node's Meshtastic id: !aabbccdd, the low 32 bits of its node number. As the node spells it where it has said, otherwise derived from the number its packets carry." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding DisplayId}" FontFamily="Consolas, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
@@ -944,7 +959,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Last heard" Width="Auto" SortMemberPath="LastHeard">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="LastHeard">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="Last heard" ToolTip.Tip="When a packet from this node last arrived, over the air or through MQTT. Blank for a node this station has only ever been told about by another." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding LastHeard, Converter={x:Static local:UiStampConverter.Instance}}"
@@ -952,7 +970,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="RSSI" Width="Auto" SortMemberPath="Rssi">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="Rssi">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="RSSI" ToolTip.Tip="Level of the last packet from this node, in the unit it was actually measured in: dBm from a packet radio, dBFS off an SDR, which has no absolute reference." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding RssiText}"
@@ -960,7 +981,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="SNR" Width="Auto" SortMemberPath="SnrDb">
+                            <DataGridTemplateColumn Width="Auto" SortMemberPath="SnrDb">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="SNR" ToolTip.Tip="Signal-to-noise of the last packet from this node, in dB as firmware reports it. Normally negative: LoRa demodulates below the noise floor." />
+                                </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding SnrDb, StringFormat='{}{0:F1}'}"
@@ -985,12 +1009,12 @@
                                  been heard since the column existed. -->
                             <DataGridTemplateColumn Width="Auto" SortMemberPath="HeardOnPreset">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="Heard on" ToolTip.Tip="The preset this node was last heard on, or Custom for a custom-parameter primary. The tooltip on a cell gives the frequency." />
+                                    <TextBlock Text="Heard on" ToolTip.Tip="The mesh this node was last heard on, named the way this station names one: a preset, a listener you made and named, the name you gave the primary's own mesh, or Custom for a hand-tuned primary with no name of its own. Blank for a node not heard on a radio since this was recorded &#x2014; an MQTT sighting says nothing about what it is tuned to. A cell says which channel centre went with it." />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="nodes:NodeRecord">
                                         <TextBlock Text="{Binding HeardOnPreset}"
-                                                   ToolTip.Tip="{Binding HeardOnFreqMHz, StringFormat='{}{0:0.000} MHz'}"
+                                                   ToolTip.Tip="{Binding HeardOnTip}"
                                                    Foreground="{Binding Ignored, Converter={StaticResource IgnoredForeground}}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
