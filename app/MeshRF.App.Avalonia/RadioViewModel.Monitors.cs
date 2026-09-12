@@ -139,6 +139,9 @@ public partial class RadioViewModel
             _rxHost.ShowGroup(_rxHost.PrimaryListName);
         _rxHost.RefreshTabGroups();
         RefreshTabGroupOptions();
+        // Which meshes this station is on has just been settled, and that is
+        // what the auto-report pickers offer — an open dialog included.
+        RefreshAutoReportChannelOptions();
         // A tab that has just been taken away cannot stay selected.
         if (SelectedTab is { IsTabListed: false })
             SelectedTab = Tabs.FirstOrDefault(t => t.IsTabListed);

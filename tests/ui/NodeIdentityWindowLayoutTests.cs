@@ -63,8 +63,8 @@ public class NodeIdentityWindowLayoutTests
     /// <summary>
     /// And it still fits once the offer has to say which mesh each channel is
     /// on. That is the widest the picker ever gets: a mesh name, a channel
-    /// name, and — for a channel already chosen on a mesh that has gone quiet
-    /// — the note saying nothing is listening for it.
+    /// name, and — for a channel already chosen on a mesh the operator has
+    /// since dropped — the note saying it is not listened for.
     /// </summary>
     [Fact]
     public void TheChannelPickersFitWithTheMeshNamedOnEveryEntry() =>
@@ -80,12 +80,14 @@ public class NodeIdentityWindowLayoutTests
             vm.MultiPresetEnabled = true;
             vm.RefreshMonitors();
 
-            // Addressed to another mesh's channel, with no receiver running:
-            // the picker keeps it, names its mesh, and says it is out of reach.
+            // Addressed to a channel on a mesh the operator has since dropped:
+            // the picker keeps it, names its mesh, and says it is not listened
+            // for — the longest an entry gets.
             var elsewhere = vm.Tabs.OfType<ChannelTabViewModel>()
                 .First(t => t.Config.Preset == nameof(LoraPreset.LongFast)).Config;
             vm.AutoReportNodeStatusChannel.Restore(elsewhere.Preset, elsewhere.Name);
-            vm.RefreshAutoReportChannelOptions();
+            vm.MonitorExcludedPresets.Add(nameof(LoraPreset.LongFast));
+            vm.RefreshMonitors();
 
             var window = new NodeIdentityWindow { DataContext = vm };
             window.Show();

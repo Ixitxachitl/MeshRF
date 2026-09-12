@@ -30,10 +30,18 @@ public sealed partial class AutoReportChannelChoice : ObservableObject
 
     public string Name { get; private set; } = string.Empty;
 
+    /// <summary>Whether a channel has actually been chosen for this report.
+    /// Unset means the default, which follows the primary mesh rather than
+    /// being pinned to whatever it happened to be the first time the picker
+    /// was filled in.</summary>
+    public bool IsSet => Preset.Length > 0 || Name.Length > 0;
+
     /// <summary>The option the picker is on. Null while the offered options
     /// hold nothing matching the stored reference, which every rebuild passes
     /// through.</summary>
     [ObservableProperty] private ChannelOffer? _selected;
+
+    private bool _showingDefault;
 
     /// <summary>Raised when the channel actually changes, for the view model
     /// to persist it and re-read what it implies.</summary>
@@ -46,11 +54,22 @@ public sealed partial class AutoReportChannelChoice : ObservableObject
         Name = name;
     }
 
+    /// <summary>Shows where an unset report would go, without recording it as
+    /// a choice. The picker has to be on something — a blank combo reads as a
+    /// setting lost — but filling it in is not the operator saying "this mesh,
+    /// this channel, wherever the primary goes next".</summary>
+    public void ShowDefault(ChannelOffer? offer)
+    {
+        _showingDefault = true;
+        try { Selected = offer; }
+        finally { _showingDefault = false; }
+    }
+
     partial void OnSelectedChanged(ChannelOffer? value)
     {
         // A rebuild empties the combo before refilling it, and that null is
         // not the operator deselecting anything.
-        if (value is null) return;
+        if (value is null || _showingDefault) return;
         if (value.Preset == Preset && value.Name == Name) return;
         Preset = value.Preset;
         Name = value.Name;
@@ -720,12 +739,16 @@ public partial class RadioViewModel
         AutoReportChannelOptions.Clear();
         foreach (var option in options) AutoReportChannelOptions.Add(option);
 
-        var primary = PrimaryChannel();
+        var primary = DefaultReportChannel();
         var fallback = options.FirstOrDefault(o => o.Channel == primary) ?? options[0];
         foreach (var choice in AutoReportChannelChoices)
         {
             var channel = ResolveAutoReportChannel(choice);
-            choice.Selected = options.FirstOrDefault(o => o.Channel == channel) ?? fallback;
+            var offer = options.FirstOrDefault(o => o.Channel == channel);
+            // A chosen channel that has gone is put back on the default, and
+            // that does count as a change: it is where the report will go now.
+            if (choice.IsSet) choice.Selected = offer ?? fallback;
+            else choice.ShowDefault(fallback);
         }
     }
 
@@ -742,10 +765,17 @@ public partial class RadioViewModel
     }
 
     /// <summary>The channel a report goes out on. A channel that is gone
-    /// resolves to the primary, which is where every report went before they
-    /// could be sent separately.</summary>
+    /// resolves to the default, rather than the report going quiet.</summary>
     private ChannelConfig? AutoReportChannel(AutoReportChannelChoice choice) =>
-        ResolveAutoReportChannel(choice) ?? PrimaryChannel();
+        ResolveAutoReportChannel(choice) ?? DefaultReportChannel();
+
+    /// <summary>Where a report goes when nothing else says: the primary
+    /// mesh's own primary channel, which is where every one of them went
+    /// before they could be sent separately. Scoped to that mesh on purpose —
+    /// every list has a primary channel, and another mesh's is not a default,
+    /// it is somewhere else entirely.</summary>
+    private ChannelConfig? DefaultReportChannel() =>
+        _rxHost.ChannelIn(_rxHost.PrimaryListName, null);
 
     /// <summary>
     /// The channel a due report goes out on, or null when it cannot go out at

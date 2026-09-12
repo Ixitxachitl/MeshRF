@@ -74,37 +74,69 @@ public class AutoReportChannelTests(HeadlessAvalonia ui) : RenderTest(ui)
     }));
 
     /// <summary>
-    /// The pickers offer what can actually be broadcast on: the primary mesh's
-    /// channels, and those of any mesh a listener is up for. A channel on a
-    /// mesh nothing is listening for has no settings of its own to go out on,
-    /// so a report addressed to it would be sealed with one mesh's key and put
-    /// on the air with another's — noise to everyone who hears it.
+    /// Every mesh the operator has chosen is offered, whether or not the
+    /// receiver is running. A stopped receiver changes nothing about which
+    /// channels exist or which one a report belongs on, and a picker that
+    /// emptied itself when the receiver stopped would make a saved setting
+    /// look lost.
     /// </summary>
     [Fact]
-    public void OnlyTheMeshesInReachAreOffered() => Ui(() => TempDataDirectory.With(() =>
+    public void EveryMeshThisStationIsOnIsOffered() => Ui(() => TempDataDirectory.With(() =>
     {
         using var vm = Station();
-        // Channel lists for every preset in the capture, but no receiver: the
-        // primary's mesh is the only one this station is on.
+        // Channel lists for every preset in the capture, and no receiver.
         vm.MultiPresetEnabled = true;
         vm.RefreshMonitors();
-        vm.RefreshAutoReportChannelOptions();
 
-        Assert.Contains(vm.Tabs.OfType<ChannelTabViewModel>(),
-                        t => t.Config.Preset == nameof(LoraPreset.LongFast));
-        Assert.All(vm.AutoReportChannelOptions,
-                   o => Assert.Equal(vm.PrimaryListName, o.Preset));
+        Assert.Contains(vm.AutoReportChannelOptions, o => o.Preset == vm.PrimaryListName);
+        Assert.Contains(vm.AutoReportChannelOptions, o => o.Preset == nameof(LoraPreset.LongFast));
         Assert.All(vm.AutoReportChannelOptions, o => Assert.False(o.Channel.IsDisabled));
+        // More than one mesh on offer, so each entry says which it is on.
+        Assert.All(vm.AutoReportChannelOptions, o => Assert.Contains(o.Preset, o.Label));
     }));
 
     /// <summary>
-    /// A choice on a mesh that has gone quiet stays on the list and stays
-    /// picked, saying it is out of reach. Stopping the receiver is not the
-    /// operator changing where their reports go, and silently moving them onto
-    /// the primary would rewrite the schedule behind their back.
+    /// A report nobody has chosen a channel for shows where it would go and
+    /// records nothing, so it keeps following the primary mesh. Filling the
+    /// picker in counted as a choice once, which pinned every report to
+    /// whatever the primary was the first time the dialog was built — a
+    /// station that later moved preset went on reporting to the mesh it left.
     /// </summary>
     [Fact]
-    public void AChosenChannelSurvivesItsMeshGoingQuiet() => Ui(() => TempDataDirectory.With(() =>
+    public void AnUnchosenReportFollowsThePrimaryRatherThanPinningToIt() =>
+        Ui(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+
+        Assert.False(vm.AutoReportPositionChannel.IsSet);
+        Assert.Equal(vm.PrimaryListName, vm.AutoReportPositionChannel.Selected!.Preset);
+
+        // The station moves mesh; the unchosen reports move with it.
+        vm.SelectedPreset = LoraPreset.LongFast;
+        Assert.Equal(nameof(LoraPreset.LongFast), vm.PrimaryListName);
+        Assert.False(vm.AutoReportPositionChannel.IsSet);
+        Assert.Equal(vm.PrimaryListName, vm.AutoReportPositionChannel.Selected!.Preset);
+
+        // Choosing one is different: that is pinned, and stays put.
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+        var chosen = vm.AutoReportChannelOptions.First(o => o.Preset != vm.PrimaryListName);
+        vm.AutoReportPositionChannel.Selected = chosen;
+        Assert.True(vm.AutoReportPositionChannel.IsSet);
+
+        vm.RefreshAutoReportChannelOptions();
+        Assert.Equal(chosen.Channel, vm.AutoReportPositionChannel.Selected!.Channel);
+    }));
+
+    /// <summary>
+    /// A mesh the operator is done with takes its channels off the offer — but
+    /// one already chosen stays, and says it is no longer listened for.
+    /// Silently moving a report onto the primary would rewrite the schedule
+    /// behind their back.
+    /// </summary>
+    [Fact]
+    public void AChosenChannelSurvivesItsMeshBeingDroppedFromTheOffer() =>
+        Ui(() => TempDataDirectory.With(() =>
     {
         using var vm = Station();
         vm.MultiPresetEnabled = true;
@@ -115,17 +147,22 @@ public class AutoReportChannelTests(HeadlessAvalonia ui) : RenderTest(ui)
         vm.AutoReportNodeStatusChannel.Restore(elsewhere.Preset, elsewhere.Name);
         vm.RefreshAutoReportChannelOptions();
 
+        // Done with that mesh.
+        vm.MonitorExcludedPresets.Add(nameof(LoraPreset.LongFast));
+        vm.RefreshMonitors();
+
         var picked = vm.AutoReportNodeStatusChannel.Selected;
         Assert.NotNull(picked);
         Assert.Equal(elsewhere, picked!.Channel);
         Assert.Contains(picked, vm.AutoReportChannelOptions);
 
-        // Said on the option itself: the mesh it is on, and that nothing is
-        // listening for it.
+        // Said on the option itself: the mesh it is on, and that the station
+        // is not on that mesh any more.
         Assert.Contains(nameof(LoraPreset.LongFast), picked.Label);
-        Assert.Contains("not listening", picked.Label);
+        Assert.Contains("not listened for", picked.Label);
 
-        // The others are unmoved by it and stay on the primary's mesh.
+        // Nobody else is offered it, and the other reports are unmoved.
+        Assert.Single(vm.AutoReportChannelOptions, o => o.Preset == nameof(LoraPreset.LongFast));
         Assert.Equal(vm.PrimaryListName, vm.AutoReportPositionChannel.Selected!.Preset);
     }));
 }

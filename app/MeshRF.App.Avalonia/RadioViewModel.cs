@@ -3364,24 +3364,34 @@ public partial class RadioViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// The channels a picker offers to broadcast on: every enabled channel on
-    /// a mesh this station is actually on, the primary's own first. A disabled
-    /// channel has no key and no hash on the air, and a channel whose mesh
-    /// nothing is listening for has no settings of its own to go out on — both
-    /// are choices that cannot work, so neither is offered.
+    /// a mesh this station is set up for, the primary's own first. A disabled
+    /// channel has no key and no hash on the air, so it is nowhere to send.
     /// </summary>
+    /// <remarks>
+    /// The meshes the operator has chosen, not the ones the receiver happens
+    /// to be demodulating: a stopped receiver changes nothing about which
+    /// channels exist or which one a report belongs on, and a picker that
+    /// emptied itself when the receiver stopped would make a setting look lost.
+    /// Whether a send can actually go out is a separate question, asked at the
+    /// moment of sending by <see cref="CanReachMesh"/>.
+    /// </remarks>
     /// <param name="mesh">One mesh to keep the offer to, or null for every
-    /// mesh in reach. A request to a node is sent on the settings that node
-    /// was heard on, so only that mesh's keys can reach it.</param>
-    /// <param name="keep">Channels to offer even when their mesh has no
-    /// listener: ones already chosen and saved, which are better shown as out
-    /// of reach than quietly dropped out from under the choice.</param>
+    /// mesh this station is on. A request to a node is sent on the settings
+    /// that node was heard on, so only that mesh's keys can reach it.</param>
+    /// <param name="keep">Channels to offer even when their mesh is no longer
+    /// one of them: ones already chosen and saved, which are better shown —
+    /// and said to be listened for no longer — than quietly dropped out from
+    /// under the choice.</param>
     public IReadOnlyList<ChannelOffer> ChannelOffers(
         string? mesh = null, IReadOnlyCollection<ChannelConfig>? keep = null)
     {
+        var meshes = _rxHost.TabGroups();
+        bool IsOurs(string preset) => meshes.Contains(preset, StringComparer.Ordinal);
+
         var tabs = Tabs.OfType<ChannelTabViewModel>()
             .Where(t => !t.Config.IsDisabled)
             .Where(t => mesh is null
-                ? CanReachMesh(t.Config.Preset) || keep?.Contains(t.Config) == true
+                ? IsOurs(t.Config.Preset) || keep?.Contains(t.Config) == true
                 : t.Config.Preset == mesh)
             // Stable, so each mesh keeps its channels in tab order.
             .OrderBy(t => t.Config.Preset == _rxHost.PrimaryListName ? 0 : 1)
@@ -3395,7 +3405,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         {
             Channel = t.Config,
             Label = (nameTheMesh ? $"{t.Config.Preset}: {t.DisplayName}" : t.DisplayName)
-                    + (CanReachMesh(t.Config.Preset) ? string.Empty : " — not listening"),
+                    + (IsOurs(t.Config.Preset) ? string.Empty : " — not listened for"),
         }).ToList();
     }
 
@@ -3485,13 +3495,11 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    /// <summary>Re-asks every node-directed command whether it can run, and
-    /// re-offers the channels a report can be addressed to. Both answers
-    /// change when the set of listeners does, which is not something the
-    /// commands or an open dialog can see for themselves.</summary>
+    /// <summary>Re-asks every node-directed command whether it can run. The
+    /// answer changes when the set of listeners does, which is not something
+    /// the commands themselves can see.</summary>
     private void RefreshNodeCommandAvailability()
     {
-        RefreshAutoReportChannelOptions();
         RequestNodeInfoCommand.NotifyCanExecuteChanged();
         ExchangeNodeInfoCommand.NotifyCanExecuteChanged();
         RequestTelemetryCommand.NotifyCanExecuteChanged();
