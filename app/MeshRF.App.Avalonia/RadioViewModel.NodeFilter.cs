@@ -28,10 +28,16 @@ public partial class RadioViewModel
     public IReadOnlyList<string> NodeFavoriteFilterOptions { get; } = ["Show all", "Only favorites", "Hide favorites"];
     public IReadOnlyList<string> NodeMqttFilterOptions { get; } = ["Any", "Hide via MQTT", "Only via MQTT"];
     public IReadOnlyList<string> TelemetryHasFilterOptions { get; } = ["Any", "Has value", "No value"];
-    /// <summary>Which listener's settings a node was last heard on: any, a
-    /// preset, or the custom-parameter primary.</summary>
-    public IReadOnlyList<string> NodeHeardOnFilterOptions { get; } =
-        ["Any", .. Enum.GetNames<LoraPreset>(), MeshRF.Mesh.HeardOn.Custom];
+    /// <summary>The meshes the heard-on filter offers: Any, then every mesh a
+    /// node in the list has actually been heard on, kept current by
+    /// <see cref="RefreshHeardOnFilterOptions"/>.</summary>
+    /// <remarks>
+    /// Drawn from the nodes rather than from the preset list. Every preset the
+    /// enum knows was offered before, most of them meshes nothing here had ever
+    /// been heard on, while the names a mesh can also go by — a listener you
+    /// made, the name given to the primary's own — were not offered at all.
+    /// </remarks>
+    public ObservableCollection<string> NodeHeardOnFilterOptions { get; } = ["Any"];
 
     /// <summary>The filtered view bound to the node grid. <see cref="Nodes"/>
     /// stays the unfiltered source of truth that the RX host updates.</summary>
@@ -114,9 +120,48 @@ public partial class RadioViewModel
 
     private void HookNodeFilter()
     {
-        Nodes.CollectionChanged += (_, _) => ApplyNodeFilter();
+        Nodes.CollectionChanged += (_, _) =>
+        {
+            RefreshHeardOnFilterOptions();
+            ApplyNodeFilter();
+        };
         Waypoints.CollectionChanged += (_, _) => RaiseMapDataChanged();
+        RefreshHeardOnFilterOptions();
         ApplyNodeFilter();
+    }
+
+    /// <summary>
+    /// Brings the heard-on filter's options in line with the meshes the nodes
+    /// carry. Runs whenever the node list changes, which includes a node's
+    /// record being replaced because it was heard somewhere new.
+    /// </summary>
+    /// <remarks>
+    /// <para>The mesh the filter is set to stays offered even when no node is
+    /// on it any more — forgotten, or not loaded yet when the saved filter is
+    /// restored. Dropping it would leave the combo blank over a filter still
+    /// hiding every row, with nothing on screen saying why.</para>
+    /// <para>Edited in place rather than cleared and refilled. A cleared list
+    /// takes the combo's selection with it, and the two-way binding writes that
+    /// back as a null filter.</para>
+    /// </remarks>
+    private void RefreshHeardOnFilterOptions()
+    {
+        var wanted = new List<string> { "Any" };
+        wanted.AddRange(Nodes.Select(n => n.HeardOnPreset)
+                             .Append(NodeHeardOnFilter)
+                             .Where(m => !string.IsNullOrEmpty(m) && m != "Any")
+                             .Distinct(StringComparer.Ordinal)
+                             .OrderBy(m => m, StringComparer.Ordinal));
+        if (wanted.SequenceEqual(NodeHeardOnFilterOptions)) return;
+
+        for (int i = NodeHeardOnFilterOptions.Count - 1; i >= 0; i--)
+            if (!wanted.Contains(NodeHeardOnFilterOptions[i])) NodeHeardOnFilterOptions.RemoveAt(i);
+
+        // What is left is already in order, so each missing name goes in where
+        // the wanted list puts it.
+        for (int i = 0; i < wanted.Count; i++)
+            if (i >= NodeHeardOnFilterOptions.Count || NodeHeardOnFilterOptions[i] != wanted[i])
+                NodeHeardOnFilterOptions.Insert(i, wanted[i]);
     }
 
     /// <summary>Apply the persisted node-grid sort to <see cref="NodesView"/>.</summary>
@@ -144,7 +189,13 @@ public partial class RadioViewModel
 
     partial void OnNodeSearchTextChanged(string value) => OnFilterChanged();
     partial void OnNodeHopsFilterChanged(string value) => OnFilterChanged();
-    partial void OnNodeHeardOnFilterChanged(string value) => OnFilterChanged();
+    partial void OnNodeHeardOnFilterChanged(string value)
+    {
+        // A combo whose items are momentarily taken away writes null back; that
+        // is nobody asking for a filter that matches nothing.
+        if (value is null) { NodeHeardOnFilter = "Any"; return; }
+        OnFilterChanged();
+    }
     partial void OnNodeKeyFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeSignedFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeLocationFilterChanged(string value) => OnFilterChanged();
@@ -353,7 +404,9 @@ public partial class RadioViewModel
     {
         NodeSearchText = s.NodeFilterSearch ?? string.Empty;
         if (NodeHopsFilterOptions.Contains(s.NodeFilterHops)) NodeHopsFilter = s.NodeFilterHops;
-        if (NodeHeardOnFilterOptions.Contains(s.NodeFilterHeardOn)) NodeHeardOnFilter = s.NodeFilterHeardOn;
+        // Taken as it was saved: the options come from the nodes, and those are
+        // not in the list yet. The refresh that follows keeps it offered.
+        if (!string.IsNullOrEmpty(s.NodeFilterHeardOn)) NodeHeardOnFilter = s.NodeFilterHeardOn;
         if (NodeKeyFilterOptions.Contains(s.NodeFilterKey)) NodeKeyFilter = s.NodeFilterKey;
         if (NodeSignedFilterOptions.Contains(s.NodeFilterSigned)) NodeSignedFilter = s.NodeFilterSigned;
         if (NodeLocationFilterOptions.Contains(s.NodeFilterLocation)) NodeLocationFilter = s.NodeFilterLocation;
