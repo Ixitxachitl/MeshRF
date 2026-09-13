@@ -378,23 +378,6 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>While stopped, the axis shows where the capture will be
-    /// centred, which with several listeners need not be the primary.</summary>
-    /// <remarks>
-    /// Gated on the settings being loaded and nothing else. It used to want a
-    /// native core too, which nothing here reads: the plan is arithmetic over
-    /// the region, the preset and the sample rate. That guard is why the
-    /// waterfall opened centred on the primary and only moved to the capture
-    /// centre once RX had been started — the constructor asks before the core
-    /// is built, so the ask was thrown away.
-    /// </remarks>
-    private void RefreshPlannedSpectrumCenter()
-    {
-        if (!_settingsLoaded) return;
-        if (!IsRunning) SpectrumCenterHz = BuildMonitorPlan().DeviceCenterMHz * 1_000_000.0;
-        RefreshMonitors();
-    }
-
     [ObservableProperty]
     private IReadOnlyList<SampleRateOption> _sampleRateOptions = Array.Empty<SampleRateOption>();
 
@@ -1535,7 +1518,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // generated setter can no-op if CenterFreqMHz never actually
         // changed value during the loads above).
         SpectrumCenterHz = CenterFreqMHz * 1_000_000.0;
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
 
         try
         {
@@ -1615,7 +1598,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // Outside the try, so a machine with no native bridge still gets its
         // meshes and its axis: both are arithmetic over the settings, not
         // questions about hardware.
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
 
         _pollTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -1772,7 +1755,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             _core.Stop();
             _rxSources = [];
             RefreshNodeCommandAvailability();
-            RefreshPlannedSpectrumCenter();
+            RefreshMonitors();
         }
         else
         {
@@ -1968,7 +1951,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         // radio transmits.
         SendMessageCommand.NotifyCanExecuteChanged();
         SaveSettings();
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
     }
 
     /// <summary>Re-reads the attached sticks. Only called when an SX1262 is
@@ -2089,7 +2072,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         SpectrumSpanHz = value.Hz;
         SaveSettings();
         // A wider capture reaches more presets, so the set changes with it.
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
     }
 
     private IReadOnlyList<SampleRateOption> BuildRxSampleRateOptions(RadioDeviceKind kind)
@@ -2202,7 +2185,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         RebuildSlots(snapToDefault: true);
         SaveSettings();
         RefreshEffectiveSettings();
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
     }
 
     partial void OnSelectedRegionChanged(Region value)
@@ -2221,7 +2204,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         ApplyRegionPowerLimit();
         RefreshEffectiveSettings();
         // Every preset's slot plan is the region's, so the whole set moves.
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
         // A move to a band that doesn't touch the one we were operating in has
         // to be confirmed. Only once the constructor has established a starting
         // band: restoring a saved region is not a change. Nothing to confirm
@@ -2289,7 +2272,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     {
         if (!_suppressRetune) SaveSettings();
         SpectrumCenterHz = value * 1_000_000.0;
-        RefreshPlannedSpectrumCenter();
+        RefreshMonitors();
         // Off the default slot there is no shared channel to be held back for.
         RefreshEffectiveSettings();
     }

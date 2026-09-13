@@ -27,6 +27,12 @@ public sealed partial class MonitorPresetRow : ObservableObject
     /// </summary>
     public required bool CanChoose { get; init; }
 
+    /// <summary>Whether a hand-made listener's settings can be edited or the
+    /// listener taken away. Off while the receiver runs, for the same reason as
+    /// <see cref="CanChoose"/>: an edit then changes what the window lists and
+    /// not what is being demodulated.</summary>
+    public required bool CanEdit { get; init; }
+
     /// <summary>A listener the operator made rather than a preset the region
     /// offers. Only these can be edited or taken away.</summary>
     public bool IsCustomListener { get; init; }
@@ -66,8 +72,13 @@ public partial class RadioViewModel
             MonitorCenterOffsetKHz = value ? null : Math.Round(BuildMonitorPlan().CenterOffsetKHz);
             OnPropertyChanged(nameof(MonitorCenterAuto));
             OnPropertyChanged(nameof(MonitorCenterOffsetText));
+            OnPropertyChanged(nameof(CanEditMonitorCenterOffset));
         }
     }
+
+    /// <summary>Whether an offset can be typed: Auto is off, and the receiver
+    /// is not already running on the centre it was started with.</summary>
+    public bool CanEditMonitorCenterOffset => CanEditMonitors && !MonitorCenterAuto;
 
     /// <summary>The offset as typed, in kHz. Empty under Auto.</summary>
     public string MonitorCenterOffsetText
@@ -75,7 +86,7 @@ public partial class RadioViewModel
         get => MonitorCenterOffsetKHz is { } kHz ? kHz.ToString("0.###", CultureInfo.InvariantCulture) : string.Empty;
         set
         {
-            if (MonitorCenterAuto) return;
+            if (!CanEditMonitorCenterOffset) return;
             if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var kHz)) return;
             MonitorCenterOffsetKHz = kHz;
             OnPropertyChanged(nameof(MonitorCenterOffsetText));
@@ -116,6 +127,12 @@ public partial class RadioViewModel
 
         var plan = BuildMonitorPlan();
         RefreshChannelBands(plan);
+        // A stopped receiver's waterfall is drawn around the capture it would
+        // start on, and where that capture sits is one of the things the plan
+        // decides. Every change the plan reads comes through here, so the
+        // centre moves with the bands rather than waiting for a rate or a
+        // frequency to change. A running receiver reports its own centre.
+        if (!IsRunning) SpectrumCenterHz = plan.DeviceCenterMHz * 1_000_000.0;
 
         // Every mesh the operator has chosen, which is not the same as every
         // mesh the receiver can reach today. A preset ticked in Listeners whose
@@ -169,6 +186,7 @@ public partial class RadioViewModel
         OnPropertyChanged(nameof(HasMonitorsNote));
         OnPropertyChanged(nameof(MonitorCenterAuto));
         OnPropertyChanged(nameof(MonitorCenterOffsetText));
+        OnPropertyChanged(nameof(CanEditMonitorCenterOffset));
     }
 
     private IEnumerable<MonitorPresetRow> BuildMonitorRows(MonitorPlan.Result plan)
@@ -186,6 +204,7 @@ public partial class RadioViewModel
                 FreqText = $"{l.FreqMHz:0.000} MHz",
                 StatusText = l.IsPrimary ? "primary" : "listening",
                 CanChoose = !l.IsPrimary && CanEditMonitors,
+                CanEdit = CanEditMonitors,
                 Included = true,
                 Toggled = OnMonitorRowToggled,
             }));
@@ -222,6 +241,7 @@ public partial class RadioViewModel
                 StatusText = status,
                 CanChoose = CanEditMonitors
                             && x.Reason is MonitorPlan.LeftOutReason.Excluded or MonitorPlan.LeftOutReason.OutOfRange,
+                CanEdit = CanEditMonitors,
                 Included = x.Reason != MonitorPlan.LeftOutReason.Excluded,
                 Toggled = OnMonitorRowToggled,
             }));

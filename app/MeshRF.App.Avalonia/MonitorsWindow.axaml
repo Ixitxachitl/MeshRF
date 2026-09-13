@@ -38,7 +38,7 @@
             <TextBox Width="90" VerticalAlignment="Center" FontFamily="Consolas"
                      local:RejectInvalidBehavior.IsEnabled="True"
                      Text="{Binding MonitorCenterOffsetText, Mode=TwoWay}"
-                     IsEnabled="{Binding !MonitorCenterAuto}"
+                     IsEnabled="{Binding CanEditMonitorCenterOffset}"
                      ToolTip.Tip="Offset from the primary in kHz, negative for below it. Clamped so the primary's own channel stays inside the capture." />
             <TextBlock Text="kHz from the primary" VerticalAlignment="Center"
                        FontSize="11" Foreground="{DynamicResource BrushSubtle}" />
@@ -98,9 +98,11 @@
                                 <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="2"
                                             IsVisible="{Binding IsCustomListener}">
                                     <Button Content="Edit" FontSize="11" Padding="6,0" Click="OnEditListener"
+                                            IsEnabled="{Binding CanEdit}"
                                             Height="22" MinHeight="0" VerticalAlignment="Center"
                                             VerticalContentAlignment="Center" />
                                     <Button Content="✕" FontSize="11" Padding="6,0" Click="OnRemoveListener"
+                                            IsEnabled="{Binding CanEdit}"
                                             Height="22" MinHeight="0" VerticalAlignment="Center"
                                             VerticalContentAlignment="Center"
                                             ToolTip.Tip="Take this listener away. Its channels and its nodes stay where they are." />
