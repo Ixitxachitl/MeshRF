@@ -107,12 +107,21 @@ public static class MonitorPlan
     }
 
     /// <summary>How far either side of the centre a channel may reach, in
-    /// MHz. Inside the analogue filter with a tenth to spare on a HackRF;
-    /// well inside the tuner's roll-off on an RTL-SDR; the whole Nyquist span
-    /// for anything else.</summary>
+    /// MHz: out to the analogue filter's corner on a HackRF; well inside the
+    /// tuner's roll-off on an RTL-SDR; the whole Nyquist span for anything
+    /// else.</summary>
+    /// <remarks>
+    /// On a HackRF the edge is the baseband filter's corner itself, with no
+    /// margin held back inside it. The filter comes after the front end, so
+    /// where it starts to roll off it takes the same fraction off a channel's
+    /// noise as off its signal, and the SNR the channel is decoded at is left
+    /// as it was. What the filter is there to stop is what lies beyond the
+    /// sample rate folding back in, and its corner — the widest filter below
+    /// the rate — is already inside the Nyquist edge.
+    /// </remarks>
     public static double UsableHalfSpanMHz(RadioDeviceKind kind, uint rateHz) => kind switch
     {
-        RadioDeviceKind.HackRf => 0.9 * HackRfBasebandFilterHz(rateHz) / 2.0 / 1e6,
+        RadioDeviceKind.HackRf => HackRfBasebandFilterHz(rateHz) / 2.0 / 1e6,
         RadioDeviceKind.RtlSdr => 0.4 * rateHz / 1e6,
         _ => rateHz / 2.0 / 1e6,
     };

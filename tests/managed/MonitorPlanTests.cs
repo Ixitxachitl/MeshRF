@@ -56,7 +56,7 @@ public class MonitorPlanTests
     {
         var plan = Build(MediumFast45(), 2_400_000);
         double half = plan.UsableHalfSpanMHz;
-        Assert.InRange(half, 0.78, 0.79); // 0.9 of half of 1.75 MHz
+        Assert.Equal(0.875, half, 6); // half of the 1.75 MHz filter
         foreach (var l in plan.Listeners)
             Assert.True(Math.Abs(l.FreqMHz - plan.DeviceCenterMHz) + l.BandwidthMHz / 2 <= half + 1e-9,
                         $"{l.Preset} at {l.FreqMHz} sits outside the window");
@@ -68,14 +68,19 @@ public class MonitorPlanTests
     }
 
     [Fact]
-    public void ALongFastWindowNeedsSixteenMegasamplesCentredButTenWhenSlid()
+    public void ALongFastWindowNeedsSixteenMegasamplesCentredButEightWhenSlid()
     {
         var primary = MediumFast45();
+        // LongFast alone beside the primary, so this is about the window and
+        // not about which of several sets auto prefers: with every preset
+        // ticked, a denser cluster above the primary outnumbers it.
+        string[] others = Enum.GetNames<LoraPreset>().Where(n => n != nameof(LoraPreset.LongFast)).ToArray();
         // Held on the primary, LongFast at 906.875 needs the whole 16 MS/s window.
-        var centred = Build(primary, 10_000_000, offsetKHz: 0);
+        var centred = Build(primary, 8_000_000, excluded: others, offsetKHz: 0);
         Assert.DoesNotContain(centred.Listeners, l => l.Preset == LoraPreset.LongFast);
-        // Let the window slide and 10 MS/s (usable ±4.05 MHz) covers both.
-        var slid = Build(primary, 10_000_000);
+        // Let the window slide and 8 MS/s (a 7 MHz filter, ±3.5 MHz) covers
+        // both: they need ±3.25.
+        var slid = Build(primary, 8_000_000, excluded: others);
         Assert.Contains(slid.Listeners, l => l.Preset == LoraPreset.LongFast);
         Assert.True(slid.DeviceCenterMHz < primary.FreqMHz, "the centre should move down toward LongFast");
         Assert.True(primary.FreqMHz - slid.DeviceCenterMHz + 0.125 <= slid.UsableHalfSpanMHz + 1e-9,
@@ -83,7 +88,37 @@ public class MonitorPlanTests
         // And the OutOfRange note at 2.4 MS/s names a rate that holds both.
         var narrow = Build(primary, 2_400_000);
         var note = Assert.Single(narrow.LeftOut, x => x.Preset == LoraPreset.LongFast);
-        Assert.Equal(10_000_000u, note.FitsAtRateHz);
+        Assert.Equal(8_000_000u, note.FitsAtRateHz);
+    }
+
+    /// <summary>
+    /// Noah's station as it stands: MediumFast on 913.125 at 8 MS/s, LongFast
+    /// and LongTurbo ticked, and two listeners of his own between them.
+    /// Everything from LongFast's lower edge to the primary's upper one is
+    /// 6.5 MHz, and the 7 MHz filter holds it; the capture has to take in all
+    /// five rather than leaving LongFast out for a margin it did not need.
+    /// </summary>
+    [Fact]
+    public void EightMegasamplesTakesInLongFastBesideEverythingElse()
+    {
+        string[] excluded = Enum.GetNames<LoraPreset>()
+            .Where(n => n is not (nameof(LoraPreset.LongFast) or nameof(LoraPreset.LongTurbo)))
+            .ToArray();
+        MonitorPlan.CustomListener[] mine =
+        [
+            new("MediumTurbo 21", 9, 500_000, 5, 912.250, Enabled: true),
+            new("Meshcore", 11, 500_000, 5, 910.525, Enabled: true),
+        ];
+
+        var plan = MonitorPlan.Build(Region.US, MediumFast45(), RadioDeviceKind.HackRf, 8_000_000, HackRfRates,
+                                     enabled: true, excluded, centerOffsetKHz: null, mine);
+
+        Assert.Equal(5, plan.Listeners.Count);
+        Assert.Contains(plan.Listeners, l => l.Preset == LoraPreset.LongFast);
+        Assert.DoesNotContain(plan.LeftOut, x => x.Reason == MonitorPlan.LeftOutReason.OutOfRange);
+        foreach (var l in plan.Listeners)
+            Assert.True(Math.Abs(l.FreqMHz - plan.DeviceCenterMHz) + l.BandwidthMHz / 2 <= plan.UsableHalfSpanMHz + 1e-9,
+                        $"{l.Name} sits outside the filter");
     }
 
     [Fact]
