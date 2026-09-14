@@ -1366,6 +1366,11 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     {
         var rec = _nodeStore.Get(nodeNum);
         if (rec is null) return;
+        // A neighbour still relaying a renumbered node under its retired number
+        // resolves to the surviving row; the list holds that row under the
+        // survivor's number, so searching for the retired one would append a
+        // second copy of it.
+        nodeNum = rec.NodeNum;
         // UpsertSelf calls this for our own node, which the peer list excludes
         // (see the constructor) — without this guard the "not found, append it"
         // branch below would put us straight back in. Only the list is skipped;
