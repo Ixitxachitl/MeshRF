@@ -38,7 +38,11 @@ public class LoraPresetSyncTests
         var enumMatch = Regex.Match(proto, @"enum ModemPreset \{(.*?)\r?\n    \}", RegexOptions.Singleline);
         Assert.True(enumMatch.Success, $"Could not find 'enum ModemPreset {{ ... }}' in {protoPath}");
 
-        var entries = Regex.Matches(enumMatch.Groups[1].Value, @"(?m)^\s*([A-Z0-9_]+)\s*=\s*\d+\s*(\[deprecated = true\])?\s*;");
+        // Every entry upstream carries an option block — a display label and
+        // search keywords, deprecated on the way out — which runs onto its own
+        // lines once it holds more than the label.
+        var entries = Regex.Matches(enumMatch.Groups[1].Value,
+            @"(?m)^[ \t]*([A-Z0-9_]+)\s*=\s*\d+\s*(\[[^\]]*\])?\s*;");
         Assert.True(entries.Count > 0, $"Found the ModemPreset enum block in {protoPath} but no entries inside it.");
 
         var protoNames = entries.Select(m => m.Groups[1].Value).ToList();

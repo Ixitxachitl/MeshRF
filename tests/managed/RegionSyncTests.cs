@@ -38,8 +38,11 @@ public class RegionSyncTests
         var enumMatch = Regex.Match(proto, @"enum RegionCode \{(.*?)\r?\n    \}", RegexOptions.Singleline);
         Assert.True(enumMatch.Success, $"Could not find 'enum RegionCode {{ ... }}' in {protoPath}");
 
+        // Every entry upstream carries an option block — a display label, and
+        // deprecated on the way out — which runs onto its own lines once it
+        // holds more than the label.
         var entries = Regex.Matches(enumMatch.Groups[1].Value,
-            @"(?m)^\s*([A-Z0-9_]+)\s*=\s*(\d+)\s*(\[deprecated = true\])?\s*;");
+            @"(?m)^[ \t]*([A-Z0-9_]+)\s*=\s*(\d+)\s*(\[[^\]]*\])?\s*;");
         Assert.True(entries.Count > 0, $"Found the RegionCode enum block in {protoPath} but no entries inside it.");
 
         var protoRegions = entries.ToDictionary(m => m.Groups[1].Value, m => int.Parse(m.Groups[2].Value));
