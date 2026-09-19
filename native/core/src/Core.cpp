@@ -274,6 +274,111 @@ struct Core::Impl {
     std::uint64_t last_packet_start{0};
     std::uint64_t last_packet_end{0};
 
+    // The LoRa timing the packet-window maths is expressed in, read off the
+    // primary listener. The defaults stand in for the window before a
+    // start_rx has filled the table.
+    struct PrimaryTiming {
+        std::uint32_t rate{1'000'000u};
+        std::uint8_t  sf{11};
+        std::uint32_t bw{250'000u};
+        std::uint16_t preamble{16u};
+        std::uint64_t center_hz{0};
+        std::size_t   sym_samples{0}; // 2^SF * oversampling, at the modem rate
+    };
+
+    PrimaryTiming primary_timing() {
+        PrimaryTiming t;
+        t.rate = modem_rate ? modem_rate : 1'000'000u;
+        {
+            std::lock_guard<std::mutex> lk(start_mu);
+            if (!listeners.empty()) {
+                const auto& p = listeners.front().params;
+                t.sf = p.spreading_factor;
+                if (p.bandwidth_hz) t.bw = p.bandwidth_hz;
+                t.preamble = p.preamble_symbols;
+                t.center_hz = listeners.front().center_freq_hz;
+            }
+        }
+        t.sym_samples = (static_cast<std::size_t>(1u) << t.sf) *
+                        (t.rate / std::max<std::uint32_t>(1u, t.bw));
+        return t;
+    }
+
+    // The whole rolling ring, oldest sample first. False when it holds too
+    // little to be worth looking at.
+    bool copy_ring(std::vector<std::complex<float>>& out) {
+        std::lock_guard<std::mutex> lk(iq_mu);
+        const std::size_t cap = iq_ring.size();
+        const std::size_t filled = iq_filled;
+        if (cap == 0u || filled < 64u) return false;
+        const std::size_t start = (iq_pos + cap - filled) % cap;
+        out.resize(filled);
+        const std::size_t first = std::min<std::size_t>(filled, cap - start);
+        std::copy_n(iq_ring.begin() + start, first, out.begin());
+        if (filled > first)
+            std::copy_n(iq_ring.begin(), filled - first, out.begin() + first);
+        return true;
+    }
+
+    // The window the most recently decoded packet sits in, taken from the
+    // decoder's own sample bounds: what the last-packet panel draws, and what
+    // an IQ export writes. False when the ring holds no such packet — none
+    // has decoded since RX started, or the last one has scrolled out.
+    bool copy_last_packet(std::vector<std::complex<float>>& out,
+                          const PrimaryTiming& timing,
+                          std::size_t min_samples) {
+        std::lock_guard<std::mutex> lk(iq_mu);
+        const std::size_t cap = iq_ring.size();
+        const std::size_t filled = iq_filled;
+        if (cap == 0u || filled < 64u || filled < min_samples) return false;
+        if (last_packet_end <= last_packet_start) return false;
+
+        const std::uint64_t history_begin =
+            iq_total_samples >= filled ? iq_total_samples - filled : 0u;
+        if (last_packet_end <= history_begin) return false;
+
+        const std::size_t exact_start = last_packet_start > history_begin
+            ? static_cast<std::size_t>(last_packet_start - history_begin)
+            : 0u;
+        const std::size_t exact_end = static_cast<std::size_t>(
+            std::min<std::uint64_t>(last_packet_end - history_begin, filled));
+        // Preamble + sync/header, standing in when the bounds have already
+        // been overtaken by the write head.
+        const std::size_t min_window_symbols =
+            static_cast<std::size_t>(timing.preamble) + 12u;
+        const std::size_t fallback_len = std::max(
+            min_samples,
+            std::min<std::size_t>(filled, min_window_symbols * timing.sym_samples));
+        const std::size_t exact_len =
+            exact_end > exact_start ? exact_end - exact_start : fallback_len;
+
+        // Keep the whole packet, start to finish, rather than clipping to the
+        // decoded interior: pre-roll ahead of the preamble, and post-roll past
+        // the end_sample_index the modem reports, because the transmission
+        // runs on past it for CRC, padding and tail.
+        const std::size_t lead_syms = static_cast<std::size_t>(timing.preamble) + 8u;
+        const std::size_t lead_margin = std::min<std::size_t>(
+            filled / 2u, lead_syms * timing.sym_samples);
+        const std::size_t tail_syms = 6u;
+        const std::size_t tail_margin = std::min<std::size_t>(
+            filled / 2u, tail_syms * timing.sym_samples);
+
+        std::size_t window = std::min<std::size_t>(
+            filled, exact_len + lead_margin + tail_margin);
+        if (window < min_samples) window = min_samples;
+        std::size_t off0 = (exact_start > lead_margin) ? exact_start - lead_margin : 0u;
+        if (off0 + window > filled) off0 = filled - window;
+
+        const std::size_t ring_start = (iq_pos + cap - filled) % cap;
+        const std::size_t src0 = (ring_start + off0) % cap;
+        out.resize(window);
+        const std::size_t first = std::min<std::size_t>(window, cap - src0);
+        std::copy_n(iq_ring.begin() + src0, first, out.begin());
+        if (window > first)
+            std::copy_n(iq_ring.begin(), window - first, out.begin() + first);
+        return true;
+    }
+
     // A log line and which listener it is about: its index in `listeners`,
     // or -1 for the receiver as a whole.
     struct Event {
@@ -1058,133 +1163,50 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     if (n_time == 0u || n_freq == 0u) return 0u;
     if (out.size() < static_cast<std::size_t>(n_time) * n_freq) return 0u;
 
-    // Snapshot metadata for the rolling IQ ring. The expensive data copy is
-    // deferred until we know how much history is actually needed.
-    std::vector<std::complex<float>> snap;
-    std::size_t cap = 0;
-    std::size_t ring_start = 0;
-    std::size_t ring_filled = 0;
-    std::uint64_t total_samples = 0;
-    std::uint64_t packet_start = 0;
-    std::uint64_t packet_end = 0;
-    {
-        std::lock_guard<std::mutex> lk(impl_->iq_mu);
-        cap = impl_->iq_ring.size();
-        ring_filled = impl_->iq_filled;
-        if (cap == 0u || ring_filled < 64u) return 0u;
-        total_samples = impl_->iq_total_samples;
-        packet_start = impl_->last_packet_start;
-        packet_end = impl_->last_packet_end;
-        ring_start = (impl_->iq_pos + cap - ring_filled) % cap;
-    }
-
-    std::size_t filled = ring_filled;
-
-    const std::uint64_t history_begin = total_samples >= ring_filled
-        ? total_samples - ring_filled
-        : 0u;
-
     constexpr std::size_t kFft = 512u;
-    if (filled < kFft) return 0u;
-
-    // Minimum window: preamble + sync/header. The energy locator below expands
-    // this to the whole burst when enough history is available.
-    const std::size_t rate = impl_->modem_rate ? impl_->modem_rate : 1'000'000u;
-    std::uint8_t sf = 11;
-    std::uint32_t bw = 250'000u;
-    std::uint16_t preamble = 16u;
-    {
-        std::lock_guard<std::mutex> lk(impl_->start_mu);
-        if (!impl_->listeners.empty()) {
-            const auto& p = impl_->listeners.front().params;
-            sf = p.spreading_factor;
-            if (p.bandwidth_hz) bw = p.bandwidth_hz;
-            preamble = p.preamble_symbols;
-        }
-    }
-    // Samples per LoRa symbol at the modem rate (= 2^SF * oversampling).
-    const std::size_t sym_samples =
-        (static_cast<std::size_t>(1u) << sf) * (rate / std::max<std::uint32_t>(1u, bw));
-    const std::size_t min_window_symbols = static_cast<std::size_t>(preamble) + 12u;
-    std::size_t window = std::min<std::size_t>(filled, min_window_symbols * sym_samples);
-    if (window < kFft) window = kFft;
-
-    // Auto-locate the packet by energy instead of relying on capture timing.
-    // Find the highest-energy region of the ring and anchor the window so the
-    // packet sits near the start. This is robust to event-drain latency that
-    // would otherwise make a fixed "newest N ms" window miss the packet (and
-    // snapshot post-packet noise instead).
-    //
-    // Crucially, measure energy *inside the LoRa channel only* (a narrow band
-    // around DC). The radio is offset-tuned so the channel sits at DC and only
-    // occupies bw/modem_rate of the captured spectrum. A plain wideband power
-    // sum is dominated by out-of-band static/interference, which would make the
-    // locator lock onto noise and snapshot static instead of the frame. A
-    // per-block FFT restricted to the channel bins fixes that.
-    std::size_t off0 = filled - window; // default: newest window
     constexpr std::size_t kBlk = 2048u;
-    bool window_anchored = false;
-    if (packet_end > packet_start && packet_end > history_begin) {
-        const std::size_t exact_start = packet_start > history_begin
-            ? static_cast<std::size_t>(packet_start - history_begin)
-            : 0u;
-        const std::size_t exact_end = static_cast<std::size_t>(
-            std::min<std::uint64_t>(packet_end - history_begin, filled));
-        const std::size_t exact_len = exact_end > exact_start ? exact_end - exact_start : window;
-        // Keep the full packet visible start-to-finish instead of clipping to
-        // the decoded interior. Add generous pre-roll (preamble + sync) and
-        // post-roll (the modem reports end_sample_index when decoding finishes,
-        // but the actual RF transmission continues for several more symbols:
-        // CRC, padding, and tail).
-        const std::size_t lead_syms = static_cast<std::size_t>(preamble) + 8u;
-        const std::size_t lead_margin = std::min<std::size_t>(
-            filled / 2u, lead_syms * sym_samples);
-        // The modem's end_sample_index is where payload decoding finished, but
-        // the actual packet continues for CRC (2-4 symbols) plus tail ramp-down.
-        // Use 4 symbols of post-roll to ensure the full transmission is visible.
-        const std::size_t tail_syms = 6u;
-        const std::size_t tail_margin = std::min<std::size_t>(
-            filled / 2u, tail_syms * sym_samples);
-        window = std::min<std::size_t>(filled, exact_len + lead_margin + tail_margin);
-        if (window < kFft) window = kFft;
-        off0 = (exact_start > lead_margin) ? (exact_start - lead_margin) : 0u;
-        if (off0 + window > filled) off0 = filled - window;
 
-        snap.resize(window);
-        {
-            std::lock_guard<std::mutex> lk(impl_->iq_mu);
-            if (impl_->iq_ring.size() != cap || impl_->iq_filled < ring_filled)
-                return 0u;
+    const auto timing = impl_->primary_timing();
+    const std::size_t rate = timing.rate;
+    const std::uint32_t bw = timing.bw;
+    const std::size_t sym_samples = timing.sym_samples;
 
-            const std::size_t src0 = (ring_start + off0) % cap;
-            const std::size_t first = std::min<std::size_t>(window, cap - src0);
-            std::copy_n(impl_->iq_ring.begin() + src0, first, snap.begin());
-            if (window > first) {
-                std::copy_n(impl_->iq_ring.begin(), window - first,
-                            snap.begin() + first);
-            }
-        }
+    std::vector<std::complex<float>> snap;
+    std::size_t window = 0;
+    std::size_t off0 = 0;
 
-        filled = window;
+    // The decoder's own sample bounds place the packet exactly, so while it is
+    // still in the ring there is nothing to search for.
+    if (impl_->copy_last_packet(snap, timing, kFft)) {
+        window = snap.size();
         off0 = 0u;
-        window_anchored = true;
-    }
+    } else {
+        // No packet bounds to go on (none decoded yet, or the last one has
+        // scrolled out). Fall back to whatever the ring holds and hunt for the
+        // burst in it: a mis-drawn panel is better than an empty one.
+        if (!impl_->copy_ring(snap)) return 0u;
+        const std::size_t filled = snap.size();
+        if (filled < kFft) return 0u;
 
-    if (!window_anchored) {
-        snap.resize(filled);
-        {
-            std::lock_guard<std::mutex> lk(impl_->iq_mu);
-            if (impl_->iq_ring.size() != cap || impl_->iq_filled < ring_filled)
-                return 0u;
+        // Minimum window: preamble + sync/header. The energy locator below
+        // expands this to the whole burst when enough history is available.
+        const std::size_t min_window_symbols =
+            static_cast<std::size_t>(timing.preamble) + 12u;
+        window = std::min<std::size_t>(filled, min_window_symbols * sym_samples);
+        if (window < kFft) window = kFft;
+        off0 = filled - window; // default: newest window
 
-            const std::size_t first = std::min<std::size_t>(filled, cap - ring_start);
-            std::copy_n(impl_->iq_ring.begin() + ring_start, first, snap.begin());
-            if (filled > first) {
-                std::copy_n(impl_->iq_ring.begin(), filled - first,
-                            snap.begin() + first);
-            }
-        }
-
+        // Auto-locate the packet by energy instead of relying on capture
+        // timing. Find the highest-energy region of the ring and anchor the
+        // window so the packet sits near the start.
+        //
+        // Crucially, measure energy *inside the LoRa channel only* (a narrow
+        // band around DC). The radio is offset-tuned so the channel sits at DC
+        // and only occupies bw/modem_rate of the captured spectrum. A plain
+        // wideband power sum is dominated by out-of-band static/interference,
+        // which would make the locator lock onto noise and snapshot static
+        // instead of the frame. A per-block FFT restricted to the channel bins
+        // fixes that.
         if (filled > window && filled >= kBlk) {
             const std::size_t nblk = filled / kBlk;
 
@@ -1349,6 +1371,35 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     }
 
     return rows;
+}
+
+std::uint32_t Core::pull_packet_iq(std::span<std::complex<float>> out,
+                                   PacketIqInfo& info) const {
+    info = PacketIqInfo{};
+
+    // A hardware modem hands up frames, never samples, and leaves modem_rate
+    // at 0. Whatever is still in the ring from an earlier SDR session is not
+    // the packet the app is showing.
+    if (impl_->modem_rate == 0u) return 0u;
+
+    const auto timing = impl_->primary_timing();
+    // Each chain mixes its channel down to DC, so these samples are centred on
+    // the listener's frequency, not on the device centre the waterfall spans.
+    info.sample_rate_hz = impl_->modem_rate;
+    info.center_freq_hz = timing.center_hz;
+
+    // The decoder's bounds or nothing: the spectrogram can afford to hunt the
+    // ring for energy because a wrong guess only mis-draws a panel, where a
+    // file written out of noise is a file the user keeps and analyses.
+    // 512 is the spectrogram's FFT length, so the window written here is the
+    // one the panel drew, sample for sample.
+    std::vector<std::complex<float>> snap;
+    if (!impl_->copy_last_packet(snap, timing, 512u)) return 0u;
+
+    info.sample_count = static_cast<std::uint32_t>(snap.size());
+    if (out.size() < snap.size()) return 0u; // sizing call, or too small
+    std::copy(snap.begin(), snap.end(), out.begin());
+    return info.sample_count;
 }
 
 bool Core::set_rx_device(hal::DeviceKind kind) {

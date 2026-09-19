@@ -245,6 +245,27 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_packet_spectrogram(const mrf_core_t* cor
                                                            uint32_t n_time,
                                                            uint32_t n_freq);
 
+// What a packet-IQ copy covers, filled in whether or not the samples fit.
+typedef struct mrf_packet_iq_info_t {
+    uint32_t sample_count;   // complex samples in the located window
+    uint32_t sample_rate_hz; // the modem rate the IQ ring runs at
+    uint64_t center_freq_hz; // the channel, which sits at DC in these samples
+} mrf_packet_iq_info_t;
+
+// Copies the modem-rate IQ of the most recently decoded packet — the window
+// mrf_core_pull_packet_spectrogram draws, pre-roll through tail — into
+// out_iq as interleaved float32 I/Q, which is a ".cf32" file once written.
+// capacity is in complex samples, so out_iq must hold 2*capacity floats.
+// Returns the samples copied, or 0 when capacity is short of the window (pass
+// 0 to ask only how big it is). `info` is filled either way, with
+// sample_count 0 when the ring holds no decoded packet: none since RX
+// started, the last one has scrolled out, or the receiver is a hardware modem
+// and produces no IQ at all.
+MRF_API uint32_t MRF_CALL mrf_core_pull_packet_iq(const mrf_core_t* core,
+                                                  float* out_iq,
+                                                  uint32_t capacity,
+                                                  mrf_packet_iq_info_t* info);
+
 // Copies a NUL-terminated UTF-8 device name into `buf` (up to `capacity`
 // bytes including the NUL). Returns the number of bytes that would be needed
 // (excluding NUL). If buf is null or capacity is 0, no copy is made.

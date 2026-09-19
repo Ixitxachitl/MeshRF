@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MeshRF.Channels;
@@ -11,6 +12,8 @@ using MeshRF.Mesh;
 using MeshRF.Nodes;
 using MeshRF.Scripting;
 using MeshRF.Waypoints;
+using System.Globalization;
+using System.Runtime.InteropServices;
 
 namespace MeshRF.AvaloniaApp;
 
@@ -388,6 +391,136 @@ public partial class MainWindow : Window
         var settings = AppSettings.Load();
         settings.LastPacketExpanded = _lastPacketExpanded;
         settings.Save();
+    }
+
+    /// <summary>Writes out the IQ the last-packet panel was drawn from: the
+    /// same located window, as interleaved float32 I/Q (".cf32") at the modem
+    /// rate, with a JSON sidecar carrying the rate, centre frequency and LoRa
+    /// parameters that bare samples cannot.</summary>
+    private async void OnSaveLastPacketIq(object? sender, RoutedEventArgs e)
+    {
+        var core = _viewModel.Core;
+        if (core is null) return;
+
+        // Copy before the picker opens. The ring holds ~12 s of modem-rate
+        // history, which a dialog left sitting on screen outlives easily, so a
+        // copy made afterwards would be of whatever had scrolled in since.
+        float[] iq = Array.Empty<float>();
+        PacketIqInfo info = default;
+        int samples = 0;
+        for (int attempt = 0; attempt < 3 && samples == 0; attempt++)
+        {
+            // Ask how long the window is first — it follows the packet's own
+            // length. A packet decoding between the two calls lengthens it,
+            // which is what the retries are for.
+            core.PullPacketIq(Span<float>.Empty, out var window);
+            if (window.SampleCount <= 0) break;
+            iq = new float[window.SampleCount * 2];
+            samples = core.PullPacketIq(iq, out info);
+        }
+
+        if (samples <= 0)
+        {
+            _viewModel.StatusText = "No packet IQ to save — nothing has decoded yet, " +
+                                    "or the last packet has scrolled out of the buffer.";
+            return;
+        }
+
+        var storage = GetTopLevel(sender as Visual)?.StorageProvider
+                      ?? GetTopLevel(this)?.StorageProvider;
+        if (storage is null) return;
+
+        var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save last packet IQ",
+            SuggestedFileName = $"meshrf-packet-{DateTime.Now:yyyyMMdd-HHmmss}.cf32",
+            DefaultExtension = "cf32",
+            FileTypeChoices = new[]
+            {
+                new FilePickerFileType("Complex float32 IQ") { Patterns = new[] { "*.cf32" } },
+                new FilePickerFileType("All files") { Patterns = new[] { "*" } },
+            },
+        });
+        if (file is null) return;
+
+        try
+        {
+            int floats = samples * 2;
+            await using (var stream = await file.OpenWriteAsync())
+            {
+                // Opening for write does not always truncate, and a short
+                // capture written over a longer one would keep the old tail
+                // as trailing samples.
+                if (stream.CanSeek) stream.SetLength(0);
+
+                // A span cannot cross an await, so the write itself is
+                // synchronous on a pool thread: the buffer runs to tens of
+                // megabytes for a slow mode's long frame.
+                await Task.Run(() => stream.Write(
+                    MemoryMarshal.AsBytes(iq.AsSpan(0, floats)))).ConfigureAwait(true);
+            }
+
+            await WriteIqSidecarAsync(file, info, samples).ConfigureAwait(true);
+
+            double seconds = info.SampleRateHz > 0
+                ? (double)samples / info.SampleRateHz
+                : 0.0;
+            _viewModel.StatusText = string.Format(CultureInfo.CurrentCulture,
+                "Saved {0:N0} IQ samples ({1:0.000} s at {2:N0} Sa/s) to {3}",
+                samples, seconds, info.SampleRateHz, file.Name);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = $"Saving IQ failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>A .cf32 file is bare samples: nothing in it says what rate or
+    /// frequency they were taken at, which is the first thing any analysis
+    /// tool asks. This drops that beside the capture. Skipped when the picked
+    /// file has no local path to sit next to.</summary>
+    private async Task WriteIqSidecarAsync(IStorageFile file, PacketIqInfo info, int samples)
+    {
+        string? path = file.TryGetLocalPath();
+        if (string.IsNullOrEmpty(path)) return;
+
+        double seconds = info.SampleRateHz > 0 ? (double)samples / info.SampleRateHz : 0.0;
+        // Invariant throughout: this is a machine-read file, not a display.
+        string count = samples.ToString(CultureInfo.InvariantCulture);
+        string rate = info.SampleRateHz.ToString(CultureInfo.InvariantCulture);
+        string center = info.CenterFreqHz.ToString(CultureInfo.InvariantCulture);
+        string duration = seconds.ToString("0.000000", CultureInfo.InvariantCulture);
+        string sf = ((int)_viewModel.OverrideSf).ToString(CultureInfo.InvariantCulture);
+        string bw = ((long)Math.Round(_viewModel.OverrideBwKhz * 1000.0))
+            .ToString(CultureInfo.InvariantCulture);
+        string cr = ((int)_viewModel.OverrideCr).ToString(CultureInfo.InvariantCulture);
+        string captured = DateTimeOffset.Now.ToString(
+            "yyyy-MM-ddTHH:mm:ss.fffK", CultureInfo.InvariantCulture);
+
+        string json = $$"""
+            {
+              "format": "cf32",
+              "layout": "interleaved float32 I/Q, little-endian",
+              "samples": {{count}},
+              "sample_rate_hz": {{rate}},
+              "center_freq_hz": {{center}},
+              "duration_s": {{duration}},
+              "spreading_factor": {{sf}},
+              "bandwidth_hz": {{bw}},
+              "coding_rate": {{cr}},
+              "captured": "{{captured}}"
+            }
+            """;
+
+        try
+        {
+            await File.WriteAllTextAsync(path + ".json", json).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            // The samples are already on disk; the sidecar is a convenience.
+            _viewModel.StatusText = $"Saved the IQ, but its .json sidecar failed: {ex.Message}";
+        }
     }
 
     /// <summary>Snapshots the last decoded packet as a high-time-resolution

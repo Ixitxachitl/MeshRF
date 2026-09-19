@@ -8,6 +8,7 @@
 #include "mrf/modem/RxListenerChain.h"
 #include "mrf/router/FloodingRouter.h"
 
+#include <complex>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -229,6 +230,24 @@ public:
     std::uint32_t pull_packet_spectrogram(std::span<float> out,
                                           std::uint32_t n_time,
                                           std::uint32_t n_freq) const;
+
+    // What a packet-IQ copy covers, filled in whether or not the samples
+    // themselves fit in the caller's buffer.
+    struct PacketIqInfo {
+        std::uint32_t sample_count;    // complex samples in the located window
+        std::uint32_t sample_rate_hz;  // the modem rate the ring runs at
+        std::uint64_t center_freq_hz;  // the channel, which sits at DC here
+    };
+
+    // Copy the modem-rate IQ of the most recently decoded packet — the same
+    // window pull_packet_spectrogram() draws, pre-roll through tail — into
+    // `out` as complex float32, which is a ".cf32" file once written. Returns
+    // the samples written, or 0 when `out` is too small to hold the window
+    // (an empty span asks only how big it is). `info` describes the window
+    // either way, with sample_count 0 when the ring holds no decoded packet:
+    // none since RX started, or the last one has already scrolled out.
+    std::uint32_t pull_packet_iq(std::span<std::complex<float>> out,
+                                 PacketIqInfo& info) const;
 
     [[nodiscard]] CoreSignalStats signal_stats() const noexcept;
 

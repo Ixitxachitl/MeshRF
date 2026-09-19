@@ -123,6 +123,17 @@ public readonly record struct RxListenerSpec(LoraPreset Preset, ulong CenterFreq
 /// the receiver as a whole.</summary>
 public readonly record struct DemodEvent(int Listener, string Text);
 
+/// <summary>What a packet-IQ copy covers, reported whether or not the samples
+/// fit the caller's buffer.</summary>
+/// <param name="SampleCount">Complex samples in the located window, 0 when
+/// the IQ ring holds no decoded packet.</param>
+/// <param name="SampleRateHz">The modem rate the samples are at, which is the
+/// LoRa bandwidth oversampled, not the device sample rate.</param>
+/// <param name="CenterFreqHz">What the samples are centred on: the listener's
+/// channel, mixed down to DC, rather than the device centre the waterfall
+/// spans.</param>
+public readonly record struct PacketIqInfo(int SampleCount, int SampleRateHz, ulong CenterFreqHz);
+
 public sealed class MeshtasticCore : IDisposable
 {
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
@@ -134,7 +145,7 @@ public sealed class MeshtasticCore : IDisposable
     /// step with the native side whenever an entry point is added that the
     /// managed layer calls unconditionally.
     /// </summary>
-    private const uint RequiredAbiVersion = 11;
+    private const uint RequiredAbiVersion = 12;
 
     public MeshtasticCore()
     {
@@ -928,6 +939,40 @@ public sealed class MeshtasticCore : IDisposable
                 {
                     return (int)NativeMethods.CorePullPacketSpectrogram(
                         _handle, p, (uint)nTime, (uint)nFreq);
+                }
+            }
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>
+    /// Copies the raw modem-rate IQ of the most recently decoded packet — the
+    /// same window <see cref="PullPacketSpectrogram"/> draws, pre-roll through
+    /// tail — into <paramref name="interleaved"/> as interleaved float32 I/Q,
+    /// which is the ".cf32" file layout. Returns the complex samples written,
+    /// or 0 when the buffer is shorter than the window; <paramref name="info"/>
+    /// describes the window either way, so an empty buffer asks how big it is.
+    /// Its SampleCount is 0 when nothing is there to copy: no packet has
+    /// decoded since RX started, the last one has aged out of the ring, or the
+    /// receiver is a hardware modem and produces no IQ.
+    /// </summary>
+    public int PullPacketIq(Span<float> interleaved, out PacketIqInfo info)
+    {
+        info = default;
+        _lock.EnterReadLock();
+        try
+        {
+            if (_disposed) return 0;
+            unsafe
+            {
+                fixed (float* p = interleaved)
+                {
+                    uint written = NativeMethods.CorePullPacketIq(
+                        _handle, p, (uint)(interleaved.Length / 2), out var native);
+                    info = new PacketIqInfo((int)native.SampleCount,
+                                            (int)native.SampleRateHz,
+                                            native.CenterFreqHz);
+                    return (int)written;
                 }
             }
         }

@@ -3,6 +3,7 @@
 #include "mrf/Core.h"
 
 #include <algorithm>
+#include <complex>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -341,6 +342,25 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_packet_spectrogram(const mrf_core_t* cor
         n_time, n_freq);
 }
 
+MRF_API uint32_t MRF_CALL mrf_core_pull_packet_iq(const mrf_core_t* core,
+                                                  float* out_iq,
+                                                  uint32_t capacity,
+                                                  mrf_packet_iq_info_t* info) {
+    if (!core) return 0u;
+    mrf::Core::PacketIqInfo native{};
+    // std::complex<float> is layout-compatible with float[2], which is what
+    // makes the caller's interleaved buffer usable as-is.
+    auto* samples = reinterpret_cast<std::complex<float>*>(out_iq);
+    const uint32_t n = core->core.pull_packet_iq(
+        std::span<std::complex<float>>(samples, out_iq ? capacity : 0u), native);
+    if (info) {
+        info->sample_count = native.sample_count;
+        info->sample_rate_hz = native.sample_rate_hz;
+        info->center_freq_hz = native.center_freq_hz;
+    }
+    return n;
+}
+
 MRF_API uint32_t MRF_CALL mrf_core_get_device_name(const mrf_core_t* core,
                                                    char* buf,
                                                    uint32_t capacity) {
@@ -506,6 +526,6 @@ MRF_API int32_t MRF_CALL mrf_set_custom_spi_board(
 //     declarable custom pin map and power model.
 // 11: several listeners off one capture (mrf_core_start_rx_multi), events
 //     that say which listener they are about, per-listener signal stats.
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 11u; }
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 12u; }
 
 } // extern "C"

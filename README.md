@@ -48,6 +48,10 @@ Current release line: **v2.4.0**
 - Live spectrum and waterfall with packet-linked snapshot support (SDR receive
   only — a hardware modem produces no IQ), with each demodulated channel
   marked across it.
+- **Save IQ** in the last-packet panel's header writes the samples that
+  snapshot was drawn from — the located packet, pre-roll through tail — to a
+  `.cf32` file (interleaved float32 at the modem rate) with a `.json` sidecar
+  giving the rate, centre frequency and LoRa parameters.
 - Several presets received at once off one capture, each a mesh this station
   is a full node on. See [Listening on several presets](#listening-on-several-presets).
 

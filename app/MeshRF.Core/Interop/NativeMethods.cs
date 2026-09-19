@@ -174,6 +174,20 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_pull_packet_spectrogram")]
     public static unsafe partial uint CorePullPacketSpectrogram(nint core, float* outDbfs, uint nTime, uint nFreq);
 
+    /// <summary>Mirrors <c>mrf_packet_iq_info_t</c>: what a packet-IQ copy
+    /// covers, filled in whether or not the samples fit.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PacketIqInfo
+    {
+        public uint SampleCount;
+        public uint SampleRateHz;
+        public ulong CenterFreqHz;
+    }
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_pull_packet_iq")]
+    public static unsafe partial uint CorePullPacketIq(nint core, float* outIq, uint capacity,
+                                                       out PacketIqInfo info);
+
     [LibraryImport(Dll, EntryPoint = "mrf_core_get_device_name")]
     public static unsafe partial uint CoreGetDeviceName(nint core, byte* buf, uint capacity);
 
