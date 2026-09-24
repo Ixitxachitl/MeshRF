@@ -6,6 +6,15 @@ namespace MeshRF.Tests;
 
 public class MeshCryptoXeddsaTests
 {
+    private const uint From = 0x12345678, PacketId = 42, To = 0xFFFFFFFF;
+
+    // Every covered envelope field nonzero, so each tamper case flips something that was signed.
+    private static readonly XeddsaEnvelope Envelope = new(
+        Portnum: 1, RequestId: 0xCAFE0001, ReplyId: 0xCAFE0002, Emoji: 0xCAFE0003,
+        Bitfield: 0x01, WantResponse: true);
+
+    private static byte[] Payload => System.Text.Encoding.UTF8.GetBytes("hello mesh");
+
     [Fact]
     public void SignThenVerify_RoundTrips()
     {
@@ -13,34 +22,80 @@ public class MeshCryptoXeddsaTests
         var curvePub = Curve25519.GetPublicKey(curvePriv);
         var (edPriv, edPub) = MeshCrypto.DeriveXeddsaKeys(curvePriv);
 
-        var payload = System.Text.Encoding.UTF8.GetBytes("hello mesh");
-        var sig = MeshCrypto.XeddsaSign(fromNode: 0x12345678, packetId: 42, portnum: 1, payload, edPriv, edPub);
+        var sig = MeshCrypto.XeddsaSign(From, PacketId, To, Envelope, Payload, edPriv, edPub);
 
         Assert.Equal(64, sig.Length);
-        Assert.True(MeshCrypto.XeddsaVerify(0x12345678, 42, 1, payload, sig, curvePub));
+        Assert.True(MeshCrypto.XeddsaVerify(From, PacketId, To, Envelope, Payload, sig, curvePub));
     }
 
+    public static TheoryData<string> Tampers => new()
+    {
+        "from", "id", "to", "portnum", "request_id", "reply_id", "emoji",
+        "bitfield", "bitfield_stripped", "want_response", "payload",
+    };
+
     [Theory]
-    [InlineData(true, false, false, false)]  // wrong fromNode
-    [InlineData(false, true, false, false)]  // wrong packetId
-    [InlineData(false, false, true, false)]  // wrong portnum
-    [InlineData(false, false, false, true)]  // wrong payload
-    public void Verify_FailsWhenBoundMetadataDiffers(bool tamperFrom, bool tamperPacketId, bool tamperPort, bool tamperPayload)
+    [MemberData(nameof(Tampers))]
+    public void Verify_FailsWhenAnyCoveredFieldDiffers(string field)
     {
         var curvePriv = Curve25519.GeneratePrivateKey();
         var curvePub = Curve25519.GetPublicKey(curvePriv);
         var (edPriv, edPub) = MeshCrypto.DeriveXeddsaKeys(curvePriv);
+        var sig = MeshCrypto.XeddsaSign(From, PacketId, To, Envelope, Payload, edPriv, edPub);
 
-        uint from = 0x12345678, packetId = 42, port = 1;
-        var payload = System.Text.Encoding.UTF8.GetBytes("hello mesh");
-        var sig = MeshCrypto.XeddsaSign(from, packetId, port, payload, edPriv, edPub);
+        uint from = From, id = PacketId, to = To;
+        var env = Envelope;
+        var payload = Payload;
+        switch (field)
+        {
+            case "from": from++; break;
+            case "id": id++; break;
+            case "to": to = 0xAABBCCDD; break;
+            case "portnum": env = env with { Portnum = 2 }; break;
+            case "request_id": env = env with { RequestId = 0 }; break;
+            case "reply_id": env = env with { ReplyId = 0xCAFE0009 }; break;
+            case "emoji": env = env with { Emoji = 0 }; break;
+            case "bitfield": env = env with { Bitfield = 0x00 }; break;
+            case "bitfield_stripped": env = env with { Bitfield = null }; break;
+            case "want_response": env = env with { WantResponse = false }; break;
+            case "payload": payload = System.Text.Encoding.UTF8.GetBytes("hello MESH"); break;
+        }
 
-        uint checkFrom = tamperFrom ? from + 1 : from;
-        uint checkPacketId = tamperPacketId ? packetId + 1 : packetId;
-        uint checkPort = tamperPort ? port + 1 : port;
-        var checkPayload = tamperPayload ? System.Text.Encoding.UTF8.GetBytes("hello MESH") : payload;
+        Assert.False(MeshCrypto.XeddsaVerify(from, id, to, env, payload, sig, curvePub));
+    }
 
-        Assert.False(MeshCrypto.XeddsaVerify(checkFrom, checkPacketId, checkPort, checkPayload, sig, curvePub));
+    [Fact]
+    public void SigningBuffer_MatchesFirmwareLayout()
+    {
+        var buf = MeshCrypto.BuildSigningBuffer(0x04030201, 0x08070605, 0x0C0B0A09,
+            new XeddsaEnvelope(Portnum: 0x10, RequestId: 0x14131211, ReplyId: 0x18171615,
+                               Emoji: 0x1C1B1A19, Bitfield: 0x201F1E1D, WantResponse: true),
+            new byte[] { 0xAA, 0xBB });
+
+        Assert.Equal(new byte[]
+        {
+            0x01,                   // version
+            0x01, 0x02, 0x03, 0x04, // from
+            0x05, 0x06, 0x07, 0x08, // id
+            0x09, 0x0A, 0x0B, 0x0C, // to
+            0x10, 0x00, 0x00, 0x00, // portnum
+            0x11, 0x12, 0x13, 0x14, // request_id
+            0x15, 0x16, 0x17, 0x18, // reply_id
+            0x19, 0x1A, 0x1B, 0x1C, // emoji
+            0x1D, 0x1E, 0x1F, 0x20, // bitfield
+            0x03,                   // flags: want_response | has_bitfield
+            0xAA, 0xBB,             // payload
+        }, buf);
+    }
+
+    [Fact]
+    public void SigningBuffer_AbsentBitfieldSignsAsZeroWithPresenceClear()
+    {
+        var buf = MeshCrypto.BuildSigningBuffer(1, 2, 3, new XeddsaEnvelope(Portnum: 4), ReadOnlySpan<byte>.Empty);
+
+        Assert.Equal(MeshCrypto.XeddsaSignedHeaderLength, buf.Length);
+        Assert.Equal(new byte[] { 0, 0, 0, 0 }, buf[29..33]);
+        Assert.Equal(0x00, buf[33]);
     }
 
     [Fact]
@@ -48,20 +103,18 @@ public class MeshCryptoXeddsaTests
     {
         var (edPriv, edPub) = MeshCrypto.DeriveXeddsaKeys(Curve25519.GeneratePrivateKey());
         var otherCurvePub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
-        var payload = System.Text.Encoding.UTF8.GetBytes("hello mesh");
-        var sig = MeshCrypto.XeddsaSign(1, 2, 3, payload, edPriv, edPub);
+        var sig = MeshCrypto.XeddsaSign(From, PacketId, To, Envelope, Payload, edPriv, edPub);
 
-        Assert.False(MeshCrypto.XeddsaVerify(1, 2, 3, payload, sig, otherCurvePub));
+        Assert.False(MeshCrypto.XeddsaVerify(From, PacketId, To, Envelope, Payload, sig, otherCurvePub));
     }
 
     [Fact]
     public void Verify_FailsForMissingOrMalformedSignature()
     {
         var curvePub = Curve25519.GetPublicKey(Curve25519.GeneratePrivateKey());
-        var payload = System.Text.Encoding.UTF8.GetBytes("hello mesh");
 
-        Assert.False(MeshCrypto.XeddsaVerify(1, 2, 3, payload, null, curvePub));
-        Assert.False(MeshCrypto.XeddsaVerify(1, 2, 3, payload, Array.Empty<byte>(), curvePub));
-        Assert.False(MeshCrypto.XeddsaVerify(1, 2, 3, payload, new byte[10], curvePub));
+        Assert.False(MeshCrypto.XeddsaVerify(From, PacketId, To, Envelope, Payload, null, curvePub));
+        Assert.False(MeshCrypto.XeddsaVerify(From, PacketId, To, Envelope, Payload, Array.Empty<byte>(), curvePub));
+        Assert.False(MeshCrypto.XeddsaVerify(From, PacketId, To, Envelope, Payload, new byte[10], curvePub));
     }
 }

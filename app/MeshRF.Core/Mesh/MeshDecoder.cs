@@ -34,6 +34,11 @@ public sealed class MeshDecodeResult
     /// directed NodeInfo request asking us to send ours back).</summary>
     public bool WantResponse { get; init; }
 
+    /// <summary>Data.want_response (field 3) as sent, before bitfield bit 1 is
+    /// merged into <see cref="WantResponse"/>. The signature covers the two
+    /// separately.</summary>
+    public bool DataWantResponse { get; init; }
+
     /// <summary>Data.request_id (field 6): the packet id this message responds
     /// to. For a ROUTING ack/nak it identifies the original packet.</summary>
     public uint RequestId { get; init; }
@@ -70,6 +75,12 @@ public sealed class MeshDecodeResult
     /// Empty when absent.
     /// </summary>
     public byte[] DataField10 { get; init; } = Array.Empty<byte>();
+
+    /// <summary>The envelope fields <see cref="DataField10"/> signs, for
+    /// <see cref="MeshCrypto.XeddsaVerify"/>.</summary>
+    public XeddsaEnvelope XeddsaEnvelope => new(
+        (uint)Port, RequestId, ReplyId, Emoji,
+        HasDataBitfield ? DataBitfield : null, DataWantResponse);
 
     /// <summary>Full Data protobuf JSON (generated class), including fields not
     /// mapped to the strongly-typed properties above.</summary>
@@ -581,7 +592,6 @@ public static class MeshDecoder
         hasDataBitfield = parsed.HasBitfield;
         dataBitfield = hasDataBitfield ? parsed.Bitfield : 0u;
         okToMqtt = (dataBitfield & 0x01) != 0;
-        wantResponse = wantResponse || (dataBitfield & 0x02) != 0;
         dataField10 = parsed.XeddsaSignature.ToByteArray();
 
         try { dataProtoJson = ProtoJson.Format(parsed); } catch { dataProtoJson = null; }
@@ -710,7 +720,8 @@ public static class MeshDecoder
             NeighborInfo = neighborInfo,
             StoreForward = storeForward,
             Beacon = beacon,
-            WantResponse = wantResponse,
+            WantResponse = wantResponse || (dataBitfield & 0x02) != 0,
+            DataWantResponse = wantResponse,
             RequestId = requestId,
             ReplyId = replyId,
             Emoji = emoji,

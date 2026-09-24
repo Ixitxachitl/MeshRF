@@ -183,46 +183,71 @@ public static class MeshCrypto
         => XEdDSA.DeriveEdKeysFromCurvePrivateKey(curvePrivateKey);
 
     /// <summary>
-    /// Sign a broadcast packet's payload, mirroring firmware
-    /// <c>CryptoEngine::xeddsa_sign</c>: the signed buffer is
-    /// <c>fromNode(4,LE) || packetId(4,LE) || portnum(4,LE) || payload</c>, and
-    /// a fresh 32-byte random "hedge" is mixed into the nonce every call.
+    /// Sign a packet, mirroring firmware <c>CryptoEngine::xeddsa_sign</c>. The
+    /// signature covers the whole Data envelope (see <see cref="BuildSigningBuffer"/>),
+    /// and a fresh 32-byte random "hedge" is mixed into the nonce every call.
     /// </summary>
-    public static byte[] XeddsaSign(uint fromNode, uint packetId, uint portnum,
-                                    ReadOnlySpan<byte> payload,
+    public static byte[] XeddsaSign(uint fromNode, uint packetId, uint toNode,
+                                    in XeddsaEnvelope envelope, ReadOnlySpan<byte> payload,
                                     byte[] edPrivateKey, byte[] edPublicKey)
     {
-        byte[] signingBuffer = BuildSigningBuffer(fromNode, packetId, portnum, payload);
+        byte[] signingBuffer = BuildSigningBuffer(fromNode, packetId, toNode, envelope, payload);
         byte[] hedge = RandomNumberGenerator.GetBytes(32);
         return XEdDSA.Sign(edPrivateKey, edPublicKey, signingBuffer, hedge);
     }
 
     /// <summary>
-    /// Verify a broadcast packet's XEdDSA signature against the sender's known
-    /// X25519 (PKI) public key, mirroring firmware
-    /// <c>CryptoEngine::xeddsa_verify</c>. Returns false for a missing/wrong-size
-    /// signature, an unknown/malformed sender key, or a signature that doesn't
-    /// verify (tampered, wrong sender, or wrong key).
+    /// Verify a packet's XEdDSA signature against the sender's known X25519
+    /// (PKI) public key, mirroring firmware <c>CryptoEngine::xeddsa_verify</c>.
+    /// Returns false for a missing/wrong-size signature, an unknown/malformed
+    /// sender key, or a signature that doesn't verify (tampered, wrong sender,
+    /// or wrong key).
     /// </summary>
-    public static bool XeddsaVerify(uint fromNode, uint packetId, uint portnum,
-                                    ReadOnlySpan<byte> payload,
+    public static bool XeddsaVerify(uint fromNode, uint packetId, uint toNode,
+                                    in XeddsaEnvelope envelope, ReadOnlySpan<byte> payload,
                                     byte[]? signature, byte[]? senderCurvePublicKey)
     {
         if (signature is null || signature.Length != XeddsaSignatureSize) return false;
         if (senderCurvePublicKey is null || senderCurvePublicKey.Length != 32) return false;
 
-        byte[] signingBuffer = BuildSigningBuffer(fromNode, packetId, portnum, payload);
+        byte[] signingBuffer = BuildSigningBuffer(fromNode, packetId, toNode, envelope, payload);
         byte[] senderEdPublicKey = XEdDSA.CurveToEdPublic(senderCurvePublicKey);
         return XEdDSA.Verify(senderEdPublicKey, signingBuffer, signature);
     }
 
-    private static byte[] BuildSigningBuffer(uint fromNode, uint packetId, uint portnum, ReadOnlySpan<byte> payload)
+    // Firmware XEDDSA_SIGNING_VERSION and the flags-byte bits.
+    private const byte XeddsaSigningVersion = 0x01;
+    private const byte XeddsaFlagWantResponse = 0x01;
+    private const byte XeddsaFlagHasBitfield = 0x02;
+    // version(1) + from, id, to, portnum, request_id, reply_id, emoji, bitfield (4 each) + flags(1)
+    public const int XeddsaSignedHeaderLength = 1 + 8 * 4 + 1;
+
+    /// <summary>
+    /// The bytes a signature covers, byte-for-byte as firmware
+    /// <c>buildSigningBuffer</c>, all integers little-endian:
+    /// <c>version(1) | from | id | to | portnum | request_id | reply_id | emoji
+    /// | bitfield | flags(1) | payload</c>. The header is fixed-length so the
+    /// payload boundary never depends on content. An absent bitfield signs as
+    /// zero with its presence in the flags byte, so stripping the field is not
+    /// the same as sending it empty.
+    /// </summary>
+    public static byte[] BuildSigningBuffer(uint fromNode, uint packetId, uint toNode,
+                                              in XeddsaEnvelope envelope, ReadOnlySpan<byte> payload)
     {
-        var buf = new byte[12 + payload.Length];
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(0, 4), fromNode);
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(4, 4), packetId);
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(8, 4), portnum);
-        payload.CopyTo(buf.AsSpan(12));
+        var buf = new byte[XeddsaSignedHeaderLength + payload.Length];
+        var w = buf.AsSpan();
+        w[0] = XeddsaSigningVersion;
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(1, 4), fromNode);
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(5, 4), packetId);
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(9, 4), toNode);
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(13, 4), envelope.Portnum);
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(17, 4), envelope.RequestId);
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(21, 4), envelope.ReplyId);
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(25, 4), envelope.Emoji);
+        BinaryPrimitives.WriteUInt32LittleEndian(w.Slice(29, 4), envelope.Bitfield ?? 0);
+        w[33] = (byte)((envelope.WantResponse ? XeddsaFlagWantResponse : 0)
+                       | (envelope.Bitfield.HasValue ? XeddsaFlagHasBitfield : 0));
+        payload.CopyTo(w.Slice(XeddsaSignedHeaderLength));
         return buf;
     }
 
@@ -250,3 +275,18 @@ public static class MeshCrypto
         // nonce[12] stays 0
     }
 }
+
+/// <summary>
+/// The <c>Data</c> envelope fields an XEdDSA signature covers besides the
+/// payload. Mirrors what firmware reads from the decoded <c>meshtastic_Data</c>:
+/// <paramref name="WantResponse"/> is the raw field 3, not merged with
+/// bitfield bit 1 (firmware verifies before merging them), and
+/// <paramref name="Bitfield"/> is null when field 9 was absent.
+/// </summary>
+public readonly record struct XeddsaEnvelope(
+    uint Portnum,
+    uint RequestId = 0,
+    uint ReplyId = 0,
+    uint Emoji = 0,
+    uint? Bitfield = null,
+    bool WantResponse = false);

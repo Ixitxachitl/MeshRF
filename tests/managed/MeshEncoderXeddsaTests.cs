@@ -42,7 +42,7 @@ public class MeshEncoderXeddsaTests
         Assert.NotNull(result);
         Assert.Equal(64, result!.DataField10.Length);
 
-        bool verified = MeshCrypto.XeddsaVerify(from, id, (uint)PortNum.TextMessage,
+        bool verified = MeshCrypto.XeddsaVerify(from, id, result.Header.To, result.XeddsaEnvelope,
             result.AppPayload, result.DataField10, curvePub);
         Assert.True(verified);
     }
@@ -85,8 +85,8 @@ public class MeshEncoderXeddsaTests
             xeddsaPrivateKey: edPriv, xeddsaPublicKey: edPub);
         var result = MeshDecoder.Decode(frame, new[] { channel });
 
-        bool verified = MeshCrypto.XeddsaVerify(from, id, (uint)PortNum.TextMessage,
-            result!.AppPayload, result.DataField10, otherCurvePub);
+        bool verified = MeshCrypto.XeddsaVerify(from, id, result!.Header.To, result.XeddsaEnvelope,
+            result.AppPayload, result.DataField10, otherCurvePub);
         Assert.False(verified);
     }
 
@@ -103,7 +103,7 @@ public class MeshEncoderXeddsaTests
         var result = MeshDecoder.Decode(frame, new[] { channel });
         Assert.NotNull(result);
         Assert.Equal(64, result!.DataField10.Length);
-        Assert.True(MeshCrypto.XeddsaVerify(from, id, (uint)PortNum.NodeInfo,
+        Assert.True(MeshCrypto.XeddsaVerify(from, id, result.Header.To, result.XeddsaEnvelope,
             result.AppPayload, result.DataField10, curvePub));
     }
 
@@ -120,7 +120,33 @@ public class MeshEncoderXeddsaTests
         var result = MeshDecoder.Decode(frame, new[] { channel });
         Assert.NotNull(result);
         Assert.Equal(64, result!.DataField10.Length);
-        Assert.True(MeshCrypto.XeddsaVerify(from, id, (uint)PortNum.Position,
+        Assert.True(MeshCrypto.XeddsaVerify(from, id, result.Header.To, result.XeddsaEnvelope,
+            result.AppPayload, result.DataField10, curvePub));
+    }
+
+    [Fact]
+    public void BroadcastReactionWithEnvelopeFields_IsSignedAndVerifiable()
+    {
+        var (_, curvePub, edPriv, edPub) = MakeIdentity();
+        var channel = DefaultChannel();
+        const uint from = 7, id = 8;
+
+        // reply_id, emoji, and want_response ride outside the payload; the
+        // decoder must hand back the raw want_response, not the bitfield-merged one.
+        var frame = MeshEncoder.Encode(channel, from, 0xFFFFFFFFu, id, PortNum.TextMessage,
+            System.Text.Encoding.UTF8.GetBytes("👍"), wantResponse: true,
+            replyId: 0x1234, emoji: 1, okToMqtt: true,
+            xeddsaPrivateKey: edPriv, xeddsaPublicKey: edPub);
+
+        var result = MeshDecoder.Decode(frame, new[] { channel });
+        Assert.NotNull(result);
+        Assert.Equal(64, result!.DataField10.Length);
+        Assert.Equal(new XeddsaEnvelope((uint)PortNum.TextMessage, 0, 0x1234, 1, 0x03, true),
+            result.XeddsaEnvelope);
+        Assert.True(MeshCrypto.XeddsaVerify(from, id, result.Header.To, result.XeddsaEnvelope,
+            result.AppPayload, result.DataField10, curvePub));
+        Assert.False(MeshCrypto.XeddsaVerify(from, id, result.Header.To,
+            result.XeddsaEnvelope with { ReplyId = 0x9999 },
             result.AppPayload, result.DataField10, curvePub));
     }
 
@@ -158,7 +184,7 @@ public class MeshEncoderXeddsaTests
         var result = MeshDecoder.Decode(frame, new[] { channel });
         Assert.NotNull(result);
         Assert.Equal(64, result!.DataField10.Length);
-        Assert.True(MeshCrypto.XeddsaVerify(from, id, (uint)PortNum.TextMessage,
+        Assert.True(MeshCrypto.XeddsaVerify(from, id, result.Header.To, result.XeddsaEnvelope,
             result.AppPayload, result.DataField10, curvePub));
         Assert.True(frame.Length <= MeshHeader.Size + 255);
     }

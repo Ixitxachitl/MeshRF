@@ -2074,7 +2074,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         senderCurvePublicKey ??= TryParseHex(knownKeyHex);
         if (senderCurvePublicKey.Length != 32) return;
 
-        if (!MeshCrypto.XeddsaVerify(header.From, header.PacketId, (uint)result.Port,
+        if (!MeshCrypto.XeddsaVerify(header.From, header.PacketId, header.To, result.XeddsaEnvelope,
                                      result.AppPayload, result.DataField10, senderCurvePublicKey))
             return;
 

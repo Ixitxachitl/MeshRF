@@ -102,7 +102,9 @@ public static class MeshEncoder
             const int SigFieldOverhead = 2; // tag byte + 1-byte length varint (sig is always 64 bytes).
             if (MeshHeader.Size + data.Length + SigFieldOverhead + MeshCrypto.XeddsaSignatureSize <= 255)
             {
-                byte[] signature = MeshCrypto.XeddsaSign(from, packetId, (uint)port, payload,
+                var envelope = new XeddsaEnvelope((uint)port, requestId, replyId, emoji,
+                                                  (uint)bitfield, wantResponse);
+                byte[] signature = MeshCrypto.XeddsaSign(from, packetId, to, envelope, payload,
                                                           xeddsaPrivateKey, xeddsaPublicKey);
                 data.WriteBytesField(10, signature);
             }
