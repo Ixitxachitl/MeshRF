@@ -279,6 +279,24 @@ public class CustomListenerUiTests(HeadlessAvalonia avalonia)
         Assert.Equal((decimal)ChannelPlan.FrequencyMHz(Region.US, 0.5, auto), editor.FreqMHz);
     }));
 
+    /// <summary>Reopened, a listener shows its slot by number: only the
+    /// frequency was saved, so there is no Auto left to show.</summary>
+    [Fact]
+    public void AReopenedListenerOnTheAutoSlotShowsItsNumber() => avalonia.Run(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        int auto = ChannelPlan.DefaultSlot(Region.US, 0.5, "TurboLink", "TurboLink");
+        var saved = new CustomListenerEdit
+        {
+            Name = "TurboLink", Sf = 5, BwKhz = 500, Cr = 8,
+            FreqMHz = ChannelPlan.FrequencyMHz(Region.US, 0.5, auto), Enabled = true,
+        };
+
+        var editor = CustomListenerWindow.CreateEditor(vm, saved);
+
+        Assert.Equal(auto, editor.SelectedSlot?.Slot);
+    }));
+
     /// <summary>And a frequency that matches nothing on the grid leaves it
     /// blank rather than claiming a slot it is not on.</summary>
     [Fact]

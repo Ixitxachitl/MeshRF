@@ -111,12 +111,13 @@ public sealed partial class CustomListenerEditor : ObservableObject
         bool Matches(SlotChoice option) =>
             Math.Abs(ChannelPlan.FrequencyMHz(SelectedRegion, bwMHz, option.Slot ?? auto) - Draft.FreqMHz) < 1e-6;
         // The auto slot's frequency is also a numbered slot's, so two entries
-        // can both be right. The one the operator picked stays picked; with
-        // no pick to keep, Auto comes first.
+        // can both be right. The one the operator picked stays picked. With no
+        // pick to keep — a listener reopened, say — the number wins: only the
+        // frequency is saved, so nothing about it is Auto any more.
         if (SelectedSlot is { } picked && _slotOptions.FirstOrDefault(o => o.Slot == picked.Slot) is { } same
             && Matches(same))
             return same;
-        return _slotOptions.FirstOrDefault(Matches);
+        return _slotOptions.FirstOrDefault(o => o.Slot is not null && Matches(o));
     }
 
     // Surfaced separately so the numeric boxes can bind to decimal? without
