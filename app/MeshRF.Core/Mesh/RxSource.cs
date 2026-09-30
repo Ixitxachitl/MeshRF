@@ -28,8 +28,14 @@ namespace MeshRF.Mesh;
 /// channel it arrived sealed with. What it does not have is a frequency worth
 /// recording — it was heard on no radio, so it says nothing about what its
 /// sender is tuned to.</param>
+/// <param name="Sf">A hand-made listener's spreading factor, or 0 for one on
+/// a preset. With <see cref="BwHz"/> and <see cref="Cr"/> it is what a reply
+/// goes out on, since there is no preset to name.</param>
+/// <param name="Cr">A hand-made listener's coding-rate denominator, with
+/// <see cref="Sf"/>.</param>
 public sealed record RxSource(int Listener, string MeshName, LoraPreset? Preset, bool IsCustom,
-                              double FreqMHz, uint BwHz = 0, bool FromDownlink = false)
+                              double FreqMHz, uint BwHz = 0, bool FromDownlink = false,
+                              byte Sf = 0, byte Cr = 0)
 {
     public bool IsPrimary => Listener == 0;
 

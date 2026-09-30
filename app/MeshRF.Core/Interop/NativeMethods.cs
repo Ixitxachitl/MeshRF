@@ -209,6 +209,10 @@ internal static partial class NativeMethods
     [LibraryImport(Dll, EntryPoint = "mrf_core_transmit")]
     public static unsafe partial int CoreTransmit(nint core, int preset, ulong centerFreqHz,
         byte* payload, uint payloadLen, byte txvgaGainDb, int ampEnable);
+
+    [LibraryImport(Dll, EntryPoint = "mrf_core_transmit_params")]
+    public static unsafe partial int CoreTransmitParams(nint core, byte sf, uint bwHz, byte cr,
+        ulong centerFreqHz, byte* payload, uint payloadLen, byte txvgaGainDb, int ampEnable);
 }
 
 

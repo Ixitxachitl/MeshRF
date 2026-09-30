@@ -1567,7 +1567,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
                 // rather than relying on that.
                 if (!IsRunning) return;
                 var target = TargetForSource(source);
-                try { _core.Transmit(target.Preset, target.FreqHz, frame, TxGainDb, TxAmpEnable); }
+                try { _core.Transmit(target, frame, TxGainDb, TxAmpEnable); }
                 catch { return; /* best-effort auto-reply */ }
                 // An answer we sent on our own initiative is the one kind of
                 // outgoing frame the operator never asked for, so it is the one
@@ -1789,7 +1789,8 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         if (_core is null) return;
         var sources = new List<RxSource>();
         foreach (var l in plan.Listeners)
-            sources.Add(new RxSource(sources.Count, l.Name, l.Preset, l.IsCustom, l.FreqMHz, l.BwHz));
+            sources.Add(new RxSource(sources.Count, l.Name, l.Preset, l.IsCustom, l.FreqMHz, l.BwHz,
+                                     Sf: l.IsCustom ? l.Sf : (byte)0, Cr: l.IsCustom ? l.Cr : (byte)0));
 
         if (plan.Listeners.Count == 1)
         {
@@ -2806,15 +2807,14 @@ public partial class RadioViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        var hz = target.FreqHz;
-        var preset = target.Preset; var gain = TxGainDb; var amp = TxAmpEnable;
+        var gain = TxGainDb; var amp = TxAmpEnable;
 
         await _txSemaphore.WaitAsync().ConfigureAwait(false);
         bool sent;
         try
         {
             await WaitForTxOpportunityAsync(target.Listener).ConfigureAwait(false);
-            sent = await Task.Run(() => _core.Transmit(preset, hz, frame, gain, amp))
+            sent = await Task.Run(() => _core.Transmit(target, frame, gain, amp))
                              .ConfigureAwait(true);
         }
         finally

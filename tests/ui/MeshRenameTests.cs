@@ -79,6 +79,23 @@ public class MeshRenameTests(HeadlessAvalonia avalonia)
                               t => t.Config.Preset == "Backyard net");
     }));
 
+    /// <summary>A hand-made listener names no preset, so what goes out on it
+    /// is its own settings, not the primary's.</summary>
+    [Fact]
+    public void SendingOnAHandMadeListenerUsesItsOwnSettings() => avalonia.Run(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        var target = vm.TargetForSourceForTest(
+            new RxSource(1, "TurboLink", null, true, 907.75, BwHz: 500_000, Sf: 5, Cr: 8));
+
+        Assert.True(target.IsCustom);
+        Assert.Equal((byte)5, target.Sf);
+        Assert.Equal(500_000u, target.BwHz);
+        Assert.Equal((byte)8, target.Cr);
+        Assert.Equal(907_750_000ul, target.FreqHz);
+        Assert.Equal(1, target.Listener);
+    }));
+
     /// <summary>And its nodes, which would otherwise be pointing at a mesh
     /// that no longer exists — out of reach, and spoken to on the primary.
     /// </summary>

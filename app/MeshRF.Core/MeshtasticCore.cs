@@ -702,6 +702,30 @@ public sealed class MeshtasticCore : IDisposable
         finally { _lock.ExitReadLock(); }
     }
 
+    /// <summary>Transmits on a target's settings: its preset, or the explicit
+    /// SF/BW/CR of a hand-made listener or a custom primary.</summary>
+    public bool Transmit(Mesh.TxTarget target, ReadOnlySpan<byte> payload,
+                         byte txvgaGainDb = 30, bool ampEnable = false)
+    {
+        if (!target.IsCustom)
+            return Transmit(target.Preset, target.FreqHz, payload, txvgaGainDb, ampEnable);
+        _lock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            if (payload.IsEmpty) return false;
+            unsafe
+            {
+                fixed (byte* p = payload)
+                {
+                    return NativeMethods.CoreTransmitParams(_handle, target.Sf, target.BwHz, target.Cr,
+                        target.FreqHz, p, (uint)payload.Length, txvgaGainDb, ampEnable ? 1 : 0) != 0;
+                }
+            }
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
     /// <summary>True while an IQ capture is in progress.</summary>
     public bool IsCapturing
     {

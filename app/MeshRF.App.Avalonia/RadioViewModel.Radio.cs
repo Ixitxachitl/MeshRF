@@ -399,9 +399,17 @@ public partial class RadioViewModel
     /// goes out on: the same settings.</summary>
     private TxTarget TargetForSource(RxSource source)
     {
-        if (source.IsPrimary || source.Preset is null) return PrimaryTarget();
-        return TxTarget.ForPreset(source.Preset.Value, (ulong)Math.Round(source.FreqMHz * 1_000_000.0), source.Listener);
+        if (source.IsPrimary) return PrimaryTarget();
+        var hz = (ulong)Math.Round(source.FreqMHz * 1_000_000.0);
+        // A hand-made listener names no preset, so its own settings go with it.
+        if (source.Sf != 0) return TxTarget.ForParams(source.Sf, source.BwHz, source.Cr, hz, source.Listener);
+        if (source.Preset is { } preset) return TxTarget.ForPreset(preset, hz, source.Listener);
+        return PrimaryTarget();
     }
+
+    /// <summary>Where a reply to a packet heard on <paramref name="source"/>
+    /// goes. Choosing it needs no running receiver, though sending does.</summary>
+    public TxTarget TargetForSourceForTest(RxSource source) => TargetForSource(source);
 
     /// <summary>What a packet to a node goes out on: the settings it was last
     /// heard on, when that preset is one the receiver is listening on now,
