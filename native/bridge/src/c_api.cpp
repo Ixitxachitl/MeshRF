@@ -335,24 +335,40 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_packet_spectrogram(const mrf_core_t* cor
                                                            float* out_dbfs,
                                                            uint32_t n_time,
                                                            uint32_t n_freq) {
+    return mrf_core_pull_listener_packet_spectrogram(core, 0, out_dbfs, n_time, n_freq);
+}
+
+MRF_API uint32_t MRF_CALL mrf_core_pull_listener_packet_spectrogram(const mrf_core_t* core,
+                                                                    int32_t listener,
+                                                                    float* out_dbfs,
+                                                                    uint32_t n_time,
+                                                                    uint32_t n_freq) {
     if (!core || !out_dbfs) return 0u;
     return core->core.pull_packet_spectrogram(
         std::span<float>(out_dbfs,
                          static_cast<std::size_t>(n_time) * n_freq),
-        n_time, n_freq);
+        n_time, n_freq, listener);
 }
 
 MRF_API uint32_t MRF_CALL mrf_core_pull_packet_iq(const mrf_core_t* core,
                                                   float* out_iq,
                                                   uint32_t capacity,
                                                   mrf_packet_iq_info_t* info) {
+    return mrf_core_pull_listener_packet_iq(core, 0, out_iq, capacity, info);
+}
+
+MRF_API uint32_t MRF_CALL mrf_core_pull_listener_packet_iq(const mrf_core_t* core,
+                                                           int32_t listener,
+                                                           float* out_iq,
+                                                           uint32_t capacity,
+                                                           mrf_packet_iq_info_t* info) {
     if (!core) return 0u;
     mrf::Core::PacketIqInfo native{};
     // std::complex<float> is layout-compatible with float[2], which is what
     // makes the caller's interleaved buffer usable as-is.
     auto* samples = reinterpret_cast<std::complex<float>*>(out_iq);
     const uint32_t n = core->core.pull_packet_iq(
-        std::span<std::complex<float>>(samples, out_iq ? capacity : 0u), native);
+        std::span<std::complex<float>>(samples, out_iq ? capacity : 0u), native, listener);
     if (info) {
         info->sample_count = native.sample_count;
         info->sample_rate_hz = native.sample_rate_hz;
@@ -525,6 +541,6 @@ MRF_API int32_t MRF_CALL mrf_set_custom_spi_board(
 //     declarable custom pin map and power model.
 // 11: several listeners off one capture (mrf_core_start_rx_multi), events
 //     that say which listener they are about, per-listener signal stats.
-MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 12u; }
+MRF_API uint32_t MRF_CALL mrf_abi_version(void) { return 13u; }
 
 } // extern "C"

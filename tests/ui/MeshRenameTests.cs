@@ -96,6 +96,23 @@ public class MeshRenameTests(HeadlessAvalonia avalonia)
         Assert.Equal(1, target.Listener);
     }));
 
+    /// <summary>The last-packet panel draws a hand-made listener's packet on
+    /// its own settings and under its own name, and a preset listener's on the
+    /// preset's.</summary>
+    [Fact]
+    public void ASecondListenersPacketIsDrawnOnItsOwnSettings() => avalonia.Run(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+
+        var custom = vm.LoraOf(new RxSource(1, "TurboLink", null, true, 907.75, BwHz: 500_000, Sf: 5, Cr: 8));
+        Assert.Equal(("TurboLink", (byte)5, 500.0, (byte)8), custom);
+
+        var preset = vm.LoraOf(RxSource.ForPreset(2, LoraPreset.ShortFast, 906.875));
+        Assert.Equal("ShortFast", preset.MeshName);
+        Assert.Equal((byte)7, preset.Sf);
+        Assert.Equal(250.0, preset.BwKhz, 3);
+    }));
+
     /// <summary>And its nodes, which would otherwise be pointing at a mesh
     /// that no longer exists — out of reach, and spoken to on the primary.
     /// </summary>

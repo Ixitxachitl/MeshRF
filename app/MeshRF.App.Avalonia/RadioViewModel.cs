@@ -864,9 +864,9 @@ public partial class RadioViewModel : ObservableObject, IDisposable
     /// <summary>What the glyph means, since a shape cannot say it itself.</summary>
     public string ToggleButtonTip => IsRunning ? "Stop the receiver" : "Start the receiver";
 
-    /// <summary>Raised when a CRC-valid packet decodes, so the view can freeze
-    /// a spectrogram of it (MeshRF.App's PacketDecoded).</summary>
-    public event Action? PacketDecoded;
+    /// <summary>Raised when a CRC-valid packet decodes, with the listener that
+    /// heard it, so the view can freeze a spectrogram of it.</summary>
+    public event Action<int>? PacketDecoded;
 
     /// <summary>Exposed so MainWindow's code-behind can drive the
     /// spectrum/waterfall pull loop — mirrors how MeshRF.App's

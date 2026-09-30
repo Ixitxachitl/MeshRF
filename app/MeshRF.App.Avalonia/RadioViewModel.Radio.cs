@@ -386,6 +386,28 @@ public partial class RadioViewModel
     private RxSource SourceFor(int listener) =>
         listener >= 0 && listener < _rxSources.Length ? _rxSources[listener] : PrimarySource();
 
+    /// <summary>What a listener is called and what it is tuned to, for the
+    /// last-packet panel: its title, the time grid it is drawn on, and the
+    /// sidecar of an IQ export.</summary>
+    public (string MeshName, byte Sf, double BwKhz, byte Cr) ListenerLora(int listener) =>
+        LoraOf(SourceFor(listener));
+
+    /// <summary>The same, for a listener as the receiver was started with it.</summary>
+    public (string MeshName, byte Sf, double BwKhz, byte Cr) LoraOf(RxSource source)
+    {
+        if (!source.IsPrimary)
+        {
+            if (source.Sf != 0) return (source.MeshName, source.Sf, source.BwHz / 1000.0, source.Cr);
+            if (source.Preset is { } preset)
+            {
+                var p = LoraParamsHelper.FromPreset(preset, ChannelPlan.IsWideLora(SelectedRegion));
+                return (source.MeshName, p.Sf, p.BwKhz, p.Cr);
+            }
+        }
+        var (sf, bwKhz, cr) = EffectiveLoraParams;
+        return (PrimarySource().MeshName, sf, bwKhz, cr);
+    }
+
     /// <summary>The toolbar configuration as a transmit target.</summary>
     private TxTarget PrimaryTarget()
     {
@@ -566,9 +588,9 @@ public partial class RadioViewModel
 
             DecodePayloadIfPossible(kind, listener);
 
-            // The packet spectrogram follows the primary: its IQ ring is the
-            // primary's channel.
-            if (listener == 0 && IsCrcOkPayload(kind)) PacketDecoded?.Invoke();
+            // Every listener's channel keeps its own IQ history, so any of
+            // them can be drawn — our own frames heard back included.
+            if (IsCrcOkPayload(kind)) PacketDecoded?.Invoke(listener);
         }
     }
 }

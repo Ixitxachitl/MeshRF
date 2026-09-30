@@ -245,6 +245,15 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_packet_spectrogram(const mrf_core_t* cor
                                                            uint32_t n_time,
                                                            uint32_t n_freq);
 
+// The same for the last packet one listener decoded, by its index in the set
+// the receiver was started with; the call above is listener 0, the primary.
+// Returns 0 for a listener with no IQ: out of range, or a hardware modem.
+MRF_API uint32_t MRF_CALL mrf_core_pull_listener_packet_spectrogram(const mrf_core_t* core,
+                                                                    int32_t listener,
+                                                                    float* out_dbfs,
+                                                                    uint32_t n_time,
+                                                                    uint32_t n_freq);
+
 // What a packet-IQ copy covers, filled in whether or not the samples fit.
 typedef struct mrf_packet_iq_info_t {
     uint32_t sample_count;   // complex samples in the located window
@@ -265,6 +274,13 @@ MRF_API uint32_t MRF_CALL mrf_core_pull_packet_iq(const mrf_core_t* core,
                                                   float* out_iq,
                                                   uint32_t capacity,
                                                   mrf_packet_iq_info_t* info);
+
+// The same for one listener's last packet, as for the spectrogram.
+MRF_API uint32_t MRF_CALL mrf_core_pull_listener_packet_iq(const mrf_core_t* core,
+                                                           int32_t listener,
+                                                           float* out_iq,
+                                                           uint32_t capacity,
+                                                           mrf_packet_iq_info_t* info);
 
 // Copies a NUL-terminated UTF-8 device name into `buf` (up to `capacity`
 // bytes including the NUL). Returns the number of bytes that would be needed

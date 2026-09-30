@@ -145,7 +145,7 @@ public sealed class MeshtasticCore : IDisposable
     /// step with the native side whenever an entry point is added that the
     /// managed layer calls unconditionally.
     /// </summary>
-    private const uint RequiredAbiVersion = 12;
+    private const uint RequiredAbiVersion = 13;
 
     public MeshtasticCore()
     {
@@ -943,14 +943,15 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
-    /// Computes a high-time-resolution spectrogram of the most recent ~150 ms
-    /// of modem-rate IQ, cropped to the LoRa channel. Fills <paramref
-    /// name="buffer"/> row-major as <paramref name="nTime"/> rows of <paramref
-    /// name="nFreq"/> dBFS values (low->high freq left->right). The buffer must
-    /// hold at least nTime*nFreq floats. Returns the number of rows written, or
-    /// 0 if not enough IQ history is available.
+    /// Computes a high-time-resolution spectrogram of the last packet
+    /// <paramref name="listener"/> decoded, from its channel's modem-rate IQ,
+    /// cropped to the LoRa channel. Fills <paramref name="buffer"/> row-major
+    /// as <paramref name="nTime"/> rows of <paramref name="nFreq"/> dBFS values
+    /// (low->high freq left->right). The buffer must hold at least nTime*nFreq
+    /// floats. Returns the number of rows written, or 0 if not enough IQ
+    /// history is available.
     /// </summary>
-    public int PullPacketSpectrogram(Span<float> buffer, int nTime, int nFreq)
+    public int PullPacketSpectrogram(Span<float> buffer, int nTime, int nFreq, int listener = 0)
     {
         _lock.EnterReadLock();
         try
@@ -961,8 +962,8 @@ public sealed class MeshtasticCore : IDisposable
             {
                 fixed (float* p = buffer)
                 {
-                    return (int)NativeMethods.CorePullPacketSpectrogram(
-                        _handle, p, (uint)nTime, (uint)nFreq);
+                    return (int)NativeMethods.CorePullListenerPacketSpectrogram(
+                        _handle, listener, p, (uint)nTime, (uint)nFreq);
                 }
             }
         }
@@ -970,7 +971,8 @@ public sealed class MeshtasticCore : IDisposable
     }
 
     /// <summary>
-    /// Copies the raw modem-rate IQ of the most recently decoded packet — the
+    /// Copies the raw modem-rate IQ of <paramref name="listener"/>'s last
+    /// decoded packet — the
     /// same window <see cref="PullPacketSpectrogram"/> draws, pre-roll through
     /// tail — into <paramref name="interleaved"/> as interleaved float32 I/Q,
     /// which is the ".cf32" file layout. Returns the complex samples written,
@@ -980,7 +982,7 @@ public sealed class MeshtasticCore : IDisposable
     /// decoded since RX started, the last one has aged out of the ring, or the
     /// receiver is a hardware modem and produces no IQ.
     /// </summary>
-    public int PullPacketIq(Span<float> interleaved, out PacketIqInfo info)
+    public int PullPacketIq(Span<float> interleaved, out PacketIqInfo info, int listener = 0)
     {
         info = default;
         _lock.EnterReadLock();
@@ -991,8 +993,8 @@ public sealed class MeshtasticCore : IDisposable
             {
                 fixed (float* p = interleaved)
                 {
-                    uint written = NativeMethods.CorePullPacketIq(
-                        _handle, p, (uint)(interleaved.Length / 2), out var native);
+                    uint written = NativeMethods.CorePullListenerPacketIq(
+                        _handle, listener, p, (uint)(interleaved.Length / 2), out var native);
                     info = new PacketIqInfo((int)native.SampleCount,
                                             (int)native.SampleRateHz,
                                             native.CenterFreqHz);

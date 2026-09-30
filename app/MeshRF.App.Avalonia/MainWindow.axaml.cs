@@ -341,17 +341,22 @@ public partial class MainWindow : Window
     private uint[] _snapshotPixelBuffer = Array.Empty<uint>();
     private int _snapshotInFlight;
 
+    // The listener the panel's packet came from, and what it is tuned to: an
+    // IQ export writes that packet, and its sidecar says how it was sent.
+    private int _snapshotListener;
+    private (string MeshName, byte Sf, double BwKhz, byte Cr) _snapshotLora;
+
     // A CRC-valid packet just decoded. A bad frame or a false positive
     // (preamble that never decodes) never reaches here, so the last-packet
     // panel only ever shows genuine packets. The whole packet is already
     // buffered in the native IQ ring by the time it decodes, so we snapshot
     // immediately — any extra delay just ages the packet toward the far end of
     // the ring and risks the preamble scrolling out.
-    private void OnPacketDecoded()
+    private void OnPacketDecoded(int listener)
     {
         if (!_lastPacketExpanded) return; // Collapsed: don't pay for a snapshot nobody sees.
         if (Interlocked.Exchange(ref _snapshotInFlight, 1) != 0) return;
-        _ = FreezeLastPacketAsync();
+        _ = FreezeLastPacketAsync(listener);
     }
 
     // Collapsed state for the last-packet panel, persisted under the same
@@ -402,9 +407,10 @@ public partial class MainWindow : Window
         var core = _viewModel.Core;
         if (core is null) return;
 
-        // Copy before the picker opens. The ring holds ~12 s of modem-rate
-        // history, which a dialog left sitting on screen outlives easily, so a
-        // copy made afterwards would be of whatever had scrolled in since.
+        // Copy before the picker opens. The ring holds a few seconds of
+        // modem-rate history, which a dialog left sitting on screen outlives
+        // easily, so a copy made afterwards would be of whatever had scrolled
+        // in since.
         float[] iq = Array.Empty<float>();
         PacketIqInfo info = default;
         int samples = 0;
@@ -413,10 +419,10 @@ public partial class MainWindow : Window
             // Ask how long the window is first — it follows the packet's own
             // length. A packet decoding between the two calls lengthens it,
             // which is what the retries are for.
-            core.PullPacketIq(Span<float>.Empty, out var window);
+            core.PullPacketIq(Span<float>.Empty, out var window, _snapshotListener);
             if (window.SampleCount <= 0) break;
             iq = new float[window.SampleCount * 2];
-            samples = core.PullPacketIq(iq, out info);
+            samples = core.PullPacketIq(iq, out info, _snapshotListener);
         }
 
         if (samples <= 0)
@@ -490,10 +496,10 @@ public partial class MainWindow : Window
         string rate = info.SampleRateHz.ToString(CultureInfo.InvariantCulture);
         string center = info.CenterFreqHz.ToString(CultureInfo.InvariantCulture);
         string duration = seconds.ToString("0.000000", CultureInfo.InvariantCulture);
-        string sf = ((int)_viewModel.OverrideSf).ToString(CultureInfo.InvariantCulture);
-        string bw = ((long)Math.Round(_viewModel.OverrideBwKhz * 1000.0))
+        string sf = ((int)_snapshotLora.Sf).ToString(CultureInfo.InvariantCulture);
+        string bw = ((long)Math.Round(_snapshotLora.BwKhz * 1000.0))
             .ToString(CultureInfo.InvariantCulture);
-        string cr = ((int)_viewModel.OverrideCr).ToString(CultureInfo.InvariantCulture);
+        string cr = ((int)_snapshotLora.Cr).ToString(CultureInfo.InvariantCulture);
         string captured = DateTimeOffset.Now.ToString(
             "yyyy-MM-ddTHH:mm:ss.fffK", CultureInfo.InvariantCulture);
 
@@ -531,12 +537,13 @@ public partial class MainWindow : Window
     /// PullPacketSpectrogram is CPU-heavy (IQ ring copy + energy locator FFTs +
     /// STFT) and so is the bicubic rasterize that follows it, so both run on a
     /// thread-pool thread; only the final blit touches the UI thread.</summary>
-    private async Task FreezeLastPacketAsync()
+    private async Task FreezeLastPacketAsync(int listener)
     {
         try
         {
             var core = _viewModel.Core;
             if (core is null) return;
+            var lora = _viewModel.ListenerLora(listener);
 
             // Size the grid from the LoRa parameters: slow modes (high SF, low
             // BW) need many more STFT frames to hold the full packet.
@@ -546,8 +553,7 @@ public partial class MainWindow : Window
             const int kHop = 128;
             const int nFreq = 256;
 
-            int sf = Math.Clamp((int)_viewModel.OverrideSf, 5, 12);
-            double bwHz = Math.Max(7_800.0, _viewModel.OverrideBwKhz * 1000.0);
+            int sf = Math.Clamp((int)lora.Sf, 5, 12);
             double symbolSamples = (1 << sf) * 4.0;
 
             // 16 preamble + 4.25 sync + 8 header + 280 payload symbols; for
@@ -569,7 +575,7 @@ public partial class MainWindow : Window
                 if (grid is null || grid.Length < nTime * nFreq)
                     _snapshotGridPool[poolIndex] = grid = new float[nTime * nFreq];
 
-                int written = core.PullPacketSpectrogram(grid, nTime, nFreq);
+                int written = core.PullPacketSpectrogram(grid, nTime, nFreq, listener);
                 if (written <= 0) return (0, Array.Empty<float>(), -100.0, 0.0);
 
                 var (floor, ceil) = ComputeContrastLevels(grid.AsSpan(0, written * nFreq));
@@ -589,13 +595,16 @@ public partial class MainWindow : Window
             // shortly after decode before falling back.
             if (rows <= 0)
             {
-                await Task.Delay(ComputeRetryDelayMs()).ConfigureAwait(true);
+                await Task.Delay(ComputeRetryDelayMs(lora.Sf, lora.BwKhz)).ConfigureAwait(true);
                 (rows, grid, floor, ceil) = await Task.Run(PullAndRasterize).ConfigureAwait(true);
             }
 
             if (rows <= 0)
             {
-                FreezeLastPacketFromHistory();
+                // The waterfall history is the whole capture around the device
+                // centre, which is the primary's channel only when it is the
+                // one listener; another's would draw the wrong channel.
+                if (listener == 0) FreezeLastPacketFromHistory();
                 return;
             }
 
@@ -604,7 +613,9 @@ public partial class MainWindow : Window
                 _snapshotPixelBuffer, targetW, targetH,
                 grid, rows, nFreq);
             _snapshotGridPoolIndex = poolIndex;
-            LastPacketTitle.Text = $"Last packet  {UiFormats.Stamp(DateTime.Now)}";
+            _snapshotListener = listener;
+            _snapshotLora = lora;
+            LastPacketTitle.Text = $"Last packet  {lora.MeshName}  {UiFormats.Stamp(DateTime.Now)}";
         }
         finally
         {
@@ -615,10 +626,10 @@ public partial class MainWindow : Window
     /// <summary>Base the retry wait on LoRa symbol time so slow modes (high SF
     /// / low BW) wait longer to accumulate history for the first packet, with
     /// hard bounds for UI responsiveness.</summary>
-    private int ComputeRetryDelayMs()
+    private static int ComputeRetryDelayMs(byte loraSf, double bwKhz)
     {
-        int sf = Math.Clamp((int)_viewModel.OverrideSf, 5, 12);
-        double bwHz = Math.Max(7_800.0, _viewModel.OverrideBwKhz * 1000.0);
+        int sf = Math.Clamp((int)loraSf, 5, 12);
+        double bwHz = Math.Max(7_800.0, bwKhz * 1000.0);
         double symbolMs = ((1 << sf) / bwHz) * 1000.0;
         return Math.Clamp((int)Math.Round(symbolMs * 24.0), 80, 900);
     }

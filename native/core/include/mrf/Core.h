@@ -222,14 +222,16 @@ public:
         std::uint32_t max_count,
         std::span<float> out_frames) const;
 
-    // Compute a high-time-resolution spectrogram of the most recent ~150 ms of
-    // modem-rate IQ, cropped to the LoRa channel. Fills `out` row-major as
-    // n_time rows of n_freq dBFS values (low->high freq left->right, matching
-    // the live waterfall). Returns the number of rows written (n_time) or 0 if
-    // not enough IQ history is available. out.size() must be >= n_time*n_freq.
+    // Compute a high-time-resolution spectrogram of `listener`'s most recently
+    // decoded packet from its channel's modem-rate IQ, cropped to the LoRa
+    // channel. Fills `out` row-major as n_time rows of n_freq dBFS values
+    // (low->high freq left->right, matching the live waterfall). Returns the
+    // number of rows written or 0 if not enough IQ history is available.
+    // out.size() must be >= n_time*n_freq.
     std::uint32_t pull_packet_spectrogram(std::span<float> out,
                                           std::uint32_t n_time,
-                                          std::uint32_t n_freq) const;
+                                          std::uint32_t n_freq,
+                                          int listener = 0) const;
 
     // What a packet-IQ copy covers, filled in whether or not the samples
     // themselves fit in the caller's buffer.
@@ -239,15 +241,16 @@ public:
         std::uint64_t center_freq_hz;  // the channel, which sits at DC here
     };
 
-    // Copy the modem-rate IQ of the most recently decoded packet — the same
-    // window pull_packet_spectrogram() draws, pre-roll through tail — into
+    // Copy the modem-rate IQ of `listener`'s most recently decoded packet — the
+    // same window pull_packet_spectrogram() draws, pre-roll through tail — into
     // `out` as complex float32, which is a ".cf32" file once written. Returns
     // the samples written, or 0 when `out` is too small to hold the window
     // (an empty span asks only how big it is). `info` describes the window
     // either way, with sample_count 0 when the ring holds no decoded packet:
     // none since RX started, or the last one has already scrolled out.
     std::uint32_t pull_packet_iq(std::span<std::complex<float>> out,
-                                 PacketIqInfo& info) const;
+                                 PacketIqInfo& info,
+                                 int listener = 0) const;
 
     [[nodiscard]] CoreSignalStats signal_stats() const noexcept;
 
