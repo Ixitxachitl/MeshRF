@@ -108,15 +108,15 @@ public sealed partial class CustomListenerEditor : ObservableObject
         double bwMHz = Draft.BwKhz / 1000.0;
         if (bwMHz <= 0) return null;
         int auto = AutoSlot();
-        // Auto is first, so a frequency that is both the auto slot's and an
-        // explicit slot's reads as Auto — which is what it is.
-        foreach (var option in _slotOptions)
-        {
-            var slot = option.Slot ?? auto;
-            if (Math.Abs(ChannelPlan.FrequencyMHz(SelectedRegion, bwMHz, slot) - Draft.FreqMHz) < 1e-6)
-                return option;
-        }
-        return null;
+        bool Matches(SlotChoice option) =>
+            Math.Abs(ChannelPlan.FrequencyMHz(SelectedRegion, bwMHz, option.Slot ?? auto) - Draft.FreqMHz) < 1e-6;
+        // The auto slot's frequency is also a numbered slot's, so two entries
+        // can both be right. The one the operator picked stays picked; with
+        // no pick to keep, Auto comes first.
+        if (SelectedSlot is { } picked && _slotOptions.FirstOrDefault(o => o.Slot == picked.Slot) is { } same
+            && Matches(same))
+            return same;
+        return _slotOptions.FirstOrDefault(Matches);
     }
 
     // Surfaced separately so the numeric boxes can bind to decimal? without

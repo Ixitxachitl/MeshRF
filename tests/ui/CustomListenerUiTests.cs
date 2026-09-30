@@ -260,6 +260,25 @@ public class CustomListenerUiTests(HeadlessAvalonia avalonia)
                      ChannelPlan.FrequencyMHz(editor.SelectedRegion, editor.Draft.BwKhz / 1000.0, slot), 3);
     }));
 
+    /// <summary>A slot picked by number stays picked when it happens to be
+    /// the one the name hashes to, rather than being relabelled Auto.</summary>
+    [Fact]
+    public void APickedSlotThatIsAlsoTheAutoSlotStaysPicked() => avalonia.Run(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        var editor = CustomListenerWindow.CreateEditor(vm, null);
+        editor.Draft.Name = "TurboLink";
+        editor.RaiseNameChecked();
+        editor.Sf = 5;
+        editor.BwKhz = 500;
+        int auto = ChannelPlan.DefaultSlot(Region.US, 0.5, "TurboLink", "TurboLink");
+
+        editor.SelectedSlot = editor.SlotOptions.Single(o => o.Slot == auto);
+
+        Assert.Equal(auto, editor.SelectedSlot!.Slot);
+        Assert.Equal((decimal)ChannelPlan.FrequencyMHz(Region.US, 0.5, auto), editor.FreqMHz);
+    }));
+
     /// <summary>And a frequency that matches nothing on the grid leaves it
     /// blank rather than claiming a slot it is not on.</summary>
     [Fact]
