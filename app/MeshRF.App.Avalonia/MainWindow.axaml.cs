@@ -546,15 +546,16 @@ public partial class MainWindow : Window
             var lora = _viewModel.ListenerLora(listener);
 
             // Size the grid from the LoRa parameters: slow modes (high SF, low
-            // BW) need many more STFT frames to hold the full packet.
-            // STFT is a 512-point FFT with a 128-sample hop; at modem rate
-            // (BW * 4 oversampling) a symbol is 2^SF * 4 samples.
-            const int kFft = 512;
-            const int kHop = 128;
+            // BW) need many more STFT frames to hold the full packet. At modem
+            // rate (BW * 4 oversampling) a symbol is 2^SF * 4 samples; each
+            // row looks at a quarter of one, between 64 and 512, and steps a
+            // quarter of that — the rule the native side draws with.
             const int nFreq = 256;
 
             int sf = Math.Clamp((int)lora.Sf, 5, 12);
             double symbolSamples = (1 << sf) * 4.0;
+            int kFft = Math.Clamp((int)symbolSamples / 4, 64, 512);
+            int kHop = Math.Max(1, kFft / 4);
 
             // 16 preamble + 4.25 sync + 8 header + 280 payload symbols; for
             // SF12/125k a 255-byte packet is ~280 symbols ≈ 9 seconds.

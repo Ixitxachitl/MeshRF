@@ -31,6 +31,16 @@ namespace mrf {
 namespace {
 constexpr std::size_t kSpectrumFftSize = 1024;
 constexpr std::size_t kMaxQueuedEvents = 1024;
+
+// Samples each row of the packet snapshot looks at: a quarter of a symbol,
+// between 64 and the 512-point FFT it is padded to. Longer spans chirps at
+// different frequencies and smears them flat; shorter blurs each across the
+// band. That range keeps the chirp line sharpest from SF5 to SF12 at four
+// samples a chip. MainWindow sizes its grid with the same rule, and a quarter
+// of this as the hop.
+constexpr std::size_t packet_look_samples(std::size_t sym_samples) {
+    return std::clamp<std::size_t>(sym_samples / 4u, 64u, 512u);
+}
 // Fill level past which the queue keeps only the lines the app acts on; see
 // Impl::is_diagnostic_line.
 constexpr std::size_t kShedDiagnosticsAbove = kMaxQueuedEvents / 2;
@@ -1371,24 +1381,25 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
         }
     }
 
-    // Fixed STFT hop (75% overlap of the kFft window) so the snapshot's time
-    // resolution reflects the actual located packet length captured in the IQ
-    // history rather than always being stretched/compressed to a fixed row
-    // count. n_time is treated as the maximum the caller's buffer can hold.
-    const std::size_t hop = std::max<std::size_t>(1u, kFft / 4u);
+    // Each row looks at packet_look_samples, zero-padded to kFft; at SF5 a
+    // full kFft spans four symbols and draws a flat band. The hop is a
+    // quarter of the look, so the snapshot's time resolution follows the
+    // packet's own length; n_time is the most rows the caller's buffer holds.
+    const std::size_t look = packet_look_samples(sym_samples);
+    const std::size_t hop = std::max<std::size_t>(1u, look / 4u);
 
-    std::uint32_t rows = (window > kFft)
-        ? static_cast<std::uint32_t>((window - kFft) / hop + 1u)
+    std::uint32_t rows = (window > look)
+        ? static_cast<std::uint32_t>((window - look) / hop + 1u)
         : 1u;
     if (rows > n_time) rows = n_time;
     if (rows < 1u) rows = 1u;
 
-    // Hann window.
-    std::vector<float> win(kFft);
+    // Hann window over the look.
+    std::vector<float> win(look);
     constexpr float kPi = std::numbers::pi_v<float>;
-    for (std::size_t i = 0; i < kFft; ++i)
+    for (std::size_t i = 0; i < look; ++i)
         win[i] = 0.5f * (1.0f - std::cos(2.0f * kPi * static_cast<float>(i) /
-                                         static_cast<float>(kFft - 1)));
+                                         static_cast<float>(look - 1)));
 
     dsp::Fft fft(kFft);
     std::vector<std::complex<float>> buf(kFft);
@@ -1406,13 +1417,13 @@ std::uint32_t Core::pull_packet_spectrogram(std::span<float> out,
     const std::size_t cropLo = half - cropHalf;
     const std::size_t cropN = cropHalf * 2u;
 
-    const float norm = 1.0f / static_cast<float>(kFft);
+    const float norm = 1.0f / static_cast<float>(look);
     for (std::uint32_t t = 0; t < rows; ++t) {
         const std::size_t base =
             off0 + std::min<std::size_t>(static_cast<std::size_t>(t) * hop,
-                                         window - kFft);
+                                         window - look);
         for (std::size_t i = 0; i < kFft; ++i)
-            buf[i] = snap[base + i] * win[i];
+            buf[i] = i < look ? snap[base + i] * win[i] : std::complex<float>{};
         fft.forward(std::span<std::complex<float>>(buf.data(), kFft));
 
         // fftshift so DC lands at bin kFft/2, matching the live waterfall.
