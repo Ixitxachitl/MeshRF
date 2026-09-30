@@ -15,6 +15,8 @@
 
 #include <complex>
 #include <cstdint>
+#include <cmath>
+#include <random>
 #include <vector>
 
 using namespace mrf::modem;
@@ -271,4 +273,55 @@ TEST(LoraTx, FrameLengthMatchesTheRadiosTimeOnAir) {
                 << "SF" << int(p.spreading_factor) << " " << len << " B";
         }
     }
+}
+
+// With 32 bins, noise lands six symbols running within a bin of each other
+// every few seconds, which read as a preamble and logged a bad header each
+// time. SF5 asks for a longer run so it false-alarms no more than SF7 does.
+TEST(LoraTx, NoiseIsNotAPreambleAtLowSpreadingFactors) {
+    constexpr int kOs = 4;
+    for (const std::uint8_t sf : {5, 6}) {
+        const std::uint32_t bw = 500'000;
+        MeshtasticRx rx(sf, bw, kOs);
+        std::mt19937 rng(1234 + sf);
+        std::normal_distribution<float> g(0.0f, 1.0f);
+        std::vector<cf> block(1u << 16);
+        const std::uint64_t total = 30ull * bw * kOs; // 30 s of air
+        for (std::uint64_t done = 0; done < total; done += block.size()) {
+            for (auto& s : block) s = {g(rng), g(rng)};
+            rx.process(std::span<const cf>(block.data(), block.size()));
+        }
+        EXPECT_EQ(rx.preambles_detected(), 0u) << "SF" << int(sf);
+    }
+}
+
+// And asking for that longer run does not cost frames a shorter one decodes:
+// both lose some at +3 dB and none at +6.
+TEST(LoraTx, Sf5StillDecodesInNoise) {
+    constexpr int kOs = 4;
+    const LoraParams p = low_sf(5, 500'000, 8);
+    const auto data = make_payload(40);
+    const auto frame = make_modem(p)->encode(
+        std::span<const std::uint8_t>(data.data(), data.size()));
+    std::mt19937 rng(99);
+    // SNR in the channel bandwidth: noise power spread over kOs times it.
+    const float snr_db = 6.0f;
+    const float sigma = std::sqrt(kOs * std::pow(10.0f, -snr_db / 10.0f) / 2.0f);
+    std::normal_distribution<float> g(0.0f, sigma);
+
+    int decoded = 0;
+    constexpr int kFrames = 20;
+    for (int f = 0; f < kFrames; ++f) {
+        MeshtasticRx rx(p.spreading_factor, p.bandwidth_hz, kOs);
+        bool ok = false;
+        rx.set_payload_callback([&](const PayloadEvent& ev) { ok = ok || ev.crc_ok; });
+        std::vector<cf> stream;
+        const int lead = 1000 + f * 37; // arbitrary timing
+        for (int i = 0; i < lead; ++i) stream.emplace_back(g(rng), g(rng));
+        for (const auto& s : frame) stream.emplace_back(s.real() + g(rng), s.imag() + g(rng));
+        for (int i = 0; i < 32 * kOs * 20; ++i) stream.emplace_back(g(rng), g(rng));
+        rx.process(std::span<const cf>(stream.data(), stream.size()));
+        decoded += ok ? 1 : 0;
+    }
+    EXPECT_GE(decoded, kFrames - 1);
 }

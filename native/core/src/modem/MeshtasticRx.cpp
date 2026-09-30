@@ -65,8 +65,11 @@ MeshtasticRx::MeshtasticRx(std::uint8_t spreading_factor,
     std::copy(down_chirps_.begin(), down_chirps_.begin() + n_, down_chirps_.begin() + n_);
 
     // Number of preamble up-chirps we require to confirm a lock. The over-
-    // the-air preamble is 16 chirps; we lock well before it ends.
-    required_upchirps_ = 6;
+    // the-air preamble is 16 chirps; we lock well before it ends. Noise meets
+    // the within-a-bin test with odds of about 3/N a symbol, so a small bin
+    // space needs a longer run to false-alarm as rarely: at 500 kHz, 6 at SF7
+    // comes to about two a day, and 8 at SF6 and 10 at SF5 to fewer.
+    required_upchirps_ = (sf_ == 5 ? 10 : sf_ == 6 ? 8 : 6);
     up_symb_to_use_    = required_upchirps_ - 1;
 
     preamble_vals_.assign(static_cast<std::size_t>(required_upchirps_), 0);
