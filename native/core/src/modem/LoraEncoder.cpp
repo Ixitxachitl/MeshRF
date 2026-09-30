@@ -98,14 +98,15 @@ std::vector<std::uint16_t> encode_frame_symbols(std::span<const std::uint8_t> da
                                                 bool has_crc,
                                                 bool low_data_rate_optimize) {
     const int sf = static_cast<int>(spreading_factor);
-    if (sf < 7 || sf > 12)
-        throw std::invalid_argument("encode_frame_symbols: SF must be 7..12");
+    if (sf < 5 || sf > 12)
+        throw std::invalid_argument("encode_frame_symbols: SF must be 5..12");
     if (cr < 1 || cr > 4)
         throw std::invalid_argument("encode_frame_symbols: cr must be 1..4");
     if (data.empty() || data.size() > 255)
         throw std::invalid_argument("encode_frame_symbols: data length 1..255");
 
-    const std::uint8_t sf_app = static_cast<std::uint8_t>(sf - 2);
+    const std::uint8_t sf_app = header_block_codewords(spreading_factor);
+    const bool full_rate_header = header_at_full_rate(spreading_factor);
     const std::uint8_t pl = static_cast<std::uint8_t>(data.size());
 
     // --- Block layout (gr-lora_sdr formula) --------------------------------
@@ -115,12 +116,9 @@ std::vector<std::uint16_t> encode_frame_symbols(std::span<const std::uint8_t> da
     const std::uint8_t ppm =
         static_cast<std::uint8_t>(sf - (low_data_rate_optimize ? 2 : 0));
     const std::uint8_t cw_len = static_cast<std::uint8_t>(cr + 4);
-    const int crc_flag = has_crc ? 1 : 0;
-    const int num = 8 * static_cast<int>(pl) - 4 * sf + 28 + 16 * crc_flag;
-    const int den = 4 * (sf - (low_data_rate_optimize ? 2 : 0));
-    int blocks = (num + den - 1) / den;
-    if (blocks < 0) blocks = 0;
-    const std::size_t leak_count = static_cast<std::size_t>(sf_app) - 5u; // sf-7
+    const int blocks = payload_block_count(pl, spreading_factor, has_crc,
+                                           low_data_rate_optimize);
+    const std::size_t leak_count = static_cast<std::size_t>(sf_app) - 5u;
     const std::size_t total_nibbles =
         leak_count + static_cast<std::size_t>(blocks) * ppm;
     const std::size_t total_bytes = (total_nibbles + 1u) / 2u;
@@ -178,7 +176,9 @@ std::vector<std::uint16_t> encode_frame_symbols(std::span<const std::uint8_t> da
             std::span<const std::uint8_t>(codewords.data(), codewords.size()),
             sf_app, /*cr_app*/ 8);
         for (std::uint16_t b : sym_bits)
-            symbols.push_back(header_bits_to_symbol(b, spreading_factor));
+            symbols.push_back(full_rate_header
+                                  ? payload_bits_to_symbol(b, spreading_factor, spreading_factor)
+                                  : header_bits_to_symbol(b, spreading_factor));
     }
 
     // --- 4. Payload blocks --------------------------------------------------

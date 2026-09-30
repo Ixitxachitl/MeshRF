@@ -230,6 +230,13 @@ TEST(Sx126xAirtime, MatchesTheSemtechFormulaForShortFast) {
     EXPECT_NEAR(t, 0.064768, 1e-6);
 }
 
+TEST(Sx126xAirtime, MatchesTheSemtechFormulaForSf5) {
+    // SF5 / 500 kHz / 4-8, the SF5/6 form: 16 + 6.25 preamble symbols (the
+    // fine sync included) + 8 header + 13 blocks of 8, at 64 us each.
+    const double t = hal::lora_airtime_seconds(params(5, 500'000, 8), 30);
+    EXPECT_NEAR(t, 0.008592, 1e-6);
+}
+
 TEST(Sx126xAirtime, GrowsWithSpreadingFactorAndPayload) {
     const auto p = params(9, 125'000, 5);
     EXPECT_GT(hal::lora_airtime_seconds(p, 200), hal::lora_airtime_seconds(p, 20));

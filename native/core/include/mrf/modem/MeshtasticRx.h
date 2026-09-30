@@ -166,6 +166,7 @@ private:
 
     // --- Frame collection ---------------------------------------------
     int frame_symbol_count_{0};
+    int fine_sync_left_{0}; // SF5/6 fine-sync chirps still to pass over
     int expected_symbols_{0};
     bool header_locked_{false};
     std::uint64_t frame_first_sample_{};

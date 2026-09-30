@@ -48,7 +48,7 @@ MRF_API int MRF_CALL mrf_core_start_rx_params(mrf_core_t* core,
     // make_modem() in LoraModem.cpp) before it's used as a shift amount below
     // (1u << sf is undefined behavior for sf >= 32), and bw_hz must be
     // non-zero to avoid dividing by zero.
-    if (sf < 7 || sf > 12 || bw_hz == 0) return -3;
+    if (sf < 5 || sf > 12 || bw_hz == 0) return -3;
     try {
         mrf::modem::LoraParams p{};
         p.spreading_factor = sf;
@@ -79,7 +79,7 @@ MRF_API int MRF_CALL mrf_core_start_rx_multi(mrf_core_t* core,
         if (l.sf != 0) {
             // Same guard as mrf_core_start_rx_params: sf is a shift amount
             // further down, and bw_hz a divisor.
-            if (l.sf < 7 || l.sf > 12 || l.bw_hz == 0) return -3;
+            if (l.sf < 5 || l.sf > 12 || l.bw_hz == 0) return -3;
             r.params.spreading_factor = static_cast<uint8_t>(l.sf);
             r.params.bandwidth_hz     = l.bw_hz;
             r.params.coding_rate      = static_cast<uint8_t>(l.cr);
@@ -458,10 +458,9 @@ MRF_API int32_t MRF_CALL mrf_core_transmit_params(mrf_core_t* core,
                                                   uint8_t txvga_gain_db,
                                                   int32_t amp_enable) {
     if (!core || !payload || payload_len == 0) return 0;
-    // ChirpChatTx (the modulator this ultimately reaches) only supports
-    // SF 7..12; reject out of range here rather than letting a throw from
-    // deep in the modem propagate, and to avoid `1u << sf` being UB below.
-    if (sf < 7 || sf > 12 || bw_hz == 0) return 0;
+    // Reject out of range here rather than letting a throw from deep in the
+    // modem propagate, and to avoid `1u << sf` being UB below.
+    if (sf < 5 || sf > 12 || bw_hz == 0) return 0;
     try {
         mrf::modem::LoraParams p{};
         p.spreading_factor = sf;

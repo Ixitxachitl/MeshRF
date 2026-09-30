@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "mrf/modem/ChirpChatTx.h"
+#include "mrf/modem/LoraDecoder.h"
 
 #include <cmath>
 #include <numbers>
@@ -22,8 +23,8 @@ ChirpChatTx::ChirpChatTx(std::uint8_t spreading_factor,
       sync_word_(sync_word),
       preamble_symbols_(preamble_symbols),
       n_(1 << spreading_factor) {
-    if (sf_ < 7 || sf_ > 12)
-        throw std::invalid_argument("ChirpChatTx: SF must be 7..12");
+    if (sf_ < 5 || sf_ > 12)
+        throw std::invalid_argument("ChirpChatTx: SF must be 5..12");
     if (os_ < 1)
         throw std::invalid_argument("ChirpChatTx: oversampling must be >= 1");
 }
@@ -62,9 +63,9 @@ std::vector<std::complex<float>> ChirpChatTx::modulate(
     const int sym_samples = n_ * os_;
 
     std::vector<std::complex<float>> out;
-    // preamble + 2 sync + 2.25 SFD + payload symbols, plus small guard.
+    // preamble + 2 sync + 2.25 SFD + fine sync + payload symbols, plus guard.
     out.reserve(static_cast<std::size_t>(sym_samples) *
-                (preamble_symbols_ + 5 + symbols.size()));
+                (preamble_symbols_ + 5 + lora::kFineSyncSymbols + symbols.size()));
 
     // Single carrier phase accumulated across the entire frame for phase
     // continuity at every symbol boundary (see append_symbol_).
@@ -84,6 +85,11 @@ std::vector<std::complex<float>> ChirpChatTx::modulate(
     append_symbol_(out, 0.0, /*down*/ true, sym_samples, phase);
     append_symbol_(out, 0.0, /*down*/ true, sym_samples, phase);
     append_symbol_(out, 0.0, /*down*/ true, sym_samples / 4, phase);
+
+    if (lora::header_at_full_rate(sf_)) {
+        for (int i = 0; i < lora::kFineSyncSymbols; ++i)
+            append_symbol_(out, lora::kFineSyncBin, false, sym_samples, phase);
+    }
 
     // Header + payload data symbols.
     for (std::uint16_t v : symbols)

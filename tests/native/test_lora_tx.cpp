@@ -9,6 +9,7 @@
 #include "mrf/modem/LoraEncoder.h"
 #include "mrf/modem/ChirpChatTx.h"
 #include "mrf/modem/MeshtasticRx.h"
+#include "../../native/core/src/hal/Sx126x.h"
 
 #include <gtest/gtest.h>
 
@@ -91,6 +92,16 @@ std::vector<std::uint8_t> make_payload(std::size_t n) {
     for (std::size_t i = 0; i < n; ++i)
         d[i] = static_cast<std::uint8_t>(0x40 + (i * 7 + 3) % 0xB0);
     return d;
+}
+
+// A custom mesh on SF5 or SF6, which only SX126x-class radios transmit.
+LoraParams low_sf(std::uint8_t sf, std::uint32_t bw_hz, std::uint8_t cr) {
+    LoraParams p = params_for(Preset::ShortTurbo);
+    p.spreading_factor = sf;
+    p.bandwidth_hz = bw_hz;
+    p.coding_rate = cr;
+    p.low_data_rate_optimize = false;
+    return p;
 }
 
 } // namespace
@@ -188,4 +199,76 @@ TEST(LoraTx, RoundTripLongModerateSf11Ldro) {
     ASSERT_TRUE(res.payload_fired);
     EXPECT_TRUE(res.crc_ok);
     EXPECT_EQ(res.bytes, data);
+}
+
+// `meshtastic --set lora.spread_factor 5 --set lora.bandwidth 500
+// --set lora.coding_rate 8`: the header block at full rate and the two
+// fine-sync chirps after the SFD.
+TEST(LoraTx, RoundTripSf5) {
+    LoraParams p = low_sf(5, 500'000, 8);
+    auto data = make_payload(40);
+    auto res = run_loopback(p, data);
+    ASSERT_TRUE(res.header_fired);
+    EXPECT_TRUE(res.header_ok);
+    EXPECT_EQ(res.length, data.size());
+    EXPECT_EQ(res.cr, 4);
+    EXPECT_TRUE(res.has_crc);
+    ASSERT_TRUE(res.payload_fired);
+    EXPECT_TRUE(res.crc_ok);
+    EXPECT_EQ(res.bytes, data);
+}
+
+// SF6 carries one payload nibble in the header block, as SF8 does.
+TEST(LoraTx, RoundTripSf6) {
+    LoraParams p = low_sf(6, 250'000, 5);
+    auto data = make_payload(33);
+    auto res = run_loopback(p, data);
+    ASSERT_TRUE(res.header_fired);
+    EXPECT_TRUE(res.header_ok);
+    EXPECT_EQ(res.length, data.size());
+    ASSERT_TRUE(res.payload_fired);
+    EXPECT_TRUE(res.crc_ok);
+    EXPECT_EQ(res.bytes, data);
+}
+
+// At SF5 the sync chirps wrap: 0x2B's B nibble lands on the bin an 3 would.
+// Read against the listener's own sync word it is still Meshtastic, which is
+// what keeps the app from dropping every frame as foreign.
+TEST(LoraTx, ReportsMeshtasticSyncWordAtSf5) {
+    auto res = run_loopback(low_sf(5, 500'000, 8), make_payload(32));
+    ASSERT_TRUE(res.payload_fired);
+    EXPECT_TRUE(res.crc_ok);
+    EXPECT_EQ(res.sync_word, 0x2B);
+}
+
+// A bin that does not fit the expected nibble is ambiguous at SF5, so it is
+// reported as unknown rather than guessed.
+TEST(LoraTx, ReportsAnAmbiguousForeignSyncWordAsUnknownAtSf5) {
+    LoraParams p = low_sf(5, 500'000, 8);
+    p.sync_word = 0x12u;
+    auto res = run_loopback(p, make_payload(32), /*rx_sync_word=*/0x2B);
+    ASSERT_TRUE(res.payload_fired);
+    EXPECT_TRUE(res.crc_ok);
+    EXPECT_EQ(res.sync_word, -1);
+}
+
+// The frame we transmit is exactly as long as a radio would make it: the
+// datasheet's time on air, which counts the SF5/6 fine sync and full-rate
+// header block, times the modem's sample rate.
+TEST(LoraTx, FrameLengthMatchesTheRadiosTimeOnAir) {
+    constexpr int kOs = 4; // LoraModem::kOversampling
+    const LoraParams cases[] = {
+        low_sf(5, 500'000, 8), low_sf(6, 250'000, 5),
+        params_for(Preset::ShortFast), params_for(Preset::LongModerate)};
+    for (const auto& p : cases) {
+        for (const std::size_t len : {16u, 37u, 200u}) {
+            const auto data = make_payload(len);
+            const auto frame = make_modem(p)->encode(
+                std::span<const std::uint8_t>(data.data(), data.size()));
+            const double expected =
+                mrf::hal::lora_airtime_seconds(p, len) * p.bandwidth_hz * kOs;
+            EXPECT_NEAR(static_cast<double>(frame.size()), expected, 0.5)
+                << "SF" << int(p.spreading_factor) << " " << len << " B";
+        }
+    }
 }

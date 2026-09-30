@@ -5,7 +5,7 @@
 // LoraEncoder::encode_frame_symbols, it synthesizes the full on-air IQ frame:
 //
 //   [preamble up-chirps] [2 sync-word up-chirps] [2.25 SFD down-chirps]
-//   [8 header up-chirps]  [payload up-chirps]
+//   [2 fine-sync up-chirps, SF5/6 only] [8 header up-chirps] [payload up-chirps]
 //
 // Output is continuous-phase complex<float> at chip_rate_hz * oversampling,
 // i.e. the modem's working sample rate (Core re-samples it to the radio rate).

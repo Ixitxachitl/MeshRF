@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Sx126x.h"
+#include "mrf/modem/LoraDecoder.h"
 
 #include <algorithm>
 #include <array>
@@ -292,14 +293,19 @@ double lora_airtime_seconds(const modem::LoraParams& params, std::size_t payload
     const double ih = params.explicit_header ? 0.0 : 1.0;
     const double crc = params.crc_enabled ? 1.0 : 0.0;
     const double cr = static_cast<double>(params.coding_rate) - 4.0;
+    // Below SF7 the header block runs at full rate and two fine-sync chirps
+    // follow the SFD (datasheet 6.1.4).
+    const bool low_sf = modem::lora::header_at_full_rate(params.spreading_factor);
 
     const double numerator =
-        8.0 * static_cast<double>(payload_len) - 4.0 * sf + 28.0 + 16.0 * crc - 20.0 * ih;
+        8.0 * static_cast<double>(payload_len) - 4.0 * sf + (low_sf ? 20.0 : 28.0) +
+        16.0 * crc - 20.0 * ih;
     const double denominator = 4.0 * (sf - 2.0 * de);
     const double symbols =
         8.0 + std::max(0.0, std::ceil(numerator / denominator) * (cr + 4.0));
 
-    const double preamble = (static_cast<double>(params.preamble_symbols) + 4.25) * t_sym;
+    const double preamble =
+        (static_cast<double>(params.preamble_symbols) + (low_sf ? 6.25 : 4.25)) * t_sym;
     return preamble + symbols * t_sym;
 }
 

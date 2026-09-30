@@ -38,7 +38,7 @@ MRF_API int  MRF_CALL mrf_core_start_rx_params(mrf_core_t* core,
 // ordinal), or explicit parameters when sf is non-zero, on a frequency.
 typedef struct mrf_rx_listener_t {
     int32_t  preset;
-    uint32_t sf;        // 0 = take the preset; else 7..12, with bw_hz and cr
+    uint32_t sf;        // 0 = take the preset; else 5..12, with bw_hz and cr
     uint32_t bw_hz;
     uint32_t cr;        // 5..8 for 4/N
     uint64_t center_freq_hz;

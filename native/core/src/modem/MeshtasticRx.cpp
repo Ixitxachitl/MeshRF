@@ -106,6 +106,7 @@ void MeshtasticRx::reset_frame_sync_() {
     cfo_sto_estimated_ = false;
     additional_upchirps_ = 0;
     frame_symbol_count_ = 0;
+    fine_sync_left_ = 0;
     expected_symbols_ = 0;
     header_locked_ = false;
     cfo_bin_ = 0;
@@ -129,16 +130,23 @@ int MeshtasticRx::observed_sync_word_() const noexcept {
     // is a divide by eight. The bins were read before the SFD gave up the
     // integer CFO, so take that off first; a nibble-0 chirp then sits just
     // below the top of the bin space rather than at zero.
-    auto nibble = [this](int bin) -> int {
+    //
+    // Below SF7 the bin space is too small for that: 8 x nibble wraps modulo
+    // 2^SF, so one bin stands for every nibble 2^SF/8 apart. The bin can then
+    // only confirm the nibble this listener expects; any other reading is
+    // reported as unknown rather than as a guess that would pass for foreign.
+    auto nibble = [this](int bin, int expected) -> int {
         int b = lora_mod_(bin - cfo_int_, n_);
         if (b > n_ - 4) b -= n_;
         const int nib = (b + 4) / 8;
-        if (nib < 0 || nib > 15) return -1;
-        return (std::abs(b - nib * 8) <= 2) ? nib : -1;
+        if (std::abs(b - nib * 8) > 2) return -1;
+        const int positions = n_ / 8;
+        if (positions >= 16) return (nib >= 0 && nib <= 15) ? nib : -1;
+        return lora_mod_(expected - nib, positions) == 0 ? expected : -1;
     };
 
-    const int hi = nibble(net_ids_[0]);
-    const int lo = nibble(net_ids_[1]);
+    const int hi = nibble(net_ids_[0], (sync_word_ >> 4) & 0x0F);
+    const int lo = nibble(net_ids_[1], sync_word_ & 0x0F);
     if (hi < 0 || lo < 0) return -1;
     return (hi << 4) | lo;
 }
@@ -462,6 +470,7 @@ int MeshtasticRx::process_frame_sync_step_() {
 
             // Begin frame data capture.
             frame_symbol_count_ = 0;
+            fine_sync_left_     = lora::header_at_full_rate(sf_) ? lora::kFineSyncSymbols : 0;
             expected_symbols_   = 0;
             header_locked_      = false;
             cfo_bin_            = 0;
@@ -481,6 +490,10 @@ int MeshtasticRx::process_frame_sync_step_() {
 
     // ---------------- Data: collect + decode header/payload ------------
     {
+        if (fine_sync_left_ > 0) {
+            --fine_sync_left_;
+            return symbol_span_;
+        }
         const int raw_symbol =
             static_cast<int>(get_symbol_val_(in_down_.data(), payload_downchirp_.data()));
         ++symbols_processed_;
@@ -530,7 +543,8 @@ int MeshtasticRx::process_frame_sync_step_() {
 
 void MeshtasticRx::decode_header_() {
     using namespace mrf::modem::lora;
-    const std::uint8_t sf_app = static_cast<std::uint8_t>(sf_ - 2);
+    const std::uint8_t sf_app = header_block_codewords(sf_);
+    const bool full_rate = header_at_full_rate(sf_);
     const std::uint8_t cr_app = 8;
 
     static constexpr int kHeaderDeltas[] = {
@@ -546,8 +560,9 @@ void MeshtasticRx::decode_header_() {
         std::vector<std::uint16_t> sym_bits(kHeaderSymbols);
         for (int i = 0; i < kHeaderSymbols; ++i) {
             const int raw = ((header_symbols_[static_cast<std::size_t>(start + i)] + delta) % n_ + n_) % n_;
-            sym_bits[static_cast<std::size_t>(i)] = symbol_to_bits(
-                static_cast<std::uint16_t>(raw), sf_, /*ldro*/true);
+            sym_bits[static_cast<std::size_t>(i)] = full_rate
+                ? gray_demap(static_cast<std::uint16_t>((raw - 1 + n_) % n_), sf_, sf_)
+                : symbol_to_bits(static_cast<std::uint16_t>(raw), sf_, /*ldro*/true);
         }
         out_cws = deinterleave(
             std::span<const std::uint16_t>(sym_bits.data(), sym_bits.size()),
@@ -609,16 +624,9 @@ void MeshtasticRx::decode_header_() {
             const double t_sym_ms =
                 1000.0 * static_cast<double>(n_) / static_cast<double>(chip_rate_);
             payload_ldro_ = (t_sym_ms >= 16.0);
-            const int sf  = static_cast<int>(sf_);
-            const int eff = sf - (payload_ldro_ ? 2 : 0);
-            const int pl  = static_cast<int>(ev.payload_length);
-            const int crc = ev.has_crc ? 1 : 0;
-            const int cr  = static_cast<int>(ev.coding_rate);
-            const int num = 8 * pl - 4 * sf + 28 + 16 * crc;
-            const int den = 4 * eff;
-            int blocks = (num + den - 1) / den;
-            if (blocks < 0) blocks = 0;
-            payload_total_symbols_ = blocks * (cr + 4);
+            const int blocks = payload_block_count(ev.payload_length, sf_, ev.has_crc,
+                                                   payload_ldro_);
+            payload_total_symbols_ = blocks * (static_cast<int>(ev.coding_rate) + 4);
             payload_length_bytes_  = ev.payload_length;
             payload_coding_rate_   = ev.coding_rate;
             payload_has_crc_       = ev.has_crc;

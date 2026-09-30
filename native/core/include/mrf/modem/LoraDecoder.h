@@ -13,6 +13,44 @@
 
 namespace mrf::modem::lora {
 
+// ---- SF5 / SF6 framing -------------------------------------------------
+//
+// Below SF7 a frame differs in two ways (Rösler, Zubow and Dressler,
+// "Reverse-Engineering SF 5 and SF 6", 2026; RadioLib's time-on-air):
+//   - The header block is sent at full rate, SF bits per symbol. Reduced
+//     rate would leave 8 symbols of SF-2 bits short of the 40-bit header.
+//   - Two fine-sync chirps at bin 1 follow the SFD, ahead of the header.
+
+[[nodiscard]] constexpr bool header_at_full_rate(std::uint8_t spreading_factor) noexcept {
+    return spreading_factor < 7;
+}
+
+inline constexpr int kFineSyncSymbols = 2;
+inline constexpr int kFineSyncBin     = 1;
+
+// Codewords in the header block: the 5 header nibbles, then payload
+// nibbles to fill it.
+[[nodiscard]] constexpr std::uint8_t header_block_codewords(std::uint8_t spreading_factor) noexcept {
+    return static_cast<std::uint8_t>(
+        header_at_full_rate(spreading_factor) ? spreading_factor : spreading_factor - 2);
+}
+
+// Interleaver blocks after the header block for an explicit-header frame of
+// `payload_len` bytes: the datasheet's ceil((8PL + 16CRC - 4SF + 20 + 8)/
+// (4(SF - 2DE))), where the +8 is the header block's reduced rate and so is
+// absent below SF7.
+[[nodiscard]] constexpr int payload_block_count(int payload_len,
+                                                std::uint8_t spreading_factor,
+                                                bool has_crc,
+                                                bool low_data_rate_optimize) noexcept {
+    const int sf  = spreading_factor;
+    const int num = 8 * payload_len - 4 * sf + 20 +
+                    (header_at_full_rate(spreading_factor) ? 0 : 8) + (has_crc ? 16 : 0);
+    const int den = 4 * (sf - (low_data_rate_optimize ? 2 : 0));
+    const int blocks = (num + den - 1) / den;
+    return blocks < 0 ? 0 : blocks;
+}
+
 // ---- Gray --------------------------------------------------------------
 
 // Standard binary -> Gray and back. LoRa uses Gray *de*-mapping after the

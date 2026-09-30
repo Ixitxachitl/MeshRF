@@ -546,7 +546,7 @@ public partial class MainWindow : Window
             const int kHop = 128;
             const int nFreq = 256;
 
-            int sf = Math.Clamp((int)_viewModel.OverrideSf, 7, 12);
+            int sf = Math.Clamp((int)_viewModel.OverrideSf, 5, 12);
             double bwHz = Math.Max(7_800.0, _viewModel.OverrideBwKhz * 1000.0);
             double symbolSamples = (1 << sf) * 4.0;
 
