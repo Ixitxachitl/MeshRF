@@ -79,6 +79,24 @@ public class MeshRenameTests(HeadlessAvalonia avalonia)
                               t => t.Config.Preset == "Backyard net");
     }));
 
+    /// <summary>And its place among the mesh tabs, which is kept by name.</summary>
+    [Fact]
+    public void RenamingAListenerKeepsItsTabsPlace() => avalonia.Run(() => TempDataDirectory.With(() =>
+    {
+        using var vm = Station();
+        var mine = Backyard();
+        vm.SaveCustomListener(mine, null);
+        Settle();
+        vm.Host.MeshOrder = ["ShortFast", "Backyard net", "LongFast"];
+
+        var renamed = mine.Clone();
+        renamed.Name = "Garden net";
+        vm.SaveCustomListener(renamed, mine);
+        Settle();
+
+        Assert.Equal(["ShortFast", "Garden net", "LongFast"], vm.Host.MeshOrder);
+    }));
+
     /// <summary>A hand-made listener names no preset, so what goes out on it
     /// is its own settings, not the primary's.</summary>
     [Fact]

@@ -153,8 +153,14 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         .Where(g => g == PrimaryListName || IsPresetShown?.Invoke(g) == true)
         .Distinct(StringComparer.Ordinal)
         .OrderBy(g => g == PrimaryListName ? 0 : 1)
+        .ThenBy(g => MeshOrder.IndexOf(g) is var at and >= 0 ? at : int.MaxValue)
         .ThenBy(g => g, StringComparer.Ordinal)
         .ToList();
+
+    /// <summary>The order the secondary meshes' tabs were dragged into, by
+    /// name. Kept for meshes not listened for right now too, so one switched
+    /// off and on again comes back where it was.</summary>
+    public List<string> MeshOrder { get; set; } = new();
 
     /// <summary>True when any tab on this mesh has unseen activity, whether or
     /// not the mesh is the one on show. Hiding a mesh must not hide the fact
@@ -506,6 +512,9 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
 
         if (string.Equals(PrimaryListName, from, StringComparison.Ordinal)) SetPrimaryList(to);
         if (string.Equals(ShownGroup, from, StringComparison.Ordinal)) ShowGroup(to);
+        // A renamed mesh keeps its place among the tabs.
+        int ordered = MeshOrder.IndexOf(from);
+        if (ordered >= 0) MeshOrder[ordered] = to;
         RefreshTabGroups();
         return true;
     }

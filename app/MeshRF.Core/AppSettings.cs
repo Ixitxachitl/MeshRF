@@ -59,6 +59,11 @@ public sealed class AppSettings
     /// region supports and the capture reaches is listened for.</summary>
     public List<string> MonitorExcludedPresets { get; set; } = new();
 
+    /// <summary>The order the secondary meshes' tabs were dragged into, by
+    /// mesh name. The primary's always comes first; a mesh not named here
+    /// follows the named ones, alphabetically.</summary>
+    public List<string> MeshTabOrder { get; set; } = new();
+
     /// <summary>Listeners described by hand rather than picked off the preset
     /// list. Each is a mesh of its own, known by its name.</summary>
     public List<CustomListenerSettings> CustomListeners { get; set; } = new();

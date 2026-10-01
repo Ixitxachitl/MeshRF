@@ -79,6 +79,52 @@ public class MeshTabRowTests(HeadlessAvalonia avalonia)
         window.Close();
     }));
 
+    /// <summary>A secondary mesh dropped on another takes its place, on the
+    /// row and on disk, and holds it when the listeners are worked out again.
+    /// The primary's stays first and cannot be dragged.</summary>
+    [Fact]
+    public void DraggingAMeshTabReordersTheRow() => avalonia.Run(() => TempDataDirectory.With(() =>
+    {
+        var window = new MainWindow { Width = 1280, Height = 900 };
+        window.Show();
+        for (int i = 0; i < 8; i++) Dispatcher.UIThread.RunJobs();
+
+        var vm = (RadioViewModel)window.DataContext!;
+        vm.SelectedDevice = RadioDeviceKind.HackRf;
+        vm.SelectedRegion = Region.US;
+        vm.SelectedPreset = LoraPreset.MediumFast;
+        vm.SelectedRxSampleRate = vm.SampleRateOptions.Single(o => o.Hz == 10_000_000u);
+        vm.MultiPresetEnabled = true;
+        vm.RefreshMonitors();
+        for (int i = 0; i < 8; i++) Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.TabGroupOptions.Count >= 3, "needs two secondary meshes to reorder");
+
+        var primary = vm.TabGroupOptions[0];
+        var first = vm.TabGroupOptions[1];
+        var last = vm.TabGroupOptions[^1];
+        Assert.False(vm.CanDragMesh(primary));
+        Assert.False(vm.CanReorderMeshPair(last, primary));
+
+        Assert.True(vm.ReorderMeshPair(last, first));
+        for (int i = 0; i < 8; i++) Dispatcher.UIThread.RunJobs();
+
+        Assert.Same(primary, vm.TabGroupOptions[0]);
+        Assert.Same(last, vm.TabGroupOptions[1]);
+        Assert.Same(first, vm.TabGroupOptions[2]);
+        AppSettings.FlushPendingWrites(TimeSpan.FromSeconds(5));
+        Assert.Equal(last.Group, AppSettings.Load().MeshTabOrder.First());
+
+        // The row draws them in that order too.
+        var drawn = MeshTabs(window).Select(b => b.DataContext).ToList();
+        Assert.Equal(vm.TabGroupOptions.Cast<object>(), drawn);
+
+        vm.RefreshMonitors();
+        for (int i = 0; i < 8; i++) Dispatcher.UIThread.RunJobs();
+        Assert.Equal(last.Group, vm.TabGroupOptions[1].Group);
+
+        window.Close();
+    }));
+
     [Fact]
     public void PickingAnotherMeshMovesTheMark() => avalonia.Run(() => TempDataDirectory.With(() =>
     {

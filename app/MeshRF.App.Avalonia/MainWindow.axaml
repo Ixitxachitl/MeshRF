@@ -1259,10 +1259,11 @@
                              the class that carries it are the app's own, so
                              none of it depends on a theme's internal part
                              names. -->
-                        <ItemsControl Margin="8,0,0,0"
+                        <ItemsControl Name="MeshTabsRow" Margin="8,0,0,0"
                                       HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                       IsVisible="{Binding HasSeveralMeshes}"
-                                      ItemsSource="{Binding TabGroupOptions}">
+                                      ItemsSource="{Binding TabGroupOptions}"
+                                      DragDrop.AllowDrop="True">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <!-- Flush, as the strip below is: an ordinary

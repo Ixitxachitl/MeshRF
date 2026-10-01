@@ -64,6 +64,8 @@ public partial class MainWindow : Window
         // than in the markup.
         MainTabs.AddHandler(DragDrop.DragOverEvent, OnTabsDragOver);
         MainTabs.AddHandler(DragDrop.DropEvent, OnTabsDrop);
+        MeshTabsRow.AddHandler(DragDrop.DragOverEvent, OnMeshTabsDragOver);
+        MeshTabsRow.AddHandler(DragDrop.DropEvent, OnMeshTabsDrop);
 
         // handledEventsToo, and so not a PointerPressed="..." attribute in the
         // markup: TabControl derives from SelectingItemsControl, whose own
@@ -1206,14 +1208,55 @@ public partial class MainWindow : Window
     private MqttSettingsWindow? _mqttWindow;
     private BeaconSettingsWindow? _beaconWindow;
 
-    /// <summary>Picks which mesh the channel strip below is showing. A
-    /// pointer handler rather than a button, so the tab is the app's own
+    /// <summary>Picks which mesh the channel strip below is showing, and
+    /// starts a drag of a secondary mesh's tab, as the channel tabs below do.
+    /// A pointer handler rather than a button, so the tab is the app's own
     /// border and owes nothing to a theme's button chrome.</summary>
-    private void OnMeshTabPressed(object? sender, PointerPressedEventArgs e)
+    private async void OnMeshTabPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is not Control { DataContext: TabGroupOption option }) return;
+        if (sender is not Control { DataContext: TabGroupOption option } control) return;
         _viewModel.SelectedTabGroupOption = option;
         e.Handled = true;
+
+        if (!e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
+        if (!_viewModel.CanDragMesh(option)) return;
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(MeshDragFormat, option));
+        try
+        {
+            await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
+        }
+        catch (InvalidOperationException)
+        {
+            // A drag is already in progress, or the platform refused to start one.
+        }
+    }
+
+    /// <summary>In-process drag payload for a mesh tab, kept apart from the
+    /// channel tabs' so neither strip accepts the other's tabs.</summary>
+    private static readonly DataFormat<TabGroupOption> MeshDragFormat =
+        DataFormat.CreateInProcessFormat<TabGroupOption>("MeshRF.MeshTab");
+
+    private void OnMeshTabsDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = ResolveMeshDropTarget(e) is not null ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnMeshTabsDrop(object? sender, DragEventArgs e)
+    {
+        if (ResolveMeshDropTarget(e) is not ({ } dragged, { } target)) return;
+        _viewModel.ReorderMeshPair(dragged, target);
+        e.Handled = true;
+    }
+
+    private (TabGroupOption Dragged, TabGroupOption Target)? ResolveMeshDropTarget(DragEventArgs e)
+    {
+        if (e.DataTransfer.TryGetValue(MeshDragFormat) is not { } dragged) return null;
+        if (e.Source is not Visual v) return null;
+        if (v.FindAncestorOfType<Border>(includeSelf: true) is not { DataContext: TabGroupOption target })
+            return null;
+        return _viewModel.CanReorderMeshPair(dragged, target) ? (dragged, target) : null;
     }
 
     private MonitorsWindow? _monitorsWindow;

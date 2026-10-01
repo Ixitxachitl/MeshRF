@@ -98,6 +98,37 @@ public partial class RadioViewModel
         RefreshTabGroupAttention();
     }
 
+    /// <summary>The primary's mesh stays first, as its channel does in the
+    /// strip below; the rest move among themselves.</summary>
+    public bool CanDragMesh(TabGroupOption? option) =>
+        option is not null && option.Group != _rxHost.PrimaryListName;
+
+    public bool CanReorderMeshPair(TabGroupOption? dragged, TabGroupOption? target) =>
+        CanDragMesh(dragged) && CanDragMesh(target) && !ReferenceEquals(dragged, target);
+
+    /// <summary>Puts the dragged mesh where the target is, the way a channel
+    /// tab dropped on another takes its place. Returns true when the order
+    /// changed.</summary>
+    public bool ReorderMeshPair(TabGroupOption? dragged, TabGroupOption? target)
+    {
+        if (!CanReorderMeshPair(dragged, target)) return false;
+
+        var order = TabGroupOptions.Select(o => o.Group)
+                                   .Where(g => g != _rxHost.PrimaryListName).ToList();
+        int from = order.IndexOf(dragged!.Group), to = order.IndexOf(target!.Group);
+        if (from < 0 || to < 0) return false;
+        order.RemoveAt(from);
+        order.Insert(to, dragged.Group);
+
+        // Meshes not on the strip right now keep their remembered places
+        // after the ones that are.
+        order.AddRange(_rxHost.MeshOrder.Where(g => !order.Contains(g, StringComparer.Ordinal)));
+        _rxHost.MeshOrder = order;
+        RefreshTabGroupOptions();
+        SaveSettings();
+        return true;
+    }
+
     /// <summary>Marks the mesh on show, and every mesh holding a tab with
     /// unseen activity — the one on show included.</summary>
     private void RefreshTabGroupAttention()

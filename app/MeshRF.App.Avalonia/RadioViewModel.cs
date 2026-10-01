@@ -1305,6 +1305,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _rxHost.IsPresetListening = name => _rxSources.Any(s => !s.IsPrimary && s.MeshName == name);
         _rxHost.MeshForPreset = MeshForPreset;
         _rxHost.IsPresetShown = name => _shownPresets.Contains(name);
+        _rxHost.MeshOrder = _settings.MeshTabOrder.ToList();
         // The picker follows the tabs that exist; it only reads the host, so
         // it is safe from inside the collection's own notification.
         Tabs.CollectionChanged += (_, _) => RefreshTabGroupOptions();
@@ -2623,6 +2624,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         _settings.Slot = SelectedSlot;
         _settings.MultiPresetEnabled = MultiPresetEnabled;
         _settings.MonitorExcludedPresets = MonitorExcludedPresets.ToList();
+        _settings.MeshTabOrder = _rxHost.MeshOrder.ToList();
         _settings.CustomListeners = CustomListeners.Select(c => c.ToSettings()).ToList();
         _settings.PrimaryMeshName = CustomPrimaryName.Trim();
         // Takes the target, like every other line here: writing the field
