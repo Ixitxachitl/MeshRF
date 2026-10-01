@@ -64,7 +64,8 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
                                     NodeStore? nodeStore = null,
                                     Func<Func<float, string>?>? temperatureFormatter = null,
                                     Func<Func<float, string>?>? pressureFormatter = null,
-                                    Func<Func<int, string>?>? altitudeFormatter = null)
+                                    Func<Func<int, string>?>? altitudeFormatter = null,
+                                    Func<Func<float, string>?>? windSpeedFormatter = null)
     {
         NodeNum = nodeNum;
         _peerName = peerName;
@@ -72,7 +73,10 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
         _temperatureFormatter = temperatureFormatter;
         _pressureFormatter = pressureFormatter;
         _altitudeFormatter = altitudeFormatter;
+        _windSpeedFormatter = windSpeedFormatter;
     }
+
+    private readonly Func<Func<float, string>?>? _windSpeedFormatter;
 
     partial void OnPeerNameChanged(string value) => OnPropertyChanged(nameof(TabHeader));
 
@@ -145,6 +149,8 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
 
             var temp = _temperatureFormatter?.Invoke();
             var pres = _pressureFormatter?.Invoke();
+            var wind = _windSpeedFormatter?.Invoke();
+            string Speed(float mps) => wind?.Invoke(mps) ?? $"{mps:0.0} m/s";
 
             Add("Long name", n.LongName);
             Add("Short name", n.ShortName);
@@ -163,6 +169,10 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
             if (n.BarometricPressureHpa is float p) Add("Pressure", pres?.Invoke(p) ?? $"{p:0.0} hPa");
             if (n.GasResistanceMohm is float gas) Add("Gas resistance", $"{gas:0.0} MΩ");
             if (n.Iaq is int iaq) Add("Air quality (IAQ)", iaq.ToString());
+            if (n.WindSpeedMps is float ws) Add("Wind", Speed(ws));
+            if (n.WindDirectionDeg is uint wd) Add("Wind from", DisplayUnits.FormatWindDirection(wd));
+            if (n.WindGustMps is float wg) Add("Gusts", Speed(wg));
+            if (n.WindLullMps is float wl) Add("Lulls", Speed(wl));
             if (n.Pm25Standard is uint pm25s) Add("PM2.5 std", $"{pm25s} μg/m³");
             if (n.Pm100Standard is uint pm100s) Add("PM10 std", $"{pm100s} μg/m³");
             if (n.Pm10Standard is uint pm1s) Add("PM1.0 std", $"{pm1s} μg/m³");
@@ -283,7 +293,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
             { Id = row.Id });
 
         foreach (var row in _nodeStore.TelemetryHistory(NodeNum))
-            AddTelemetryPoint(TelemetryHistoryPointFactory.FromRecord(row, _temperatureFormatter?.Invoke(), _pressureFormatter?.Invoke()));
+            AddTelemetryPoint(TelemetryHistoryPointFactory.FromRecord(row, _temperatureFormatter?.Invoke(), _pressureFormatter?.Invoke(), _windSpeedFormatter?.Invoke()));
 
         RaiseHistoryFlags();
     }
@@ -317,7 +327,7 @@ public partial class ConversationTabViewModel : ObservableObject, ITabItem
     public void AppendTelemetryRecord(NodeTelemetryHistoryRecord record)
     {
         if (!_historyLoaded) return;
-        AddTelemetryPoint(TelemetryHistoryPointFactory.FromRecord(record, _temperatureFormatter?.Invoke(), _pressureFormatter?.Invoke()));
+        AddTelemetryPoint(TelemetryHistoryPointFactory.FromRecord(record, _temperatureFormatter?.Invoke(), _pressureFormatter?.Invoke(), _windSpeedFormatter?.Invoke()));
         RaiseHistoryFlags();
     }
 

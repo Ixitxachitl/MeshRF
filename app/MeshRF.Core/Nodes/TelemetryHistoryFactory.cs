@@ -57,7 +57,11 @@ public static class TelemetryHistoryFactory
         t.HasAirQualityMetrics ? V(t.Pm25Standard) : string.Empty,
         t.HasAirQualityMetrics ? V(t.Pm100Standard) : string.Empty,
         t.HasPowerMetrics ? V(t.Ch1VoltageV) : string.Empty,
-        t.HasPowerMetrics ? V(t.Ch1CurrentMa) : string.Empty);
+        t.HasPowerMetrics ? V(t.Ch1CurrentMa) : string.Empty,
+        t.HasEnvironmentMetrics ? V(t.WindDirectionDeg) : string.Empty,
+        t.HasEnvironmentMetrics ? V(t.WindSpeedMps) : string.Empty,
+        t.HasEnvironmentMetrics ? V(t.WindGustMps) : string.Empty,
+        t.HasEnvironmentMetrics ? V(t.WindLullMps) : string.Empty);
 
     /// <summary>Builds the row. Only fields whose metric group is present are
     /// filled — a missing group stays null rather than recording a zero, so a
@@ -88,7 +92,11 @@ public static class TelemetryHistoryFactory
             t.HasPowerMetrics ? t.Ch2CurrentMa : null,
             t.HasPowerMetrics ? t.Ch3VoltageV : null,
             t.HasPowerMetrics ? t.Ch3CurrentMa : null,
-            Signature(t));
+            Signature(t),
+            WindDirectionDeg: t.HasEnvironmentMetrics ? t.WindDirectionDeg : null,
+            WindSpeedMps: t.HasEnvironmentMetrics ? t.WindSpeedMps : null,
+            WindGustMps: t.HasEnvironmentMetrics ? t.WindGustMps : null,
+            WindLullMps: t.HasEnvironmentMetrics ? t.WindLullMps : null);
 
     private static string V<T>(T? value) where T : struct, IFormattable =>
         value.HasValue ? value.Value.ToString(null, CultureInfo.InvariantCulture) : string.Empty;

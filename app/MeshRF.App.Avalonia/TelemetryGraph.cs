@@ -198,6 +198,8 @@ public sealed class TelemetryGraph : UserControl
     public static readonly Color Pressure = Color.Parse("#9B59B6");
     public static readonly Color Gas = Color.Parse("#95A5A6");
     public static readonly Color Iaq = Color.Parse("#FF6B9A");
+    public static readonly Color Wind = Color.Parse("#48C9B0");
+    public static readonly Color WindGust = Color.Parse("#AF7AC5");
     public static readonly Color Pm1Std = Color.Parse("#5DADE2");
     public static readonly Color Pm25Std = Color.Parse("#EB984E");
     public static readonly Color Pm100Std = Color.Parse("#E74C3C");

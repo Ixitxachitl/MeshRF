@@ -1331,6 +1331,7 @@ public partial class RadioViewModel : ObservableObject, IDisposable
         InitMqtt();
         _rxHost.FormatTemperature = FormatTemperature;
         _rxHost.FormatPressure = hpa => $"{hpa:0.0} hPa";
+        _rxHost.FormatWindSpeed = mps => DisplayUnits.FormatWindSpeed(mps, CurrentUnitSystem);
         _rxHost.FormatAltitude = m => DisplayUnits.FormatAltitude(m, CurrentUnitSystem);
         // Restore per-channel ringtone mutes. The channel tabs exist by now
         // (the host loads them in its constructor), and MutedRingtoneChannels

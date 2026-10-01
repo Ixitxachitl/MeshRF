@@ -235,6 +235,11 @@ public sealed class MeshTelemetry
     public float? BarometricPressureHpa { get; init; }
     public float? GasResistanceMohm { get; init; }
     public int? Iaq { get; init; }
+    // Wind: the degrees it blows from, and speeds in m/s.
+    public uint? WindDirectionDeg { get; init; }
+    public float? WindSpeedMps { get; init; }
+    public float? WindGustMps { get; init; }
+    public float? WindLullMps { get; init; }
 
     public bool HasDeviceMetrics =>
         BatteryLevel.HasValue || Voltage.HasValue ||
@@ -242,7 +247,8 @@ public sealed class MeshTelemetry
 
     public bool HasEnvironmentMetrics =>
         TemperatureC.HasValue || RelativeHumidityPct.HasValue ||
-        BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || Iaq.HasValue;
+        BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || Iaq.HasValue ||
+        WindDirectionDeg.HasValue || WindSpeedMps.HasValue || WindGustMps.HasValue || WindLullMps.HasValue;
 
     // Air quality metrics (from TELEMETRY_APP AirQualityMetrics, field 4).
     // pm10_standard = PM1.0 µg/m³, pm25_standard = PM2.5 µg/m³, pm100_standard = PM10.0 µg/m³
@@ -1076,6 +1082,7 @@ public static class MeshDecoder
         var present = TelemetryVariants.None;
         byte? batt = null; float? volt = null, chan = null, airx = null; uint? uptime = null;
         float? temp = null, hum = null, pres = null, gas = null; int? iaq = null;
+        uint? windDir = null; float? windSpeed = null, windGust = null, windLull = null;
         uint? pm10std = null, pm25std = null, pm100std = null;
         uint? pm10env = null, pm25env = null, pm100env = null;
         float? ch1v = null, ch1i = null, ch2v = null, ch2i = null, ch3v = null, ch3i = null;
@@ -1119,6 +1126,11 @@ public static class MeshDecoder
                             case 4 when swt == ProtoReader.WireType.I32: gas = sub.ReadFloat(); break;
                             case 7 when swt == ProtoReader.WireType.Varint:
                                 iaq = (int)sub.ReadVarint(); break;
+                            case 13 when swt == ProtoReader.WireType.Varint:
+                                windDir = (uint)sub.ReadVarint(); break;
+                            case 14 when swt == ProtoReader.WireType.I32: windSpeed = sub.ReadFloat(); break;
+                            case 16 when swt == ProtoReader.WireType.I32: windGust = sub.ReadFloat(); break;
+                            case 17 when swt == ProtoReader.WireType.I32: windLull = sub.ReadFloat(); break;
                             default: sub.SkipField(swt); break;
                         }
                     }
@@ -1179,6 +1191,10 @@ public static class MeshDecoder
             BarometricPressureHpa = pres,
             GasResistanceMohm = gas,
             Iaq = iaq,
+            WindDirectionDeg = windDir,
+            WindSpeedMps = windSpeed,
+            WindGustMps = windGust,
+            WindLullMps = windLull,
             Pm10Standard      = pm10std,
             Pm25Standard      = pm25std,
             Pm100Standard     = pm100std,

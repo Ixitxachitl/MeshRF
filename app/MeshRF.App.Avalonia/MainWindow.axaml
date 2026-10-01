@@ -626,13 +626,13 @@
                                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled" MaxHeight="220">
                                         <Grid Margin="0,6,0,0" ColumnDefinitions="120,*"
-                                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Hops" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="0" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeHopsFilterOptions}" SelectedItem="{Binding NodeHopsFilter}" />
 
-                                            <TextBlock Grid.Row="23" Grid.Column="0" Text="Heard on" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="23" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="24" Grid.Column="0" Text="Heard on" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="24" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding NodeHeardOnFilterOptions}" SelectedItem="{Binding NodeHeardOnFilter}"
                                                       ToolTip.Tip="Keep the table to nodes last heard on one mesh, named the way the Heard on column names them: a preset, a listener you made, or the primary's own mesh. Only meshes some node in the list has been heard on are offered." />
 
@@ -688,48 +688,52 @@
                                             <ComboBox Grid.Row="13" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeIaqFilter}" />
 
-                                            <TextBlock Grid.Row="14" Grid.Column="0" Text="Has PM1.0 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <TextBlock Grid.Row="14" Grid.Column="0" Text="Has wind" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
                                             <ComboBox Grid.Row="14" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeWindFilter}" />
+
+                                            <TextBlock Grid.Row="15" Grid.Column="0" Text="Has PM1.0 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="15" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm10StdFilter}" />
 
-                                            <TextBlock Grid.Row="15" Grid.Column="0" Text="Has PM2.5 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="15" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="16" Grid.Column="0" Text="Has PM2.5 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="16" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm25StdFilter}" />
 
-                                            <TextBlock Grid.Row="16" Grid.Column="0" Text="Has PM10 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="16" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="17" Grid.Column="0" Text="Has PM10 std" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="17" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm100StdFilter}" />
 
-                                            <TextBlock Grid.Row="17" Grid.Column="0" Text="Has PM1.0 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="17" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="18" Grid.Column="0" Text="Has PM1.0 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="18" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm10EnvFilter}" />
 
-                                            <TextBlock Grid.Row="18" Grid.Column="0" Text="Has PM2.5 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="18" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="19" Grid.Column="0" Text="Has PM2.5 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="19" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm25EnvFilter}" />
 
-                                            <TextBlock Grid.Row="19" Grid.Column="0" Text="Has PM10 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <ComboBox Grid.Row="19" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
+                                            <TextBlock Grid.Row="20" Grid.Column="0" Text="Has PM10 env" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <ComboBox Grid.Row="20" Grid.Column="1" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                       ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodePm100EnvFilter}" />
 
-                                            <TextBlock Grid.Row="20" Grid.Column="0" Text="Has Ch1 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <Grid Grid.Row="20" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                            <TextBlock Grid.Row="21" Grid.Column="0" Text="Has Ch1 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="21" Grid.Column="1" ColumnDefinitions="*,4,*">
                                                 <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh1VoltageFilter}" />
                                                 <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh1CurrentFilter}" />
                                             </Grid>
 
-                                            <TextBlock Grid.Row="21" Grid.Column="0" Text="Has Ch2 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <Grid Grid.Row="21" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                            <TextBlock Grid.Row="22" Grid.Column="0" Text="Has Ch2 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="22" Grid.Column="1" ColumnDefinitions="*,4,*">
                                                 <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh2VoltageFilter}" />
                                                 <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh2CurrentFilter}" />
                                             </Grid>
 
-                                            <TextBlock Grid.Row="22" Grid.Column="0" Text="Has Ch3 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
-                                            <Grid Grid.Row="22" Grid.Column="1" ColumnDefinitions="*,4,*">
+                                            <TextBlock Grid.Row="23" Grid.Column="0" Text="Has Ch3 V / A" FontSize="11" VerticalAlignment="Center" Margin="0,2,8,2" />
+                                            <Grid Grid.Row="23" Grid.Column="1" ColumnDefinitions="*,4,*">
                                                 <ComboBox Grid.Column="0" Height="22" FontSize="11" HorizontalAlignment="Stretch"
                                                           ItemsSource="{Binding TelemetryHasFilterOptions}" SelectedItem="{Binding NodeCh3VoltageFilter}" />
                                                 <ComboBox Grid.Column="2" Height="22" FontSize="11" HorizontalAlignment="Stretch"

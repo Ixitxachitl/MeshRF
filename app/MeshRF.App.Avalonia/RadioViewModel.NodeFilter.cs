@@ -65,6 +65,7 @@ public partial class RadioViewModel
     [ObservableProperty] private string _nodePressureFilter = "Any";
     [ObservableProperty] private string _nodeGasResistanceFilter = "Any";
     [ObservableProperty] private string _nodeIaqFilter = "Any";
+    [ObservableProperty] private string _nodeWindFilter = "Any";
     [ObservableProperty] private string _nodePm10StdFilter = "Any";
     [ObservableProperty] private string _nodePm25StdFilter = "Any";
     [ObservableProperty] private string _nodePm100StdFilter = "Any";
@@ -209,6 +210,7 @@ public partial class RadioViewModel
     partial void OnNodePressureFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeGasResistanceFilterChanged(string value) => OnFilterChanged();
     partial void OnNodeIaqFilterChanged(string value) => OnFilterChanged();
+    partial void OnNodeWindFilterChanged(string value) => OnFilterChanged();
     partial void OnNodePm10StdFilterChanged(string value) => OnFilterChanged();
     partial void OnNodePm25StdFilterChanged(string value) => OnFilterChanged();
     partial void OnNodePm100StdFilterChanged(string value) => OnFilterChanged();
@@ -247,6 +249,7 @@ public partial class RadioViewModel
         NodePressureFilter = "Any";
         NodeGasResistanceFilter = "Any";
         NodeIaqFilter = "Any";
+        NodeWindFilter = "Any";
         NodePm10StdFilter = "Any";
         NodePm25StdFilter = "Any";
         NodePm100StdFilter = "Any";
@@ -357,6 +360,7 @@ public partial class RadioViewModel
             && HasValue(NodePressureFilter, n.BarometricPressureHpa.HasValue)
             && HasValue(NodeGasResistanceFilter, n.GasResistanceMohm.HasValue)
             && HasValue(NodeIaqFilter, n.Iaq.HasValue)
+            && HasValue(NodeWindFilter, n.WindSpeedMps.HasValue || n.WindDirectionDeg.HasValue)
             && HasValue(NodePm10StdFilter, n.Pm10Standard.HasValue)
             && HasValue(NodePm25StdFilter, n.Pm25Standard.HasValue)
             && HasValue(NodePm100StdFilter, n.Pm100Standard.HasValue)
@@ -421,6 +425,7 @@ public partial class RadioViewModel
         NodePressureFilter = Valid(s.NodeFilterPressure);
         NodeGasResistanceFilter = Valid(s.NodeFilterGasResistance);
         NodeIaqFilter = Valid(s.NodeFilterIaq);
+        NodeWindFilter = Valid(s.NodeFilterWind);
         NodePm10StdFilter = Valid(s.NodeFilterPm10Std);
         NodePm25StdFilter = Valid(s.NodeFilterPm25Std);
         NodePm100StdFilter = Valid(s.NodeFilterPm100Std);
@@ -456,6 +461,7 @@ public partial class RadioViewModel
         s.NodeFilterPressure = NodePressureFilter;
         s.NodeFilterGasResistance = NodeGasResistanceFilter;
         s.NodeFilterIaq = NodeIaqFilter;
+        s.NodeFilterWind = NodeWindFilter;
         s.NodeFilterPm10Std = NodePm10StdFilter;
         s.NodeFilterPm25Std = NodePm25StdFilter;
         s.NodeFilterPm100Std = NodePm100StdFilter;

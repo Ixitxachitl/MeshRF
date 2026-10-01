@@ -41,7 +41,10 @@ public sealed record TelemetryHistoryPoint(
     string Pm10Std, string Pm25Std, string Pm100Std, string Pm10Env, string Pm25Env, string Pm100Env,
     string Ch1Voltage, string Ch1Current, string Ch2Voltage, string Ch2Current,
     string Ch3Voltage, string Ch3Current,
-    string Signature)
+    string Signature,
+    double? WindDirectionDeg = null, double? WindSpeedMps = null,
+    double? WindGustMps = null, double? WindLullMps = null,
+    string WindDirection = "", string WindSpeed = "", string WindGust = "", string WindLull = "")
 {
     public long Id { get; init; }
 
@@ -55,7 +58,8 @@ public sealed record TelemetryHistoryPoint(
 
     public bool HasEnvironmentalTelemetry =>
         TemperatureC.HasValue || RelativeHumidityPct.HasValue ||
-        BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || IaqValue.HasValue;
+        BarometricPressureHpa.HasValue || GasResistanceMohm.HasValue || IaqValue.HasValue ||
+        WindDirectionDeg.HasValue || WindSpeedMps.HasValue || WindGustMps.HasValue || WindLullMps.HasValue;
 
     public bool HasAirQualityTelemetry =>
         Pm10Standard.HasValue || Pm25Standard.HasValue || Pm100Standard.HasValue ||
@@ -66,15 +70,16 @@ public sealed record TelemetryHistoryPoint(
         Ch2CurrentMa.HasValue || Ch3VoltageV.HasValue || Ch3CurrentMa.HasValue;
 }
 
-/// <summary>Turns stored history rows into display points. Temperature and
-/// pressure go through the caller's formatters so they follow the app's unit
-/// setting.</summary>
+/// <summary>Turns stored history rows into display points. Temperature,
+/// pressure and wind speed go through the caller's formatters so they follow
+/// the app's unit setting.</summary>
 public static class TelemetryHistoryPointFactory
 {
     public static TelemetryHistoryPoint FromRecord(
         NodeTelemetryHistoryRecord r,
         Func<float, string>? formatTemperature = null,
-        Func<float, string>? formatPressure = null) =>
+        Func<float, string>? formatPressure = null,
+        Func<float, string>? formatWindSpeed = null) =>
         new(r.TimestampUtc,
             r.BatteryPct, r.VoltageV, r.ChannelUtilPct, r.AirUtilTxPct, r.UptimeSeconds,
             r.TemperatureC, r.RelativeHumidityPct, r.BarometricPressureHpa,
@@ -103,8 +108,15 @@ public static class TelemetryHistoryPointFactory
             r.Ch2CurrentMa is double c2i ? $"{c2i:0.0} mA" : string.Empty,
             r.Ch3VoltageV is double c3v ? $"{c3v:0.000} V" : string.Empty,
             r.Ch3CurrentMa is double c3i ? $"{c3i:0.0} mA" : string.Empty,
-            r.Signature)
+            r.Signature,
+            r.WindDirectionDeg, r.WindSpeedMps, r.WindGustMps, r.WindLullMps,
+            r.WindDirectionDeg is double dir ? DisplayUnits.FormatWindDirection((uint)Math.Max(0, dir)) : string.Empty,
+            Wind(r.WindSpeedMps, formatWindSpeed), Wind(r.WindGustMps, formatWindSpeed),
+            Wind(r.WindLullMps, formatWindSpeed))
         { Id = r.Id };
+
+    private static string Wind(double? metresPerSecond, Func<float, string>? format) =>
+        metresPerSecond is double v ? (format?.Invoke((float)v) ?? $"{v:0.0} m/s") : string.Empty;
 
     private static string Pm(double? value) =>
         value is double v ? $"{v:0} μg/m³" : string.Empty;

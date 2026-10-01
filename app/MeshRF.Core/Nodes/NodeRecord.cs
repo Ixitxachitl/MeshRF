@@ -57,6 +57,10 @@ public sealed class NodeRecord : INotifyPropertyChanged
         BarometricPressureHpa = source.BarometricPressureHpa;
         GasResistanceMohm     = source.GasResistanceMohm;
         Iaq                   = source.Iaq;
+        WindDirectionDeg      = source.WindDirectionDeg;
+        WindSpeedMps          = source.WindSpeedMps;
+        WindGustMps           = source.WindGustMps;
+        WindLullMps           = source.WindLullMps;
         Pm10Standard          = source.Pm10Standard;
         Pm25Standard          = source.Pm25Standard;
         Pm100Standard         = source.Pm100Standard;
@@ -279,6 +283,11 @@ public sealed class NodeRecord : INotifyPropertyChanged
     public float?  BarometricPressureHpa { get; set; }
     public float?  GasResistanceMohm     { get; set; }
     public int?    Iaq                   { get; set; }
+    // Wind: the degrees it blows from, and speeds in m/s.
+    public uint?   WindDirectionDeg      { get; set; }
+    public float?  WindSpeedMps          { get; set; }
+    public float?  WindGustMps           { get; set; }
+    public float?  WindLullMps           { get; set; }
 
     // Air quality metrics (from TELEMETRY_APP AirQualityMetrics).
     // pm10_standard = PM1.0 µg/m³, pm25_standard = PM2.5 µg/m³, pm100_standard = PM10 µg/m³

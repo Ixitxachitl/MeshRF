@@ -104,7 +104,9 @@ public partial class TelemetryHistoryWindow : Window
             new TelemetrySeries("Humidity", TelemetryGraph.Humidity, p => p.RelativeHumidityPct),
             new TelemetrySeries("Pressure", TelemetryGraph.Pressure, p => p.BarometricPressureHpa),
             new TelemetrySeries("Gas", TelemetryGraph.Gas, p => p.GasResistanceMohm),
-            new TelemetrySeries("IAQ", TelemetryGraph.Iaq, p => p.IaqValue));
+            new TelemetrySeries("IAQ", TelemetryGraph.Iaq, p => p.IaqValue),
+            new TelemetrySeries("Wind", TelemetryGraph.Wind, p => p.WindSpeedMps),
+            new TelemetrySeries("Gust", TelemetryGraph.WindGust, p => p.WindGustMps));
 
         // The environmental "e" variants default off, as in MeshRF.App: most
         // sensors report only the standard set, so showing both doubles the

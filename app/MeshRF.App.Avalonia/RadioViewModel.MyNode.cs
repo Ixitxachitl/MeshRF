@@ -168,7 +168,8 @@ public partial class RadioViewModel
             _nodeStore,
             () => FormatTemperature,
             () => (Func<float, string>)(hpa => $"{hpa:0.0} hPa"),
-            () => (Func<int, string>)(m => DisplayUnits.FormatAltitude(m, CurrentUnitSystem)));
+            () => (Func<int, string>)(m => DisplayUnits.FormatAltitude(m, CurrentUnitSystem)),
+            () => (Func<float, string>)(mps => DisplayUnits.FormatWindSpeed(mps, CurrentUnitSystem)));
 
         _detachedHistory[nodeNum] = new WeakReference<ConversationTabViewModel>(convo);
         return convo;
@@ -536,6 +537,9 @@ public partial class RadioViewModel
                         temperatureC: weather.TemperatureC,
                         relativeHumidityPct: weather.RelativeHumidityPct,
                         barometricPressureHpa: weather.BarometricPressureHpa,
+                        windDirectionDeg: weather.WindDirectionDeg,
+                        windSpeedMps: weather.WindSpeedMps,
+                        windGustMps: weather.WindGustMps,
                         to: to, hopLimit: hopLimit, okToMqtt: OkToMqtt));
                 }
 
@@ -606,6 +610,9 @@ public partial class RadioViewModel
             temperatureC: weather.TemperatureC,
             relativeHumidityPct: weather.RelativeHumidityPct,
             barometricPressureHpa: weather.BarometricPressureHpa,
+            windDirectionDeg: weather.WindDirectionDeg,
+            windSpeedMps: weather.WindSpeedMps,
+            windGustMps: weather.WindGustMps,
             to: to ?? 0xFFFFFFFFu, hopLimit: (byte)HopLimit, okToMqtt: OkToMqtt,
             xeddsaPrivateKey: MyXeddsa.PrivateKey, xeddsaPublicKey: MyXeddsa.PublicKey);
         if (await TransmitFrameAsync(frame, TargetForChannel(channel, to ?? 0xFFFFFFFFu)))
@@ -616,6 +623,9 @@ public partial class RadioViewModel
                 TemperatureC = weather.TemperatureC,
                 RelativeHumidityPct = weather.RelativeHumidityPct,
                 BarometricPressureHpa = weather.BarometricPressureHpa,
+                WindDirectionDeg = weather.WindDirectionDeg,
+                WindSpeedMps = weather.WindSpeedMps,
+                WindGustMps = weather.WindGustMps,
             });
         }
         else StatusText = "Transmit failed.";

@@ -64,6 +64,24 @@ public static class DisplayUnits
     public static string FormatPressure(double pressureHpa, UnitSystem unitSystem) =>
         FormatPressure((float)pressureHpa, unitSystem);
 
+    /// <summary>Wind speed: m/s, as nodes report it, or mph.</summary>
+    public static string FormatWindSpeed(float metresPerSecond, UnitSystem unitSystem) =>
+        IsImperial(unitSystem)
+            ? $"{metresPerSecond * SecondsPerHour / MetresPerMile:F1} mph"
+            : $"{metresPerSecond:F1} m/s";
+
+    private const double SecondsPerHour = 3600.0;
+    private const double MetresPerMile = KmPerMile * 1000.0;
+
+    private static readonly string[] s_compassPoints =
+        ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+         "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+
+    /// <summary>Where the wind blows from, in degrees and as a compass point:
+    /// "270° W".</summary>
+    public static string FormatWindDirection(uint degrees) =>
+        $"{degrees % 360}° {s_compassPoints[(int)Math.Round(degrees % 360 / 22.5) % 16]}";
+
     public static string FormatAltitude(int altitudeMeters, UnitSystem unitSystem) =>
         IsImperial(unitSystem)
             ? $"{Math.Round(altitudeMeters * FeetPerMeter):F0} ft"

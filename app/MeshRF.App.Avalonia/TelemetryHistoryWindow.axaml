@@ -80,6 +80,10 @@
                     <DataGridTextColumn Header="Pressure" Width="80" MinWidth="52" Binding="{Binding Pressure}" />
                     <DataGridTextColumn Header="Gas" Width="76" MinWidth="48" Binding="{Binding GasResistance}" />
                     <DataGridTextColumn Header="IAQ" Width="52" MinWidth="40" Binding="{Binding AirQuality}" />
+                    <DataGridTextColumn Header="Wind" Width="74" MinWidth="48" Binding="{Binding WindSpeed}" />
+                    <DataGridTextColumn Header="From" Width="70" MinWidth="48" Binding="{Binding WindDirection}" />
+                    <DataGridTextColumn Header="Gust" Width="74" MinWidth="48" Binding="{Binding WindGust}" />
+                    <DataGridTextColumn Header="Lull" Width="74" MinWidth="48" Binding="{Binding WindLull}" />
                 </DataGrid.Columns>
             </DataGrid>
 

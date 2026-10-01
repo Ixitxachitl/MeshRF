@@ -458,6 +458,10 @@ public static class MeshEncoder
                                                            float? temperatureC = null,
                                                            float? relativeHumidityPct = null,
                                                            float? barometricPressureHpa = null,
+                                                           uint? windDirectionDeg = null,
+                                                           float? windSpeedMps = null,
+                                                           float? windGustMps = null,
+                                                           float? windLullMps = null,
                                                            uint to = 0xFFFFFFFFu,
                                                            byte hopLimit = 3,
                                                            bool okToMqtt = false,
@@ -472,6 +476,14 @@ public static class MeshEncoder
             environment.WriteFloatField(2, humidity);
         if (barometricPressureHpa is float pressure)
             environment.WriteFloatField(3, pressure);
+        if (windDirectionDeg is uint windDirection)
+            environment.WriteVarintField(13, windDirection);
+        if (windSpeedMps is float windSpeed)
+            environment.WriteFloatField(14, windSpeed);
+        if (windGustMps is float windGust)
+            environment.WriteFloatField(16, windGust);
+        if (windLullMps is float windLull)
+            environment.WriteFloatField(17, windLull);
 
         var telemetry = new ProtoWriter();
         telemetry.WriteFixed32Field(1, (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());

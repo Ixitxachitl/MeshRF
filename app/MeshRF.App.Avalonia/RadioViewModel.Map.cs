@@ -107,6 +107,7 @@ public partial class RadioViewModel
     [
         "Node Number", "Long Name", "Short Name",
         "Temperature", "Humidity", "Pressure", "Gas Resistance", "IAQ",
+        "Wind", "Wind Direction", "Wind Gust",
         "PM1.0 std", "PM2.5 std", "PM10 std",
         "PM1.0 env", "PM2.5 env", "PM10 env",
         "Ch1 Voltage", "Ch1 Current", "Ch2 Voltage", "Ch2 Current",
@@ -134,6 +135,9 @@ public partial class RadioViewModel
         "Humidity" => n.RelativeHumidityPct is float h ? $"{h:F0}%" : n.DisplayId,
         "Pressure" => n.BarometricPressureHpa is float p ? $"{p:0.0} hPa" : n.DisplayId,
         "Gas Resistance" => n.GasResistanceMohm is float g ? $"{g:0.0} MΩ" : n.DisplayId,
+        "Wind" => n.WindSpeedMps is float ws ? DisplayUnits.FormatWindSpeed(ws, CurrentUnitSystem) : n.DisplayId,
+        "Wind Direction" => n.WindDirectionDeg is uint wd ? DisplayUnits.FormatWindDirection(wd) : n.DisplayId,
+        "Wind Gust" => n.WindGustMps is float wg ? DisplayUnits.FormatWindSpeed(wg, CurrentUnitSystem) : n.DisplayId,
         "IAQ" => n.Iaq is int iaq ? $"IAQ {iaq}" : n.DisplayId,
         "PM1.0 std" => n.Pm10Standard is uint p10s ? $"{p10s} µg" : n.DisplayId,
         "PM2.5 std" => n.Pm25Standard is uint p25s ? $"{p25s} µg" : n.DisplayId,

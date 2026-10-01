@@ -557,6 +557,7 @@ public sealed class AppSettings
     public string NodeFilterPressure { get; set; } = "Any";
     public string NodeFilterGasResistance { get; set; } = "Any";
     public string NodeFilterIaq { get; set; } = "Any";
+    public string NodeFilterWind { get; set; } = "Any";
     public string NodeFilterPm10Std { get; set; } = "Any";
     public string NodeFilterPm25Std { get; set; } = "Any";
     public string NodeFilterPm100Std { get; set; } = "Any";

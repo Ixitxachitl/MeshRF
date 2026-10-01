@@ -39,7 +39,11 @@ public sealed record NodeTelemetryHistoryRecord(
     double? Ch2CurrentMa,
     double? Ch3VoltageV,
     double? Ch3CurrentMa,
-    string Signature);
+    string Signature,
+    double? WindDirectionDeg = null,
+    double? WindSpeedMps = null,
+    double? WindGustMps = null,
+    double? WindLullMps = null);
 
 /// <summary>One node number folded into another as a single radio that
 /// renumbered itself, and the evidence that said so.</summary>
@@ -141,6 +145,10 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("barometric_pressure_hpa", "REAL");
         AddColumnIfMissing("gas_resistance_mohm", "REAL");
         AddColumnIfMissing("iaq", "INTEGER");
+        AddColumnIfMissing("wind_direction_deg", "INTEGER");
+        AddColumnIfMissing("wind_speed_mps", "REAL");
+        AddColumnIfMissing("wind_gust_mps", "REAL");
+        AddColumnIfMissing("wind_lull_mps", "REAL");
         AddColumnIfMissing("public_key", "TEXT");
         AddColumnIfMissing("mac_address", "TEXT");
         // Written once, when the row is created, and never updated after --
@@ -251,6 +259,10 @@ public sealed class NodeStore : IDisposable
         AddColumnIfMissing("ch2_current_ma", "REAL", hist);
         AddColumnIfMissing("ch3_voltage_v",  "REAL", hist);
         AddColumnIfMissing("ch3_current_ma", "REAL", hist);
+        AddColumnIfMissing("wind_direction_deg", "REAL", hist);
+        AddColumnIfMissing("wind_speed_mps", "REAL", hist);
+        AddColumnIfMissing("wind_gust_mps", "REAL", hist);
+        AddColumnIfMissing("wind_lull_mps", "REAL", hist);
     }
 
     /// <summary>Adds a column to an older database. Says whether it actually
@@ -331,6 +343,7 @@ public sealed class NodeStore : IDisposable
                                        ch1_voltage_v, ch1_current_ma,
                                        ch2_voltage_v, ch2_current_ma,
                                        ch3_voltage_v, ch3_current_ma,
+                                       wind_direction_deg, wind_speed_mps, wind_gust_mps, wind_lull_mps,
                                        heard_on_preset, heard_on_freq_mhz)
                 VALUES ($node_num, $user_id, $long_name, $short_name,
                         $hw_model, $role, $last_heard, MAX($seen_via_mqtt, 0),
@@ -347,6 +360,7 @@ public sealed class NodeStore : IDisposable
                                     $pm10std, $pm25std, $pm100std,
                                     $pm10env, $pm25env, $pm100env,
                                     $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i,
+                                    $wind_dir, $wind_speed, $wind_gust, $wind_lull,
                                     $heard_on_preset, $heard_on_freq)
                 ON CONFLICT(node_num) DO UPDATE SET
                     user_id          = COALESCE(NULLIF(excluded.user_id, ''),    user_id),
@@ -392,6 +406,10 @@ public sealed class NodeStore : IDisposable
                     ch2_current_ma   = COALESCE(excluded.ch2_current_ma, ch2_current_ma),
                     ch3_voltage_v    = COALESCE(excluded.ch3_voltage_v,  ch3_voltage_v),
                     ch3_current_ma   = COALESCE(excluded.ch3_current_ma, ch3_current_ma),
+                    wind_direction_deg = COALESCE(excluded.wind_direction_deg, wind_direction_deg),
+                    wind_speed_mps   = COALESCE(excluded.wind_speed_mps, wind_speed_mps),
+                    wind_gust_mps    = COALESCE(excluded.wind_gust_mps,  wind_gust_mps),
+                    wind_lull_mps    = COALESCE(excluded.wind_lull_mps,  wind_lull_mps),
                     heard_on_preset  = COALESCE(NULLIF(excluded.heard_on_preset, ''), heard_on_preset),
                     heard_on_freq_mhz = COALESCE(excluded.heard_on_freq_mhz, heard_on_freq_mhz);
                 """;
@@ -457,6 +475,10 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_dir",   (object?)rec.WindDirectionDeg ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_speed", (object?)rec.WindSpeedMps     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_gust",  (object?)rec.WindGustMps      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_lull",  (object?)rec.WindLullMps      ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$heard_on_preset", rec.HeardOnPreset ?? string.Empty);
             cmd.Parameters.AddWithValue("$heard_on_freq", (object?)rec.HeardOnFreqMHz ?? DBNull.Value);
             cmd.ExecuteNonQuery();
@@ -1147,7 +1169,11 @@ public sealed class NodeStore : IDisposable
                     Nullable<double>(rd, "ch2_current_ma"),
                     Nullable<double>(rd, "ch3_voltage_v"),
                     Nullable<double>(rd, "ch3_current_ma"),
-                    ReadStringOrEmpty(rd, "signature")));
+                    ReadStringOrEmpty(rd, "signature"),
+                    Nullable<double>(rd, "wind_direction_deg"),
+                    Nullable<double>(rd, "wind_speed_mps"),
+                    Nullable<double>(rd, "wind_gust_mps"),
+                    Nullable<double>(rd, "wind_lull_mps")));
             }
         }
         rows.Reverse();
@@ -1196,6 +1222,7 @@ public sealed class NodeStore : IDisposable
                      pm10_std, pm25_std, pm100_std, pm10_env, pm25_env, pm100_env,
                      ch1_voltage_v, ch1_current_ma, ch2_voltage_v, ch2_current_ma,
                      ch3_voltage_v, ch3_current_ma,
+                     wind_direction_deg, wind_speed_mps, wind_gust_mps, wind_lull_mps,
                      signature)
                 VALUES ($node_num, $ts, $batt, $volt,
                         $chan, $airx, $uptime,
@@ -1203,6 +1230,7 @@ public sealed class NodeStore : IDisposable
                         $gas, $iaq,
                         $pm10std, $pm25std, $pm100std, $pm10env, $pm25env, $pm100env,
                         $ch1v, $ch1i, $ch2v, $ch2i, $ch3v, $ch3i,
+                        $wind_dir, $wind_speed, $wind_gust, $wind_lull,
                         $sig);
                 SELECT last_insert_rowid();
                 """;
@@ -1230,6 +1258,10 @@ public sealed class NodeStore : IDisposable
             cmd.Parameters.AddWithValue("$ch2i", (object?)rec.Ch2CurrentMa ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ch3v", (object?)rec.Ch3VoltageV  ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ch3i", (object?)rec.Ch3CurrentMa ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_dir",   (object?)rec.WindDirectionDeg ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_speed", (object?)rec.WindSpeedMps     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_gust",  (object?)rec.WindGustMps      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$wind_lull",  (object?)rec.WindLullMps      ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$sig", rec.Signature ?? string.Empty);
             var id = Convert.ToInt64(cmd.ExecuteScalar());
             TrimTelemetryHistory(rec.NodeNum, HistoryRowsKeptPerNode);
@@ -1280,7 +1312,9 @@ public sealed class NodeStore : IDisposable
                     pm10_env = NULL, pm25_env = NULL, pm100_env = NULL,
                     ch1_voltage_v = NULL, ch1_current_ma = NULL,
                     ch2_voltage_v = NULL, ch2_current_ma = NULL,
-                    ch3_voltage_v = NULL, ch3_current_ma = NULL
+                    ch3_voltage_v = NULL, ch3_current_ma = NULL,
+                    wind_direction_deg = NULL, wind_speed_mps = NULL,
+                    wind_gust_mps = NULL, wind_lull_mps = NULL
                 WHERE node_num = $n
                 """;
             cmd.Parameters.AddWithValue("$n", nodeNum);
@@ -1447,6 +1481,10 @@ public sealed class NodeStore : IDisposable
             BarometricPressureHpa = Nullable<float>("barometric_pressure_hpa"),
             GasResistanceMohm     = Nullable<float>("gas_resistance_mohm"),
             Iaq                   = Nullable<int>("iaq"),
+            WindDirectionDeg      = Nullable<uint>("wind_direction_deg"),
+            WindSpeedMps          = Nullable<float>("wind_speed_mps"),
+            WindGustMps           = Nullable<float>("wind_gust_mps"),
+            WindLullMps           = Nullable<float>("wind_lull_mps"),
             NodeStatus            = ReadStringOrEmpty(r, "node_status"),
             PublicKey             = ReadStringOrEmpty(r, "public_key"),
             FirstHeardEpoch       = r.GetInt64(r.GetOrdinal("first_heard_epoch")),

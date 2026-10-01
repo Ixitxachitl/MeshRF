@@ -5,13 +5,18 @@ using System.Text.Json;
 
 namespace MeshRF.Telemetry;
 
-/// <summary>Current weather at a point, as reported by Open-Meteo.</summary>
+/// <summary>Current weather at a point, as reported by Open-Meteo. Wind is
+/// 10 m above ground, in m/s and the degrees it blows from; any of it may be
+/// missing without the rest being refused.</summary>
 public sealed record WeatherSnapshot(
     float TemperatureC,
     float RelativeHumidityPct,
     float BarometricPressureHpa,
     DateTime FetchedUtc,
-    string Source);
+    string Source,
+    float? WindSpeedMps = null,
+    uint? WindDirectionDeg = null,
+    float? WindGustMps = null);
 
 /// <summary>Current particulate readings at a point. Both values are µg/m³ and
 /// either may be missing, but never both (the fetch fails instead).</summary>
@@ -68,7 +73,8 @@ public sealed class OpenMeteoClient : IDisposable
 
             var url = "https://api.open-meteo.com/v1/forecast" +
                       $"?latitude={Coord(latitude)}&longitude={Coord(longitude)}" +
-                      "&current=temperature_2m,relative_humidity_2m,surface_pressure";
+                      "&current=temperature_2m,relative_humidity_2m,surface_pressure," +
+                      "wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=ms";
 
             WeatherStatusChanged?.Invoke("Weather telemetry: fetching...");
 
@@ -97,11 +103,16 @@ public sealed class OpenMeteoClient : IDisposable
             }
 
             var snapshot = new WeatherSnapshot(temperatureC, humidityPct, pressureHpa,
-                                               DateTime.UtcNow, "Open-Meteo");
+                                               DateTime.UtcNow, "Open-Meteo",
+                WindSpeedMps: TryReadFloat(current, "wind_speed_10m", out var windSpeed) ? windSpeed : null,
+                WindDirectionDeg: TryReadFloat(current, "wind_direction_10m", out var windDir)
+                    ? (uint)Math.Round(windDir) % 360u : null,
+                WindGustMps: TryReadFloat(current, "wind_gusts_10m", out var windGust) ? windGust : null);
             _weather = snapshot;
             WeatherStatusChanged?.Invoke(
                 $"Weather telemetry: OK {UiFormats.Time(snapshot.FetchedUtc.ToLocalTime())} " +
-                $"({snapshot.TemperatureC:F1} C, {snapshot.RelativeHumidityPct:F0}% RH, {snapshot.BarometricPressureHpa:F1} hPa)");
+                $"({snapshot.TemperatureC:F1} C, {snapshot.RelativeHumidityPct:F0}% RH, {snapshot.BarometricPressureHpa:F1} hPa" +
+                (snapshot.WindSpeedMps is float wind ? $", wind {wind:F1} m/s" : "") + ")");
             return snapshot;
         }
         catch (Exception ex)

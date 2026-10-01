@@ -328,6 +328,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     /// view model, which holds the unit setting.</summary>
     public Func<float, string>? FormatTemperature { get; set; }
     public Func<float, string>? FormatPressure { get; set; }
+    public Func<float, string>? FormatWindSpeed { get; set; }
     public Func<int, string>? FormatAltitude { get; set; }
 
     /// <summary>Raised after a history row is persisted, so an open history
@@ -686,6 +687,42 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         long id = _nodeStore.AddTelemetryHistory(record);
         TelemetryHistoryRecorded?.Invoke(nodeNum, record with { Id = id });
     }
+
+    /// <summary>
+    /// A node row holding every value a telemetry packet carried, for the
+    /// upsert to lay over what the node last reported. A value the packet left
+    /// out stays null, so it keeps the stored one rather than clearing it.
+    /// </summary>
+    private static NodeRecord TelemetryRow(uint nodeNum, MeshTelemetry t) => new()
+    {
+        NodeNum = nodeNum,
+        BatteryPct = t.BatteryLevel,
+        VoltageV = t.Voltage,
+        ChannelUtilPct = t.ChannelUtilization,
+        AirUtilTxPct = t.AirUtilTx,
+        UptimeSeconds = t.UptimeSeconds,
+        TemperatureC = t.TemperatureC,
+        RelativeHumidityPct = t.RelativeHumidityPct,
+        BarometricPressureHpa = t.BarometricPressureHpa,
+        GasResistanceMohm = t.GasResistanceMohm,
+        Iaq = t.Iaq,
+        WindDirectionDeg = t.WindDirectionDeg,
+        WindSpeedMps = t.WindSpeedMps,
+        WindGustMps = t.WindGustMps,
+        WindLullMps = t.WindLullMps,
+        Pm10Standard = t.Pm10Standard,
+        Pm25Standard = t.Pm25Standard,
+        Pm100Standard = t.Pm100Standard,
+        Pm10Environmental = t.Pm10Environmental,
+        Pm25Environmental = t.Pm25Environmental,
+        Pm100Environmental = t.Pm100Environmental,
+        Ch1VoltageV = t.Ch1VoltageV,
+        Ch1CurrentMa = t.Ch1CurrentMa,
+        Ch2VoltageV = t.Ch2VoltageV,
+        Ch2CurrentMa = t.Ch2CurrentMa,
+        Ch3VoltageV = t.Ch3VoltageV,
+        Ch3CurrentMa = t.Ch3CurrentMa,
+    };
 
     /// <summary>Stored public key for a peer, as hex; empty when unknown.</summary>
     public string PublicKeyHexFor(uint nodeNum) => _nodeStore.Get(nodeNum)?.PublicKey ?? string.Empty;
@@ -1194,7 +1231,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
         // on the app's unit setting.
         var convo = new ConversationTabViewModel(nodeNum, NodeDisplayName(nodeNum),
                                                  _nodeStore, () => FormatTemperature, () => FormatPressure,
-                                                 () => FormatAltitude)
+                                                 () => FormatAltitude, () => FormatWindSpeed)
         {
             Node = _nodeStore.Get(nodeNum),
         };
@@ -2005,18 +2042,10 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
                     break;
                 }
                 var t = result.Telemetry;
-                _nodeStore.Upsert(new NodeRecord
-                {
-                    NodeNum = header.From,
-                    LastHeardEpoch = rxEpoch,
-                    SeenViaMqtt = header.ViaMqtt,
-                    BatteryPct = t.BatteryLevel,
-                    VoltageV = t.Voltage,
-                    ChannelUtilPct = t.ChannelUtilization,
-                    AirUtilTxPct = t.AirUtilTx,
-                    UptimeSeconds = t.UptimeSeconds,
-                    TemperatureC = t.TemperatureC,
-                });
+                var telemetryRow = TelemetryRow(header.From, t);
+                telemetryRow.LastHeardEpoch = rxEpoch;
+                telemetryRow.SeenViaMqtt = header.ViaMqtt;
+                _nodeStore.Upsert(telemetryRow);
                 RecordTelemetryHistory(header.From, t, rxEpoch);
                 MarkNodeDirty(header.From);
                 if (IsDirectedRequest(header, result))
@@ -2837,6 +2866,7 @@ public sealed class AvaloniaMeshRxHost : IMeshRxHost, IDisposable
     public void RecordSelfTelemetry(MeshTelemetry telemetry)
     {
         if (MyNodeNum == 0) return;
+        _nodeStore.Upsert(TelemetryRow(MyNodeNum, telemetry));
         RecordTelemetryHistory(MyNodeNum, telemetry, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         MarkNodeDirty(MyNodeNum);
     }

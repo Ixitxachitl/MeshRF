@@ -150,6 +150,10 @@ public static class MqttJsonSerializer
             if (t.BarometricPressureHpa is float bp) payload["barometric_pressure"] = bp;
             if (t.GasResistanceMohm is float gr) payload["gas_resistance"] = gr;
             if (t.Iaq is int iaq) payload["iaq"] = iaq;
+            if (t.WindSpeedMps is float ws) payload["wind_speed"] = ws;
+            if (t.WindDirectionDeg is uint wd) payload["wind_direction"] = wd;
+            if (t.WindGustMps is float wg) payload["wind_gust"] = wg;
+            if (t.WindLullMps is float wl) payload["wind_lull"] = wl;
             return ("telemetry", payload);
         }
         if (t.HasAirQualityMetrics)
